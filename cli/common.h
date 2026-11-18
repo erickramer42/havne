@@ -66,6 +66,10 @@ constexpr size_t kLineBytes = 32 * 1024;
 constexpr auto kPoll = std::chrono::milliseconds(100);
 
 unsigned long env_ms(const char* name, unsigned long fallback);
+// A whole number above 0: --count, --columns, --year
+bool parse_count(const char* text, uint64_t& out);
+// --seconds of stream, play and sim: a whole number up to the shared cap
+bool parse_run_seconds(const char* text, uint64_t& out);
 
 extern std::atomic<bool> g_interrupted;
 

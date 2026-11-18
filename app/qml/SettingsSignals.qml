@@ -17,7 +17,7 @@ ColumnLayout {
     readonly property bool vehicle: root.host.pickedVehicle !== null
     // Nothing changes the store or a vehicle's picks under a session, or
     // past a question that waits for its answer
-    readonly property bool canChange: root.host.idle && root.host.confirming === ""
+    readonly property bool canChange: root.host.ownPart.idle && root.host.confirming === ""
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
@@ -26,7 +26,7 @@ ColumnLayout {
     property alias saveDialog: saveDialog
 
     function replaceFrom(row) {
-        root.host.startReplace(row)
+        root.host.importPart.startReplace(row)
         importDialog.open()
     }
 
@@ -35,7 +35,7 @@ ColumnLayout {
     // moves up with its plugin
     signal focusRow(string profile)
     function pressRow(profile, focused) {
-        root.host.togglePick(profile)
+        root.host.picksPart.togglePick(profile)
         if (focused)
             root.focusRow(profile)
     }
@@ -47,7 +47,7 @@ ColumnLayout {
 
     Label {
         objectName: "signalLockedNote"
-        visible: !root.host.idle
+        visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to change what a vehicle reads.")
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -62,7 +62,7 @@ ColumnLayout {
             text: qsTr("Import...")
             enabled: root.canChange
             onClicked: {
-                root.host.replaceTarget = null
+                root.host.importPart.replaceTarget = null
                 importDialog.open()
             }
         }
@@ -71,7 +71,7 @@ ColumnLayout {
     Label {
         objectName: "signalProblem"
         visible: text !== ""
-        text: root.host.signalProblem
+        text: root.host.picksPart.signalProblem
         color: Theme.warning
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -79,7 +79,7 @@ ColumnLayout {
     Label {
         objectName: "signalNote"
         visible: text !== ""
-        text: root.host.signalNote
+        text: root.host.picksPart.signalNote
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -89,11 +89,11 @@ ColumnLayout {
     ColumnLayout {
         id: importPanel
         objectName: "importPanel"
-        visible: root.host.pendingImport !== null
-        readonly property bool isFile: root.host.pendingImport !== null
-                                       && root.host.pendingImport.kind === "signals"
-        readonly property bool isObdb: root.host.pendingImport !== null
-                                       && root.host.pendingImport.kind === "obdb"
+        visible: root.host.importPart.pendingImport !== null
+        readonly property bool isFile: root.host.importPart.pendingImport !== null
+                                       && root.host.importPart.pendingImport.kind === "signals"
+        readonly property bool isObdb: root.host.importPart.pendingImport !== null
+                                       && root.host.importPart.pendingImport.kind === "obdb"
         spacing: Theme.spacing
         Layout.fillWidth: true
 
@@ -102,7 +102,7 @@ ColumnLayout {
         Label {
             objectName: "importText"
             visible: importPanel.isFile
-            text: importPanel.isFile ? qsTr("%1: a signal file").arg(root.host.pendingImport.name) : ""
+            text: importPanel.isFile ? qsTr("%1: a signal file").arg(root.host.importPart.pendingImport.name) : ""
             color: Theme.text
             wrapMode: Text.Wrap
             Layout.fillWidth: true
@@ -115,12 +115,12 @@ ColumnLayout {
                 objectName: "importAsNew"
                 width: Math.min(implicitWidth, parent.width)
                 text: qsTr("As a new plugin")
-                highlighted: root.host.importInto === ""
+                highlighted: root.host.importPart.importInto === ""
                 enabled: root.canChange
-                onClicked: root.host.keepPending("", "")
+                onClicked: root.host.importPart.keepPending("", "")
             }
             Repeater {
-                model: importPanel.isFile ? root.host.ownPlugins : []
+                model: importPanel.isFile ? root.host.picksPart.ownPlugins : []
                 ThemedButton {
                     required property var modelData
                     required property int index
@@ -128,14 +128,14 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Into %1").arg(modelData.name)
                     checkable: true
-                    checked: root.host.importInto === modelData.sha256
+                    checked: root.host.importPart.importInto === modelData.sha256
                     enabled: root.canChange
-                    onClicked: root.host.importInto = modelData.sha256
+                    onClicked: root.host.importPart.importInto = modelData.sha256
                 }
             }
         }
         LabeledFlow {
-            visible: importPanel.isFile && root.host.importInto !== ""
+            visible: importPanel.isFile && root.host.importPart.importInto !== ""
             label: qsTr("Variant:")
             ThemedTextField {
                 id: importVariantField
@@ -148,7 +148,7 @@ ColumnLayout {
             Label {
                 objectName: "importReplaces"
                 visible: text !== ""
-                text: root.host.importReplaces(importVariantField.text)
+                text: root.host.importPart.importReplaces(importVariantField.text)
                 color: Theme.textDim
             }
             ThemedButton {
@@ -156,7 +156,7 @@ ColumnLayout {
                 text: qsTr("Keep")
                 highlighted: true
                 enabled: root.canChange
-                onClicked: root.host.keepPending(root.host.importInto, importVariantField.text.trim())
+                onClicked: root.host.importPart.keepPending(root.host.importPart.importInto, importVariantField.text.trim())
             }
         }
 
@@ -176,39 +176,39 @@ ColumnLayout {
                 // from a VIN after setting it. A year part typed is judged
                 // at its fourth digit or the field's end
                 onTextChanged: {
-                    root.host.obdbYearFromVin = false
+                    root.host.importPart.obdbYearFromVin = false
                     if (importPanel.isObdb)
-                        root.host.previewObdb(true)
+                        root.host.importPart.previewObdb(true)
                 }
                 onEditingFinished: {
-                    if (importPanel.isObdb && root.host.obdbReport === null)
-                        root.host.previewObdb()
+                    if (importPanel.isObdb && root.host.importPart.obdbReport === null)
+                        root.host.importPart.previewObdb()
                 }
             }
         }
         ColumnLayout {
             objectName: "obdbReport"
-            visible: importPanel.isObdb && root.host.obdbShown
+            visible: importPanel.isObdb && root.host.importPart.obdbShown
             spacing: Theme.spacing / 2
             Layout.fillWidth: true
 
             Label {
                 objectName: "obdbSummary"
-                text: root.host.obdbSummary(root.host.obdbReport)
+                text: root.host.importPart.obdbSummary(root.host.importPart.obdbReport)
                 color: Theme.text
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
             Label {
-                visible: root.host.obdbReport !== null && root.host.obdbReport.changed.length > 0
+                visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.changed.length > 0
                 text: qsTr("Differs from OBDb:")
                 color: Theme.text
                 font.bold: true
             }
             Repeater {
                 objectName: "obdbChanged"
-                model: root.host.obdbReport !== null
-                       ? root.host.obdbReport.changed.slice(0, root.host.obdbRowsShown) : []
+                model: root.host.importPart.obdbReport !== null
+                       ? root.host.importPart.obdbReport.changed.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
                     required property var modelData
                     text: qsTr("%1, %2: %3")
@@ -221,22 +221,22 @@ ColumnLayout {
             }
             Label {
                 objectName: "obdbChangedMore"
-                readonly property int more: root.host.obdbReport === null ? 0
-                    : root.host.obdbReport.changed.length - root.host.obdbRowsShown
+                readonly property int more: root.host.importPart.obdbReport === null ? 0
+                    : root.host.importPart.obdbReport.changed.length - root.host.importPart.obdbRowsShown
                 visible: more > 0
                 text: qsTr("and %1 more").arg(more)
                 color: Theme.textDim
             }
             Label {
-                visible: root.host.obdbReport !== null && root.host.obdbReport.skipped.length > 0
+                visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.skipped.length > 0
                 text: qsTr("Left out:")
                 color: Theme.text
                 font.bold: true
             }
             Repeater {
                 objectName: "obdbSkipped"
-                model: root.host.obdbReport !== null
-                       ? root.host.obdbReport.skipped.slice(0, root.host.obdbRowsShown) : []
+                model: root.host.importPart.obdbReport !== null
+                       ? root.host.importPart.obdbReport.skipped.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
                     required property var modelData
                     text: qsTr("%1 (line %2): %3")
@@ -249,15 +249,15 @@ ColumnLayout {
             }
             Label {
                 objectName: "obdbSkippedMore"
-                readonly property int more: root.host.obdbReport === null ? 0
-                    : root.host.obdbReport.skipped.length - root.host.obdbRowsShown
+                readonly property int more: root.host.importPart.obdbReport === null ? 0
+                    : root.host.importPart.obdbReport.skipped.length - root.host.importPart.obdbRowsShown
                 visible: more > 0
                 text: qsTr("and %1 more").arg(more)
                 color: Theme.textDim
             }
             Repeater {
                 objectName: "obdbFileNotes"
-                model: root.host.obdbReport !== null ? root.host.obdbReport.file : []
+                model: root.host.importPart.obdbReport !== null ? root.host.importPart.obdbReport.file : []
                 Label {
                     required property var modelData
                     text: modelData.field !== ""
@@ -274,23 +274,23 @@ ColumnLayout {
             spacing: Theme.spacing
             ThemedButton {
                 objectName: "obdbKeep"
-                visible: importPanel.isObdb && root.host.obdbShown
-                text: root.host.obdbReplaces ? qsTr("Keep, replacing the earlier") : qsTr("Keep")
+                visible: importPanel.isObdb && root.host.importPart.obdbShown
+                text: root.host.importPart.obdbReplaces ? qsTr("Keep, replacing the earlier") : qsTr("Keep")
                 highlighted: true
                 enabled: root.canChange
-                onClicked: root.host.keepObdb()
+                onClicked: root.host.importPart.keepObdb()
             }
             ThemedButton {
                 objectName: "importDiscard"
                 text: qsTr("Discard")
-                onClicked: root.host.discardImport()
+                onClicked: root.host.importPart.discardImport()
             }
         }
     }
 
     Label {
         objectName: "signalsNone"
-        visible: root.host.pluginList.length === 0
+        visible: root.host.picksPart.pluginList.length === 0
         text: qsTr("None yet. Import takes a plugin (a .havne-plugin.json file), a signal file "
                    + "you keep yourself or an OBDb set (a community list of a model's signals); "
                    + "each is listed here as a plugin.")
@@ -301,7 +301,7 @@ ColumnLayout {
 
     // A pick no plugin here has, so it can be seen and undone
     Repeater {
-        model: root.host.missingPicks
+        model: root.host.picksPart.missingPicks
         RowLayout {
             id: missingRow
             required property var modelData
@@ -321,14 +321,14 @@ ColumnLayout {
                 flat: true
                 text: qsTr("Unpick")
                 enabled: root.canChange
-                onClicked: root.host.togglePick(missingRow.modelData.profile)
+                onClicked: root.host.picksPart.togglePick(missingRow.modelData.profile)
             }
         }
     }
 
     // A kept copy that no longer loads, with the loader's words
     Repeater {
-        model: root.host.refusedPlugins
+        model: root.host.picksPart.refusedPlugins
         RowLayout {
             id: refusedRow
             required property var modelData
@@ -348,7 +348,7 @@ ColumnLayout {
                 flat: true
                 text: qsTr("Remove")
                 enabled: root.canChange
-                onClicked: root.host.removePlugin(refusedRow.modelData.sha256)
+                onClicked: root.host.rowActionsPart.removePlugin(refusedRow.modelData.sha256)
             }
         }
     }
@@ -359,14 +359,14 @@ ColumnLayout {
     // The model is the rows' count: a pick changes a row's data and not
     // their number, so the items stay and a press keeps its focus
     Repeater {
-        model: root.host.variantRows.length
+        model: root.host.picksPart.variantRows.length
         ColumnLayout {
             id: row
             required property int index
-            readonly property var entry: root.host.variantRows[index] ?? root.noRow
-            readonly property bool open: root.host.openRow === entry.profile
-            readonly property string title: root.host.rowTitle(entry)
-            readonly property string reads: root.host.rowReads(entry)
+            readonly property var entry: root.host.picksPart.variantRows[index] ?? root.noRow
+            readonly property bool open: root.host.rowActionsPart.openRow === entry.profile
+            readonly property string title: root.host.picksPart.rowTitle(entry)
+            readonly property string reads: root.host.picksPart.rowReads(entry)
             objectName: "signalRow_" + index
             Layout.fillWidth: true
             spacing: Theme.spacing / 2
@@ -462,7 +462,7 @@ ColumnLayout {
                     // A question asked in the open row is answered there
                     enabled: root.host.confirming === ""
                     Accessible.name: qsTr("More for %1").arg(row.title)
-                    onClicked: root.host.openRow = row.open ? "" : row.entry.profile
+                    onClicked: root.host.rowActionsPart.openRow = row.open ? "" : row.entry.profile
                 }
             }
 
@@ -471,9 +471,9 @@ ColumnLayout {
             RemoveQuestion {
                 id: rowQuestion
                 objectName: "signalsConfirm"
-                words: root.host.rowQuestion(row.entry, row.open)
-                canRemove: root.host.idle
-                onRemoveChosen: root.host.confirmRemoval()
+                words: root.host.rowActionsPart.rowQuestion(row.entry, row.open)
+                canRemove: root.host.ownPart.idle
+                onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
                 onCancelChosen: root.host.confirming = ""
             }
             Flow {
@@ -487,14 +487,14 @@ ColumnLayout {
                     text: qsTr("Save as a signal file...")
                     // Reads the copy alone, so a session may run
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.saveVariantAs(row.entry)
+                    onClicked: root.host.rowActionsPart.saveVariantAs(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowExport"
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Export plugin...")
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.exportPluginAs(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.exportPluginAs(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowReplace"
@@ -510,9 +510,9 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Copy to my plugin")
                     checkable: true
-                    checked: row.open && root.host.copyShown
+                    checked: row.open && root.host.rowActionsPart.copyShown
                     enabled: root.canChange
-                    onClicked: root.host.copyShown = !root.host.copyShown
+                    onClicked: root.host.rowActionsPart.copyShown = !root.host.rowActionsPart.copyShown
                 }
                 ThemedButton {
                     objectName: "rowMine"
@@ -520,7 +520,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Mine")
                     enabled: root.canChange
-                    onClicked: root.host.markMine(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.markMine(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowRemoveVariant"
@@ -529,7 +529,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove this variant")
                     enabled: root.canChange
-                    onClicked: root.host.askRemoveVariant(row.entry)
+                    onClicked: root.host.rowActionsPart.askRemoveVariant(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowRemove"
@@ -537,7 +537,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: row.entry.several ? qsTr("Remove the plugin") : qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.askRemovePlugin(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.askRemovePlugin(row.entry.sha256)
                 }
             }
             // What Mine does, said before the press
@@ -553,7 +553,7 @@ ColumnLayout {
             // Copy to my plugin: where the copy goes
             Flow {
                 objectName: "rowCopyPanel"
-                visible: row.open && root.host.copyShown
+                visible: row.open && root.host.rowActionsPart.copyShown
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ThemedButton {
@@ -562,10 +562,10 @@ ColumnLayout {
                     text: qsTr("Into a new plugin")
                     highlighted: true
                     enabled: root.canChange
-                    onClicked: root.host.copyVariantTo(row.entry, "")
+                    onClicked: root.host.rowActionsPart.copyVariantTo(row.entry, "")
                 }
                 Repeater {
-                    model: row.open && root.host.copyShown ? root.host.ownPlugins : []
+                    model: row.open && root.host.rowActionsPart.copyShown ? root.host.picksPart.ownPlugins : []
                     ThemedButton {
                         required property var modelData
                         required property int index
@@ -573,19 +573,19 @@ ColumnLayout {
                         width: Math.min(implicitWidth, parent.width)
                         text: qsTr("Into %1").arg(modelData.name)
                         enabled: root.canChange
-                        onClicked: root.host.copyVariantTo(row.entry, modelData.sha256)
+                        onClicked: root.host.rowActionsPart.copyVariantTo(row.entry, modelData.sha256)
                     }
                 }
             }
             // Export's share-alike note, before the save dialog
             ColumnLayout {
                 objectName: "rowExportNote"
-                visible: row.open && root.host.exportNote !== ""
+                visible: row.open && root.host.rowActionsPart.exportNote !== ""
                 Layout.fillWidth: true
                 spacing: Theme.spacing / 2
                 Label {
                     objectName: "exportNoteText"
-                    text: root.host.exportNote
+                    text: root.host.rowActionsPart.exportNote
                     color: Theme.text
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
@@ -597,12 +597,12 @@ ColumnLayout {
                         objectName: "exportSave"
                         text: qsTr("Save...")
                         highlighted: true
-                        onClicked: root.host.openExport(row.entry.sha256)
+                        onClicked: root.host.rowActionsPart.openExport(row.entry.sha256)
                     }
                     ThemedButton {
                         objectName: "exportCancel"
                         text: qsTr("Cancel")
-                        onClicked: root.host.exportNote = ""
+                        onClicked: root.host.rowActionsPart.exportNote = ""
                     }
                 }
             }
@@ -626,14 +626,14 @@ ColumnLayout {
     // ---- The signal files the move into the plugin store left behind ----
     Label {
         objectName: "unmigratedTitle"
-        visible: root.host.unmigratedRows.length > 0
+        visible: root.host.rowActionsPart.unmigratedRows.length > 0
         text: qsTr("Not moved from the earlier version:")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
     Repeater {
-        model: root.host.unmigratedRows
+        model: root.host.rowActionsPart.unmigratedRows
         ColumnLayout {
             id: leftRow
             required property var modelData
@@ -643,7 +643,7 @@ ColumnLayout {
             spacing: Theme.spacing / 2
             Label {
                 objectName: "unmigratedText"
-                text: root.host.unmigratedText(leftRow.modelData)
+                text: root.host.rowActionsPart.unmigratedText(leftRow.modelData)
                 color: Theme.warning
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -651,9 +651,9 @@ ColumnLayout {
             RemoveQuestion {
                 id: leftQuestion
                 objectName: "unmigratedConfirm"
-                words: root.host.unmigratedQuestion(leftRow.modelData)
-                canRemove: root.host.idle
-                onRemoveChosen: root.host.confirmRemoval()
+                words: root.host.rowActionsPart.unmigratedQuestion(leftRow.modelData)
+                canRemove: root.host.ownPart.idle
+                onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
                 onCancelChosen: root.host.confirming = ""
             }
             Flow {
@@ -665,7 +665,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Save as a signal file...")
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.saveUnmigratedAs(leftRow.modelData)
+                    onClicked: root.host.rowActionsPart.saveUnmigratedAs(leftRow.modelData)
                 }
                 ThemedButton {
                     objectName: "unmigratedRemove"
@@ -673,7 +673,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.askRemoveUnmigrated(leftRow.modelData)
+                    onClicked: root.host.rowActionsPart.askRemoveUnmigrated(leftRow.modelData)
                 }
             }
         }
@@ -682,17 +682,17 @@ ColumnLayout {
     DocumentOpenDialog {
         id: importDialog
         objectName: "signalImportDialog"
-        title: root.host.replaceTarget !== null
-               ? qsTr("Replace %1 with a signal file").arg(root.host.replaceTarget.name)
+        title: root.host.importPart.replaceTarget !== null
+               ? qsTr("Replace %1 with a signal file").arg(root.host.importPart.replaceTarget.name)
                : qsTr("Import a plugin, a signal file or an OBDb set")
         nameFilters: [qsTr("Plugins, signal files and OBDb sets (*.json)"), qsTr("All files (*)")]
-        onAccepted: root.host.importFile(importDialog.selectedFile)
-        onRejected: root.host.replaceTarget = null
+        onAccepted: root.host.importPart.importFile(importDialog.selectedFile)
+        onRejected: root.host.importPart.replaceTarget = null
         // As an import's refusal: no earlier note left beside the words
         onFailed: words => {
-            root.host.replaceTarget = null
-            root.host.signalNote = ""
-            root.host.signalProblem = words
+            root.host.importPart.replaceTarget = null
+            root.host.picksPart.signalNote = ""
+            root.host.picksPart.signalProblem = words
         }
     }
     DocumentSaveDialog {
@@ -700,12 +700,12 @@ ColumnLayout {
         objectName: "signalSaveDialog"
         defaultSuffix: "json"
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.host.saveTo(saveDialog.selectedFile)
-        onRejected: root.host.saving = null
+        onAccepted: root.host.rowActionsPart.saveTo(saveDialog.selectedFile)
+        onRejected: root.host.rowActionsPart.saving = null
         onFailed: words => {
-            root.host.saving = null
-            root.host.signalNote = ""
-            root.host.signalProblem = words
+            root.host.rowActionsPart.saving = null
+            root.host.picksPart.signalNote = ""
+            root.host.picksPart.signalProblem = words
         }
     }
 }

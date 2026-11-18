@@ -31,7 +31,7 @@ Item {
     // where Default isn't obd2. Default's button stays only while the
     // field reads it, so the row always shows the URI's
     readonly property bool adapterUri: VehicleBook.isAdapterUri(host.uriField.text)
-    readonly property var standIn: host.pickRows.find(r => r.standIn) || null
+    readonly property var standIn: host.picksPart.pickRows.find(r => r.standIn) || null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
         hint: qsTr("Default reads OBD-II values on an adapter; a recording or a "
@@ -40,17 +40,17 @@ Item {
     // A pick as the row's entry: one that extends obd2 says so on an
     // adapter, where obd2 is what Default reads
     function pickEntry(r) {
-        const name = host.profileName(r.profile)
+        const name = host.picksPart.profileName(r.profile)
         const obd2 = r.extends === "obd2"
         return { name: r.profile,
                  label: obd2 && adapterUri ? qsTr("obd2 + %1").arg(name) : name,
                  hint: obd2 ? qsTr("obd2's signals and those of %1, picked for this vehicle")
-                                  .arg(host.profileTitle(r.profile))
+                                  .arg(host.picksPart.profileTitle(r.profile))
                             : qsTr("The signals of %1, picked for this vehicle")
-                                  .arg(host.profileTitle(r.profile)) }
+                                  .arg(host.picksPart.profileTitle(r.profile)) }
     }
     // The picks but the stand-in, which sits where Default does
-    readonly property var pickProfiles: host.pickRows.filter(r => !r.missing && !r.standIn)
+    readonly property var pickProfiles: host.picksPart.pickRows.filter(r => !r.missing && !r.standIn)
                                                 .map(r => pickEntry(r))
     readonly property var builtInProfiles: (standIn === null ? [defaultProfile]
         : profileChoice === "default" ? [defaultProfile, pickEntry(standIn)]
@@ -66,13 +66,13 @@ Item {
 
     // The picked vehicle's sets as [{ profile, name, variant }]: its picks
     // the store has, in their order
-    readonly property var pickedSets: host.pickRows.filter(r => !r.missing)
+    readonly property var pickedSets: host.picksPart.pickRows.filter(r => !r.missing)
         .map(r => ({ profile: r.profile, name: r.name, variant: r.variant }))
     // A profile's name as the user knows it: every loaded plugin's
     // variants by the plugin's name
     readonly property var profileNames: {
         const names = {}
-        for (const p of host.pluginList) {
+        for (const p of host.picksPart.pluginList) {
             for (const profile of (p.ok ? p.profiles : []))
                 names[profile] = p.name
         }
@@ -82,7 +82,7 @@ Item {
     // The first picked set that reads all of obd2, which stands in for
     // Default on an adapter (ADR-0064)
     readonly property var obd2PickedSet: {
-        const first = host.pickRows.find(r => !r.missing && r.extends === "obd2")
+        const first = host.picksPart.pickRows.find(r => !r.missing && r.extends === "obd2")
         return first === undefined ? null
              : { profile: first.profile, name: first.name, variant: first.variant }
     }

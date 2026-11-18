@@ -208,7 +208,7 @@ void set_up(bus& b, uint8_t profile)
     e.pack = pack;
     ecuio_engine_identify(&e);
     ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     for (uint32_t c = 0; c < b.chans; ++c) {
         b.ecus[c].rx = b.rx_ids[c];
         b.ecus[c].tx = b.tx_ids[c];
@@ -526,7 +526,7 @@ void operate(bus& b, uint8_t op)
     }
     default:
         /* the link back after a failure: probe and rescan again */
-        ecuio_engine_probe(&e, b.now);
+        ecuio_engine_probe(&e);
         ecuio_engine_rescan(&e);
         break;
     }

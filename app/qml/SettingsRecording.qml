@@ -20,7 +20,7 @@ ColumnLayout {
     // each recording covers a whole session.
     Label {
         objectName: "recordLockedNote"
-        visible: !root.host.idle
+        visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to turn recording on or off.")
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -35,7 +35,7 @@ ColumnLayout {
             objectName: "recordBox"
             text: qsTr("Record sessions")
             checked: Bridge.recording
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             // The bridge decides; the binding comes back either way
             onToggled: {
                 Bridge.recording = checked

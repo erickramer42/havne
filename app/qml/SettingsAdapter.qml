@@ -76,7 +76,7 @@ ColumnLayout {
         ThemedButton {
             objectName: "bleScanButton"
             text: Bluetooth.scanning ? qsTr("Scanning…") : qsTr("Scan for BLE")
-            enabled: root.host.idle && !Bluetooth.scanning
+            enabled: root.host.ownPart.idle && !Bluetooth.scanning
             onClicked: Bluetooth.scan()
         }
     }
@@ -126,9 +126,9 @@ ColumnLayout {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(row.modelData.base)
+                    root.host.uriPart.fillUri(row.modelData.base)
                     root.host.showUriField()
                 }
             }
@@ -145,7 +145,7 @@ ColumnLayout {
                     Label {
                         objectName: "deviceTitle"
                         text: row.modelData.title
-                        color: root.host.idle ? Theme.text : Theme.textDim
+                        color: root.host.ownPart.idle ? Theme.text : Theme.textDim
                     }
                     Label {
                         objectName: "deviceVersions"
@@ -213,7 +213,7 @@ ColumnLayout {
                 text: Relay.running ? qsTr("Stop relaying") : qsTr("Relay")
                 // Not beside a session: the adapter takes one link
                 enabled: Relay.running
-                         || (root.host.idle && /^elm327:\/\/bt:/i.test(root.host.uriField.text))
+                         || (root.host.ownPart.idle && /^elm327:\/\/bt:/i.test(root.host.uriField.text))
                 onClicked: {
                     if (Relay.running) {
                         Relay.stop()
@@ -275,9 +275,9 @@ ColumnLayout {
                 width: Math.min(implicitWidth, parent.width)
                 visible: root.presetsOpen
                          && (modelData.name !== "j2534" || root.j2534Offered)
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(modelData.uri)
+                    root.host.uriPart.fillUri(modelData.uri)
                     root.host.showUriField()
                 }
                 // The name, and the address smaller under it. The width is

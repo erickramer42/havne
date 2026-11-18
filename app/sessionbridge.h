@@ -14,7 +14,6 @@
 
 #include "readonce.h"
 #include "pluginstore.h"
-#include "signalstore.h"
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
@@ -230,30 +229,9 @@ public:
     Q_INVOKABLE QString readOnce(const QString& adapterUri,
                                  const QVariantMap& signal,
                                  const QVariantMap& module);
-    // The vehicles' signal files (ADR-0051, SignalStore). Import reads
-    // the file at url (a local file, or Android's content:// through
-    // QFile) and keeps a copy when core's loader reads it: { ok, words,
-    // sha256, name, profile, extends, count, own, kept }, words never
-    // naming the path.
-    // It registers nothing; the vehicle book says whether the file may
-    // join (VehicleBook.profileProblem), then useSignalFiles registers
-    // the files the book references. Each logs one line.
-    Q_INVOKABLE QVariantMap importSignalFile(const QUrl& url);
-    // The form's file (ADR-0051's form): its text into the store as an
-    // import's bytes, the same result; and a kept copy's text back, ""
-    // for none. Settings composes the file, core's loader judges it
-    Q_INVOKABLE QVariantMap importSignalText(const QString& text);
-    Q_INVOKABLE QString signalFileText(const QString& sha) const;
-    // A kept copy saved where the user chose (a local file, or Android's
-    // content:// from its document picker, by the content resolver): the copy's
-    // bytes as imported or as the form wrote them, nothing added, so
-    // havne-cli --signals and another vehicle read the same file. { ok,
-    // words }, words never naming either path; a copy changed since it
-    // was kept is refused, not saved. Logs one line
-    Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
     // A dashboard layout file (ADR-0057's appendix on the layout file): the
     // text DashboardBook.exportText made, written where the user chose (as
-    // saveSignalFile writes), and a picked file's text back. { ok, words }
+    // exportPlugin writes), and a picked file's text back. { ok, words }
     // and { ok, words, text }, words never naming a path. The size is
     // bounded at layoutFileMaxBytes either way, a text that isn't UTF-8 is
     // refused unread, and a leading UTF-8 BOM is skipped. A local file is
@@ -294,28 +272,16 @@ public:
     Q_INVOKABLE QVariantMap
     saveHealthReport(const QUrl& url, int filterIndex,
                      const QString& baselineFolder = QString());
-    Q_INVOKABLE QVariantList useSignalFiles(const QStringList& shas);
-    // Removes every copy keep doesn't name, each profile unregistered
-    // first; the files themselves stay loaded until the bridge closes,
-    // since a session may still decode with one
-    Q_INVOKABLE int deleteUnusedSignalFiles(const QStringList& keep);
     // An OBDb set imported (ADR-0051's appendix of 2026-11-06,
-    // ObdbImport): preview reads the file at url as importSignalFile
-    // does and converts it for modelYear (0: none), named name, giving
+    // ObdbImport): preview reads the file at url as readImport does and
+    // converts it for modelYear (0: none), named name, giving
     // ObdbImport::report's map; the converted text is held as the one
-    // pending import, nothing kept. keep puts it in the store as
-    // importSignalText does, the same map back; replacing names the
-    // vehicle's earlier import it takes the place of, "" for none, and
-    // is refused, nothing changed and the import still pending, while a
-    // session decodes with that file. drop forgets the pending import.
-    // Each of preview and keep logs one line, never naming the path
+    // pending import, nothing kept, until keepObdbPlugin keeps it. drop
+    // forgets the pending import. Preview logs one line, never naming
+    // the path
     Q_INVOKABLE QVariantMap previewObdb(const QUrl& url, int modelYear,
                                         const QString& name);
-    Q_INVOKABLE QVariantMap keepObdb(const QString& replacing);
     Q_INVOKABLE void dropObdb() { m_obdbPending.clear(); }
-    // A kept copy the OBDb import wrote (ObdbImport::isConversion): only
-    // such a file is replaced by importing the set again
-    Q_INVOKABLE bool isObdbImport(const QString& sha) const;
     // The model year of the typed VIN, or with "" the session's (which
     // stays here, ADR-0027 section 3), by ADR-0043's decode; 0 for none
     Q_INVOKABLE int vinModelYear(const QString& typedVin) const;
@@ -323,10 +289,11 @@ public:
     // and its variants registered at the first call, then the list, one
     // entry a plugin { sha256, ok, words, id, name, version, variants,
     // profiles }. Import reads a packed plugin (<id>.havne-plugin.json)
-    // at url as importSignalFile reads a file and keeps a copy when core
-    // loads it (the entry, kept, replaced: the version it replaced, or
-    // ""); Remove frees it and deletes its copy. Both refuse, with
-    // words, an id a session decodes with. Each logs one line.
+    // at url (a local file, or Android's content:// through QFile) and
+    // keeps a copy when core loads it (the entry, kept, replaced: the
+    // version it replaced, or ""); Remove frees it and deletes its
+    // copy. Both refuse, with words, an id a session decodes with. Each
+    // logs one line.
     Q_INVOKABLE QVariantList plugins();
     Q_INVOKABLE QVariantMap importPlugin(const QUrl& url);
     Q_INVOKABLE QVariantMap removePlugin(const QString& sha);
@@ -494,9 +461,8 @@ public:
     // a scheme this platform's core doesn't take, a malformed query or
     // a bad profile= value. Static, so tests need no session.
     static QString profileOfUri(const QString& uri);
-    // The signal file whose set set is: a vehicle's (the signal store),
-    // a plugin variant's or a replay's own signals.json; nullptr for
-    // any other set
+    // The signal file whose set set is: a plugin variant's or a replay's
+    // own signals.json; nullptr for any other set
     const ecuio_signal_file_t* fileOfSet(const ecuio_signal_set_t* set) const;
     // That file's text, copied; "" for any other set. What the viewer's
     // frames open loads its own copy from (RecordingFrameSet)
@@ -1226,9 +1192,8 @@ private:
     // A replay:// URI selecting the profile its recording names (or that
     // copy's own name, rec.<16 hex>), with the recording's signals.json
     // there and matching its hash: the URI that decodes with those bytes
-    // (ADR-0051 section 4). The recorded profile when the signal store
-    // registers the same bytes under it; otherwise the copy, loaded and
-    // registered as rec.<16 hex> for the bridge's life. Any other URI,
+    // (ADR-0051 section 4): the copy's own, loaded and registered as
+    // rec.<16 hex> for the bridge's life. Any other URI,
     // or a copy missing, changed or refused, comes back as given, with a
     // log line saying why. GUI thread, before the connect.
     QString replayUriWithOwnSignals(const QString& uri);
@@ -1357,7 +1322,6 @@ private:
     std::function<QString(const QString&)>
         m_streamPreparer; // none: nothing to ready
     ReadOnce m_readOnce;
-    SignalStore m_signalStore;
     QByteArray m_obdbPending; // previewObdb's converted file, until kept
     int m_obdbPendingYear = 0;  // the model year it was converted for
     QByteArray m_importPending; // readImport's file, until kept or dropped

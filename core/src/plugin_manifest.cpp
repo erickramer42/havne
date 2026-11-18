@@ -1,11 +1,12 @@
 // File/layer: core/src/plugin_manifest.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); FUZZ:
-//          fuzz_plugin_manifest
+// Testing: UNIT: PluginTest, PluginWrapTest, PluginConversationTest
+//          (test_signals); FUZZ: fuzz_plugin_manifest
 //
 // The plugin loader's reading (ADR-0052): the manifest's keys, each group
 // in a function of its own (json.h, the signal-file loader's rules for
 // unknown keys and words), and the package's data files, a packed one by
-// its name and a folder's through the host's callback.
+// its name and a folder's through the host's callback. The conversation
+// tier's group is plugin_conversation.cpp's.
 
 #include "plugin_loader.h"
 
@@ -19,10 +20,6 @@
 
 namespace ecuio_plugin_loader {
 
-namespace {
-
-/* Relative, forward slashes, no "." or ".." part, no empty part, 1 to
- * ECUIO_PLUGIN_PATH_MAX printable ASCII bytes but backslash and colon */
 bool path_ok(const std::string& p)
 {
     if (p.empty() || p.size() > ECUIO_PLUGIN_PATH_MAX || p.front() == '/') {
@@ -46,17 +43,19 @@ bool path_ok(const std::string& p)
     return true;
 }
 
-const std::string& path_of(const Value& v, const std::string& what)
+const std::string& path_of(const Value& v, std::string_view what)
 {
     const std::string& p = text_of(v, 1, ECUIO_PLUGIN_PATH_MAX, what);
     if (!path_ok(p)) {
         refuse(v,
-               what + " " + q(p) +
+               std::string(what) + " " + q(p) +
                    " isn't a path in the package: relative, forward slashes, "
                    "no \".\" or \"..\" part");
     }
     return p;
 }
+
+namespace {
 
 year_range years_of(const Value& v, const std::string& what)
 {
@@ -156,7 +155,7 @@ void loader::read_manifest(ecuio_plugin& p)
     read_tiers(root, p);
     read_match(root, p);
     read_fixtures(root, p);
-    read_files(root);
+    read_files(root, p);
     const std::vector<std::vector<const data_file*>> lists =
         read_variants(root, p);
     const Value* variants = root.find("variants");
@@ -181,6 +180,8 @@ void loader::read_manifest(ecuio_plugin& p)
         build_variant(p, variants->items[i], lists[i], p.variants[i]);
         ecuio_least::raise(p.least, p.variants[i].file->least);
     }
+    /* After the variants: the manifest's "ecus" are judged by then */
+    read_conversation(root, p);
 }
 
 /* "havne_plugin", first, and the keys a manifest may hold */
@@ -192,19 +193,19 @@ void loader::read_format(const Value& root, ecuio_plugin& p)
     }
     const Value& format = root.members.front().value;
     expect(format, Type::number, "\"havne_plugin\"");
-    if (!format.integer || format.whole != ECUIO_PLUGIN_FORMAT) {
+    if (!format.integer || format.whole < ECUIO_PLUGIN_FORMAT ||
+        format.whole > ECUIO_PLUGIN_FORMAT_MAX) {
         refuse(format, "\"havne_plugin\" is format " +
                            (format.integer ? std::to_string(format.whole)
                                            : std::string("?")) +
-                           ", and this Havne reads format 1");
+                           ", and this Havne reads formats 1 and 2");
     }
-    ecuio_least::raise(
-        p.least,
-        ecuio_least::kPluginFormatSince[static_cast<size_t>(format.whole)]);
+    p.format = static_cast<uint32_t>(format.whole);
+    ecuio_least::raise(p.least, ecuio_least::kPluginFormatSince[p.format]);
     only_keys(root,
               {"havne_plugin", "id", "name", "version", "requires", "lineage",
                "source", "tiers", "match", "ecus", "variants", "fixtures",
-               "files"},
+               "files", "conversation"},
               "the manifest");
 }
 
@@ -318,14 +319,29 @@ void loader::read_tiers(const Value& root, ecuio_plugin& p)
     }
     for (const Value& t : tiers->items) {
         expect(t, Type::string, "a tier");
-        if (t.text != "data") {
+        if (t.text != "data" && t.text != "conversation") {
             refuse(t, "tier " + q(t.text) +
-                          " isn't one this Havne runs: only \"data\"");
+                          (p.format < 2
+                               ? " isn't one format 1 takes: only \"data\""
+                               : " isn't one this Havne runs: \"data\" "
+                                 "and \"conversation\""));
         }
-        if ((p.tiers & ECUIO_PLUGIN_TIER_DATA) != 0) {
-            refuse(t, "tier \"data\" is listed twice");
+        const bool data = t.text == "data";
+        if (!data && p.format < 2) {
+            refuse(t, "tier \"conversation\" is format 2's: its manifest "
+                      "starts with \"havne_plugin\": 2");
         }
-        p.tiers |= ECUIO_PLUGIN_TIER_DATA;
+        const uint32_t bit =
+            data ? ECUIO_PLUGIN_TIER_DATA : ECUIO_PLUGIN_TIER_CONVERSATION;
+        if ((p.tiers & bit) != 0) {
+            refuse(t, "tier " + q(t.text) + " is listed twice");
+        }
+        p.tiers |= bit;
+    }
+    /* The variants are data, so the tier is every plugin's */
+    if ((p.tiers & ECUIO_PLUGIN_TIER_DATA) == 0) {
+        refuse(*tiers, "\"tiers\" lists \"data\" too: a plugin's variants "
+                       "are signal files");
     }
 }
 
@@ -391,8 +407,9 @@ void loader::read_fixtures(const Value& root, ecuio_plugin& p)
     }
 }
 
-/* "files": a packed plugin's data files by their paths */
-void loader::read_files(const Value& root)
+/* "files": a packed plugin's files by their paths: a data file, or with
+ * a "kind" a binary one (format 2) */
+void loader::read_files(const Value& root, const ecuio_plugin& p)
 {
     const Value* files = root.find("files");
     if (files != nullptr && !packed()) {
@@ -415,6 +432,19 @@ void loader::read_files(const Value& root)
                 refuse(m, "file " + q(m.key) +
                               " isn't a path in the package: relative, forward "
                               "slashes, no \".\" or \"..\" part");
+            }
+            if (m.value.type == Type::object &&
+                m.value.find("kind") != nullptr) {
+                if (p.format < 2) {
+                    refuse(m, "file " + q(m.key) +
+                                  " is a binary file, which format 2 "
+                                  "carries: \"havne_plugin\": 2");
+                }
+                binary_file b;
+                b.path = m.key;
+                b.root = &m.value;
+                binaries_.push_back(std::move(b));
+                continue;
             }
             data_file f;
             f.path = m.key;

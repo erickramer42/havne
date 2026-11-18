@@ -24,7 +24,7 @@ ColumnLayout {
     property string liveNote: ""
     property var nameRows: []
     property alias editor: exprEditorItem
-    readonly property bool shown: root.host.formKind === "computed"
+    readonly property bool shown: root.host.ownPart.formKind === "computed"
     // The vehicle's own file as the editor reads it: obd2's signals named too
     readonly property var fileDoc: {
         const f = root.host.ownFile !== null ? root.host.ownFile
@@ -71,7 +71,7 @@ ColumnLayout {
     Component.onCompleted: loadFile()
 
     Connections {
-        target: root.host
+        target: root.host.ownPart
         function onEditingKeyChanged() {
             root.recheck()
         }
@@ -100,7 +100,7 @@ ColumnLayout {
     function recheck() {
         if (!root.shown)
             return
-        const r = exprEditorItem.check(root.host.editingKey, formExprField.text)
+        const r = exprEditorItem.check(root.host.ownPart.editingKey, formExprField.text)
         root.checked = JSON.parse(JSON.stringify(r))
         const refs = r.ok ? r.leaves.map(l => l.ref) : []
         if (JSON.stringify(refs) !== JSON.stringify(root.leafRefs))
@@ -218,26 +218,26 @@ ColumnLayout {
     // signals read with it when an input is one, each said in the note
     function save(f) {
         const signal = SignalForm.draftComputed(f)
-        const named = root.host.ownSignals.find(s => s.name === signal.name && s.key !== root.host.editingKey)
-        if (root.host.editingKey !== "" && named !== undefined) {
-            root.host.formProblem = qsTr("%1 is saved already: give this one another name").arg(named.name)
+        const named = root.host.ownSignals.find(s => s.name === signal.name && s.key !== root.host.ownPart.editingKey)
+        if (root.host.ownPart.editingKey !== "" && named !== undefined) {
+            root.host.ownPart.formProblem = qsTr("%1 is saved already: give this one another name").arg(named.name)
             return false
         }
-        signal.key = SignalForm.keyFor(root.host.ownSignals, signal.name, root.host.editingKey)
-        if (root.host.editingKey === "" && SignalForm.startsWithDigit(signal.key)) {
-            root.host.formProblem = qsTr("A computed signal's name can't start with a digit: an expression "
+        signal.key = SignalForm.keyFor(root.host.ownSignals, signal.name, root.host.ownPart.editingKey)
+        if (root.host.ownPart.editingKey === "" && SignalForm.startsWithDigit(signal.key)) {
+            root.host.ownPart.formProblem = qsTr("A computed signal's name can't start with a digit: an expression "
                                + "would read it as a number. Start the name with a letter.")
             return false
         }
         const c = exprEditorItem.check(root.host.ownSignals.some(s => s.key === signal.key) ? signal.key : "", signal.expr)
         if (!c.ok) {
             const w = String(c.words)
-            root.host.formProblem = w.charAt(0).toUpperCase() + w.slice(1)
+            root.host.ownPart.formProblem = w.charAt(0).toUpperCase() + w.slice(1)
             return false
         }
         const base = root.host.ownFile !== null ? root.host.ownFile
-            : SignalForm.emptyFile(root.host.pickedVehicle.label, root.host.ownName(root.host.pickedVehicle.label))
-        let doc = SignalForm.withComputed(base, signal, root.host.editingKey)
+            : SignalForm.emptyFile(root.host.pickedVehicle.label, root.host.ownPart.ownName(root.host.pickedVehicle.label))
+        let doc = SignalForm.withComputed(base, signal, root.host.ownPart.editingKey)
         let note = qsTr("%1 saved in %2").arg(signal.name, base.name)
         if (c.format > (base.havne_signals === undefined ? 1 : base.havne_signals)) {
             doc = SignalForm.withFormat(doc, c.format)
@@ -249,9 +249,9 @@ ColumnLayout {
             note += qsTr(". Your signals now read with obd2's: the profile row shows obd2 + %1, "
                          + "and the car is asked obd2's PIDs too.").arg(base.name)
         }
-        if (!root.host.saveOwn(doc, note))
+        if (!root.host.ownPart.saveOwn(doc, note))
             return false
-        root.host.editingKey = ""
+        root.host.ownPart.editingKey = ""
         return true
     }
 
@@ -267,7 +267,7 @@ ColumnLayout {
 
     function shownRows() {
         const words = insertFilter.text.toLowerCase().split(/\s+/).filter(w => w !== "")
-        return root.nameRows.filter(r => (root.host.editingKey === "" || r.ref !== root.host.editingKey)
+        return root.nameRows.filter(r => (root.host.ownPart.editingKey === "" || r.ref !== root.host.ownPart.editingKey)
             && words.every(w => (r.name + " " + r.ref + " " + r.unit).toLowerCase().indexOf(w) >= 0))
     }
 

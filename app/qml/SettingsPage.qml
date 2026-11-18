@@ -153,7 +153,7 @@ Pane {
     function rememberVersions(uri, versions) {
         if (versions === "")
             return
-        const base = splitUri(uri).base
+        const base = uriCompose.splitUri(uri).base
         if (seenVersions[base] === versions)
             return
         const next = Object.assign({}, seenVersions)
@@ -197,96 +197,25 @@ Pane {
 
     SettingsPicks { id: picker; host: page }
 
-    // SettingsPicks's members others use
-    property alias storeRev: picker.storeRev
-    property alias vinRev: picker.vinRev
-    property alias pluginList: picker.pluginList
-    property alias pluginBySha: picker.pluginBySha
-    property alias ownPlugins: picker.ownPlugins
-    property alias refusedPlugins: picker.refusedPlugins
-    property alias picks: picker.picks
-    function picksNow() { return picker.picksNow() }
-    property alias pickRows: picker.pickRows
-    property alias signalProblem: picker.signalProblem
-    property alias signalNote: picker.signalNote
-    function placeOf(profile) { return picker.placeOf(profile) }
-    function profileName(profile) { return picker.profileName(profile) }
-    property alias variantRows: picker.variantRows
-    function rowTitle(r) { return picker.rowTitle(r) }
-    function profileTitle(profile) { return picker.profileTitle(profile) }
-    function rowReads(r) { return picker.rowReads(r) }
-    property alias missingPicks: picker.missingPicks
-    function signalsSummary() { return picker.signalsSummary() }
-    function togglePick(profile) { return picker.togglePick(profile) }
-    function pickProfile(profile) { return picker.pickProfile(profile) }
+    readonly property SettingsPicks picksPart: picker
 
     SettingsImport { id: importer; host: page }
 
-    onOwnPluginsChanged: {
-        if (importInto !== "" && !ownPlugins.some(p => p.sha256 === importInto))
-            importInto = ""
-    }
-
-    // SettingsImport's members others use
-    property alias pendingImport: importer.pendingImport
-    property alias importInto: importer.importInto
-    property alias replaceTarget: importer.replaceTarget
-    function saidToo(r) { return importer.saidToo(r) }
-    function importFile(url) { return importer.importFile(url) }
-    function keepPending(into, variant, replacing) { return importer.keepPending(into, variant, replacing) }
-    function discardImport() { return importer.discardImport() }
-    function startReplace(row) { return importer.startReplace(row) }
-    function importReplaces(variant) { return importer.importReplaces(variant) }
-    property alias obdbReport: importer.obdbReport
-    property alias obdbYearFromVin: importer.obdbYearFromVin
-    property alias obdbRowsShown: importer.obdbRowsShown
-    property alias obdbShown: importer.obdbShown
-    property alias obdbReplaces: importer.obdbReplaces
-    function noteCarYear() { return importer.noteCarYear() }
-    function obdbVinYear() { return importer.obdbVinYear() }
-    function previewObdb(typing) { return importer.previewObdb(typing) }
-    function obdbSummary(r) { return importer.obdbSummary(r) }
-    function keepObdb() { return importer.keepObdb() }
+    readonly property SettingsImport importPart: importer
 
     SettingsRowActions { id: rowActions; host: page }
 
-    // SettingsRowActions's members others use
-    property alias openRow: rowActions.openRow
-    property alias copyShown: rowActions.copyShown
-    property alias exportNote: rowActions.exportNote
-    function markMine(sha) { return rowActions.markMine(sha) }
-    function copyVariantTo(row, into) { return rowActions.copyVariantTo(row, into) }
-    function removeVariant(row) { return rowActions.removeVariant(row) }
-    function askRemoveVariant(row) { return rowActions.askRemoveVariant(row) }
-    function askRemovePlugin(sha) { return rowActions.askRemovePlugin(sha) }
-    function confirmingPlugin() { return rowActions.confirmingPlugin() }
-    function rowQuestion(entry, open) { return rowActions.rowQuestion(entry, open) }
-    function ownQuestion() { return rowActions.ownQuestion() }
-    function confirmRemoval() { return rowActions.confirmRemoval() }
-    function removePlugin(sha) { return rowActions.removePlugin(sha) }
-    property alias saving: rowActions.saving
-    function variantSave(row) { return rowActions.variantSave(row) }
-    function pluginSave(sha) { return rowActions.pluginSave(sha) }
-    function unmigratedSave(record) { return rowActions.unmigratedSave(record) }
-    function saveVariantAs(row) { return rowActions.saveVariantAs(row) }
-    function exportPluginAs(sha) { return rowActions.exportPluginAs(sha) }
-    function exportWaits(sha) { return rowActions.exportWaits(sha) }
-    function openExport(sha) { return rowActions.openExport(sha) }
-    function saveUnmigratedAs(record) { return rowActions.saveUnmigratedAs(record) }
-    function saveTo(url) { return rowActions.saveTo(url) }
-    property alias unmigratedRows: rowActions.unmigratedRows
-    function unmigratedText(r) { return rowActions.unmigratedText(r) }
-    function askRemoveUnmigrated(record) { return rowActions.askRemoveUnmigrated(record) }
-    function unmigratedQuestion(record) { return rowActions.unmigratedQuestion(record) }
-    function noteVinMatches() { return rowActions.noteVinMatches() }
+    readonly property SettingsRowActions rowActionsPart: rowActions
 
     SettingsOwn { id: own; host: page }
+
+    readonly property SettingsOwn ownPart: own
 
     // ---- The vehicle's own signals (ADR-0051's form, ADR-0064 Q7): the
     // variant the form writes, in a plugin of the user's own ----
     // Where the own variant is, null for none or one the store lost
     readonly property var ownPlace: pickedVehicle === null || pickedVehicle.own === "" ? null
-        : placeOf(pickedVehicle.own)
+        : picker.placeOf(pickedVehicle.own)
 
     // Its signal file as a document (SignalForm), null for none; the
     // form's choices that aren't text; what Read once last said
@@ -298,35 +227,6 @@ Pane {
     }
 
     readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
-
-    // SettingsOwn's members others use
-    property alias formService: own.formService
-    property alias formOrder: own.formOrder
-    property alias formKind: own.formKind
-    property alias formGroup: own.formGroup
-    property alias formProblem: own.formProblem
-    property alias formNote: own.formNote
-    property alias readResult: own.readResult
-    property alias editingKey: own.editingKey
-    property alias readOnceFor: own.readOnceFor
-    property alias pickedId: own.pickedId
-    function clearForm() { return own.clearForm() }
-    function fillForm(f) { return own.fillForm(f) }
-    function readOnceDraft() { return own.readOnceDraft() }
-    function readResultText(r) { return own.readResultText(r) }
-    function saveOwn(doc, note) { return own.saveOwn(doc, note) }
-    function ownName(label) { return own.ownName(label) }
-    function saveDraft() { return own.saveDraft() }
-    function editOwnSignal(key) { return own.editOwnSignal(key) }
-    function duplicateVehicle() { return own.duplicateVehicle() }
-    function removeOwnSignal(key) { return own.removeOwnSignal(key) }
-    function forgetVehicles(all) { return own.forgetVehicles(all) }
-    function pickVehicle(id) { return own.pickVehicle(id) }
-    function changeVehicles(doc) { return own.changeVehicles(doc) }
-    function rememberPlotting() { return own.rememberPlotting() }
-    property alias vinPickNote: own.vinPickNote
-    function recognizeVehicle() { return own.recognizeVehicle() }
-    property alias idle: own.idle
 
     // ---- Navigation: the list of pages, and the page shown. A phone shows
     // one at a time (the list is the root, a page pushes over it); 900 and
@@ -344,8 +244,8 @@ Pane {
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
                    + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
         { key: "signals", title: qsTr("Signals"),
-          summary: signalsSummary(),
-          warn: missingPicks.length > 0 || refusedPlugins.length > 0 },
+          summary: picker.signalsSummary(),
+          warn: picker.missingPicks.length > 0 || picker.refusedPlugins.length > 0 },
         { key: "alerts", title: qsTr("Alerts"),
           summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
                    : settingsAlerts.conditions.length === 0 ? qsTr("none")
@@ -469,11 +369,11 @@ Pane {
     }
 
     function profileLabel() {
-        for (const p of profiles) {
-            if (p.name === profileChoice)
+        for (const p of uriCompose.profiles) {
+            if (p.name === uriCompose.profileChoice)
                 return p.label
         }
-        return profileChoice
+        return uriCompose.profileChoice
     }
 
     // A replay plays a recording already, so the bridge doesn't record
@@ -500,7 +400,7 @@ Pane {
     // The row a device or recording list shows outlined: its URI is in
     // the field, whatever the query
     function isChosen(uri) {
-        return uri !== "" && splitUri(uriField.text).base === splitUri(uri).base
+        return uri !== "" && uriCompose.splitUri(uriField.text).base === uriCompose.splitUri(uri).base
     }
 
     // A row or preset fills the field: scrolls the page back to the field,
@@ -515,43 +415,24 @@ Pane {
             connectionPage.contentY = Math.max(0, top)
     }
 
-    SettingsUri { id: uriPart; host: page }
+    SettingsUri { id: uriCompose; host: page }
+
+    readonly property SettingsUri uriPart: uriCompose
 
     // SettingsUri's members others use
-    property alias profileChoice: uriPart.profileChoice
-    property alias extSession: uriPart.extSession
-    property alias profiles: uriPart.profiles
-    property alias adapterUri: uriPart.adapterUri
-    property alias standIn: uriPart.standIn
-    property alias pickedSets: uriPart.pickedSets
-    property alias profileNames: uriPart.profileNames
-    property alias offlineUri: uriPart.offlineUri
-    property alias syncing: uriPart.syncing
-    property alias composing: uriPart.composing
-    function profileHint() { return uriPart.profileHint() }
-    function splitUri(text) { return uriPart.splitUri(text) }
-    function queryValue(pairs, key) { return uriPart.queryValue(pairs, key) }
-    function uriBase() { return uriPart.uriBase() }
-    function sessionOffered(base) { return uriPart.sessionOffered(base) }
-    function fillUri(base) { return uriPart.fillUri(base) }
-    function chooseProfile(name) { return uriPart.chooseProfile(name) }
-    function recompose() { return uriPart.recompose() }
-    function readChoices() { return uriPart.readChoices() }
+    property alias pickedSets: uriCompose.pickedSets
+    property alias profileNames: uriCompose.profileNames
+    property alias offlineUri: uriCompose.offlineUri
 
     SettingsConnectFrom { id: connectFrom; host: page }
 
+    readonly property SettingsConnectFrom connectFromPart: connectFrom
+
     // SettingsConnectFrom's members others use
-    property alias connectKeeps: connectFrom.connectKeeps
     function requestConnect(uri, kept) { return connectFrom.requestConnect(uri, kept) }
-    property alias recentUris: connectFrom.recentUris
-    function keptUri(uri) { return connectFrom.keptUri(uri) }
-    function parseRecentUris(text, lastUri) { return connectFrom.parseRecentUris(text, lastUri) }
-    function withRecentUri(list, uri) { return connectFrom.withRecentUri(list, uri) }
     property alias vehicleUri: connectFrom.vehicleUri
     property alias connectUris: connectFrom.connectUris
     property alias connectAdapters: connectFrom.connectAdapters
-    function listConnectUri(uri) { return connectFrom.listConnectUri(uri) }
-    function listProfileWord(uri) { return connectFrom.listProfileWord(uri) }
     property alias connectProfileWords: connectFrom.connectProfileWords
     function connectFromList(uri) { return connectFrom.connectFromList(uri) }
 
@@ -586,15 +467,15 @@ Pane {
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens
         // A replay or mock address an earlier version stored is dropped
-        if (!keptUri(sessionSettings.uri))
+        if (!connectFrom.keptUri(sessionSettings.uri))
             sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
         // it back; as a list would connect it, like a picked vehicle's
         if (uriField.text === "")
-            uriField.text = listConnectUri(sessionSettings.uri)
-        recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
-        if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
-            sessionSettings.recentUris = JSON.stringify(recentUris)
+            uriField.text = connectFrom.listConnectUri(sessionSettings.uri)
+        connectFrom.recentUris = connectFrom.parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
+        if (JSON.stringify(connectFrom.recentUris) !== sessionSettings.recentUris)
+            sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
         Bridge.recording = sessionSettings.recording
     }
 
@@ -602,19 +483,19 @@ Pane {
         target: Bridge
 
         function onReadOnceResult(result) {
-            if (page.readOnceFor === page.pickedId)
-                page.readResult = result
+            if (own.readOnceFor === own.pickedId)
+                own.readResult = result
         }
         function onConnectResult(uri, error) {
-            const keeps = page.connectKeeps !== "" ? page.connectKeeps : uri
+            const keeps = connectFrom.connectKeeps !== "" ? connectFrom.connectKeeps : uri
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             page.logExplains = (error !== "")
             if (error === "") {
-                if (page.keptUri(keeps)) {
+                if (connectFrom.keptUri(keeps)) {
                     sessionSettings.uri = keeps
-                    page.recentUris = page.withRecentUri(page.recentUris, keeps)
-                    sessionSettings.recentUris = JSON.stringify(page.recentUris)
+                    connectFrom.recentUris = connectFrom.withRecentUri(connectFrom.recentUris, keeps)
+                    sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
                 }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
@@ -633,14 +514,14 @@ Pane {
                 page.plottedApplied = false
             // The session's VIN, read again at each, goes at its end; the
             // matches it made stay on the vehicle it identified
-            ++page.vinRev
+            ++picker.vinRev
         }
 
         function onVehicleIdentified() {
-            page.recognizeVehicle()
-            ++page.vinRev
-            page.noteVinMatches()
-            page.noteCarYear()
+            own.recognizeVehicle()
+            ++picker.vinRev
+            rowActions.noteVinMatches()
+            importer.noteCarYear()
         }
 
         function onRecordingChanged() {
@@ -657,7 +538,7 @@ Pane {
         function onTicksChanged() {
             if (page.plottedApplied && page.pickedVehicle !== null
                     && VehicleBook.isAdapterUri(Bridge.currentUri))
-                page.rememberPlotting()
+                own.rememberPlotting()
         }
     }
 

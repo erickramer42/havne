@@ -507,14 +507,14 @@ TestCase {
         press(page, "ownEdit_0")
         compare(page.pageKey, "ownform", "Edit opens the form")
         compare(find(page, "formName").text, "Trans Temp")
-        compare(page.editingKey, "trans_temp")
+        compare(page.ownPart.editingKey, "trans_temp")
         page.back()
         compare(page.pageKey, "signals", "back from the form lands on Signals")
 
         press(page, "ownAdd")
         compare(page.pageKey, "ownform", "Add opens the form")
         compare(find(page, "formName").text, "", "Add starts empty")
-        compare(page.editingKey, "")
+        compare(page.ownPart.editingKey, "")
         typeSignal(page, "Gear", "D101")
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.key).sort(), ["gear", "trans_temp"], "added, not replaced")
@@ -747,7 +747,7 @@ TestCase {
         const page = createPage(true)
         press(page, "vehicleNew")
         page.open("ownform")
-        page.formKind = "number"
+        page.ownPart.formKind = "number"
         compare(find(page, "formReadBy").label, "Read by:")
         compare(find(page, "formType").label, "Type:")
         const order = find(page, "formOrderLabel")

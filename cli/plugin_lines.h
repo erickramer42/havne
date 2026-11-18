@@ -1,10 +1,12 @@
 // File/layer: cli/plugin_lines.h | havne-cli, a plugin's lines (ADR-0052)
 // Testing: UNIT (tests/test_cli.cpp, CliPluginTest); the commands in the
 //          golden runs (tests/golden/cli/plugins-*.jsonl, on
-//          plugins/example-sim), CliPluginMakeTest
+//          plugins/example-sim), CliPluginMakeTest,
+//          CliPluginConversationTest
 //
 // What `havne-cli plugins list`, `check` and `match` write about a loaded
-// package (plugin.h): the package, each variant and its source, each
+// package (plugin.h): the package, its conversation tier's declaration
+// (ADR-0066), each variant and its source, each
 // value fixture's outcome, the check's summary and the variants a VIN
 // proposes, and the rule a fixture passes by; what `plugins wrap`, `put`,
 // `drop` and `signals import obdb --plugin` (ADR-0064 Q9) wrote, and the
@@ -56,8 +58,9 @@ inline uint32_t own_signals(const ecuio_signal_file_t* file,
 }
 
 // {"type":"plugin", package (its place among the command's packages),
-// id, version, name, tiers ["data"], variants [{id, profile}], fixtures
-// (a folder's fixture files)}
+// id, version, name, tiers (["data"], and "conversation" after it for a
+// plugin with a module), variants [{id, profile}], fixtures (a folder's
+// fixture files)}
 inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
                         const ecuio_plugin_info_t& info)
 {
@@ -71,7 +74,15 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.key("name");
     l.string(info.name, std::strlen(info.name));
     l.key("tiers");
-    l.raw((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0 ? "[\"data\"]" : "[]");
+    l.ch('[');
+    if ((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0) {
+        l.raw("\"data\"");
+    }
+    if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
+        l.raw((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0 ? ",\"conversation\""
+                                                         : "\"conversation\"");
+    }
+    l.ch(']');
     l.key("variants");
     l.ch('[');
     for (uint32_t v = 0; v < info.variant_count; ++v) {
@@ -91,6 +102,111 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.key("fixtures");
     l.u64(info.fixture_count);
     l.ch('}');
+}
+
+// Room for a conversation line at every bound of plugin.h's
+constexpr size_t kConversationLineBytes = 16384;
+
+// One of a conversation's ECUs: {"id", "rx", "tx"}
+inline void conversation_ecu(Line& l, const ecuio_plugin_t* p, uint32_t index)
+{
+    ecuio_plugin_conversation_ecu_t e{};
+    e.struct_size = sizeof e;
+    ecuio_plugin_conversation_ecu(p, index, &e);
+    if (index > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"id\":");
+    l.string(e.id, std::strlen(e.id));
+    l.key("rx");
+    l.hex_id(e.rx_id);
+    l.key("tx");
+    l.hex_id(e.tx_id);
+    l.ch('}');
+}
+
+// {"type":"conversation", package, code {bytes, sha256}, budget (the most
+// instructions in one call), ecus [{id, rx, tx}], services [{sid, sub (the
+// sub-functions declared; null for a service declared without)}],
+// security [{ecu, level, seed_bytes, key_bytes, delay_ms, key_window_ms}]},
+// after the plugin line of a plugin with the conversation tier: what its
+// manifest lets its module cause to be sent
+inline void conversation_line(Line& l, uint32_t package,
+                              const ecuio_plugin_t* p,
+                              const ecuio_plugin_conversation_t& c)
+{
+    static const char digits[] = "0123456789abcdef";
+    char sha[2 * sizeof c.code_sha256];
+    for (size_t i = 0; i < sizeof c.code_sha256; ++i) {
+        sha[2 * i] = digits[c.code_sha256[i] >> 4];
+        sha[2 * i + 1] = digits[c.code_sha256[i] & 0x0F];
+    }
+    l.raw("{\"type\":\"conversation\"");
+    l.key("package");
+    l.u64(package);
+    l.key("code");
+    l.raw("{\"bytes\":");
+    l.u64(c.code_bytes);
+    l.key("sha256");
+    l.string(sha, sizeof sha);
+    l.ch('}');
+    l.key("budget");
+    l.u64(c.budget);
+    l.key("ecus");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.ecu_count; ++i) {
+        conversation_ecu(l, p, i);
+    }
+    l.ch(']');
+    l.key("services");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.service_count; ++i) {
+        ecuio_plugin_service_t s{};
+        ecuio_plugin_service(p, i, &s);
+        if (i > 0) {
+            l.ch(',');
+        }
+        l.raw("{\"sid\":");
+        l.hex_bytes(&s.sid, 1);
+        l.key("sub");
+        if (s.sub_count == 0) {
+            l.raw("null");
+        } else {
+            l.ch('[');
+            for (uint8_t k = 0; k < s.sub_count && k < sizeof s.subs; ++k) {
+                if (k > 0) {
+                    l.ch(',');
+                }
+                l.hex_bytes(&s.subs[k], 1);
+            }
+            l.ch(']');
+        }
+        l.ch('}');
+    }
+    l.ch(']');
+    l.key("security");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.level_count; ++i) {
+        ecuio_plugin_security_level_t s{};
+        ecuio_plugin_security_level(p, i, &s);
+        if (i > 0) {
+            l.ch(',');
+        }
+        l.raw("{\"ecu\":");
+        l.hex_id(s.rx_id);
+        l.key("level");
+        l.hex_bytes(&s.level, 1);
+        l.key("seed_bytes");
+        l.u64(s.seed_bytes);
+        l.key("key_bytes");
+        l.u64(s.key_bytes);
+        l.key("delay_ms");
+        l.u64(s.delay_ms);
+        l.key("key_window_ms");
+        l.u64(s.key_window_ms);
+        l.ch('}');
+    }
+    l.raw("]}");
 }
 
 // A file's source (ecuio_signal_file_source); every text "" when it

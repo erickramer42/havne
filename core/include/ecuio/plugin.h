@@ -35,8 +35,10 @@ extern "C" {
  * package the line and column, then why. Never the package's own path.
  */
 
-#define ECUIO_PLUGIN_FORMAT       1         /* "havne_plugin" read */
+#define ECUIO_PLUGIN_FORMAT            1 /* "havne_plugin" a wrap writes */
+#define ECUIO_PLUGIN_FORMAT_MAX        2 /* the newest read; 1 is too */
 #define ECUIO_PLUGIN_TIER_DATA    0x1u      /* signal files only */
+#define ECUIO_PLUGIN_TIER_CONVERSATION 0x2u /* a module that asks (below) */
 #define ECUIO_PLUGIN_MANIFEST_MAX 1048576u  /* a folder's manifest.json */
 #define ECUIO_PLUGIN_PACKAGE_MAX  16777216u /* everything read, packed or not */
 #define ECUIO_PLUGIN_MAX_FILES    64u
@@ -202,6 +204,109 @@ ecuio_status_t ecuio_plugin_register(ecuio_plugin_t* plugin, uint32_t index,
                                      char* name, size_t cap);
 
 /*
+ * The conversation tier (ADR-0066; "havne_plugin" 2): a plugin that
+ * also carries a WebAssembly module and declares, in its manifest, which
+ * of its ECUs the module talks to, which services it may cause core to
+ * send and which security-access levels it computes a key for. Loading
+ * checks all of it: every declared service against the tier's ceiling,
+ * the module's SHA-256 against the manifest's, and the module's shape
+ * (its exports by name and type, one bounded memory, no import, no start
+ * function). Nothing in this header runs the module.
+ */
+
+#define ECUIO_PLUGIN_BUDGET_MAX   1000000u /* instructions in one call */
+#define ECUIO_PLUGIN_MAX_SERVICES 16u
+#define ECUIO_PLUGIN_MAX_SUBS     14u /* sub-functions of one service */
+#define ECUIO_PLUGIN_MAX_LEVELS   32u
+#define ECUIO_PLUGIN_KEY_MAX 58u /* a key's bytes: one request's, less 27 xx */
+
+typedef struct ecuio_plugin_conversation {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t code_bytes;  /* the module's size */
+    uint8_t code_sha256[32];
+    uint32_t budget; /* instructions one call into the module may run */
+    uint32_t ecu_count;
+    uint32_t service_count;
+    uint32_t level_count;
+    uint32_t reserved[2]; /* zero; ABI growth space */
+} ecuio_plugin_conversation_t;
+
+/* An ECU the module talks to */
+typedef struct ecuio_plugin_conversation_ecu {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t rx_id;       /* its response ID */
+    uint32_t tx_id;       /* its request ID */
+    char id[32];          /* the manifest's id for it */
+    uint32_t flags;       /* zero */
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_plugin_conversation_ecu_t;
+
+/* A service the module may cause core to send */
+typedef struct ecuio_plugin_service {
+    uint8_t sid;
+    uint8_t sub_count; /* 0: the service isn't declared by sub-function */
+    uint8_t subs[ECUIO_PLUGIN_MAX_SUBS]; /* those declared, in the manifest's
+                                            order */
+    uint32_t reserved[2];                /* zero */
+} ecuio_plugin_service_t;
+
+/* A security-access level the module computes a key for */
+typedef struct ecuio_plugin_security_level {
+    uint32_t rx_id;         /* the ECU's response ID */
+    uint8_t level;          /* the seed request's sub-function, odd; the key's
+                           is the next */
+    uint8_t seed_bytes;     /* the seed's length */
+    uint8_t key_bytes;      /* the key's, 1 to ECUIO_PLUGIN_KEY_MAX */
+    uint8_t reserved0;      /* zero */
+    uint32_t delay_ms;      /* the least wait after a refused key */
+    uint32_t key_window_ms; /* how long the module has to give the key */
+    uint32_t reserved[4];   /* zero */
+} ecuio_plugin_security_level_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_conversation_t) == 64,
+              "ecuio_plugin_conversation_t size is ABI");
+static_assert(offsetof(ecuio_plugin_conversation_t, budget) == 40,
+              "plugin conversation budget offset is ABI");
+static_assert(sizeof(ecuio_plugin_conversation_ecu_t) == 64,
+              "ecuio_plugin_conversation_ecu_t size is ABI");
+static_assert(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12,
+              "plugin conversation ecu id offset is ABI");
+static_assert(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44,
+              "plugin conversation ecu flags offset is ABI");
+static_assert(sizeof(ecuio_plugin_service_t) == 24,
+              "ecuio_plugin_service_t size is ABI");
+static_assert(sizeof(ecuio_plugin_security_level_t) == 32,
+              "ecuio_plugin_security_level_t size is ABI");
+static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 8,
+              "plugin security level delay_ms offset is ABI");
+#endif
+
+/* The conversation tier's part of plugin. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL; ECUIO_ERR_INVALID_ARGUMENT, out untouched, for a plugin without
+ * the tier (ecuio_plugin_info's tiers says) or a struct_size smaller
+ * than the struct. */
+ecuio_status_t ecuio_plugin_conversation(const ecuio_plugin_t* plugin,
+                                         ecuio_plugin_conversation_t* out);
+
+/* The index-th ECU the module talks to, in the group's order: a getter
+ * by index, ECUIO_ERR_INVALID_ARGUMENT at or past ecu_count, for a
+ * plugin without the tier and for a struct_size smaller than the
+ * struct, out untouched. */
+ecuio_status_t
+ecuio_plugin_conversation_ecu(const ecuio_plugin_t* plugin, uint32_t index,
+                              ecuio_plugin_conversation_ecu_t* out);
+
+/* The index-th declared service, and the index-th security level: getters
+ * by index against service_count and level_count, as above. */
+ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
+                                    uint32_t index,
+                                    ecuio_plugin_service_t* out);
+ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
+                                           uint32_t index,
+                                           ecuio_plugin_security_level_t* out);
+
+/*
  * Making and changing a packed plugin (ADR-0064): a signal file wrapped
  * into a plugin of one variant, and a packed plugin's text with a
  * variant put in or dropped. Each call reads bytes and gives a new
@@ -228,6 +333,9 @@ ecuio_status_t ecuio_plugin_register(ecuio_plugin_t* plugin, uint32_t index,
  *   length; ECUIO_ERR_OUT_OF_MEMORY. The inputs' bounds are the
  *   loaders': ECUIO_SIGNAL_FILE_MAX_BYTES a signal file,
  *   ECUIO_PLUGIN_PACKAGE_MAX a packed plugin.
+ * - A wrap writes format ECUIO_PLUGIN_FORMAT. A put or a drop refuses a
+ *   plugin with the conversation tier: its module and what the manifest
+ *   declares for it are not these calls' to carry over.
  */
 
 /* The pointers go last, so the numbers' offsets are the same on every

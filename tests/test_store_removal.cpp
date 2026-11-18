@@ -118,6 +118,54 @@ Four stageFour(const OldState& old)
     return f;
 }
 
+// Every bridge call that imports, keeps, saves or removes in the stores,
+// each once and each answered ok; what it saves goes to out
+void runEveryStoreCall(SessionBridge& bridge, const QString& out,
+                       const QString& big, const QString& changed)
+{
+    const auto url = [&out](const char* name) {
+        return QUrl::fromLocalFile(out + QLatin1Char('/') +
+                                   QLatin1String(name));
+    };
+    // The answer's sha256, once its ok is checked
+    const auto ok = [](const QVariantMap& r) {
+        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+            << r.value(QStringLiteral("words")).toString().toStdString();
+        return r.value(QStringLiteral("sha256")).toString();
+    };
+    const QString more = QStringLiteral("more");
+    writeBytes(out + QStringLiteral("/a.json"),
+               signalFile(QStringLiteral("Picked")));
+    ok(bridge.readImport(url("a.json")));
+    QString mine =
+        ok(bridge.keepSignals(QString(), QString(), QStringLiteral("v1")));
+    writeBytes(out + QStringLiteral("/b.json"),
+               signalFile(QStringLiteral("More"), QStringLiteral("D101")));
+    ok(bridge.readImport(url("b.json")));
+    mine = ok(bridge.keepSignals(mine, more, QString()));
+    ok(bridge.keepSignalText(
+        QString::fromUtf8(signalFile(QStringLiteral("Typed"))), QString(),
+        QString(), QString()));
+    const QString copied = ok(bridge.copyVariant(mine, more, QString(), more));
+    ok(bridge.saveVariantFile(mine, more, url("more.json")));
+    mine = ok(bridge.dropPluginVariant(mine, more));
+    ok(bridge.exportPlugin(mine, url("mine.havne-plugin.json")));
+    ok(bridge.removePlugin(mine));
+    ok(bridge.markPluginMine(
+        ok(bridge.importPlugin(url("mine.havne-plugin.json")))));
+    ok(bridge.removePlugin(copied));
+    ok(bridge.readImport(
+        QUrl::fromLocalFile(QStringLiteral(ECUIO_OBDB_FIXTURE))));
+    ok(bridge.previewObdbImport(2019, QStringLiteral("Car OBDb")));
+    ok(bridge.keepObdbPlugin(QStringLiteral("v1"), true));
+    ok(bridge.saveUnmigratedFile(big, url("big.json")));
+    ok(bridge.saveUnmigratedFile(changed, url("changed.json")));
+    EXPECT_TRUE(bridge.removeUnmigratedFile(changed));
+    EXPECT_TRUE(bridge.removeUnmigratedFile(big));
+    (void)bridge.forgetVehicleImports(QStringLiteral("v1"));
+    (void)bridge.forgetAllVehicleImports();
+}
+
 } // namespace
 
 /* Two starts after an update from before v0.8.0: the first moves the
@@ -472,4 +520,49 @@ TEST(BridgeTest, OneStoreRemovalStopsWhileTheOldBookIsReadStill)
                            "removed: it is tried again at the next start")});
     EXPECT_EQ(filesUnder(old.signalsRoot()), before);
     EXPECT_FALSE(old.has(kOldBook)) << "the user's own file lost its key";
+}
+
+/* Between the move and the start after it, nothing else writes to or
+ * deletes from signals/: each import, keep, save and removal through the
+ * bridge (runEveryStoreCall) leaves it byte for byte, and a copy that
+ * couldn't be moved still saves from there */
+TEST(BridgeTest, OneStoreRemovalAloneDeletesFromTheOldFolder)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QByteArray moved = signalFile(QStringLiteral("Moved"));
+    old.keep(moved);
+    // A copy past what the store keeps (kept false) and one changed since
+    // it was kept, whose bytes the move keeps in plugins/unmigrated
+    const QString big = sha256Of("a file past the store's bound");
+    writeBytes(old.copyOf(big), QByteArray());
+    ASSERT_TRUE(QFile::resize(old.copyOf(big), ECUIO_PLUGIN_PACKAGE_MAX + 1));
+    const QString changed = sha256Of("as it was kept");
+    writeBytes(old.copyOf(changed), "changed since");
+    old.set(kOldBook,
+            bookOf({vehicle(
+                QStringLiteral("v1"), QString(),
+                {listed(moved),
+                 named(big, QStringLiteral("Big"), QStringLiteral("user.big")),
+                 named(changed, QStringLiteral("Changed"),
+                       QStringLiteral("user.changed"))})}));
+    {
+        SessionBridge bridge;
+        QSettings prefs(old.prefsPath(), QSettings::IniFormat);
+        (void)bridge.migrateStores(prefs);
+    }
+    ASSERT_TRUE(marked());
+    ASSERT_TRUE(QFile::exists(keptPath(changed)));
+    const auto before = filesUnder(old.signalsRoot());
+    ASSERT_EQ(before.size(), 3);
+
+    SessionBridge bridge;
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    runEveryStoreCall(bridge, out.path(), big, changed);
+    EXPECT_FALSE(QFile::exists(keptPath(changed)));
+
+    EXPECT_EQ(filesUnder(old.signalsRoot()), before) << said(before);
+    EXPECT_EQ(QFileInfo(out.path() + QStringLiteral("/big.json")).size(),
+              ECUIO_PLUGIN_PACKAGE_MAX + 1);
 }

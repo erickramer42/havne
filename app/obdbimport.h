@@ -6,7 +6,7 @@
 // appendix of 2026-11-06): core's converter (ecuio_obdb_import) runs on
 // the picked file's bytes and its notes come back sorted for Settings'
 // report, each field that differs and each signal left out, before the
-// converted file is kept as any signal file is (SignalStore). The words
+// converted file is kept as a plugin (PluginStore). The words
 // are core's, and never name the file's path.
 
 #pragma once

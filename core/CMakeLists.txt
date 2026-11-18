@@ -10,6 +10,8 @@ add_library(ecuio-core STATIC
     src/export_pcapng.cpp
     src/export_wide.cpp
     src/health.cpp
+    src/health_build.cpp
+    src/health_write.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp
@@ -19,6 +21,8 @@ add_library(ecuio-core STATIC
     src/queue.cpp
     src/recorder.cpp
     src/recorder_armed.cpp
+    src/recorder_attach.cpp
+    src/recorder_control.cpp
     src/recorder_text.cpp
     src/recorder_writer.cpp
     src/recording_check.cpp
@@ -50,6 +54,7 @@ add_library(ecuio-core STATIC
     src/condition_eval.cpp
     src/plugin.cpp
     src/plugin_manifest.cpp
+    src/plugin_conversation.cpp
     src/plugin_merge.cpp
     src/plugin_wrap.cpp
     src/signal_sets.cpp

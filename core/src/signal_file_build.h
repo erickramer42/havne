@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -123,8 +124,10 @@ void only_keys(const ecuio_json::Value& obj,
  * other characters one '-'; "" when there are none */
 std::string profile_of(const std::string& name);
 
+/* what is a view: a temporary std::string bound to a reference parameter
+ * trips GCC's -Wdangling-reference where a caller keeps the result */
 const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
-                           const std::string& what);
+                           std::string_view what);
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,
                  const std::string& what);
 double finite_of(const ecuio_json::Value& v, const std::string& what);

@@ -1,7 +1,8 @@
 // File/layer: cli/cmd_plugins.cpp | havne-cli, plugins list, match, check, wrap, put
 //             and drop (ADR-0052, ADR-0064)
 // Testing: UNIT: CliGoldenTest, CliPluginMakeTest, CliPluginRunTest,
-//          CliUsageTest (ctest); CliPluginTest (test_cli)
+//          CliPluginConversationTest, CliUsageTest (ctest); CliPluginTest
+//          (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
@@ -22,9 +23,27 @@
 
 namespace cmd {
 
+namespace {
+
+// The conversation line of a plugin with the tier, after its plugin line
+void write_conversation(Output& out, uint32_t package, const ecuio_plugin_t* p)
+{
+    ecuio_plugin_conversation_t c{};
+    c.struct_size = sizeof c;
+    if (ecuio_plugin_conversation(p, &c) != ECUIO_OK) {
+        return; // a plugin without the tier
+    }
+    BigLine b(cli::kConversationLineBytes);
+    cli::conversation_line(b.line, package, p, c);
+    write_line(out, b.line);
+}
+
+} // namespace
+
 // plugins list <pkg>... (ADR-0052): start, then a plugin line for each
-// package, or a refused line saying why and going on; exit 3 when any was
-// refused. No end line (a list)
+// package (and a conversation line for one with the tier), or a refused
+// line saying why and going on; exit 3 when any was refused. No end line
+// (a list)
 int run_plugins_list(const std::vector<const char*>& paths)
 {
     Output out;
@@ -42,9 +61,12 @@ int run_plugins_list(const std::vector<const char*>& paths)
                               why.c_str());
         } else {
             cli::plugin_line(b.line, index, p, plugin_info(p));
-            ecuio_plugin_free(p);
         }
         write_line(out, b.line);
+        if (p != nullptr) {
+            write_conversation(out, index, p);
+            ecuio_plugin_free(p);
+        }
     }
     out.flush();
     if (!out.ok()) {
@@ -280,7 +302,8 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
 
 // plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
 // package as a session would, then reads its value fixtures. start,
-// plugin, for each variant a variant line (its source's license), a
+// plugin, a conversation line for a plugin with the tier, for each
+// variant a variant line (its source's license), a
 // share_alike line when that license is share-alike, and its own signals'
 // signal_def lines, a fixture_refused line for each fixture file that
 // can't be read or that core refused, a fixture line for each entry (with
@@ -305,6 +328,7 @@ int run_plugins_check(const char* path, const char* on)
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
+    write_conversation(out, 0, p);
     bool uses_gauge = false;
     bool uses_format2 = false;
     for (uint32_t v = 0; v < info.variant_count; ++v) {

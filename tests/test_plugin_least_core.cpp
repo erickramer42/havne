@@ -107,6 +107,18 @@ std::string one_file(const std::string& ecu_list, const std::string& data_file,
                   "\"a.json\": " + data_file, "1.0.0", more);
 }
 
+/* package as format 2 of the manifest, nothing else changed */
+std::string format2(std::string package)
+{
+    const std::string one = "\"havne_plugin\": 1";
+    const size_t at = package.find(one);
+    EXPECT_NE(at, std::string::npos);
+    if (at != std::string::npos) {
+        package[at + one.size() - 1] = '2';
+    }
+    return package;
+}
+
 /* A package whose one variant reads a.json, then b.json */
 std::string two_files(const std::string& ecu_list, const std::string& a,
                       const std::string& b)
@@ -288,6 +300,7 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
         {"4 ECUs and the base's",
          one_file(kFourPastTheBase, data(sig("oil", "F40D", "e1"), extends)),
          "0.9.0"},
+        {"plugin format 2", format2(one_file(kPcm, data(oil))), "0.9.0"},
     };
     for (const row& r : rows) {
         EXPECT_EQ(least_of_package(r.package), r.least) << r.what;
