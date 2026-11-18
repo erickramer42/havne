@@ -1654,3 +1654,161 @@ don't say:
     an ELM327 sends a single frame, so there a talk is 7 bytes at most and
     a longer one is refused as too long before anything is typed. Until
     the conversation tier exists the only caller is a test seam.
+
+28. **Format 2 and the conversation tier at load as built** (section 2.8,
+    `plugin.h`; `core/src/plugin_conversation.cpp`, `core/src/base64.h`,
+    `core/src/guest_abi.h`). A manifest starts with `"havne_plugin"` 1 or
+    2. Format 2 adds the tier: `"tiers"` lists `"data"` always and
+    `"conversation"` exactly when the manifest has the `"conversation"`
+    group. The group's keys and bounds are judged at load: `ecus` (each
+    once), `services` (each inside the ceiling, `sub` required exactly for
+    10, 27, 2C and 3E), `security` (levels odd and inside the ceiling's 27
+    range, each once, `delay_ms` 1,000 to 3,600,000 and left out 10,000),
+    `budget` (left out, the most).
+    - **One addition to the ABI:**
+      `ecuio_plugin_conversation_ecu(plugin, index, ecuio_plugin_conversation_ecu_t* out)`,
+      since `ecuio_plugin_conversation_t` has `ecu_count` and nothing else
+      lists the ECUs. The struct is sized (64 bytes: `struct_size`,
+      `rx_id`, `tx_id`, `id[32]`, `flags`, `reserved[4]`), so a front end
+      names a module by the manifest's id and a later field needs no new
+      getter.
+    - The module is checked at load (its SHA-256, then its shape by
+      `check_module`), not first at connect; instantiating stays attach's.
+    - A packed binary file is `{"kind": "wasm", "base64": ...}`: RFC 4648,
+      padded, no white space, unused bits zero, so a module has one text.
+      In a folder the module is a file, read as bytes and counted into the
+      package's 16 MiB.
+    - `key_window_ms` reads 50 to 4,000: a second under S3 (5 s), past
+      which a key would find the session gone. The hold between a seed and
+      its key is the conversation's, not the loader's.
+    - `ecuio_plugin_put_variant` and `_drop_variant` refuse a plugin with
+      the tier: a module is changed in its folder and packed again.
+    - The getters answer INVALID_ARGUMENT for a plugin without the tier;
+      a caller reads `ecuio_plugin_info`'s `tiers` first.
+    - The schema says the same (`schema/plugin-manifest.schema.json`:
+      `havne_plugin` 1 or 2, `$defs` `binaryFile`, `conversation`, `code`,
+      `service`, `securityLevel`), with one verdict from schema and loader
+      over every file and case of `tests/schema_fixtures.py`.
+    - The app's store takes a packed plugin with the tier and shows
+      nothing of it; no module binds before the consent gate of the
+      conversation tier's front end, and the v0.9.0 release checks that
+      gate is in.
+
+### Appendix: the write plan's shape beyond one download (2026-11-18)
+
+Section 3.4 builds the declarative UDS plan first and leaves the
+two-stage kernel-loader shape (section 3.1's last item, section 7.4) to
+the sandboxed-code sequence. A protected module of that shape needs no
+sandboxed code when its transfer has no data-dependent control flow:
+fixed blobs, fixed routine arguments, the key computed once by the tier 2
+`27` conversation (section 2.3), a check inside the ECU. That is a static
+list of steps, which the declarative plan can carry.
+
+1. **A multi-step declarative plan, in v0.9.0.** The plan grows from one
+   download to an ordered list of steps, each a kind: download
+   (`34`/`36`/`37`), upload (`35`/`36`/`37`), routine (`31`), reset
+   (`11`). Each step carries its `dfi`, its region, the block length from
+   `34`'s or `35`'s reply, and a routine's arguments. Each blob is pinned
+   by its SHA-256 in the manifest, as section 2.8 pins the module. The
+   only value computed at run time is the `27` key. The step count is
+   bounded.
+   - Core's point-of-no-return floor is unchanged (section 3.3): the
+     earlier of the plan's mark and the first `31`, `34`, `2E` or `3D` in
+     the programming session. A kernel-to-RAM `34` is therefore past it:
+     conservative for a stage that writes only RAM, but core can't tell
+     RAM from flash, and a mark only moves the line earlier.
+   - **Sequencing:** an increment of its own after section 9's step 4 (the
+     single-download flash and the dry run), before the sandboxed-code
+     sequence. The minimal flash proves the envelope before the plan's
+     shape grows.
+2. **A kernel-assisted read is write-class.** Section 4.2 holds: a read
+   never sends a `31`, and a `34` is a download. A dump that needs a `34`
+   to a RAM region and a `31` to start a loader before its
+   `35`/`36`/`37` runs under the write ceiling, behind gate 2's envelope
+   (the voltage floor, do-not-power-off, the keep-alive, the
+   point-of-no-return floor at its first `34`) and gate 3. It still
+   writes the original-copy file of section 4 (checksum-addressed, read
+   twice and compared), and it remains the lowest-risk write-class step on
+   a car, since it writes no flash. Gate 1's bare read (`23`, or
+   `35`/`36`/`37` with no `34` or `31`) stays the standalone dump. For a
+   target that answers no bare read, the kernel-assisted dump is the
+   original-copy path, and that target's first car step waits for gates 2
+   and 3 and for the multi-step plan.
+3. **A second UDS simulated bootloader.** A UDS two-stage kernel-loader
+   bootloader on the one simulated ECU model (sections 7.1 and 8): a blob
+   accepted into a RAM region, a routine that starts it, then the main
+   download or upload through it, and a check inside the ECU. It proves
+   items 1 and 2 in CI with no car. It adds to section 3.3's non-UDS
+   bootloader and doesn't replace it: that one proves the sandboxed
+   path's reach beyond UDS.
+4. **A functional programming session, as declared, previewed steps.**
+   Three captured commercial tool sessions (generic) open programming
+   with a functional `10 02` with the suppress-positive-response bit
+   (`10 82`), then a physical `10 02` to the target. During the transfer
+   the tool keeps every module in the programming session itself: a
+   functional suppressed `3E 80` throughout and the functional `10 82`
+   sent again, never a physical or unsuppressed tester-present. The close
+   is a functional suppressed hard reset (`11 81`): every module reboots,
+   and no `10 01` is sent. No `28` and no `85` appears. Whether a
+   physical `10 02` and a physical keep-alive to the target alone suffice
+   is untested; only a car run settles it.
+   - A plan may declare **functional, suppressed** steps of three kinds,
+     and no other: the programming session (`10 82`), its keep-alive
+     (`3E 80`, sent and re-sent by core on the plan's declared period),
+     and the close (`11 81`). Each is shown in the preview before the
+     session in plain words ("opens a programming session on every module
+     on the bus and keeps it open; resets every module at the end"). A
+     plan drops what a car run shows the target doesn't need.
+   - Appendix note 25's suppress-bit bar holds for every physical
+     request: core reads the replies of a physical `27` and `3E`. A
+     functional request expects no reply by construction, so the
+     carve-out is exactly these three, functional and suppressed only. A
+     suppressed `3E` to the target alone stays refused.
+   - It is a new request class: requests to modules outside the
+     manifest's ECUs, whose replies core never sees. So, beyond section
+     3.3's gates:
+     - gate 2's preconditions (parked, engine off, key on) are checked
+       before the first functional step;
+     - **the end is core's, and depends on the point of no return.**
+       Before it (a cancel, the voltage floor, a refused unlock), core
+       stops the functional keep-alive and sends a functional suppressed
+       `10 81`, so every module returns to its default session without a
+       reboot; one that misses it falls back at S3. After it, a
+       functional end reaches the target too, so core sends none while
+       the target holds a partly written image: the functional keep-alive
+       goes on while the plan's recovery runs, and the end follows once
+       recovery has finished or been given up. At a normal close, the
+       plan's declared close (`11 81`), else the functional `10 81`. Like
+       the keep-alive, the end is never the plan's to skip;
+     - **replies to a functional request are logged and shown, never a
+       stop:** a module outside the manifest that answers negatively (a
+       "conditions not correct", say) is listed in the session's lines
+       and the journal; only the target's own refusal stops the plan;
+     - **other adapters on the port:** the preview warns, it doesn't
+       block: "Only this adapter should talk on the bus: disconnect
+       others, or leave them unconnected to any app or listening only."
+       Core can't detect another tester, and a listening adapter doesn't
+       disturb a transfer;
+     - **after the close,** the plan reads the fault codes, since
+       rebooting every module commonly leaves lost-communication codes,
+       and offers the clear the app already has;
+     - **no functional keep-alive unless the plan declares one.** Without
+       it the other modules fall back to their default session at S3
+       (about 5 s) by themselves: the framework's default. A target whose
+       tool holds them declares it;
+     - the dry run on the simulated car with several modules (ADR-0065
+       step 6) receives each functional request, its keep-alive and its
+       reset;
+     - each functional request is in the wire log and the journal.
+   - Section 1's spine is unchanged: tier 2 can't send any of these; only
+     a tier-3 plan through core can.
+   - The pre-programming unit section 1 defers (`28`, `85`) stays
+     deferred. The evidence doesn't use it.
+5. **The car runs before any write,** parked, no write: (a) a passive
+   probe of a bare `23` or `35` of the calibration after `27`; (b)
+   whether a physical `10 02` and a physical keep-alive to the target
+   alone hold the session with the other modules quiet enough; then (c)
+   the broadcast open plus the target, held 30 s, closed with a
+   functional `10 81` (no reboot), the cluster watched and the fault
+   codes read after; (d) the same closed with `11 81`, to see what the
+   reboot leaves. Only then any write, following the captured sequence.

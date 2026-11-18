@@ -51,12 +51,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **C API:** `ecuio_session_timing_t` gains `untimed` in its reserved room (64 bytes kept): the requests asked that have no timing row, because all 1024 rows were taken before they were first picked. `ecuio_session_get_timing`'s rows are in the order the requests were first asked.
 - **C API, changed meanings (no value or layout changed):** `ECUIO_PROFILE_MAX_REQUESTS` is the most requests a session has in its rotation at one time, and the timing rows it keeps; it no longer bounds what a set defines. `ECUIO_VALIDATE_ERR_REQUEST_COUNT` names the first def whose request is past its own module's 1024. On a session with `ECUIO_SESSION_INFO_PICK_ONLY`, a focus of count 0 leaves nothing asked but an attached condition's signals, and `ecuio_session_get_unasked_signals` lists every other signal from create on.
 - **A vehicle's ticks on Live are kept by each signal's key** (ADR-0065 section 9), not its name. Ticks saved by an earlier version are read as they are and saved by key at the next tick. A tick on a signal the connected profile lacks is no longer dropped at the next tick: it stays with the vehicle and comes back under a profile that has the signal. A version before this one reads such a vehicle's ticks as none.
+- After an update from a version before v0.8.0, the vehicle list and signal files that version kept are removed at the second start, once the first has moved them into the plugin store. Files added by an earlier version after the move are removed with the rest. A signal file that couldn't be moved stays until it is saved or removed. A downgrade past v0.8.0 then shows no vehicles or signal files. (ADR-0064)
 
 ### Fixed
 
 - An expression refused at a character outside ASCII (such as "a + é") shows the character in the refusal's words, not '?'.
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
 - A plugin made from a signal file names the oldest Havne that reads it, not the version that made it, so the same file makes the same plugin on every version and the store keeps one copy of it. (ADR-0064)
+- **A pick spread over several ECUs no longer stalls through an ELM327 adapter.** The adapter asks one ECU at a time, and it gave each ECU the same share of its exchanges, so one signal on a second module was asked as often as all of the engine's together, and the engine's values went stale (dimmed) every few seconds. Now each ECU is asked each of its requests once in turn, under one header switch. Each ECU's supported-PID check (the walk) now has its own second, so with several ECUs the engine's no longer stops at the first range and leaves the PIDs above 0x20 asked one per request.
 
 ## [0.8.0] - 2026-11-15
 

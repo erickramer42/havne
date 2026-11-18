@@ -594,23 +594,30 @@ written, and `signals check` says it won't convert.
 
 ### Where Havne keeps them
 
-The app keeps a copy of each file it imports, so the vehicle still has
-it when the original moves or the phone's picker loses access to it:
+The app keeps each file it imports as a plugin of its own, so the vehicle
+still has it when the original moves or the phone's picker loses access
+to it:
 
-- **The folder:** `signals/` in the app's data folder (Windows
-  `%APPDATA%\Havne\Havne\signals`, Linux `~/.local/share/Havne/Havne/signals`,
-  macOS `~/Library/Application Support/Havne/Havne/signals`, and the
-  app's own storage on a phone), or `signals/` under
+- **The folder:** `plugins/` in the app's data folder (Windows
+  `%APPDATA%\Havne\Havne\plugins`, Linux `~/.local/share/Havne/Havne/plugins`,
+  macOS `~/Library/Application Support/Havne/Havne/plugins`, and the
+  app's own storage on a phone), or `plugins/` under
   `HAVNE_SETTINGS_DIR` when that's set.
-- **The name:** `<sha256>.json`, the SHA-256 of the file's bytes in
-  lower-case hex, the bytes as imported. Two vehicles with the same file
-  share one copy, and the hash is the one a recording names.
-- **Which vehicle has which:** the vehicle list in the app's preferences
-  names each vehicle's files by their hash; the copies are only read.
-- **When a copy goes:** when no vehicle has its file any more (Remove,
-  Forget, Forget all), its profile first. A copy that is missing, has
-  changed, or no longer loads is shown with why, and its profile isn't
-  offered.
+- **The name:** `<sha256>.havne-plugin.json`: the plugin Havne wraps the
+  file in, with the file as its one variant, named by the SHA-256 of the
+  plugin's own bytes. The variant's file is the one a recording names.
+- **Which vehicle has which:** the vehicle book in the app's preferences
+  names each vehicle's picks; `store.json` beside the plugins holds the
+  store's facts about them.
+- **When a copy goes:** when you remove the plugin. A copy that is
+  missing, has changed, or no longer loads is shown with why, and its
+  profile isn't offered.
+- **Before v0.8.0** the app kept each file as `<sha256>.json` in
+  `signals/`. The first start of v0.8.0 or later moves those files into
+  plugins, and the second removes the folder and the old vehicle list,
+  except the files that couldn't be moved: those stay until each is saved
+  or removed. Files an older version added after the move are removed with
+  the rest, so a downgrade past v0.8.0 shows no vehicles or signal files.
 
 **Not settled:** whether Read once reads while a session is connected.
 

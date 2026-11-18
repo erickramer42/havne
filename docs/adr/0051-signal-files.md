@@ -850,3 +850,14 @@ Note of 2026-11-16: section 6's "`ECUIO_MAX_CHANNELS` stays 4 until a real car n
 | A variant's merged list | 16,384 signals, and 4 MiB written |
 
 The third row is a plugin variant's files read together (ADR-0065).
+
+## Note: where an imported file is kept (2026-11-18)
+
+The appendix "the OBDb import in the app" says the report waits for
+**Keep**, which keeps the converted file through the same store as any
+signal file (`SignalStore`, its copy named by its SHA-256). Since v0.8.0
+every import of a signal file keeps the file as a plugin of the user's
+own ([ADR-0064](0064-one-store.md): an OBDb set is converted, wrapped and
+kept the same way). `SignalStore` is removed from the app (ADR-0064's
+appendix "step 6 as built"); the earlier version's `signals/` folder is
+read once by the move and removed at the next start.

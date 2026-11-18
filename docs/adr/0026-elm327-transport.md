@@ -258,6 +258,13 @@ command only after its prompt. Each pass:
    `ecuio_session_dispatch_callbacks`, and hands each matched frame to
    `ecuio_engine_on_frame`.
 
+> **Amended 2026-11-18 ([ADR-0015](0015-request-engine.md)'s appendix
+> "turns on an adapter that asks one channel at a time"):** step 2 takes
+> turns by request, not by channel: a channel keeps the turn until it has
+> asked each row of its rotation once (or a second has passed, or another
+> channel's session needs a request), so a channel's requests go under
+> one `AT SH`; a walking channel keeps it until its walk ends.
+
 `NO DATA` completes the read and leaves the engine's wait to expire
 the request, so a timeout is judged in one place. The engine's
 constants (the 100 ms wait, the 20 ms floor) stand, and `AT ST 19`

@@ -1619,3 +1619,11 @@ frame shows the phone's own document, and the format, the two stored
 documents and the file rules are unchanged. The state is the page's,
 false at every start and after Done. The frame is one width; the grid's
 six columns hold at any phone width, and the switch says so.
+
+## Note: where a set's file is found (2026-11-18)
+
+The appendix "the bridge and the hub as built" says
+`SessionBridge::fileOfSet(set)` finds a set's file in the signal store,
+the plugin store, then the replay's own files. The signal store is gone
+([ADR-0064](0064-one-store.md), step 6): it asks the plugin store, then
+the replay's own files.
