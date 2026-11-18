@@ -245,29 +245,28 @@ TEST(RecordingViewTest, ARegisteredProfilesFileTextKeysTheFramesOpen)
 }
 
 /* The hook as main() sets it: the bridge answers with the file of a
- * profile its store registered, a plugin variant's written text, which
- * loads to the registered set's defs, so the open has the file's keys */
+ * profile its plugin store registered, a kept file's variant's written
+ * text, which loads to the registered set's defs, so the open has the
+ * file's keys */
 TEST(RecordingViewTest, TheBridgesStoreFileKeysTheFramesOpen)
 {
     HookScope scope;
     SettingsDirScope settings;
     ASSERT_TRUE(settings.valid());
-    QTemporaryDir from;
     QTemporaryDir dir;
-    ASSERT_TRUE(from.isValid() && dir.isValid());
+    ASSERT_TRUE(dir.isValid());
     writeFile(dir.filePath(QStringLiteral("frames.csv")), kRpmFrames);
     SessionBridge bridge;
     RecordingFrameSet::setSignalFileText(
         [&bridge](const ecuio_signal_set_t* set) {
             return bridge.signalFileTextOfSet(set);
         });
-    const QByteArray bytes = keyedFile();
-    const QVariantMap r =
-        bridge.importSignalFile(writeScratch(from.path(), "f.json", bytes));
+    const QVariantMap r = bridge.keepSignalText(
+        QString::fromUtf8(keyedFile()), QString(), QString(), QString());
     ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("words")).toString().toStdString();
-    ASSERT_EQ(bridge.useSignalFiles({sha256Of(bytes)}).size(), 1);
-    const QString profile = r.value(QStringLiteral("profile")).toString();
+    const QString profile =
+        r.value(QStringLiteral("profiles")).toStringList().value(0);
     const ecuio_signal_set_t* set = nullptr;
     ASSERT_EQ(ecuio_profile_lookup(profile.toUtf8().constData(), &set),
               ECUIO_OK);
@@ -278,4 +277,5 @@ TEST(RecordingViewTest, TheBridgesStoreFileKeysTheFramesOpen)
     v.openFrames(dir.path(), profile);
     ASSERT_TRUE(opened(v)) << v.error().toStdString();
     EXPECT_EQ(keyOf(v, "RPM in Thousands"), QStringLiteral("krpm"));
+    EXPECT_EQ(removeEveryPlugin(bridge), 1);
 }
