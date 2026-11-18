@@ -10,6 +10,7 @@ add_executable(havne-cli
     cmd_stream.cpp
     cmd_log.cpp
     cmd_view.cpp
+    cmd_view_args.cpp
     cmd_info.cpp
     cmd_plugins.cpp
     cmd_signals.cpp

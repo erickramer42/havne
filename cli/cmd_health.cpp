@@ -1,6 +1,6 @@
 // File/layer: cli/cmd_health.cpp | havne-cli, health (ADR-0054's appendix "the health
 //             report as built")
-// Testing: UNIT: CliHealthRunTest, CliTransferRunTest (ctest);
+// Testing: UNIT: CliHealthRunTest, CliTransferRunTest, CliUsageTest (ctest);
 //          CliHealthTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
@@ -9,6 +9,7 @@
 #include "jsonl.h"
 
 #include "commands.h"
+#include "profile_source.h"
 #include "session_lines.h"
 #include "common.h"
 
@@ -223,6 +224,44 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
     ecuio_session_destroy(session);
     return write_health_result(out, a, rc, r, settled);
+}
+
+// health's arguments, then the recording's report or the session's
+int cmd_health(int argc, char** argv)
+{
+    cli::HealthArgs h;
+    std::string why;
+    if (!cli::parse_health(argc, argv, h, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (!h.live) {
+        return run_health_recording(h);
+    }
+    const char* uri = h.source;
+    std::string opened;
+    if (h.plugin != nullptr) {
+        const int rc = use_plugin(h.plugin, uri);
+        if (rc >= 0) {
+            return rc;
+        }
+    } else if (h.signals != nullptr) {
+        const int rc = use_signal_file(h.signals, uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        uri = opened.c_str();
+    } else {
+        const int rc = use_recording_signals(uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        if (!opened.empty()) {
+            uri = opened.c_str();
+        }
+    }
+    return run_health_session(h, uri);
 }
 
 } // namespace cmd

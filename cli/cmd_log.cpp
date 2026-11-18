@@ -1,5 +1,6 @@
 // File/layer: cli/cmd_log.cpp | havne-cli, log (ADR-0056 section 7)
-// Testing: UNIT: CliLogRunTest, CliGoldenTest (ctest); CliLogTest (test_cli)
+// Testing: UNIT: CliLogRunTest, CliGoldenTest, CliUsageTest (ctest);
+//          CliLogTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
@@ -423,6 +424,24 @@ int run_log(const cli::LogArgs& args)
     g_done.store(true);
 #endif
     return code;
+}
+
+// log's arguments and its profile, then run_log
+int cmd_log(int argc, char** argv)
+{
+    cli::LogArgs la;
+    std::string why;
+    if (!cli::parse_log(argc, argv, la, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    std::string opened;
+    const int rc = take_profile_source(la.signals, la.plugin, &la.uri, &opened);
+    if (rc >= 0) {
+        return rc;
+    }
+    return run_log(la);
 }
 
 } // namespace cmd

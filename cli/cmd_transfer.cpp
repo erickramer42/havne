@@ -1,6 +1,6 @@
 // File/layer: cli/cmd_transfer.cpp | havne-cli, frames, and what export and import
 //             ask of core (ADR-0054, ADR-0049)
-// Testing: UNIT: CliGoldenTest, CliTransferRunTest (ctest);
+// Testing: UNIT: CliGoldenTest, CliTransferRunTest, CliUsageTest (ctest);
 //          CliTransferTest, CliFramesTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
@@ -154,6 +154,211 @@ int run_frames(const cli::FramesArgs& args)
     cli::Line l(buf, sizeof buf);
     cli::frames_end_line(l, rc == ECUIO_OK ? "read" : "interrupted", summary);
     write_line(out, l);
+    return ended(out, kExitOk);
+}
+
+// frames' arguments, then run_frames
+int cmd_frames(int argc, char** argv)
+{
+    cli::FramesArgs fr;
+    std::string why;
+    if (!cli::parse_frames(argc, argv, fr, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    return run_frames(fr);
+}
+
+// export: its arguments, the column check, then the estimate or the file
+int cmd_export(int argc, char** argv)
+{
+    cli::ExportArgs ex;
+    std::string why;
+    if (!cli::parse_export(argc, argv, ex, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    // A named column the recording has no values for stays empty
+    // (a focus pick that never answered is a column of a log): each is
+    // said on stderr once the export is done, so a typo isn't silent,
+    // and counted. The check runs first, so an interrupt during it
+    // leaves nothing written
+    std::vector<const char*> missing;
+    const auto say_missing = [&missing] {
+        for (const char* name : missing) {
+            std::fprintf(stderr,
+                         "havne-cli: the recording has no values for "
+                         "'%s': its column is empty\n",
+                         name);
+        }
+        return missing.size();
+    };
+    Output out;
+    install_handlers(true);
+    write_start(out);
+    out.flush(); // a second interrupt leaves no half line behind
+    bool asked = false;
+    if (ex.options.format == ECUIO_EXPORT_CSV &&
+        ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
+        !missing_columns(ex, &asked, &missing)) {
+        return ended_interrupted(out, "column check");
+    }
+    if (ex.estimate) {
+        const std::vector<uint32_t> shown = cli::estimate_intervals(ex);
+        const std::vector<uint32_t> rows = cli::with_sweep(shown);
+        std::vector<ecuio_export_estimate_t> sized(rows.size());
+        const ecuio_status_t sizing = ecuio_export_estimate_with(
+            &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
+            export_interrupted, &asked, sized.data());
+        second_interrupt_over("estimate");
+        if (sizing == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
+        if (sizing != ECUIO_OK) {
+            write_error(out, sizing);
+            return ended(out, kExitConnect);
+        }
+        BigLine sizes(1024);
+        cli::estimate_line(
+            sizes.line, rows.data(), sized.data(), shown.size(), say_missing(),
+            cli::sweep_rows_of(rows.data(), sized.data(), sized.size()));
+        write_line(out, sizes.line);
+        return ended(out, kExitOk);
+    }
+    // An interval is judged against the sweep's rows, sized first so an
+    // interrupt here leaves nothing written: one pass more
+    uint64_t sweep_rows = UINT64_MAX;
+    if (ex.options.format == ECUIO_EXPORT_CSV &&
+        ex.options.layout == ECUIO_CSV_WIDE && ex.options.row_ms > 0) {
+        const uint32_t sweep = 0;
+        ecuio_export_estimate_t sized{};
+        const ecuio_status_t sizing = ecuio_export_estimate_with(
+            &ex.options, &sweep, 1, interval_interrupted, &asked, &sized);
+        if (sizing == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
+        if (sizing == ECUIO_OK) {
+            sweep_rows = sized.rows;
+        }
+    }
+    ecuio_export_report_t report{};
+    const ecuio_status_t rc =
+        ecuio_export_with(&ex.options, export_interrupted, &asked, &report);
+    second_interrupt_over("export");
+    if (rc == ECUIO_ERR_CANCELED) {
+        return ended_interrupted(out);
+    }
+    BigLine b(cli::exported_line_bytes(ex));
+    cli::Line& l = b.line;
+    if (rc != ECUIO_OK) {
+        if (report.failed_class != 0) {
+            cli::export_failed_line(l, report);
+            write_line(out, l);
+        }
+        write_error(out, rc);
+        return ended(out, kExitConnect);
+    }
+    const bool no_fewer =
+        cli::no_fewer_than_sweep(ex.options.row_ms, report.rows, sweep_rows);
+    cli::exported_line(l, ex, report, say_missing(), no_fewer);
+    write_line(out, l);
+    if (no_fewer) {
+        std::fprintf(stderr,
+                     "havne-cli: every %u ms gives no fewer rows than "
+                     "every sweep: the recording is slower than that\n",
+                     static_cast<unsigned>(ex.options.row_ms));
+    }
+    return ended(out, kExitOk);
+}
+
+// import: its arguments, the CSV's column map, then the recording
+int cmd_import(int argc, char** argv)
+{
+    cli::ImportArgs im;
+    std::string why;
+    if (!cli::parse_import(argc, argv, im, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (im.print_map) {
+        return print_guessed_map(im);
+    }
+    Output out;
+    // Before the guess, so a Ctrl+C during it stops the import at its
+    // first ask
+    install_handlers(true);
+    write_start(out);
+    out.flush(); // a second interrupt leaves no half line behind
+    // A CSV's column map: core takes its text, up to the JSON reader's
+    // 1 MiB, and refuses a larger one in its own words
+    std::string map;
+    if (im.options.format == ECUIO_IMPORT_CSV && im.map_path == nullptr) {
+        // None given: guessed from the file, the guess written first,
+        // so its notes come before an import's words
+        std::string text;
+        ecuio_csv_guess_t guess{};
+        const ecuio_status_t grc = guess_map(im, &text, &guess, &why);
+        if (grc != ECUIO_OK) {
+            second_interrupt_over();
+            write_error(out, grc, why.c_str());
+            return ended(out, kExitConnect);
+        }
+        {
+            BigLine g(cli::guessed_line_bytes(text));
+            cli::guessed_line(g.line, text);
+            write_line(out, g.line);
+            out.flush();
+        }
+        if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
+            // --time-unit gives a unit only to plain numbers
+            second_interrupt_over();
+            write_error(out, ECUIO_ERR_LOAD_FAILED,
+                        (guess.flags & ECUIO_CSV_GUESS_TIME_NUMBERS) != 0
+                            ? "the guessed map's time has no unit: give "
+                              "--time-unit s, ms or us, or a map with "
+                              "--map"
+                            : "the guessed map's time has no unit a "
+                              "guess can give: its cells need a map "
+                              "with the zone (or the date and offset), "
+                              "given with --map");
+            return ended(out, kExitConnect);
+        }
+        map = text.substr(guess.map_offset, guess.map_length);
+        im.options.column_map_utf8 = map.c_str();
+    } else if (im.map_path != nullptr) {
+        if (!read_whole(im.map_path, size_t{1} << 20, "column map", &map,
+                        &why)) {
+            second_interrupt_over();
+            write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+            return ended(out, kExitConnect);
+        }
+        im.options.column_map_utf8 = map.c_str();
+    }
+    ecuio_import_report_t report{};
+    bool asked = false;
+    const ecuio_status_t rc =
+        ecuio_import_with(&im.options, import_interrupted, &asked, &report);
+    second_interrupt_over("import");
+    if (rc == ECUIO_ERR_CANCELED) {
+        return ended_interrupted(out);
+    }
+    if (rc != ECUIO_OK) {
+        write_error(out, rc);
+        return ended(out, kExitConnect);
+    }
+    BigLine b(cli::imported_line_bytes(im));
+    cli::Line& l = b.line;
+    cli::imported_line(l, im, report);
+    write_line(out, l);
+    if (report.rows_no_time > 0) {
+        // Left out and counted, never silent
+        std::fprintf(stderr, "havne-cli: %llu %s with no time left out\n",
+                     static_cast<unsigned long long>(report.rows_no_time),
+                     report.rows_no_time == 1 ? "row" : "rows");
+    }
     return ended(out, kExitOk);
 }
 

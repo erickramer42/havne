@@ -6,6 +6,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "jsonl.h"
+#include "log_lines.h"
 #include "partial_file.h"
 
 #include "common.h"
@@ -405,6 +406,26 @@ bool is_file(const char* path)
     struct stat st{};
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
 #endif
+}
+
+bool parse_count(const char* text, uint64_t& out)
+{
+    if (!text || !*text) {
+        return false;
+    }
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long long v = std::strtoull(text, &end, 10);
+    if (errno || *end || v == 0 || *text == '-' || *text == '+') {
+        return false;
+    }
+    out = v;
+    return true;
+}
+
+bool parse_run_seconds(const char* text, uint64_t& out)
+{
+    return parse_count(text, out) && out <= cli::kMaxRunSeconds;
 }
 
 } // namespace cmd

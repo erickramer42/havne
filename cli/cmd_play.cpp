@@ -4,6 +4,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "jsonl.h"
+#include "log_lines.h"
 
 #include "commands.h"
 #include "session_lines.h"
@@ -251,5 +252,45 @@ int run_play(const PlayArgs& args)
     return ended(out, kExitOk);
 }
 #endif
+
+// play's arguments, then run_play; off Linux its one refusal
+int cmd_play([[maybe_unused]] int argc, [[maybe_unused]] char** argv)
+{
+#if HAVNE_CLI_PLAY
+    PlayArgs play;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--to" && i + 1 < argc) {
+            play.to = argv[++i];
+        } else if ((a == "--count" || a == "--seconds") && i + 1 < argc) {
+            const bool is_count = a == "--count";
+            if (!(is_count ? parse_count(argv[++i], play.count)
+                           : parse_run_seconds(argv[++i], play.seconds))) {
+                std::fprintf(stderr, "havne-cli: %s\n",
+                             is_count ? "--count takes a whole number above 0"
+                                      : cli::run_seconds_why());
+                return kExitUsage;
+            }
+        } else if (a.rfind("--", 0) == 0 || play.uri) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else {
+            play.uri = argv[i];
+        }
+    }
+    if (!play.uri || !play.to) {
+        std::fprintf(stderr,
+                     "havne-cli: play needs a URI and --to <interface>\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    return run_play(play);
+#else
+    std::fprintf(stderr, "havne-cli: play needs Linux, where a CAN "
+                         "interface is a network device\n");
+    return kExitUsage;
+#endif
+}
 
 } // namespace cmd

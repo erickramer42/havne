@@ -9,8 +9,10 @@
 #include "sim_line.h"
 #include "elm327_emulator.h"
 #include "elm327_lines.h"
+#include "log_lines.h"
 
 #include "commands.h"
+#include "profile_source.h"
 #include "common.h"
 
 #include "ecuio/core.h"
@@ -204,6 +206,75 @@ int run_sim(const SimArgs& args)
         return kExitFailed;
     }
     return ended(out, kExitOk);
+}
+
+// sim's arguments and its profile, then the bus's sim or the ELM327's
+int cmd_sim(int argc, char** argv)
+{
+    SimArgs sim;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--on" && i + 1 < argc) {
+            sim.on = argv[++i];
+        } else if (a == "--elm327" && i + 1 < argc) {
+            sim.elm327 = argv[++i];
+            if (!cli::parse_elm327_address(sim.elm327, &sim.elm327_at)) {
+                std::fprintf(stderr, "havne-cli: --elm327 takes tcp:<port> or "
+                                     "tcp:<a.b.c.d>:<port>, a port 0-65535\n");
+                return kExitUsage;
+            }
+        } else if (a == "--desk-bus") {
+            sim.desk_bus = true;
+        } else if (a == "--signals" && i + 1 < argc) {
+            sim.signals = argv[++i];
+        } else if (a == "--plugin" && i + 1 < argc) {
+            sim.plugin = argv[++i];
+        } else if (a == "--seconds" && i + 1 < argc) {
+            if (!parse_run_seconds(argv[++i], sim.seconds)) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::run_seconds_why());
+                return kExitUsage;
+            }
+        } else if (a.rfind("--", 0) == 0 || sim.uri) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else {
+            sim.uri = argv[i];
+        }
+    }
+    if (!sim.uri || (sim.on == nullptr) == (sim.elm327 == nullptr)) {
+        std::fprintf(stderr, "havne-cli: sim needs a URI and either --on "
+                             "<interface> or --elm327 tcp:<port>\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (sim.elm327 != nullptr && sim.desk_bus) {
+        std::fprintf(stderr, "havne-cli: --desk-bus is for --on: the "
+                             "ELM327 emulator is on no bus\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (sim.signals != nullptr && sim.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each "
+                             "give the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (sim.plugin != nullptr) {
+        const int rc = use_plugin(sim.plugin, sim.uri);
+        if (rc >= 0) {
+            return rc;
+        }
+    }
+    std::string opened;
+    if (sim.signals != nullptr) {
+        const int rc = use_signal_file(sim.signals, sim.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        sim.uri = opened.c_str();
+    }
+    return sim.elm327 != nullptr ? run_sim_elm327(sim) : run_sim(sim);
 }
 
 } // namespace cmd

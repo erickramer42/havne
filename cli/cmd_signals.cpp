@@ -433,4 +433,89 @@ int run_signals_expr(int argc, char** argv)
     return write_expr_value(out, file, checked.program, args.values, leaves);
 }
 
+// signals' words: check, import obdb's arguments, or expr
+int cmd_signals(int argc, char** argv)
+{
+    const std::string word = argc > 2 ? argv[2] : "";
+    if (word == "check" && argc == 4) {
+        return run_signals_check(argv[3]);
+    }
+    if (word == "import" && argc > 4 && std::string(argv[3]) == "obdb") {
+        ImportArgs im;
+        im.file = argv[4];
+        for (int i = 5; i < argc; ++i) {
+            const std::string a = argv[i];
+            const bool has_value = i + 1 < argc;
+            if (a == "--out" && has_value) {
+                im.out = argv[++i];
+            } else if (a == "--year" && has_value) {
+                uint64_t year = 0;
+                if (!parse_count(argv[++i], year) || year < 1980 ||
+                    year > 2100) {
+                    std::fprintf(stderr, "havne-cli: --year takes a model "
+                                         "year, 1980 to 2100\n");
+                    return kExitUsage;
+                }
+                im.options.model_year = static_cast<uint32_t>(year);
+            } else if (a == "--name" && has_value) {
+                im.options.name = argv[++i];
+            } else if (a == "--url" && has_value) {
+                im.options.url = argv[++i];
+            } else if (a == "--commit" && has_value) {
+                im.options.commit = argv[++i];
+            } else if (a == "--alone") {
+                im.options.flags |= ECUIO_OBDB_ALONE;
+            } else if (a == "--plugin") {
+                im.plugin = true;
+            } else if (a == "--wmi" && has_value) {
+                if (!cli::parse_wmi(argv[++i], &im.wmi)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --wmi takes manufacturer "
+                                 "codes, each 3 or 6 of a VIN's letters "
+                                 "and digits, separated by commas\n");
+                    return kExitUsage;
+                }
+            } else if (a == "--years" && has_value) {
+                if (!cli::parse_model_years(argv[++i], im.years)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --years takes <from>-<to>, "
+                                 "two model years from 1980 to 2039\n");
+                    return kExitUsage;
+                }
+            } else {
+                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+                usage(stderr);
+                return kExitUsage;
+            }
+        }
+        if (im.out == nullptr || *im.out == '\0') {
+            std::fprintf(stderr,
+                         "havne-cli: signals import obdb needs --out <file>\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (!im.plugin && (!im.wmi.empty() || im.years[0] != 0)) {
+            std::fprintf(stderr, "havne-cli: --wmi and --years go with "
+                                 "--plugin: a match is a plugin's\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        if (im.years[0] != 0 && im.wmi.empty()) {
+            std::fprintf(stderr, "havne-cli: --years goes with --wmi: a "
+                                 "match needs its manufacturer codes\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        return run_signals_import(im);
+    }
+    if (word == "expr") {
+        return run_signals_expr(argc - 3, argv + 3);
+    }
+    std::fprintf(stderr, "havne-cli: signals takes check <file>, import obdb "
+                         "<file> --out <file>, or expr (--signals <file> | "
+                         "--plugin <pkg>) [<expr>]\n");
+    usage(stderr);
+    return kExitUsage;
+}
+
 } // namespace cmd

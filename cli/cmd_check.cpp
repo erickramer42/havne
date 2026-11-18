@@ -190,4 +190,35 @@ int run_layout_check(const char* path, const std::string& form)
     return ended(out, v.read ? kExitOk : kExitFailed);
 }
 
+// conditions check's arguments, then run_conditions_check
+int cmd_conditions(int argc, char** argv)
+{
+    cli::ConditionsCheckArgs check;
+    std::string why = "conditions takes check <file> [--signals <file> | "
+                      "--profile <name> | --plugin <pkg> [--variant <id>]]";
+    if (argc > 2 && std::string(argv[2]) == "check" &&
+        cli::parse_conditions_check(argc - 3, argv + 3, &check, &why)) {
+        return run_conditions_check(check);
+    }
+    std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+    usage(stderr);
+    return kExitUsage;
+}
+
+// layout check's arguments, then run_layout_check
+int cmd_layout(int argc, char** argv)
+{
+    const std::string word = argc > 2 ? argv[2] : "";
+    if (word == "check" && argc == 4) {
+        return run_layout_check(argv[3], "");
+    }
+    if (word == "check" && argc == 6 && std::string(argv[4]) == "--form" &&
+        (std::string(argv[5]) == "phone" ||
+         std::string(argv[5]) == "desktop")) {
+        return run_layout_check(argv[3], argv[5]);
+    }
+    usage(stderr);
+    return kExitUsage;
+}
+
 } // namespace cmd
