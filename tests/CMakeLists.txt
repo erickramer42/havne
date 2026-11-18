@@ -126,7 +126,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp)
+    test_engine_talk.cpp test_request_turns.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -157,8 +157,9 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # pseudo-terminal (elm327_port.h); it holds the binary's new_counter.h.
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
 # test_elm327_talk.cpp: a talk through the test seam, against the fake.
+# test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp test_elm327_talk.cpp)
+    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -218,12 +219,14 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # test_vcan_talk.cpp: a request longer than a frame through a requesting
 # session, to the kernel's ISO-TP and the simulated ECU's (ADR-0066
 # section 2.4, SocketCanTalkTest).
+# test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
+# pace doesn't wait on another's (SocketCanTurnsTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
                    test_vcan_requests.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )

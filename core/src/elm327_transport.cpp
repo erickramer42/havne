@@ -1,7 +1,8 @@
 // File/layer: core/src/elm327_transport.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
 // Testing: HARNESS: Elm327SessionTest, Elm327PortTest, Elm327TcpTest,
-//          Elm327StreamTest, Elm327TalkTest (test_elm327); BENCH
+//          Elm327StreamTest, Elm327TalkTest, Elm327TurnsTest (test_elm327);
+//          BENCH
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -14,6 +15,7 @@
 #include "elm327_protocol.h"
 #include "request_engine.h"
 #include "request_setup.h"
+#include "request_turns.h"
 #include "link_health.h"
 #include "uri_query.h"
 #include "error_detail.h"
@@ -1335,11 +1337,28 @@ void leave_sessions(transport* t)
     t->leaving = false;
 }
 
+/* The channels whose ECU is still sending a cut reply, a bit each, passed
+ * over until it's done; *left is the soonest hold's rest, INT64_MAX for
+ * none */
+uint32_t held_channels(const transport* t, int64_t now, int64_t* left)
+{
+    uint32_t held = 0;
+    *left = INT64_MAX;
+    for (uint32_t k = 0; k < t->engine.chan_count; ++k) {
+        if (t->cut[k].hold_until_us > now) {
+            const int64_t rest = t->cut[k].hold_until_us - now;
+            *left = (rest < *left) ? rest : *left;
+            held |= 1u << k;
+        }
+    }
+    return held;
+}
+
 /* The worker (ADR-0026 section 3): the request engine driven as the J2534
  * worker drives it, with one command outstanding for the whole adapter,
  * since an ELM327 takes the next command only after its prompt. Each
- * pass ends the waits that ran out, asks the first channel in turn with
- * a request due, and reads its reply to the prompt. With nothing due it
+ * pass ends the waits that ran out, asks the channel holding the turn
+ * (request_turns.h), and reads its reply to the prompt. With nothing due it
  * listens for what the adapter says unasked (a reset): until the next
  * request's floor or wait, or, with nothing left to ask, for the idle
  * read's 100 ms, which counts toward quiet as J2534's passive reads do.
@@ -1368,7 +1387,7 @@ void elm327_worker(transport* t)
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
-    uint32_t next_chan = 0;
+    ecuio_engine_turns turns;    /* which channel asks next */
     const bool passive = asks_nothing(t);
     /* A requesting worker's waits to the engine's next event end on
      * time (precise_wait.h) */
@@ -1403,21 +1422,12 @@ void elm327_worker(transport* t)
             /* The adapter answering its setup ends the backoff */
             link_on_read(h, !ready, false, false);
         } else {
-            uint32_t c = 0;
-            int32_t r = ECUIO_ENGINE_NONE;
-            /* A channel whose ECU is still sending a cut reply is passed
-             * over until it's done */
             int64_t held_left = INT64_MAX;
-            for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE;
-                 ++k) {
-                c = (next_chan + k) % e.chan_count;
-                if (t->cut[c].hold_until_us > now) {
-                    const int64_t left = t->cut[c].hold_until_us - now;
-                    held_left = (left < held_left) ? left : held_left;
-                    continue;
-                }
-                r = ecuio_engine_due(&e, c, now);
-            }
+            const uint32_t held = held_channels(t, now, &held_left);
+            uint32_t c = 0;
+            int64_t floor_us = 0;
+            const int32_t r =
+                ecuio_engine_take_turn(&e, turns, held, now, &c, &floor_us);
             elm327_io io = elm327_io::prompt;
             if (passive) {
                 const monitor_end m = listen(t, h);
@@ -1435,7 +1445,6 @@ void elm327_worker(transport* t)
                     }
                 }
             } else if (r != ECUIO_ENGINE_NONE) {
-                next_chan = (c + 1) % e.chan_count;
                 reply_seen seen;
                 io = ask(t, c, r, seen);
                 if (io == elm327_io::prompt) {
@@ -1451,7 +1460,10 @@ void elm327_worker(transport* t)
                     }
                 }
             } else {
-                int64_t next_us = ecuio_engine_next_event_us(&e, now);
+                /* the turn's channel waits out its own floor */
+                int64_t next_us = (floor_us > 0)
+                                      ? floor_us
+                                      : ecuio_engine_next_event_us(&e, now);
                 if (next_us == 0 && held_left != INT64_MAX) {
                     /* what's due is a held channel's: until its hold ends */
                     next_us = held_left;

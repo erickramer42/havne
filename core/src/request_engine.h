@@ -3,7 +3,8 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: RequestEngineTest, RequestTableTest, DiagnosticsTest,
-//          ClearTest, SessionControlTest, EngineTalkTest (test_obd2);
+//          ClearTest, SessionControlTest, EngineTalkTest, RequestTurnsTest
+//          (test_obd2);
 //          HARNESS: J2534AdoptionTest (test_j2534_stream); J2534HealthTest
 //          (test_j2534_health); BENCH
 
@@ -118,8 +119,9 @@
  * the starts of two writes on one channel: this default, or the driver's
  * (ecuio_request_engine::gap_us, the URI's ?gap=). The walk's budget is
  * each channel's own, from its first bitmap, and fits the whole chain,
- * eight bitmaps, at a full wait each. No bitmap request goes out after
- * it. */
+ * eight bitmaps, at a full wait each: an adapter that asks one channel
+ * at a time leaves a walking channel the turn (request_turns.h). No
+ * bitmap request goes out after it. */
 constexpr int64_t ECUIO_ENGINE_WAIT_US = 100000;
 constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
