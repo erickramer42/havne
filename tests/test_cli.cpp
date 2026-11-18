@@ -1346,37 +1346,6 @@ TEST(CliViewTest, AFailedReadsErrorLineSaysItsOwnCause)
     EXPECT_EQ(cli::read_error_detail(ECUIO_ERR_INVALID_ARGUMENT), nullptr);
 }
 
-TEST(CliViewTest, ADeltaIsBetweenOneNameInOneUnit)
-{
-    ecuio_recording_signal_t speed{};
-    std::strcpy(speed.name, "Vehicle Speed");
-    std::strcpy(speed.unit, "km/h");
-    ecuio_recording_signal_t other = speed;
-    EXPECT_EQ(cli::delta_key(speed), cli::delta_key(other));
-    std::strcpy(other.unit, "mph");
-    EXPECT_NE(cli::delta_key(speed), cli::delta_key(other))
-        << "km/h less mph is no difference";
-    std::strcpy(other.unit, "KM/H");
-    EXPECT_EQ(cli::delta_key(speed), cli::delta_key(other))
-        << "a unit's case is no other unit: RPM and rpm";
-    std::strcpy(other.unit, "km/h");
-    std::strcpy(other.name, "vehicle speed");
-    EXPECT_NE(cli::delta_key(speed), cli::delta_key(other))
-        << "a name's case is another signal";
-    /* The name and the unit apart: "A" in "bc" isn't "Ab" in "c" */
-    ecuio_recording_signal_t a{};
-    ecuio_recording_signal_t b{};
-    std::strcpy(a.name, "A");
-    std::strcpy(a.unit, "bc");
-    std::strcpy(b.name, "Ab");
-    std::strcpy(b.unit, "c");
-    EXPECT_NE(cli::delta_key(a), cli::delta_key(b));
-    /* A name that fills its field has no NUL: read to the field's end */
-    ecuio_recording_signal_t full{};
-    std::memset(full.name, 'n', sizeof full.name);
-    EXPECT_EQ(cli::delta_key(full).size(), sizeof full.name + 1);
-}
-
 TEST(CliViewTest, AColumnsMeanComesFromItsRangeWhereThatGivesIt)
 {
     ecuio_recording_column_t col{};

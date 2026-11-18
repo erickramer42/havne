@@ -905,8 +905,9 @@ void build(const parts& in, ecuio_signal_file& f)
      * later file replaces a signal by key: the base def is left out of
      * the set, with the program a computed one held, and the file's def
      * stands in its place with its ID, so what reads that ID (a base
-     * program, a layout's cell, a focus) reads the file's. Names are
-     * unique in a set because a recording keys its values by name. */
+     * program, a layout's cell, a focus) reads the file's. A file of
+     * format 1 or 2 names each signal once (ADR-0065 section 9), though a
+     * set may repeat a name. */
     if (base != nullptr) {
         std::vector<ecuio_signal_def_t> kept;
         for (const ecuio_signal_def_t& d : f.defs) {
@@ -1133,7 +1134,6 @@ void build(const parts& in, ecuio_signal_file& f)
         /* Only these codes' index is a def's */
         const bool names_a_def =
             why.code > 0 || why.code == ECUIO_VALIDATE_ERR_DUPLICATE_ID ||
-            why.code == ECUIO_VALIDATE_ERR_DUPLICATE_NAME ||
             why.code == ECUIO_VALIDATE_ERR_TABLE_RANGE;
         if (names_a_def && why.index != UINT32_MAX && why.index >= first &&
             why.index - first < entries.size()) {

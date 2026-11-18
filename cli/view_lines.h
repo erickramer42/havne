@@ -662,23 +662,6 @@ inline bool mean_of_column(const ecuio_recording_column_t& col, double& mean)
     return true;
 }
 
-// What a delta compares: a signal's name and its unit, the unit's ASCII
-// case ignored ("RPM" is "rpm"), so a speed in km/h is never taken from
-// one in mph
-inline std::string delta_key(const ecuio_recording_signal_t& s)
-{
-    std::string key;
-    for (size_t i = 0; i < sizeof s.name && s.name[i] != '\0'; ++i) {
-        key += s.name[i];
-    }
-    key += '\n';
-    for (size_t i = 0; i < sizeof s.unit && s.unit[i] != '\0'; ++i) {
-        const char c = s.unit[i];
-        key += c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
-    }
-    return key;
-}
-
 // {"type":"axis", from_us, to_us, columns, column_us}
 inline void axis_line(Line& l, const Axis& a)
 {
@@ -704,9 +687,9 @@ inline size_t columns_line_bytes(uint32_t columns)
 // One signal's columns on the axis: {"type":"columns", recording, signal,
 // key, samples [], and a number's lowest [], highest [] and mean [], null
 // where a column is empty; then, for a recording after the first aligned
-// one that shows the signal as a number in the same unit (delta_key),
-// delta_from (that first's place) and delta [], its mean less the
-// first's, null where either has no mean}. A column's numbers are all
+// one that shows the signal's pair (cli/signal_pairs.h) as a number in
+// the same unit, delta_from (that first's place) and delta [], its mean
+// less the first's, null where either has no mean}. A column's numbers are all
 // over one set of samples: the ones a query counts there, or under
 // columns_own_window the ones in the column's own microseconds; the last
 // column's include a sample exactly at the axis's end. A

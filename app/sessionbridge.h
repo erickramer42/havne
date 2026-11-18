@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QAbstractListModel>
@@ -463,6 +464,9 @@ public:
     // The signal file whose set set is: a plugin variant's or a replay's
     // own signals.json; nullptr for any other set
     const ecuio_signal_file_t* fileOfSet(const ecuio_signal_set_t* set) const;
+    // That file's text, copied; "" for any other set. What the viewer's
+    // frames open loads its own copy from (RecordingFrameSet)
+    QByteArray signalFileTextOfSet(const ecuio_signal_set_t* set) const;
     bool connected() const { return m_connected.load(std::memory_order_acquire); }
     int frameCount() const { return m_currentFrameCount; }
     int droppedFrames() const { return m_droppedFrames.load(std::memory_order_relaxed); }

@@ -298,6 +298,166 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
     return ECUIO_OK;
 }
 
+// What a plugin's variants use that an older core reads otherwise
+struct VariantUses {
+    bool gauge = false;
+    bool format2 = false;
+};
+
+// For each variant a variant line, a share_alike line when its license is
+// share-alike, and its own signals' signal_def lines
+VariantUses write_variant_lines(Output& out, const ecuio_plugin_t* p,
+                                const ecuio_plugin_info_t& info)
+{
+    VariantUses uses;
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
+        const std::string id = variant_of(p, v);
+        uses.format2 =
+            uses.format2 ||
+            ecuio_signal_file_format(ecuio_plugin_variant_file(p, v)) >= 2;
+        {
+            BigLine b(
+                cli::variant_line_bytes(set, ecuio_plugin_variant_file(p, v)));
+            cli::variant_line(b.line, id.c_str(),
+                              cli::plugin_profile(info.id, id.c_str()),
+                              ecuio_plugin_variant_file(p, v), set);
+            write_line(out, b.line);
+        }
+        const ecuio_signal_source_t source =
+            cli::source_of(ecuio_plugin_variant_file(p, v));
+        if ((source.flags & ECUIO_SOURCE_SHARE_ALIKE) != 0) {
+            BigLine b(cli::share_alike_line_bytes(source.license));
+            cli::share_alike_line(b.line, id.c_str(), source.license);
+            write_line(out, b.line);
+        }
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::own_signal(ecuio_plugin_variant_file(p, v), set.defs[i])) {
+                const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
+                    ecuio_plugin_variant_file(p, v), &set.defs[i]);
+                uses.gauge = uses.gauge || gauge != nullptr;
+                BigLine b(cli::def_line_bytes(set, set.defs[i]));
+                cli::def_line(b.line, set, set.defs[i], gauge,
+                              ecuio_signal_file_expr(
+                                  ecuio_plugin_variant_file(p, v), &set.defs[i]));
+                write_line(out, b.line);
+            }
+        }
+    }
+    return uses;
+}
+
+// Each fixture file's entries as runs not yet run, or a fixture_refused
+// line for a file that can't be read or that core refused
+std::vector<FixtureRun> read_fixture_runs(Output& out, const char* path,
+                                          const ecuio_plugin_t* p,
+                                          const ecuio_plugin_info_t& info,
+                                          cli::FixtureCounts& counts)
+{
+    std::vector<FixtureRun> runs;
+    std::string why;
+    for (uint32_t f = 0; f < info.fixture_count; ++f) {
+        char name[ECUIO_PLUGIN_PATH_MAX + 1] = {};
+        ecuio_plugin_fixture(p, f, name, sizeof name);
+        std::string bytes;
+        ecuio_status_t st = read_whole((std::string(path) + "/" + name).c_str(),
+                                       ECUIO_SIGNAL_FILE_MAX_BYTES,
+                                       "fixture file", &bytes, &why)
+                                ? ECUIO_OK
+                                : ECUIO_ERR_LOAD_FAILED;
+        uint32_t count = 0;
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(), nullptr, 0,
+                                     &count);
+            why = ecuio_last_error_detail();
+        }
+        std::vector<ecuio_plugin_value_t> values(count);
+        if (st == ECUIO_OK) {
+            st = ecuio_plugin_values(p, bytes.data(), bytes.size(),
+                                     values.data(), count, &count);
+            why = ecuio_last_error_detail();
+        }
+        if (st != ECUIO_OK) {
+            ++counts.files_refused;
+            BigLine b(1024 + why.size() * 6);
+            cli::refused_line(b.line, "fixture_refused", name, 0, st,
+                              why.c_str());
+            write_line(out, b.line);
+            continue;
+        }
+        for (const ecuio_plugin_value_t& v : values) {
+            FixtureRun r;
+            r.file = name;
+            r.value = v;
+            r.why = "no --on interface: the simulated ECU answers on one";
+            runs.push_back(r);
+        }
+    }
+    return runs;
+}
+
+// Every variant's runs, through the simulated ECU on interface on
+ecuio_status_t run_fixtures(ecuio_plugin_t* p, const ecuio_plugin_info_t& info,
+                            const char* on, std::vector<FixtureRun>& runs,
+                            std::string* why)
+{
+    ecuio_status_t st = register_variants(p, why);
+    for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
+        const std::string profile =
+            cli::plugin_profile(info.id, variant_of(p, v).c_str());
+        st = run_variant_fixtures(profile, v, on, runs, why);
+    }
+    return st;
+}
+
+// A fixture line for each run, counted
+void write_fixture_lines(Output& out, const ecuio_plugin_t* p,
+                         const std::vector<FixtureRun>& runs,
+                         cli::FixtureCounts& counts)
+{
+    for (const FixtureRun& r : runs) {
+        switch (r.result) {
+        case cli::FixtureResult::passed:
+            ++counts.passed;
+            break;
+        case cli::FixtureResult::failed:
+            ++counts.failed;
+            break;
+        default:
+            ++counts.not_run;
+        }
+        const std::string variant = variant_of(p, r.value.variant);
+        BigLine b(1024 + r.why.size() * 6);
+        cli::fixture_line(
+            b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
+            r.got,
+            r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
+        write_line(out, b.line);
+    }
+}
+
+// A requires_core line for each thing the variants use that the
+// manifest's requires.core is too old to read
+void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
+                               const VariantUses& uses)
+{
+    uint16_t declared[3] = {};
+    if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
+                                   &declared[2]) == ECUIO_OK) {
+        if (cli::gauge_needs_newer_core(declared, uses.gauge)) {
+            BigLine b(512);
+            cli::requires_core_line(b.line, declared);
+            write_line(out, b.line);
+        }
+        if (cli::format2_needs_newer_core(declared, uses.format2)) {
+            BigLine b(512);
+            cli::requires_core_line(b.line, declared, cli::kFormat2Core,
+                                    "\"havne_signals\": 2");
+            write_line(out, b.line);
+        }
+    }
+}
+
 } // namespace
 
 // plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
@@ -329,130 +489,21 @@ int run_plugins_check(const char* path, const char* on)
         write_line(out, b.line);
     }
     write_conversation(out, 0, p);
-    bool uses_gauge = false;
-    bool uses_format2 = false;
-    for (uint32_t v = 0; v < info.variant_count; ++v) {
-        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
-        const std::string id = variant_of(p, v);
-        uses_format2 = uses_format2 ||
-                       ecuio_signal_file_format(
-                           ecuio_plugin_variant_file(p, v)) >= 2;
-        {
-            BigLine b(
-                cli::variant_line_bytes(set, ecuio_plugin_variant_file(p, v)));
-            cli::variant_line(b.line, id.c_str(),
-                              cli::plugin_profile(info.id, id.c_str()),
-                              ecuio_plugin_variant_file(p, v), set);
-            write_line(out, b.line);
-        }
-        const ecuio_signal_source_t source =
-            cli::source_of(ecuio_plugin_variant_file(p, v));
-        if ((source.flags & ECUIO_SOURCE_SHARE_ALIKE) != 0) {
-            BigLine b(cli::share_alike_line_bytes(source.license));
-            cli::share_alike_line(b.line, id.c_str(), source.license);
-            write_line(out, b.line);
-        }
-        for (uint32_t i = 0; i < set.count; ++i) {
-            if (cli::own_signal(ecuio_plugin_variant_file(p, v), set.defs[i])) {
-                const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
-                    ecuio_plugin_variant_file(p, v), &set.defs[i]);
-                uses_gauge = uses_gauge || gauge != nullptr;
-                BigLine b(cli::def_line_bytes(set, set.defs[i]));
-                cli::def_line(b.line, set, set.defs[i], gauge,
-                              ecuio_signal_file_expr(
-                                  ecuio_plugin_variant_file(p, v), &set.defs[i]));
-                write_line(out, b.line);
-            }
-        }
-    }
+    const VariantUses uses = write_variant_lines(out, p, info);
 
     cli::FixtureCounts counts;
-    std::vector<FixtureRun> runs;
-    for (uint32_t f = 0; f < info.fixture_count; ++f) {
-        char name[ECUIO_PLUGIN_PATH_MAX + 1] = {};
-        ecuio_plugin_fixture(p, f, name, sizeof name);
-        std::string bytes;
-        st = read_whole((std::string(path) + "/" + name).c_str(),
-                        ECUIO_SIGNAL_FILE_MAX_BYTES, "fixture file", &bytes,
-                        &why)
-                 ? ECUIO_OK
-                 : ECUIO_ERR_LOAD_FAILED;
-        uint32_t count = 0;
-        if (st == ECUIO_OK) {
-            st = ecuio_plugin_values(p, bytes.data(), bytes.size(), nullptr, 0,
-                                     &count);
-            why = ecuio_last_error_detail();
-        }
-        std::vector<ecuio_plugin_value_t> values(count);
-        if (st == ECUIO_OK) {
-            st = ecuio_plugin_values(p, bytes.data(), bytes.size(),
-                                     values.data(), count, &count);
-            why = ecuio_last_error_detail();
-        }
-        if (st != ECUIO_OK) {
-            ++counts.files_refused;
-            BigLine b(1024 + why.size() * 6);
-            cli::refused_line(b.line, "fixture_refused", name, 0, st,
-                              why.c_str());
-            write_line(out, b.line);
-            continue;
-        }
-        for (const ecuio_plugin_value_t& v : values) {
-            FixtureRun r;
-            r.file = name;
-            r.value = v;
-            r.why = "no --on interface: the simulated ECU answers on one";
-            runs.push_back(r);
-        }
-    }
-
+    std::vector<FixtureRun> runs =
+        read_fixture_runs(out, path, p, info, counts);
     if (on != nullptr && !runs.empty()) {
-        st = register_variants(p, &why);
-        for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
-            const std::string profile =
-                cli::plugin_profile(info.id, variant_of(p, v).c_str());
-            st = run_variant_fixtures(profile, v, on, runs, &why);
-        }
+        st = run_fixtures(p, info, on, runs, &why);
         if (st != ECUIO_OK) {
             write_error(out, st, why.c_str());
             ecuio_plugin_free(p);
             return ended(out, kExitConnect);
         }
     }
-    for (const FixtureRun& r : runs) {
-        switch (r.result) {
-        case cli::FixtureResult::passed:
-            ++counts.passed;
-            break;
-        case cli::FixtureResult::failed:
-            ++counts.failed;
-            break;
-        default:
-            ++counts.not_run;
-        }
-        const std::string variant = variant_of(p, r.value.variant);
-        BigLine b(1024 + r.why.size() * 6);
-        cli::fixture_line(
-            b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
-            r.got,
-            r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
-        write_line(out, b.line);
-    }
-    uint16_t declared[3] = {};
-    if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
-                                   &declared[2]) == ECUIO_OK) {
-        if (cli::gauge_needs_newer_core(declared, uses_gauge)) {
-            BigLine b(512);
-            cli::requires_core_line(b.line, declared);
-            write_line(out, b.line);
-        }
-        if (cli::format2_needs_newer_core(declared, uses_format2)) {
-            BigLine b(512);
-            cli::requires_core_line(b.line, declared, cli::kFormat2Core,
-                                    "\"havne_signals\": 2");
-            write_line(out, b.line);
-        }
-    }
+    write_fixture_lines(out, p, runs, counts);
+    write_requires_core_lines(out, p, uses);
     {
         BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
         cli::checked_line(b.line, counts, on, info.fixture_count);
