@@ -145,14 +145,14 @@ TestCase {
         page.open("signals")
         compare(page.pickedVehicle.label, "Weekend car")
         compare(page.picksPart.picks, [shared])
-        compare(page.unmigratedRows, [], "every file moved")
+        compare(page.rowActionsPart.unmigratedRows, [], "every file moved")
         compare(page.picksPart.pluginList.filter(p => p.mine).map(p => p.id).sort(),
                 ["daily-driver-obdb", "daily-driver-own", "shared-pids"])
         verify(!page.picksPart.pluginList.find(p => p.id === "example-sim").mine, "the example is as it was")
         compare(page.picksPart.variantRows.filter(r => r.picked).map(r => r.profile), [shared])
         compare(page.ownSignals, [], "this vehicle wrote none")
 
-        page.pickVehicle("v1")
+        page.ownPart.pickVehicle("v1")
         compare(page.picksPart.picks, [shared, obdb, own, example])
         compare(page.pickedVehicle.own, own)
         compare(page.ownSignals.map(s => s.key), ["own_pressure"], "the form edits its file's variant")

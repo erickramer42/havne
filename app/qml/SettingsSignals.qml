@@ -17,7 +17,7 @@ ColumnLayout {
     readonly property bool vehicle: root.host.pickedVehicle !== null
     // Nothing changes the store or a vehicle's picks under a session, or
     // past a question that waits for its answer
-    readonly property bool canChange: root.host.idle && root.host.confirming === ""
+    readonly property bool canChange: root.host.ownPart.idle && root.host.confirming === ""
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
@@ -47,7 +47,7 @@ ColumnLayout {
 
     Label {
         objectName: "signalLockedNote"
-        visible: !root.host.idle
+        visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to change what a vehicle reads.")
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -348,7 +348,7 @@ ColumnLayout {
                 flat: true
                 text: qsTr("Remove")
                 enabled: root.canChange
-                onClicked: root.host.removePlugin(refusedRow.modelData.sha256)
+                onClicked: root.host.rowActionsPart.removePlugin(refusedRow.modelData.sha256)
             }
         }
     }
@@ -364,7 +364,7 @@ ColumnLayout {
             id: row
             required property int index
             readonly property var entry: root.host.picksPart.variantRows[index] ?? root.noRow
-            readonly property bool open: root.host.openRow === entry.profile
+            readonly property bool open: root.host.rowActionsPart.openRow === entry.profile
             readonly property string title: root.host.picksPart.rowTitle(entry)
             readonly property string reads: root.host.picksPart.rowReads(entry)
             objectName: "signalRow_" + index
@@ -462,7 +462,7 @@ ColumnLayout {
                     // A question asked in the open row is answered there
                     enabled: root.host.confirming === ""
                     Accessible.name: qsTr("More for %1").arg(row.title)
-                    onClicked: root.host.openRow = row.open ? "" : row.entry.profile
+                    onClicked: root.host.rowActionsPart.openRow = row.open ? "" : row.entry.profile
                 }
             }
 
@@ -471,9 +471,9 @@ ColumnLayout {
             RemoveQuestion {
                 id: rowQuestion
                 objectName: "signalsConfirm"
-                words: root.host.rowQuestion(row.entry, row.open)
-                canRemove: root.host.idle
-                onRemoveChosen: root.host.confirmRemoval()
+                words: root.host.rowActionsPart.rowQuestion(row.entry, row.open)
+                canRemove: root.host.ownPart.idle
+                onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
                 onCancelChosen: root.host.confirming = ""
             }
             Flow {
@@ -487,14 +487,14 @@ ColumnLayout {
                     text: qsTr("Save as a signal file...")
                     // Reads the copy alone, so a session may run
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.saveVariantAs(row.entry)
+                    onClicked: root.host.rowActionsPart.saveVariantAs(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowExport"
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Export plugin...")
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.exportPluginAs(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.exportPluginAs(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowReplace"
@@ -510,9 +510,9 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Copy to my plugin")
                     checkable: true
-                    checked: row.open && root.host.copyShown
+                    checked: row.open && root.host.rowActionsPart.copyShown
                     enabled: root.canChange
-                    onClicked: root.host.copyShown = !root.host.copyShown
+                    onClicked: root.host.rowActionsPart.copyShown = !root.host.rowActionsPart.copyShown
                 }
                 ThemedButton {
                     objectName: "rowMine"
@@ -520,7 +520,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Mine")
                     enabled: root.canChange
-                    onClicked: root.host.markMine(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.markMine(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowRemoveVariant"
@@ -529,7 +529,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove this variant")
                     enabled: root.canChange
-                    onClicked: root.host.askRemoveVariant(row.entry)
+                    onClicked: root.host.rowActionsPart.askRemoveVariant(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowRemove"
@@ -537,7 +537,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: row.entry.several ? qsTr("Remove the plugin") : qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.askRemovePlugin(row.entry.sha256)
+                    onClicked: root.host.rowActionsPart.askRemovePlugin(row.entry.sha256)
                 }
             }
             // What Mine does, said before the press
@@ -553,7 +553,7 @@ ColumnLayout {
             // Copy to my plugin: where the copy goes
             Flow {
                 objectName: "rowCopyPanel"
-                visible: row.open && root.host.copyShown
+                visible: row.open && root.host.rowActionsPart.copyShown
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ThemedButton {
@@ -562,10 +562,10 @@ ColumnLayout {
                     text: qsTr("Into a new plugin")
                     highlighted: true
                     enabled: root.canChange
-                    onClicked: root.host.copyVariantTo(row.entry, "")
+                    onClicked: root.host.rowActionsPart.copyVariantTo(row.entry, "")
                 }
                 Repeater {
-                    model: row.open && root.host.copyShown ? root.host.picksPart.ownPlugins : []
+                    model: row.open && root.host.rowActionsPart.copyShown ? root.host.picksPart.ownPlugins : []
                     ThemedButton {
                         required property var modelData
                         required property int index
@@ -573,19 +573,19 @@ ColumnLayout {
                         width: Math.min(implicitWidth, parent.width)
                         text: qsTr("Into %1").arg(modelData.name)
                         enabled: root.canChange
-                        onClicked: root.host.copyVariantTo(row.entry, modelData.sha256)
+                        onClicked: root.host.rowActionsPart.copyVariantTo(row.entry, modelData.sha256)
                     }
                 }
             }
             // Export's share-alike note, before the save dialog
             ColumnLayout {
                 objectName: "rowExportNote"
-                visible: row.open && root.host.exportNote !== ""
+                visible: row.open && root.host.rowActionsPart.exportNote !== ""
                 Layout.fillWidth: true
                 spacing: Theme.spacing / 2
                 Label {
                     objectName: "exportNoteText"
-                    text: root.host.exportNote
+                    text: root.host.rowActionsPart.exportNote
                     color: Theme.text
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
@@ -597,12 +597,12 @@ ColumnLayout {
                         objectName: "exportSave"
                         text: qsTr("Save...")
                         highlighted: true
-                        onClicked: root.host.openExport(row.entry.sha256)
+                        onClicked: root.host.rowActionsPart.openExport(row.entry.sha256)
                     }
                     ThemedButton {
                         objectName: "exportCancel"
                         text: qsTr("Cancel")
-                        onClicked: root.host.exportNote = ""
+                        onClicked: root.host.rowActionsPart.exportNote = ""
                     }
                 }
             }
@@ -626,14 +626,14 @@ ColumnLayout {
     // ---- The signal files the move into the plugin store left behind ----
     Label {
         objectName: "unmigratedTitle"
-        visible: root.host.unmigratedRows.length > 0
+        visible: root.host.rowActionsPart.unmigratedRows.length > 0
         text: qsTr("Not moved from the earlier version:")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
     Repeater {
-        model: root.host.unmigratedRows
+        model: root.host.rowActionsPart.unmigratedRows
         ColumnLayout {
             id: leftRow
             required property var modelData
@@ -643,7 +643,7 @@ ColumnLayout {
             spacing: Theme.spacing / 2
             Label {
                 objectName: "unmigratedText"
-                text: root.host.unmigratedText(leftRow.modelData)
+                text: root.host.rowActionsPart.unmigratedText(leftRow.modelData)
                 color: Theme.warning
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -651,9 +651,9 @@ ColumnLayout {
             RemoveQuestion {
                 id: leftQuestion
                 objectName: "unmigratedConfirm"
-                words: root.host.unmigratedQuestion(leftRow.modelData)
-                canRemove: root.host.idle
-                onRemoveChosen: root.host.confirmRemoval()
+                words: root.host.rowActionsPart.unmigratedQuestion(leftRow.modelData)
+                canRemove: root.host.ownPart.idle
+                onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
                 onCancelChosen: root.host.confirming = ""
             }
             Flow {
@@ -665,7 +665,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Save as a signal file...")
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.saveUnmigratedAs(leftRow.modelData)
+                    onClicked: root.host.rowActionsPart.saveUnmigratedAs(leftRow.modelData)
                 }
                 ThemedButton {
                     objectName: "unmigratedRemove"
@@ -673,7 +673,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.askRemoveUnmigrated(leftRow.modelData)
+                    onClicked: root.host.rowActionsPart.askRemoveUnmigrated(leftRow.modelData)
                 }
             }
         }
@@ -700,10 +700,10 @@ ColumnLayout {
         objectName: "signalSaveDialog"
         defaultSuffix: "json"
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.host.saveTo(saveDialog.selectedFile)
-        onRejected: root.host.saving = null
+        onAccepted: root.host.rowActionsPart.saveTo(saveDialog.selectedFile)
+        onRejected: root.host.rowActionsPart.saving = null
         onFailed: words => {
-            root.host.saving = null
+            root.host.rowActionsPart.saving = null
             root.host.picksPart.signalNote = ""
             root.host.picksPart.signalProblem = words
         }

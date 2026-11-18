@@ -28,7 +28,7 @@ Item {
     onPickedIdChanged: {
         host.confirming = ""
         host.importPart.discardImport()   // a file waiting was read for the last vehicle
-        host.openRow = ""
+        host.rowActionsPart.openRow = ""
         clearForm()
         dropAnotherVehiclesProfile()
     }

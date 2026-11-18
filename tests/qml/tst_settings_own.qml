@@ -249,10 +249,10 @@ TestCase {
         const own = page.picksPart.ownPlugins[0]
         const theirs = "plugin.example-sim.my2019"
         if (data.tag === "open row") {
-            page.openRow = theirs
+            page.rowActionsPart.openRow = theirs
         } else if (data.tag === "copy") {
-            page.openRow = theirs
-            page.copyShown = true
+            page.rowActionsPart.openRow = theirs
+            page.rowActionsPart.copyShown = true
         } else if (data.tag === "import panel") {
             verify(page.importPart.importFile(Harness.writeScratchFile("track.json", signalFileText("Track day", "D101"))))
             page.importPart.importInto = own.sha256
@@ -262,11 +262,11 @@ TestCase {
             verify(obdbRead(page, "2021"))
             verify(page.importPart.keepObdb())
             const obdb = page.picksPart.pluginList.find(p => p.obdb)
-            page.openRow = obdb.profiles[0]
-            verify(page.exportWaits(obdb.sha256))
+            page.rowActionsPart.openRow = obdb.profiles[0]
+            verify(page.rowActionsPart.exportWaits(obdb.sha256))
         } else if (data.tag === "confirm") {
-            page.askRemovePlugin(own.sha256)
-            verify(page.confirmingPlugin() !== null)
+            page.rowActionsPart.askRemovePlugin(own.sha256)
+            verify(page.rowActionsPart.confirmingPlugin() !== null)
         } else if (data.tag === "missing pick") {
             page.saveVehicles(VehicleBook.setPicks(page.vehicles,
                                                    page.picksPart.picks.concat(["plugin.gone-from-the-store.base"])))
@@ -308,7 +308,7 @@ TestCase {
         verify(!rowData(page, "plugin.extras.base").forCar, "imported for the first, not the copy")
         press(page, "vehicleForget")
         press(page, "vehicleConfirm")
-        page.pickVehicle("v1")
+        page.ownPart.pickVehicle("v1")
         pressRow(page, "plugin.extras.base")
         compare(page.picksPart.picks, [])
         verify(rowData(page, "plugin.extras.base").forCar, "imported for this one, picked or not")
@@ -423,7 +423,7 @@ TestCase {
         compare(find(page, "formName").text, "Trans Temp")
         press(page, "vehicle_" + second)
         compare(find(page, "formName").text, "", "the Edit stays with its vehicle")
-        compare(page.editingKey, "")
+        compare(page.ownPart.editingKey, "")
 
         press(page, "vehicle_" + first)
         press(page, "ownRemove_0")
@@ -447,25 +447,25 @@ TestCase {
         compare(find(page, "formProblem").text, "")
         compare(page.ownSignals.map(s => s.name), ["Trans Fluid Temp"])
         compare(page.ownSignals.map(s => s.key), ["trans_temp"], "renamed, the key it was saved with")
-        compare(page.editingKey, "", "the Edit is over")
+        compare(page.ownPart.editingKey, "", "the Edit is over")
 
         // The name the first was saved under, typed for a new signal
-        page.clearForm()
+        page.ownPart.clearForm()
         typeSignal(page, "Trans Temp", "D100")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2"])
         compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D100"], "neither saved over")
 
-        page.clearForm()
+        page.ownPart.clearForm()
         typeSignal(page, "Boost (psi)", "D101")
         press(page, "formSave")
-        page.clearForm()
+        page.ownPart.clearForm()
         typeSignal(page, "Boost psi", "D102")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2", "boost_psi", "boost_psi_2"])
-        page.clearForm()
+        page.ownPart.clearForm()
         typeSignal(page, "Boost (psi)", "D103")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
@@ -512,7 +512,7 @@ TestCase {
         tryVerify(() => gauge.hasValue, 5000, "the gauge reads the signal")
         compare(hub.byRef["key:trans_temp"].name, "Trans Temp")
         Bridge.disconnectSession()
-        tryVerify(() => page.idle, 5000, "the session ends")
+        tryVerify(() => page.ownPart.idle, 5000, "the session ends")
 
         press(page, "ownEdit_0")
         find(page, "formName").text = "Transmission fluid temperature"
@@ -547,12 +547,12 @@ TestCase {
         press(page, "vehicleNew")
         const reply = { ok: true, request: "22 1E 1C", reply: "62 1E 1C 12 34",
                         value: "4660", nrc: 0, words: "" }
-        page.readOnceFor = "another vehicle"
+        page.ownPart.readOnceFor = "another vehicle"
         Bridge.readOnceResult(reply)
-        compare(page.readResult, null, "asked for another vehicle")
-        page.readOnceFor = page.pickedId
+        compare(page.ownPart.readResult, null, "asked for another vehicle")
+        page.ownPart.readOnceFor = page.ownPart.pickedId
         Bridge.readOnceResult(reply)
-        compare(page.readResult.reply, "62 1E 1C 12 34")
+        compare(page.ownPart.readResult.reply, "62 1E 1C 12 34")
     }
 
     // One request ID to a module: a Save whose typed one differs moves the

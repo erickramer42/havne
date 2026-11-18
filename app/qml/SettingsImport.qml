@@ -31,7 +31,7 @@ Item {
     // An import that gave one variant is picked for the picked vehicle at
     // once; the note ends with what happened to it
     function pickKept(profile, note) {
-        if (host.pickedVehicle === null || !host.idle || host.picksPart.picks.indexOf(profile) >= 0) {
+        if (host.pickedVehicle === null || !host.ownPart.idle || host.picksPart.picks.indexOf(profile) >= 0) {
             host.picksPart.signalNote = note
             return
         }
@@ -73,7 +73,7 @@ Item {
         host.obdbYearField.text = y > 0 ? String(y) : ""
         obdbYearFromVin = y > 0
         pendingImport = { kind: "obdb" }
-        obdbVehicle = host.pickedId
+        obdbVehicle = host.ownPart.pickedId
         return previewObdb()
     }
 
@@ -115,7 +115,7 @@ Item {
         const before = host.picksPart.pluginBySha[into]
         const id = importVariantId(variant)
         const had = before !== undefined && before.variants.indexOf(id) >= 0
-        const r = Bridge.keepSignals(into, variant, into === "" ? host.pickedId : "")
+        const r = Bridge.keepSignals(into, variant, into === "" ? host.ownPart.pickedId : "")
         if (!r.ok) {
             host.picksPart.signalProblem = r.words
             return false
@@ -175,7 +175,7 @@ Item {
     // A list's rows shown at most, the rest counted: a set of thousands
     // of signals would otherwise lay out thousands of labels on a phone
     readonly property int obdbRowsShown: 50
-    readonly property bool obdbShown: obdbReport !== null && host.pickedId === obdbVehicle
+    readonly property bool obdbShown: obdbReport !== null && host.ownPart.pickedId === obdbVehicle
 
     // The name an OBDb import takes: the picked vehicle's, so its next
     // import finds this one

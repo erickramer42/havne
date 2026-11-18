@@ -207,11 +207,11 @@ TestCase {
         verify(!find(page, "formInsertPanel").visible, "Escape closes the list")
         tryVerify(() => field.activeFocus, 2000, "the field has the focus")
         // A text signal has no number to compute with: dimmed, with its reason
-        page.clearForm()
+        page.ownPart.clearForm()
         press(page, "formKind_text")
         typeSignal(page, "Label", "D200")
         press(page, "formSave")
-        page.clearForm()
+        page.ownPart.clearForm()
         press(page, "formKind_computed")
         press(page, "formInsert")
         filter.text = "label"
@@ -260,12 +260,12 @@ TestCase {
         typeComputed(page, "Hot", "max(obd2.coolant, obd2.iat)")
         press(page, "formSave")
         compare(ownFileOf(page).havne_signals, 2)
-        verify(page.formNote.indexOf("needs Havne 0.8.0 or newer") >= 0, page.formNote)
-        page.clearForm()
+        verify(page.ownPart.formNote.indexOf("needs Havne 0.8.0 or newer") >= 0, page.ownPart.formNote)
+        page.ownPart.clearForm()
         typeComputed(page, "Diff", "obd2.coolant - obd2.iat")
         press(page, "formSave")
         compare(ownFileOf(page).havne_signals, 2, "it stays where it went")
-        verify(page.formNote.indexOf("needs Havne") < 0, page.formNote)
+        verify(page.ownPart.formNote.indexOf("needs Havne") < 0, page.ownPart.formNote)
     }
 
     function test_aSaveThatNeedsObd2AddsItAndSaysSo() {
@@ -275,21 +275,21 @@ TestCase {
         typeSignal(page, "Oil", "D100", "8")
         press(page, "formSave")
         compare(ownFileOf(page).extends, undefined)
-        page.clearForm()
+        page.ownPart.clearForm()
         typeComputed(page, "Twice", "oil * 2")
         press(page, "formSave")
         compare(ownFileOf(page).extends, undefined, "its own keys alone need no obd2")
-        verify(page.formNote.indexOf("obd2") < 0, page.formNote)
-        page.clearForm()
+        verify(page.ownPart.formNote.indexOf("obd2") < 0, page.ownPart.formNote)
+        page.ownPart.clearForm()
         typeComputed(page, "Rpm over oil", "obd2.rpm / oil")
         press(page, "formSave")
         compare(ownFileOf(page).extends, "obd2")
-        verify(page.formNote.indexOf("Your signals now read with obd2") >= 0, page.formNote)
-        verify(page.formNote.indexOf("PIDs") >= 0, page.formNote)
-        page.clearForm()
+        verify(page.ownPart.formNote.indexOf("Your signals now read with obd2") >= 0, page.ownPart.formNote)
+        verify(page.ownPart.formNote.indexOf("PIDs") >= 0, page.ownPart.formNote)
+        page.ownPart.clearForm()
         typeComputed(page, "Again", "obd2.rpm / 2")
         press(page, "formSave")
-        verify(page.formNote.indexOf("Your signals now read") < 0, "said once: " + page.formNote)
+        verify(page.ownPart.formNote.indexOf("Your signals now read") < 0, "said once: " + page.ownPart.formNote)
     }
 
     function test_aDigitFirstNameIsRefusedForAComputedSignal() {
@@ -311,12 +311,12 @@ TestCase {
         page.openOwnForm()
         typeComputed(page, "Double", "obd2.rpm * 2")
         press(page, "formSave")
-        page.clearForm()
+        page.ownPart.clearForm()
         typeComputed(page, "Quad", "double * 2")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         press(page, "ownEdit_0")
-        compare(page.formKind, "computed")
+        compare(page.ownPart.formKind, "computed")
         compare(find(page, "formExpr").text, "obd2.rpm * 2", "the expression comes back")
         find(page, "formName").text = "Twice"
         press(page, "formSave")
@@ -366,7 +366,7 @@ TestCase {
                find(page, "formDemoHint").text)
         press(page, "formSave")
         page.openOwnForm()   // a save goes back to the list
-        page.clearForm()
+        page.ownPart.clearForm()
         typeComputed(page, "Six", "2 * 3")
         verify(find(page, "formDemoHint").visible, "a file that extends obd2, whatever is typed")
     }
@@ -386,7 +386,7 @@ TestCase {
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         page.openOwnForm()   // a save goes back to the list
-        page.clearForm()
+        page.ownPart.clearForm()
         typeComputed(page, "Boost", "obd2.map")
         verify(find(page, "formComputed").visible, "the form is open")
         verify(!find(page, "formReplaces").visible, "the vehicle's own Boost is not obd2's")

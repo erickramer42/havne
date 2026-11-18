@@ -888,7 +888,7 @@ TestCase {
 
         page.chooseProfile("default")
         compare(page.uriField.text, "elm327://COM3")
-        verify(page.removePlugin(page.picksPart.pluginList.find(p => p.id === "example-sim").sha256))
+        verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "example-sim").sha256))
         compare(page.picksPart.picks, ["plugin.standin.base"], "the pick goes with the plugin")
         compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
         page.uriField.text = ""

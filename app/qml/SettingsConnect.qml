@@ -49,7 +49,7 @@ ColumnLayout {
             placeholderText: qsTr("Address, e.g. mock://demo, elm327://COM5, "
                                   + "elm327://192.168.0.10:35000 or "
                                   + "j2534://Vendor?profile=raw&poll=0x0C")
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             color: Theme.text
             // A URI, not prose: a phone's keyboard capitalized
             // "Replay://" into a scheme core doesn't know
@@ -73,7 +73,7 @@ ColumnLayout {
             // with a URI to connect
             // and no relay holds the adapter (ADR-0047)
             enabled: Bridge.connected
-                     || (root.host.idle && uriField.text !== "" && !Relay.running)
+                     || (root.host.ownPart.idle && uriField.text !== "" && !Relay.running)
             onClicked: {
                 if (Bridge.connected) {
                     Bridge.disconnectSession()

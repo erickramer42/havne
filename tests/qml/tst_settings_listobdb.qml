@@ -433,7 +433,7 @@ TestCase {
         page = createPage()
         compare(find(page, "uriField").text, more, "and the field reads the pick of now")
 
-        verify(page.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
+        verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
         compare(page.picksPart.picks, [])
         compare(page.listConnectUri(uri), uri)
         compare(page.connectProfileWords[uri], undefined)

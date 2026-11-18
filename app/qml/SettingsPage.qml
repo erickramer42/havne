@@ -205,37 +205,11 @@ Pane {
 
     SettingsRowActions { id: rowActions; host: page }
 
-    // SettingsRowActions's members others use
-    property alias openRow: rowActions.openRow
-    property alias copyShown: rowActions.copyShown
-    property alias exportNote: rowActions.exportNote
-    function markMine(sha) { return rowActions.markMine(sha) }
-    function copyVariantTo(row, into) { return rowActions.copyVariantTo(row, into) }
-    function removeVariant(row) { return rowActions.removeVariant(row) }
-    function askRemoveVariant(row) { return rowActions.askRemoveVariant(row) }
-    function askRemovePlugin(sha) { return rowActions.askRemovePlugin(sha) }
-    function confirmingPlugin() { return rowActions.confirmingPlugin() }
-    function rowQuestion(entry, open) { return rowActions.rowQuestion(entry, open) }
-    function ownQuestion() { return rowActions.ownQuestion() }
-    function confirmRemoval() { return rowActions.confirmRemoval() }
-    function removePlugin(sha) { return rowActions.removePlugin(sha) }
-    property alias saving: rowActions.saving
-    function variantSave(row) { return rowActions.variantSave(row) }
-    function pluginSave(sha) { return rowActions.pluginSave(sha) }
-    function unmigratedSave(record) { return rowActions.unmigratedSave(record) }
-    function saveVariantAs(row) { return rowActions.saveVariantAs(row) }
-    function exportPluginAs(sha) { return rowActions.exportPluginAs(sha) }
-    function exportWaits(sha) { return rowActions.exportWaits(sha) }
-    function openExport(sha) { return rowActions.openExport(sha) }
-    function saveUnmigratedAs(record) { return rowActions.saveUnmigratedAs(record) }
-    function saveTo(url) { return rowActions.saveTo(url) }
-    property alias unmigratedRows: rowActions.unmigratedRows
-    function unmigratedText(r) { return rowActions.unmigratedText(r) }
-    function askRemoveUnmigrated(record) { return rowActions.askRemoveUnmigrated(record) }
-    function unmigratedQuestion(record) { return rowActions.unmigratedQuestion(record) }
-    function noteVinMatches() { return rowActions.noteVinMatches() }
+    readonly property SettingsRowActions rowActionsPart: rowActions
 
     SettingsOwn { id: own; host: page }
+
+    readonly property SettingsOwn ownPart: own
 
     // ---- The vehicle's own signals (ADR-0051's form, ADR-0064 Q7): the
     // variant the form writes, in a plugin of the user's own ----
@@ -253,35 +227,6 @@ Pane {
     }
 
     readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
-
-    // SettingsOwn's members others use
-    property alias formService: own.formService
-    property alias formOrder: own.formOrder
-    property alias formKind: own.formKind
-    property alias formGroup: own.formGroup
-    property alias formProblem: own.formProblem
-    property alias formNote: own.formNote
-    property alias readResult: own.readResult
-    property alias editingKey: own.editingKey
-    property alias readOnceFor: own.readOnceFor
-    property alias pickedId: own.pickedId
-    function clearForm() { return own.clearForm() }
-    function fillForm(f) { return own.fillForm(f) }
-    function readOnceDraft() { return own.readOnceDraft() }
-    function readResultText(r) { return own.readResultText(r) }
-    function saveOwn(doc, note) { return own.saveOwn(doc, note) }
-    function ownName(label) { return own.ownName(label) }
-    function saveDraft() { return own.saveDraft() }
-    function editOwnSignal(key) { return own.editOwnSignal(key) }
-    function duplicateVehicle() { return own.duplicateVehicle() }
-    function removeOwnSignal(key) { return own.removeOwnSignal(key) }
-    function forgetVehicles(all) { return own.forgetVehicles(all) }
-    function pickVehicle(id) { return own.pickVehicle(id) }
-    function changeVehicles(doc) { return own.changeVehicles(doc) }
-    function rememberPlotting() { return own.rememberPlotting() }
-    property alias vinPickNote: own.vinPickNote
-    function recognizeVehicle() { return own.recognizeVehicle() }
-    property alias idle: own.idle
 
     // ---- Navigation: the list of pages, and the page shown. A phone shows
     // one at a time (the list is the root, a page pushes over it); 900 and
@@ -557,8 +502,8 @@ Pane {
         target: Bridge
 
         function onReadOnceResult(result) {
-            if (page.readOnceFor === page.pickedId)
-                page.readResult = result
+            if (own.readOnceFor === own.pickedId)
+                own.readResult = result
         }
         function onConnectResult(uri, error) {
             const keeps = page.connectKeeps !== "" ? page.connectKeeps : uri
@@ -592,9 +537,9 @@ Pane {
         }
 
         function onVehicleIdentified() {
-            page.recognizeVehicle()
+            own.recognizeVehicle()
             ++picker.vinRev
-            page.noteVinMatches()
+            rowActions.noteVinMatches()
             importer.noteCarYear()
         }
 
@@ -612,7 +557,7 @@ Pane {
         function onTicksChanged() {
             if (page.plottedApplied && page.pickedVehicle !== null
                     && VehicleBook.isAdapterUri(Bridge.currentUri))
-                page.rememberPlotting()
+                own.rememberPlotting()
         }
     }
 

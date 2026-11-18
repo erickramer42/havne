@@ -203,7 +203,7 @@ TestCase {
         for (let i = 1; i <= 24; ++i)
             verify(importFile(page, "p" + i + ".json", "Plugin " + i, "D1" + String(i).padStart(2, "0")))
         const last = page.picksPart.variantRows[page.picksPart.variantRows.length - 1].profile
-        page.openRow = last
+        page.rowActionsPart.openRow = last
         const flick = find(page, "settingsSignalsPage")
         const row = rowOf(page, last)
         const remove = find(row, "rowRemove")
@@ -244,7 +244,7 @@ TestCase {
         const listed = () => page.picksPart.variantRows.map(r => r.profile).sort()
         const before = listed()
         compare(before.length, 2)
-        page.openRow = two
+        page.rowActionsPart.openRow = two
         const row = rowOf(page, two)
         find(row, "rowRemoveVariant").clicked()
         compare(listed(), before, "asked first")
@@ -276,13 +276,13 @@ TestCase {
         press(page, "importInto_0")
         verify(find(page, "importKeep").visible, "Into chosen: Keep shows")
 
-        verify(page.removeVariant(rowData(page, "plugin.trip-extras.two")))
+        verify(page.rowActionsPart.removeVariant(rowData(page, "plugin.trip-extras.two")))
         compare(page.importPart.importInto, "", "the rewritten plugin's old sha256 is no choice")
         verify(!find(page, "importKeep").visible, "Keep waits for Into again")
         press(page, "importInto_0")
         verify(find(page, "importKeep").visible)
 
-        verify(page.removePlugin(page.picksPart.pluginList[0].sha256))
+        verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList[0].sha256))
         compare(page.importPart.importInto, "")
         verify(!find(page, "importKeep").visible)
         verify(page.importPart.pendingImport !== null, "the file still waits")
@@ -299,19 +299,19 @@ TestCase {
         verify(page.importPart.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
         verify(page.importPart.keepPending(page.picksPart.pluginList[0].sha256, "two"))
         const first = Harness.writeScratchFile("trip-1.havne-plugin.json", "")
-        page.saving = page.pluginSave(page.picksPart.pluginList[0].sha256)
-        compare(page.saving.file, "trip-extras.havne-plugin.json", "the name the dialog starts from")
-        verify(page.saveTo(first))
+        page.rowActionsPart.saving = page.rowActionsPart.pluginSave(page.picksPart.pluginList[0].sha256)
+        compare(page.rowActionsPart.saving.file, "trip-extras.havne-plugin.json", "the name the dialog starts from")
+        verify(page.rowActionsPart.saveTo(first))
         compare(find(page, "signalNote").text, "Trip extras exported to the file you chose")
         verify(page.importPart.importFile(Harness.writeScratchFile("three.json", signalFileText("Three", "D102"))))
         verify(page.importPart.keepPending(page.picksPart.pluginList[0].sha256, "three"))
         const second = Harness.writeScratchFile("trip-2.havne-plugin.json", "")
-        page.saving = page.pluginSave(page.picksPart.pluginList[0].sha256)
-        verify(page.saveTo(second))
+        page.rowActionsPart.saving = page.rowActionsPart.pluginSave(page.picksPart.pluginList[0].sha256)
+        verify(page.rowActionsPart.saveTo(second))
 
         // The user's own has no copy anywhere else: its removal asks, in
         // its row, in the actions' place
-        page.openRow = "plugin.trip-extras.base"
+        page.rowActionsPart.openRow = "plugin.trip-extras.base"
         const asking = rowOf(page, "plugin.trip-extras.base")
         find(asking, "rowRemove").clicked()
         verify(find(asking, "signalsConfirm").visible)
@@ -331,7 +331,7 @@ TestCase {
         // As it comes to another device: someone else's until Mine
         verify(page.importPart.importFile(first))
         compare(find(page, "signalNote").text, "Trip extras 1.1.0 added: pick a variant below")
-        page.openRow = "plugin.trip-extras.base"
+        page.rowActionsPart.openRow = "plugin.trip-extras.base"
         let row = rowOf(page, "plugin.trip-extras.base")
         compare(find(row, "rowReads").text, "1 signal")
         verify(find(row, "rowMine").visible)
@@ -352,7 +352,7 @@ TestCase {
         verify(!find(row, "rowMineLine").visible)
         verify(!find(row, "rowCopy").visible)
         verify(!find(row, "rowCopyPanel").visible, "Copy's choices go with Copy")
-        verify(!page.copyShown)
+        verify(!page.rowActionsPart.copyShown)
         pressRow(page, "plugin.trip-extras.two")
 
         verify(page.importPart.importFile(second))
@@ -382,7 +382,7 @@ TestCase {
         const closed = { width: pick.width, height: pick.height }
         verify(closed.width > 100, "laid out")
         find(rowOf(page, profile), "rowMore").clicked()
-        compare(page.openRow, profile)
+        compare(page.rowActionsPart.openRow, profile)
         waitForPolish(find(page, "settingsSignalsPageColumn"))
         const open = find(rowOf(page, profile), "rowPick")
         compare(open.width, closed.width)
@@ -399,7 +399,7 @@ TestCase {
         page.open("signals")
         verify(importExample(page))
         const theirs = page.picksPart.pluginList[0].sha256
-        page.openRow = "plugin.example-sim.my2019"
+        page.rowActionsPart.openRow = "plugin.example-sim.my2019"
         let row = rowOf(page, "plugin.example-sim.my2019")
         verify(!find(row, "rowCopyPanel").visible)
         find(row, "rowCopy").clicked()
@@ -412,12 +412,12 @@ TestCase {
         compare(find(page, "signalNote").text,
                 "Example: the simulated car: my2019 copied into " + copy.name + " " + copy.version
                 + " (The copy won't follow Example: the simulated car's updates to my2019)")
-        verify(!page.copyShown, "the choice closes")
+        verify(!page.rowActionsPart.copyShown, "the choice closes")
         compare(page.picksPart.pluginList.length, 2, "the original stays")
         compare(page.picksPart.picks, [], "a copy is no pick")
         verify(rowData(page, copy.profiles[0]).mine)
 
-        page.openRow = "plugin.example-sim.base"
+        page.rowActionsPart.openRow = "plugin.example-sim.base"
         row = rowOf(page, "plugin.example-sim.base")
         find(row, "rowCopy").clicked()
         const intoOwn = find(row, "copyInto_0")
@@ -427,12 +427,12 @@ TestCase {
         compare(page.picksPart.ownPlugins.length, 1)
         compare(page.picksPart.ownPlugins[0].variants.length, 2, "a variant of its own beside the first")
 
-        const what = page.variantSave(rowData(page, "plugin.example-sim.my2019"))
+        const what = page.rowActionsPart.variantSave(rowData(page, "plugin.example-sim.my2019"))
         compare(what.file, "example-sim-my2019.json", "the variant, where the plugin has several")
         const url = Harness.writeScratchFile("saved.json", "x".repeat(2000))
-        page.saving = what
-        verify(page.saveTo(url))
-        compare(page.saving, null)
+        page.rowActionsPart.saving = what
+        verify(page.rowActionsPart.saveTo(url))
+        compare(page.rowActionsPart.saving, null)
         compare(Harness.readScratchFile(url), Bridge.pluginVariantText(theirs, "my2019").text)
         compare(find(page, "signalNote").text,
                 "Example: the simulated car: my2019 saved to the file you chose")
@@ -443,10 +443,10 @@ TestCase {
         verify(!find(page, "importPanel").visible)
 
         verify(importFile(page, "extras.json", "Extras"))
-        compare(page.variantSave(rowData(page, "plugin.extras.base")).file, "extras.json")
-        page.saving = { kind: "variant", sha256: "a".repeat(64), variant: "base", name: "Gone",
+        compare(page.rowActionsPart.variantSave(rowData(page, "plugin.extras.base")).file, "extras.json")
+        page.rowActionsPart.saving = { kind: "variant", sha256: "a".repeat(64), variant: "base", name: "Gone",
                         file: "gone.json" }
-        verify(!page.saveTo(url))
+        verify(!page.rowActionsPart.saveTo(url))
         compare(find(page, "signalProblem").text, "The store has no such plugin")
         compare(find(page, "signalNote").text, "")
 
@@ -454,7 +454,7 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "connected")
         page.open("signals")
-        page.openRow = "plugin.example-sim.base"
+        page.rowActionsPart.openRow = "plugin.example-sim.base"
         row = rowOf(page, "plugin.example-sim.base")
         verify(find(row, "rowSave").enabled, "Save reads the copy alone")
         verify(find(row, "rowExport").enabled)
@@ -476,10 +476,10 @@ TestCase {
         press(page, "obdbKeep")
         const profile = "plugin.daily-driver-obdb.my2021"
         const sha = rowData(page, profile).sha256
-        page.openRow = profile
+        page.rowActionsPart.openRow = profile
         const row = rowOf(page, profile)
         verify(!find(row, "rowExportNote").visible)
-        verify(page.exportWaits(sha), "the note comes before the dialog")
+        verify(page.rowActionsPart.exportWaits(sha), "the note comes before the dialog")
         verify(find(row, "rowExportNote").visible)
         compare(find(row, "exportNoteText").text,
                 "Variant 'my2021' holds data under CC-BY-SA-4.0, a share-alike license: whoever "
@@ -488,9 +488,9 @@ TestCase {
         verify(!find(row, "rowExportNote").visible)
 
         const url = Harness.writeScratchFile("out.havne-plugin.json", "")
-        page.saving = page.pluginSave(sha)
-        compare(page.saving.file, "daily-driver-obdb.havne-plugin.json")
-        verify(page.saveTo(url))
+        page.rowActionsPart.saving = page.rowActionsPart.pluginSave(sha)
+        compare(page.rowActionsPart.saving.file, "daily-driver-obdb.havne-plugin.json")
+        verify(page.rowActionsPart.saveTo(url))
         compare(find(page, "signalNote").text, "Daily driver OBDb exported to the file you chose")
         verify(page.importPart.importFile(url))
         compare(find(page, "signalNote").text, "Daily driver OBDb 1.0.0 is here already")
@@ -501,13 +501,13 @@ TestCase {
         const packed = Harness.writeExamplePlugin("example-sim.havne-plugin.json")
         verify(page.importPart.importFile(packed))
         const example = page.picksPart.pluginList.find(p => p.id === "example-sim").sha256
-        verify(!page.exportWaits(example))
-        compare(page.exportNote, "")
+        verify(!page.rowActionsPart.exportWaits(example))
+        compare(page.rowActionsPart.exportNote, "")
         const copy = Harness.writeScratchFile("example-out.havne-plugin.json", "")
-        page.saving = page.pluginSave(example)
-        verify(page.saveTo(copy))
+        page.rowActionsPart.saving = page.rowActionsPart.pluginSave(example)
+        verify(page.rowActionsPart.saveTo(copy))
         compare(Harness.readScratchFile(copy), Harness.readScratchFile(packed))
-        verify(page.exportWaits("0123"), "a plugin the store lacks opens no dialog")
+        verify(page.rowActionsPart.exportWaits("0123"), "a plugin the store lacks opens no dialog")
         compare(find(page, "signalProblem").text, "The store has no such plugin")
     }
 
@@ -629,38 +629,38 @@ TestCase {
                 "Old extras: line 3: no such key 'bitz'")
         compare(find(find(page, "unmigrated_1"), "unmigratedText").text,
                 "Loose: Its vehicle was not read (its copy is still in the earlier version's folder)")
-        compare(page.unmigratedSave(page.unmigratedRows[0]).file, "signals.json")
+        compare(page.rowActionsPart.unmigratedSave(page.rowActionsPart.unmigratedRows[0]).file, "signals.json")
 
         // Neither copy is anywhere in this test's folders: Save says so
-        page.saving = page.unmigratedSave(page.unmigratedRows[0])
-        verify(!page.saveTo(Harness.writeScratchFile("left.json", "")))
+        page.rowActionsPart.saving = page.rowActionsPart.unmigratedSave(page.rowActionsPart.unmigratedRows[0])
+        verify(!page.rowActionsPart.saveTo(Harness.writeScratchFile("left.json", "")))
         compare(find(page, "signalProblem").text, "Its copy is gone from the earlier version's folder")
 
         const kept = find(page, "unmigrated_0")
         find(kept, "unmigratedRemove").clicked()
-        compare(page.unmigratedRows.map(r => r.name), ["Old extras", "Loose"], "asked first")
+        compare(page.rowActionsPart.unmigratedRows.map(r => r.name), ["Old extras", "Loose"], "asked first")
         const question = find(kept, "unmigratedConfirm")
         verify(question.visible, "in the file's row")
         compare(find(question, "signalsConfirmText").text, "Remove Old extras? Its kept copy goes with it")
         verify(!find(kept, "unmigratedSave").visible, "the question in the buttons' place")
         verify(!find(page, "signalImport").enabled, "nothing else past the question")
         find(question, "signalsConfirmCancel").clicked()
-        compare(page.unmigratedRows.length, 2, "Cancel keeps it")
+        compare(page.rowActionsPart.unmigratedRows.length, 2, "Cancel keeps it")
         find(kept, "unmigratedRemove").clicked()
         find(question, "signalsConfirmRemove").clicked()
-        compare(page.unmigratedRows.map(r => r.name), ["Loose"])
+        compare(page.rowActionsPart.unmigratedRows.map(r => r.name), ["Loose"])
         verify(page.pickedVehicle.unmigrated === undefined, "the vehicle's record is gone")
         // Its copy is still in the earlier version's folder: nothing to ask
         find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
-        compare(page.unmigratedRows, [])
+        compare(page.rowActionsPart.unmigratedRows, [])
         verify(page.vehicles.unmigrated === undefined)
         tryVerify(() => !find(page, "unmigratedTitle").visible, 1000)
 
         // Forget all keeps the book's own records: they are no vehicle's
         page.saveVehicles(Object.assign(VehicleBook.copy(page.vehicles),
                                         { unmigrated: [{ sha256: b, name: "Loose", words: "w" }] }))
-        page.forgetVehicles(true)
-        compare(page.unmigratedRows.map(r => r.name), ["Loose"])
+        page.ownPart.forgetVehicles(true)
+        compare(page.rowActionsPart.unmigratedRows.map(r => r.name), ["Loose"])
     }
 
     // The bytes the move kept of a file go only once no vehicle lists the
@@ -681,20 +681,20 @@ TestCase {
             page.open("signals")
             compare(page.pickedVehicle.label, "Weekend car")
             const out = Harness.writeScratchFile("kept.json", "")
-            page.saving = page.unmigratedSave(page.unmigratedRows[0])
-            verify(page.saveTo(out))
+            page.rowActionsPart.saving = page.rowActionsPart.unmigratedSave(page.rowActionsPart.unmigratedRows[0])
+            verify(page.rowActionsPart.saveTo(out))
             compare(Harness.readScratchFile(out), text, "the bytes as the move kept them")
             compare(find(page, "signalNote").text, "Kept saved to the file you chose")
 
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
-            compare(page.unmigratedRows, [], "another vehicle lists it: no question")
+            compare(page.rowActionsPart.unmigratedRows, [], "another vehicle lists it: no question")
             compare(Harness.keptUnmigrated(), [c], "the other vehicle lists it still")
             press(page, "vehicle_" + page.vehicles.list[0].id)
-            compare(page.unmigratedRows.map(r => r.name), ["Kept"])
+            compare(page.rowActionsPart.unmigratedRows.map(r => r.name), ["Kept"])
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
             compare(Harness.keptUnmigrated(), [c], "the last listing asks first")
             find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
-            compare(page.unmigratedRows, [])
+            compare(page.rowActionsPart.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "no vehicle lists it: the bytes go")
         } finally {
             Bridge.removeUnmigratedFile(c)
@@ -716,20 +716,20 @@ TestCase {
             storedVehicles.sync()
             const page = createPage()
             page.open("signals")
-            compare(page.unmigratedRows.map(r => r.loose), [false], "the vehicle's")
+            compare(page.rowActionsPart.unmigratedRows.map(r => r.loose), [false], "the vehicle's")
             press(page, "vehicleForget")
             press(page, "vehicleConfirm")
             compare(page.pickedVehicle, null)
-            compare(page.unmigratedRows.map(r => r.name), ["Kept"], "listed still")
-            compare(page.unmigratedRows.map(r => r.loose), [true], "the book's own now")
+            compare(page.rowActionsPart.unmigratedRows.map(r => r.name), ["Kept"], "listed still")
+            compare(page.rowActionsPart.unmigratedRows.map(r => r.loose), [true], "the book's own now")
             compare(Harness.keptUnmigrated(), [d])
             const out = Harness.writeScratchFile("kept.json", "")
-            page.saving = page.unmigratedSave(page.unmigratedRows[0])
-            verify(page.saveTo(out))
+            page.rowActionsPart.saving = page.rowActionsPart.unmigratedSave(page.rowActionsPart.unmigratedRows[0])
+            verify(page.rowActionsPart.saveTo(out))
             compare(Harness.readScratchFile(out), text, "and saved as before")
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
             find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
-            compare(page.unmigratedRows, [])
+            compare(page.rowActionsPart.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "removed, its bytes go")
         } finally {
             Bridge.removeUnmigratedFile(d)

@@ -3175,7 +3175,7 @@ TestCase {
             tryVerify(() => !Bridge.connecting, 5000, "the desktop refuses a Bluetooth link")
         } finally {
             for (const p of settings.picksPart.pluginList)
-                settings.removePlugin(p.sha256)
+                settings.rowActionsPart.removePlugin(p.sha256)
         }
     }
 
@@ -3923,7 +3923,7 @@ TestCase {
             compare(dash.offlineUri, settings.offlineUri)
         } finally {
             for (const p of settings.picksPart.pluginList)
-                settings.removePlugin(p.sha256)
+                settings.rowActionsPart.removePlugin(p.sha256)
         }
     }
 

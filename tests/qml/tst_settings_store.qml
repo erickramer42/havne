@@ -356,7 +356,7 @@ TestCase {
         const row = rowData(page, "plugin.picked.base")
         const save = find(page, "signalSaveDialog")
         save.usePicker = true
-        page.saveVariantAs(row)
+        page.rowActionsPart.saveVariantAs(row)
         compare(DocumentPicker.titleForTesting(), "picked.json")
         const out = Harness.writeScratchFile("picked out (1).json", "")
         DocumentPicker.deliver(save.request, -1, out.toString(), "89", -1)
@@ -364,27 +364,27 @@ TestCase {
         compare(find(page, "signalNote").text, "Picked saved to the file you chose")
         verify(Harness.readScratchFile(out).includes("Picked"), "the picked document holds the file")
 
-        page.saveVariantAs(row)
+        page.rowActionsPart.saveVariantAs(row)
         compare(DocumentPicker.titleForTesting(), "picked.json",
                 "the page's name again, never the last answer's")
         DocumentPicker.deliver(save.request, -1, "", "")
         compare(find(page, "signalProblem").text, "The picker returned no document")
         compare(find(page, "signalNote").text, "", "no earlier note beside the words")
-        compare(page.saving, null, "and no save waits")
+        compare(page.rowActionsPart.saving, null, "and no save waits")
 
-        page.exportPluginAs(row.sha256)
+        page.rowActionsPart.exportPluginAs(row.sha256)
         compare(DocumentPicker.titleForTesting(), "picked.havne-plugin.json",
                 "an export's own name")
         DocumentPicker.deliver(save.request, 0, "", "")
-        compare(page.saving, null, "a cancel leaves no save waiting")
+        compare(page.rowActionsPart.saving, null, "a cancel leaves no save waiting")
         compare(find(page, "signalProblem").text, "", "and says nothing")
 
         // A pick answered with no save waiting is written nowhere, and
         // its document's verdict is taken as any refused save's is
         const uri = "content://com.android.externalstorage.documents/document/"
                     + "primary%3ADownload%2Fpicked.json"
-        page.saveVariantAs(row)
-        page.saving = null
+        page.rowActionsPart.saveVariantAs(row)
+        page.rowActionsPart.saving = null
         DocumentPicker.deliver(save.request, -1, uri, "picked.json",
                                DocumentPicker.launchedMsForTesting() + 50)
         compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
@@ -497,14 +497,14 @@ TestCase {
         pressRow(page, "plugin.extras.base")
 
         // One variant of several is removed alone, its pick with it
-        page.openRow = "plugin.extras.track"
+        page.rowActionsPart.openRow = "plugin.extras.track"
         const remove = find(rowOf(page, "plugin.extras.track"), "rowRemoveVariant")
         verify(remove.visible)
         remove.clicked()
         find(rowOf(page, "plugin.extras.track"), "signalsConfirmRemove").clicked()
         compare(page.picksPart.picks, ["plugin.extras.base"])
         compare(page.picksPart.variantRows.map(r => page.picksPart.rowTitle(r)), ["Extras 1.5.0"])
-        page.openRow = "plugin.extras.base"
+        page.rowActionsPart.openRow = "plugin.extras.base"
         const row = rowOf(page, "plugin.extras.base")
         verify(find(row, "rowReplace").visible)
         verify(!find(row, "rowRemoveVariant").visible, "never a plugin's last variant")
@@ -573,7 +573,7 @@ TestCase {
         compare(find(page, "signalNote").text, "Example: the simulated car 1.1.0 is here already")
 
         // Someone else's plugin can be imported again: its removal asks nothing
-        page.openRow = "plugin.example-sim.base"
+        page.rowActionsPart.openRow = "plugin.example-sim.base"
         const row = rowOf(page, "plugin.example-sim.base")
         compare(find(row, "rowRemove").text, "Remove the plugin")
         find(row, "rowRemove").clicked()
@@ -722,7 +722,7 @@ TestCase {
         // Another vehicle has none of them; its own turn back has them
         press(page, "vehicleNew")
         verify(!rowData(page, base).forCar, "not this one's")
-        page.pickVehicle(car)
+        page.ownPart.pickVehicle(car)
         verify(rowData(page, base).forCar)
 
         // A replacement takes the replaced plugin's matches (its new

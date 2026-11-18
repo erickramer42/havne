@@ -75,7 +75,7 @@ Item {
     // vehicle picks any of its variants
     readonly property var variantRows: {
         const offered = storeRev >= 0 && vinRev >= 0
-            ? Bridge.offeredVariants(host.pickedId, host.vinLookupField.text, picks) : []
+            ? Bridge.offeredVariants(host.ownPart.pickedId, host.vinLookupField.text, picks) : []
         const kept = host.pickedVehicle !== null && host.pickedVehicle.vinMatches !== undefined
                      && host.vinLookupField.text.trim() === "" ? host.pickedVehicle.vinMatches : []
         const rows = []
@@ -170,7 +170,7 @@ Item {
     // A press on a row: the variant picked for the vehicle, or its pick
     // undone. A pick made while the field reads Default is read at once
     function togglePick(profile) {
-        if (host.pickedVehicle === null || !host.idle)
+        if (host.pickedVehicle === null || !host.ownPart.idle)
             return
         signalProblem = ""
         signalNote = ""

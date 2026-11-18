@@ -49,7 +49,7 @@ ColumnLayout {
                 Accessible.name: modelData.label
                 selected: root.host.profileChoice === modelData.name
                 checked: selected
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: root.host.chooseProfile(modelData.name)
             }
         }
@@ -65,7 +65,7 @@ ColumnLayout {
                 text: modelData.label
                 checkable: true
                 checked: root.host.profileChoice === modelData.name
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: root.host.chooseProfile(modelData.name)
             }
         }
@@ -98,7 +98,7 @@ ColumnLayout {
                                   + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
             validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             color: Theme.text
             onTextChanged: {
                 if (!root.host.syncing && root.host.profileChoice === "uds-generic")
@@ -115,7 +115,7 @@ ColumnLayout {
         visible: root.host.profileChoice === "uds-generic" && root.host.sessionOffered(root.host.uriBase())
         text: qsTr("Extended session (10 03)")
         checked: root.host.extSession
-        enabled: root.host.idle
+        enabled: root.host.ownPart.idle
         onToggled: {
             root.host.extSession = checked
             checked = Qt.binding(() => root.host.extSession)

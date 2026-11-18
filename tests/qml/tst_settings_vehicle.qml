@@ -189,7 +189,7 @@ TestCase {
     function test_theFormsBoxesKeepTheirNamesOnceTyped() {
         const page = createPage()
         press(page, "vehicleNew")
-        compare(page.formKind, "number")
+        compare(page.ownPart.formKind, "number")
         const caption = name => find(page, name).parent.children[0]
         const named = { formName: "Name", formRx: "Reply ID", formTx: "Request ID",
                         formNumber: "DID", formByte: "Byte", formBits: "Bits",
@@ -231,7 +231,7 @@ TestCase {
         compare(Harness.storedPlugins().length, 1)
 
         // A second signal goes into the same variant; the last copy goes
-        page.fillForm(SignalForm.emptyFields())
+        page.ownPart.fillForm(SignalForm.emptyFields())
         typeSignal(page, "Gear", "D101")
         press(page, "formKind_enum")
         find(page, "formValues").text = "0=Park, 3=Drive"
@@ -248,17 +248,17 @@ TestCase {
         press(page, "ownEdit_0")
         compare(find(page, "formName").text, "Trans Temp")
         compare(find(page, "formBits").text, "16")
-        compare(page.formKind, "number")
+        compare(page.ownPart.formKind, "number")
         find(page, "formNumber").text = "1E1D"
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
 
         // The variant as a signal file, named by its plugin
-        const what = page.variantSave(rowData(page, own))
+        const what = page.rowActionsPart.variantSave(rowData(page, own))
         compare(what.file, "vehicle-1-signals.json")
         const url = Harness.writeScratchFile("own.json", "")
-        page.saving = what
-        verify(page.saveTo(url))
+        page.rowActionsPart.saving = what
+        verify(page.rowActionsPart.saveTo(url))
         compare(JSON.parse(Harness.readScratchFile(url)).signals.map(s => s.name),
                 ["Trans Temp", "Gear"])
 
@@ -357,7 +357,7 @@ TestCase {
         find(page, "formDecimals").text = "1"
         press(page, "formReadOnce")
         compare(find(page, "formProblem").text, "")
-        tryVerify(() => page.readResult !== null, 15000, "the read ends")
+        tryVerify(() => page.ownPart.readResult !== null, 15000, "the read ends")
         compare(find(page, "formReadResult").text, "Asked 22 1E 1C, got 62 1E 1C 12 34: 466.0 kPa")
         verify(!Bridge.connected, "no session left behind")
     }
