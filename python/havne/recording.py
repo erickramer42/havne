@@ -227,15 +227,29 @@ class Recording:
         """A signal by its index, its key, or a name one signal has
         (ecuio_recording_find_signal). KeyError with core's words for
         text no signal has and for a name several have, which lists
-        their keys."""
+        their keys. A closed recording answers from the signals it
+        read, by the same rule."""
         if isinstance(name_or_index, int):
             return self.signals[name_or_index]
+        if self._r is None:
+            found = [s for s in self.signals if s.key and s.key == name_or_index] or \
+                    [s for s in self.signals if s.name == name_or_index]
+            if len(found) == 1:
+                return found[0]
+            if not found:
+                raise KeyError(f"no signal with the key or name '{name_or_index}'")
+            raise KeyError(f"{len(found)} signals are named '{name_or_index}': name one "
+                           f"by its key ({', '.join(s.key for s in found)})")
         index = ctypes.c_uint32()
         try:
             check(lib.ecuio_recording_find_signal(self._r, utf8(name_or_index),
                                                   ctypes.byref(index)),
                   "ecuio_recording_find_signal")
         except Error as refused:
+            # Only "no such signal" and "several of that name" are a key
+            # that isn't there; any other refusal is the call's own
+            if refused.name != "INVALID_ARGUMENT":
+                raise
             raise KeyError(refused.detail) from None
         return self.signals[index.value]
 

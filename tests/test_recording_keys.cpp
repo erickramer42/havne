@@ -818,3 +818,32 @@ TEST(RecordingKeysTest, TheHealthReportFindsAValueByItsKey)
     ASSERT_EQ(by_frames.rc, ECUIO_OK) << by_frames.detail;
     EXPECT_EQ(by_frames.report.values, 2u) << by_frames.text;
 }
+
+// A text that is one signal's key and another signal's name is the
+// signal of that key, for the reader's find and for a named column
+TEST(RecordingKeysTest, AKeyComesBeforeAnotherSignalsName)
+{
+    Folder f;
+    f.write("events.log",
+            events_of(rows::kFormat4,
+                      {"signal  boost,Boost A,number,kPa,0,0,2",
+                       "signal  7E8:62D100:3.0:8,boost,number,psi,0,0,2"}));
+    f.write("signals.csv", signals_csv("1000000,boost,12,kPa\n"
+                                       "1000000,7E8:62D100:3.0:8,3,psi\n"));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.find("boost"), 0u) << "the signal keyed boost";
+    EXPECT_EQ(r.find("Boost A"), 0u);
+    EXPECT_EQ(r.find("7E8:62D100:3.0:8"), 1u) << "its own key still finds it";
+
+    const Exported keyed(f, ECUIO_CSV_WIDE, {"boost"});
+    ASSERT_EQ(keyed.rc, ECUIO_OK) << keyed.detail;
+    ASSERT_GE(keyed.lines.size(), 2u);
+    EXPECT_EQ(keyed.lines[0], "Time (ms),Boost A (kPa)");
+    EXPECT_EQ(keyed.lines[1], "1000,12");
+    const Exported named(f, ECUIO_CSV_WIDE, {"7E8:62D100:3.0:8"});
+    ASSERT_EQ(named.rc, ECUIO_OK) << named.detail;
+    ASSERT_GE(named.lines.size(), 2u);
+    EXPECT_EQ(named.lines[0], "Time (ms),boost (psi)");
+    EXPECT_EQ(named.lines[1], "1000,3");
+}
