@@ -303,6 +303,52 @@ inline void share_alike_line(Line& l, const char* variant, const char* license)
     l.ch('}');
 }
 
+// Whether a def takes a gauge: a number or a computed signal
+inline bool takes_gauge(const ecuio_signal_def_t& d)
+{
+    const char* kind = kind_word(d);
+    return std::strcmp(kind, "number") == 0 ||
+           std::strcmp(kind, "computed") == 0;
+}
+
+// Whether the Dashboard would guess this def's range: a signal of the
+// variant's own that takes a gauge and has none
+inline bool lacks_gauge(const ecuio_signal_file_t* file,
+                        const ecuio_signal_def_t& d,
+                        const ecuio_signal_gauge_t* gauge)
+{
+    return own_signal(file, d) && gauge == nullptr && takes_gauge(d);
+}
+
+inline size_t no_gauge_line_bytes()
+{
+    return 1024 + 2 * sizeof(ecuio_signal_def_t{}.name);
+}
+
+// {"type":"no_gauge", variant, id, name, kind, words}, after a variant's
+// lines for each number or computed signal of its own with no gauge: a
+// note, never a failure
+inline void no_gauge_line(Line& l, const char* variant,
+                          const ecuio_signal_def_t& d)
+{
+    const char* kind = kind_word(d);
+    l.raw("{\"type\":\"no_gauge\"");
+    l.key("variant");
+    l.string(variant, std::strlen(variant));
+    l.key("id");
+    l.u64(d.id);
+    l.key("name");
+    l.string(d.name, sizeof d.name);
+    l.key("kind");
+    l.string(kind, std::strlen(kind));
+    l.key("words");
+    static const char words[] =
+        "no gauge block: the Dashboard guesses this signal's range from its "
+        "unit, so set min and max in the signal file";
+    l.string(words, sizeof words - 1);
+    l.ch('}');
+}
+
 // A refusal of the command's package number package, or of a fixture
 // file: {"type":type, package or file, code, message, detail}
 inline void refused_line(Line& l, const char* type, const char* file,

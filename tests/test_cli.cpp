@@ -2431,6 +2431,42 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
               "\"share_alike\":false}\n");
 }
 
+// A number or computed signal of the variant's own with no gauge gets a
+// note; a gauge, a text or hex or enum value, or a signal the base set holds
+// gets none
+TEST(CliPluginTest, ANumberWithNoGaugeGetsANoteAndNothingElseDoes)
+{
+    Packed pk;
+    ASSERT_NE(pk.p, nullptr);
+    const ecuio_signal_file_t* file = ecuio_plugin_variant_file(pk.p, 0);
+    const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
+    const ecuio_signal_def_t& own = set.defs[set.count - 1];
+    ASSERT_TRUE(cli::own_signal(file, own));
+    ASSERT_STREQ(cli::kind_word(own), "number");
+    EXPECT_TRUE(cli::lacks_gauge(file, own, nullptr));
+    const ecuio_signal_gauge_t gauge = {};
+    EXPECT_FALSE(cli::lacks_gauge(file, own, &gauge)) << "it has a gauge";
+    ecuio_signal_def_t d = own;
+    for (const int kind : {static_cast<int>(ECUIO_VALUE_TEXT),
+                           static_cast<int>(ECUIO_VALUE_HEX),
+                           static_cast<int>(ECUIO_VALUE_ENUM)}) {
+        d.kind = static_cast<uint8_t>(kind);
+        EXPECT_FALSE(cli::takes_gauge(d)) << "not a number";
+    }
+    d = own;
+    d.flags |= ECUIO_DEF_FLAG_COMPUTED;
+    EXPECT_TRUE(cli::takes_gauge(d)) << "computed counts";
+    std::vector<char> buf(cli::no_gauge_line_bytes());
+    cli::Line l(buf.data(), buf.size());
+    cli::no_gauge_line(l, "base", d);
+    const std::string line = text_of(l);
+    EXPECT_EQ(line.rfind("{\"type\":\"no_gauge\",\"variant\":\"base\",\"id\":", 0),
+              0u)
+        << line;
+    EXPECT_NE(line.find("\"kind\":\"computed\""), std::string::npos) << line;
+    EXPECT_NE(line.find("no gauge block"), std::string::npos) << line;
+}
+
 // A variant's license and whether it's share-alike come from its written
 // file's source, the data file's own before the manifest's; the
 // share_alike line names the variant, the license and what passing the
