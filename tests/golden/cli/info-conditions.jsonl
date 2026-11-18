@@ -1,7 +1,7 @@
 {"schema": 1, "type": "start"}
 {"conditions": {"cut": false, "events": 7, "events_lost": 0, "lines_skipped": 0, "matches": true, "present": true, "sha256": "b994212f73c749d232dbf190c81fa5b183a6a67c400009eb0239db4b0b882a5e"}, "duration_us": 30001000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 2, "summary": true, "type": "opened", "utc_start_us": 1794582000000000}
-{"decimals": 0, "first_us": 1000, "group": "Engine", "highest": 112, "index": 0, "last_us": 30001000, "lowest": 100, "name": "Coolant Temp", "rank": 2, "rate_hz": 4, "recording": 0, "samples": 121, "text": false, "type": "signal", "unit": "\u00b0C"}
-{"decimals": 0, "first_us": 126000, "group": "Engine", "highest": 5400, "index": 1, "last_us": 23876000, "lowest": 800, "name": "RPM", "rank": 1, "rate_hz": 4, "recording": 0, "samples": 96, "text": false, "type": "signal", "unit": "RPM"}
+{"decimals": 0, "first_us": 1000, "group": "Engine", "highest": 112, "index": 0, "key": null, "last_us": 30001000, "lowest": 100, "name": "Coolant Temp", "rank": 2, "rate_hz": 4, "recording": 0, "samples": 121, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 126000, "group": "Engine", "highest": 5400, "index": 1, "key": null, "last_us": 23876000, "lowest": 800, "name": "RPM", "rank": 1, "rate_hz": 4, "recording": 0, "samples": 96, "text": false, "type": "signal", "unit": "RPM"}
 {"host_us": 12876000, "index": 0, "label": "Engine speed high", "recording": 0, "type": "marker"}
 {"fired": false, "held": false, "host_us": 1000, "key": "coolant_high", "recording": 0, "stale": false, "state": "off", "t_us": 0, "term": 0, "type": "condition", "value": 100}
 {"fired": false, "held": false, "host_us": 126000, "key": "rpm_high", "recording": 0, "stale": false, "state": "off", "t_us": 125000, "term": 0, "type": "condition", "value": 800}

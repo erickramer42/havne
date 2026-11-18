@@ -683,6 +683,20 @@ def pick_cases(cli, elm):
         print(f"FAIL  stream's recording names {header!r}")
         return 1
 
+    # Through a signal file a signal the file keys itself (the later of two
+    # at one address) has that key on the line, the others their address
+    extras = Path(__file__).resolve().parent / "fixtures" / "signals" / "extras.json"
+    code, rows, err, header = pick_run(cli, [
+        "stream", elm + "?identify=0&diagnose=0&probe=0", "--signals",
+        str(extras), "--seconds", "1", "--pick", "ranked"])
+    keys = {s["name"]: s["key"]
+            for s in (focus_of(rows) or {}).get("signals", [])}
+    if code != 0 or keys.get("Road Speed") != "road_speed" or \
+            keys.get("RPM") != OBD2_PICK_KEYS[2]:
+        print(f"FAIL  stream's keys through a signal file {keys!r}, "
+              f"exit {code}\n{err}")
+        return 1
+
     # A pick core refuses (?poll= asks none of the ranked ones) leaves the
     # whole set asked, as in the app, and the run goes on
     polled = elm + "?profile=obd2&poll=0x2F&identify=0&diagnose=0"

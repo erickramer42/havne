@@ -176,7 +176,8 @@ int run_log(const cli::LogArgs& args)
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> ids;
     std::string why;
-    if (!cli::resolve_focus(set, args.names, ids, &why)) {
+    if (!cli::resolve_focus(set, args.names, ids, &why,
+                            session_signal_file())) {
         ecuio_condition_set_free(conditions);
         ecuio_session_destroy(session);
         std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
@@ -252,7 +253,8 @@ int run_log(const cli::LogArgs& args)
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
         cli::focus_line(b.line, set, ids, min_sweep_ms,
-                        flags == ECUIO_FOCUS_DEFAULT_PICK);
+                        flags == ECUIO_FOCUS_DEFAULT_PICK,
+                        session_signal_file());
         write_line(out, b.line);
     }
     ecuio_recorder_t* recorder = nullptr;

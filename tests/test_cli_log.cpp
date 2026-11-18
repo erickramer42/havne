@@ -49,11 +49,20 @@ struct Set {
         std::memset(defs, 0, sizeof defs);
         std::memset(&set, 0, sizeof set);
         const char* names[] = {"RPM", "Vehicle Speed", "Coolant Temp", "VIN"};
+        /* Each at an address of its own (a Service 01 or 09 reply), so
+         * each has an address key */
+        const uint32_t keys[] = {0x410C, 0x410D, 0x4105, 0x4902};
+        const uint8_t bits[] = {16, 8, 8, 0};
         for (uint16_t i = 0; i < 4; ++i) {
             defs[i].id = static_cast<uint16_t>(10 + i);
             std::strncpy(defs[i].name, names[i], sizeof defs[i].name - 1);
             defs[i].kind = static_cast<uint8_t>(i == 3 ? ECUIO_VALUE_TEXT
                                                        : ECUIO_VALUE_UINT);
+            defs[i].message_id = 0x7E8;
+            defs[i].mux_length = 2;
+            defs[i].mux_key = keys[i];
+            defs[i].start_byte = 2;
+            defs[i].bit_length = bits[i];
         }
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.defs = defs;
@@ -150,8 +159,9 @@ TEST(CliLogTest, TheFocusLineNamesAPick)
     const std::vector<uint16_t> ids = {10, 11};
     EXPECT_EQ(
         text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids, 250, true); }),
-        "{\"type\":\"focus\",\"signals\":[{\"id\":10,\"name\":\"RPM\"},"
-        "{\"id\":11,\"name\":\"Vehicle Speed\"}],\"pick\":\"ranked\","
+        "{\"type\":\"focus\",\"signals\":[{\"id\":10,\"name\":\"RPM\","
+        "\"key\":\"7E8:410C:2.0:16\"},{\"id\":11,\"name\":\"Vehicle Speed\","
+        "\"key\":\"7E8:410D:2.0:8\"}],\"pick\":\"ranked\","
         "\"min_sweep_ms\":250}");
     EXPECT_EQ(
         text([&](cli::Line& l) { cli::focus_line(l, &s.set, {}, 0, true); }),
@@ -228,10 +238,14 @@ TEST(CliLogTest, TheFocusLineNamesAMinimumOnlyWhenSet)
     const std::vector<uint16_t> ids = {11, 10};
     EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids); }),
               "{\"type\":\"focus\",\"signals\":[{\"id\":11,\"name\":"
-              "\"Vehicle Speed\"},{\"id\":10,\"name\":\"RPM\"}]}");
+              "\"Vehicle "
+              "Speed\",\"key\":\"7E8:410D:2.0:8\"},{\"id\":10,\"name\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\"}]}");
     EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids, 250); }),
               "{\"type\":\"focus\",\"signals\":[{\"id\":11,\"name\":"
-              "\"Vehicle Speed\"},{\"id\":10,\"name\":\"RPM\"}],"
+              "\"Vehicle "
+              "Speed\",\"key\":\"7E8:410D:2.0:8\"},{\"id\":10,\"name\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\"}],"
               "\"min_sweep_ms\":250}");
 }
 
@@ -351,12 +365,37 @@ TEST(CliLogTest, ThePicksResolveInOrderAndATypoOrARepeatIsRefused)
     EXPECT_EQ(ids, (std::vector<uint16_t>{13}));
 
     EXPECT_FALSE(cli::resolve_focus(&s.set, {"RPM", "Rpm"}, ids, &why));
-    EXPECT_EQ(why, "no signal named 'Rpm' in the session's profile");
+    EXPECT_EQ(why, "no signal with the key or name 'Rpm'");
     EXPECT_FALSE(
         cli::resolve_focus(&s.set, {"RPM", "Vehicle Speed", "RPM"}, ids, &why));
     EXPECT_EQ(why, "--signal names 'RPM' twice");
     EXPECT_FALSE(cli::resolve_focus(nullptr, {"RPM"}, ids, &why));
-    EXPECT_EQ(why, "no signal named 'RPM' in the session's profile");
+    EXPECT_EQ(why, "no signal with the key or name 'RPM'");
+}
+
+/* A pick is a signal's key or a name one signal has: a key and its name
+ * together are one signal twice, and a name two signals have is refused
+ * with their keys */
+TEST(CliLogTest, APickIsAKeyOrANameOneSignalHas)
+{
+    Set s;
+    std::vector<uint16_t> ids;
+    std::string why;
+    ASSERT_TRUE(
+        cli::resolve_focus(&s.set, {"7E8:4105:2.0:8", "RPM"}, ids, &why))
+        << why;
+    EXPECT_EQ(ids, (std::vector<uint16_t>{12, 10}));
+    EXPECT_FALSE(
+        cli::resolve_focus(&s.set, {"RPM", "7E8:410C:2.0:16"}, ids, &why));
+    EXPECT_EQ(why, "--signal names '7E8:410C:2.0:16' twice");
+
+    std::strcpy(s.defs[1].name, "RPM"); /* a second module's, say */
+    EXPECT_FALSE(cli::resolve_focus(&s.set, {"RPM"}, ids, &why));
+    EXPECT_EQ(why, "2 signals are named 'RPM': name one by its key "
+                   "(7E8:410C:2.0:16, 7E8:410D:2.0:8)");
+    ASSERT_TRUE(cli::resolve_focus(&s.set, {"7E8:410D:2.0:8"}, ids, &why))
+        << why;
+    EXPECT_EQ(ids, (std::vector<uint16_t>{11}));
 }
 
 TEST(CliLogTest, TheLinesSayThePicksTheReadoutAndTheEnd)
@@ -364,7 +403,8 @@ TEST(CliLogTest, TheLinesSayThePicksTheReadoutAndTheEnd)
     Set s;
     EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, {12, 10}); }),
               "{\"type\":\"focus\",\"signals\":[{\"id\":12,\"name\":\"Coolant "
-              "Temp\"},{\"id\":10,\"name\":\"RPM\"}]}");
+              "Temp\",\"key\":\"7E8:4105:2.0:8\"},{\"id\":10,\"name\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\"}]}");
     EXPECT_EQ(text([&](cli::Line& l) { cli::focus_line(l, &s.set, {}); }),
               "{\"type\":\"focus\",\"signals\":[]}");
     EXPECT_LE(std::strlen("{\"type\":\"focus\",\"signals\":[]}"),

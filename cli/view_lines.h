@@ -16,6 +16,7 @@
 #define HAVNE_CLI_VIEW_LINES_H
 
 #include "jsonl.h"
+#include "key_field.h"
 
 #include "ecuio/conditions.h"
 #include "ecuio/recording.h"
@@ -410,7 +411,7 @@ inline void labels_object(Line& l, const ecuio_enum_entry_t* labels,
     l.ch('}');
 }
 
-// A signal: {"type":"signal", recording, index, name, unit, text, then
+// A signal: {"type":"signal", recording, index, name, key, unit, text, then
 // for an enum (format 3) "enum":true and "labels" {"<raw>": label} in
 // raw order, as a signal file's "values" (ADR-0051), then decimals, rank,
 // group (its name; "" for a code this core doesn't know), samples, lowest
@@ -429,6 +430,7 @@ inline void signal_line(Line& l, uint32_t recording, uint32_t index,
     l.u64(index);
     l.key("name");
     l.string(s.name, sizeof s.name);
+    key_field(l, s.key, sizeof s.key);
     l.key("unit");
     l.string(s.unit, sizeof s.unit);
     l.key("text");
@@ -693,14 +695,14 @@ inline void axis_line(Line& l, const Axis& a)
 }
 
 // The bytes a columns line can take: a column's five entries at most
-// 26 bytes each, and a name escaped
+// 26 bytes each, a name escaped and a key
 inline size_t columns_line_bytes(uint32_t columns)
 {
-    return 512 + static_cast<size_t>(columns) * 5 * 27;
+    return 512 + kKeyFieldBytes + static_cast<size_t>(columns) * 5 * 27;
 }
 
 // One signal's columns on the axis: {"type":"columns", recording, signal,
-// samples [], and a number's lowest [], highest [] and mean [], null
+// key, samples [], and a number's lowest [], highest [] and mean [], null
 // where a column is empty; then, for a recording after the first aligned
 // one that shows the signal as a number in the same unit (delta_key),
 // delta_from (that first's place) and delta [], its mean less the
@@ -732,6 +734,7 @@ inline void columns_line(Line& l, uint32_t recording,
     l.u64(recording);
     l.key("signal");
     l.string(s.name, sizeof s.name);
+    key_field(l, s.key, sizeof s.key);
     l.key("samples");
     l.ch('[');
     for (uint32_t c = 0; c < columns; ++c) {
@@ -781,7 +784,7 @@ inline void columns_line(Line& l, uint32_t recording,
 }
 
 // The values in force at a time on the axis (the cursor's readout):
-// {"type":"at", recording, t_us, values [{signal, host_us|null, text}]},
+// {"type":"at", recording, t_us, values [{signal, key, host_us|null, text}]},
 // each the last sample at or before it, as signals.csv holds it; before
 // a signal's first, null and "". Built in three calls.
 inline void at_begin(Line& l, uint32_t recording, int64_t t_us)
@@ -803,6 +806,7 @@ inline void at_value(Line& l, bool first, const ecuio_recording_signal_t& s,
     }
     l.raw("{\"signal\":");
     l.string(s.name, sizeof s.name);
+    key_field(l, s.key, sizeof s.key);
     l.key("host_us");
     us_or_null(l, host_us);
     l.key("text");
@@ -816,7 +820,7 @@ inline void at_end(Line& l)
 }
 
 // A span's statistics for one signal (ecuio_recording_stats):
-// {"type":"stats", recording, signal, from_us, to_us, samples, first,
+// {"type":"stats", recording, signal, key, from_us, to_us, samples, first,
 // last, lowest, lowest_us, highest, highest_us, mean}; from_us and to_us
 // the span on the axis, both ends counted; the values as signals.csv
 // holds them, null with none (and for an inf, which JSON can't hold); a
@@ -830,6 +834,7 @@ inline void stats_line(Line& l, uint32_t recording,
     l.u64(recording);
     l.key("signal");
     l.string(s.name, sizeof s.name);
+    key_field(l, s.key, sizeof s.key);
     l.key("from_us");
     signed_us(l, span.from_us);
     l.key("to_us");
@@ -1071,8 +1076,8 @@ inline void flag(Line& l, const char* key, uint32_t flags, uint32_t bit)
 }
 
 // A stretch found: {"type":"stretch", recording, kind pull|cruise,
-// from_us, to_us (on the axis), length_us, signal (the one measured),
-// start, end (a pull's two ends, a cruise's mean in both), by_load,
+// from_us, to_us (on the axis), length_us, signal (the one measured) and
+// its key, start, end (a pull's two ends, a cruise's mean in both), by_load,
 // by_engine_speed, no_throttle, cut_start, cut_end}
 inline void stretch_line(Line& l, uint32_t recording,
                          const ecuio_recording_stretch_t& s,
@@ -1092,6 +1097,7 @@ inline void stretch_line(Line& l, uint32_t recording,
     l.u64(s.to_us - s.from_us);
     l.key("signal");
     l.string(measured.name, sizeof measured.name);
+    key_field(l, measured.key, sizeof measured.key);
     l.key("start");
     l.number(s.start);
     l.key("end");

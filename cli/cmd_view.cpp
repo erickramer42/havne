@@ -76,19 +76,47 @@ struct Viewed {
     std::string decoded; // --frames: the profile, or "signals.json"
     ecuio_stretch_rules_t rules{}; // --stretches: --role's indexes in
 
-    // The index of a signal by name, or UINT32_MAX
-    uint32_t find(const std::string& name) const
+    // The index of the signal a text names, its key or a name one signal
+    // has (ecuio_recording_find_signal), or UINT32_MAX; *several says a
+    // name more than one signal has, core's detail saying their keys
+    uint32_t find(const std::string& text, bool* several = nullptr) const
     {
-        for (uint32_t k = 0; k < signals.size(); ++k) {
-            if (name ==
-                std::string(signals[k].name,
-                            strnlen(signals[k].name, sizeof signals[k].name))) {
-                return k;
+        uint32_t k = UINT32_MAX;
+        const bool found =
+            ecuio_recording_find_signal(r.get(), text.c_str(), &k) == ECUIO_OK;
+        if (several != nullptr) {
+            size_t named = 0;
+            for (const ecuio_recording_signal_t& s : signals) {
+                named +=
+                    text == std::string(s.name, strnlen(s.name, sizeof s.name))
+                        ? 1u
+                        : 0u;
             }
+            *several = !found && named > 1;
         }
-        return UINT32_MAX;
+        return found ? k : UINT32_MAX;
     }
 };
+
+// The signal file a registered profile is the set of, when view was given
+// it (--signals' file, a --plugin's variant); NULL for any other profile
+const ecuio_signal_file_t* given_file(const std::string& profile)
+{
+    if (g_signal_file != nullptr &&
+        profile == ecuio_signal_file_profile(g_signal_file)) {
+        return g_signal_file;
+    }
+    for (uint32_t v = 0; g_plugin != nullptr; ++v) {
+        const ecuio_signal_file_t* f = ecuio_plugin_variant_file(g_plugin, v);
+        if (f == nullptr) {
+            break;
+        }
+        if (profile == ecuio_signal_file_profile(f)) {
+            return f;
+        }
+    }
+    return nullptr;
+}
 
 // view's open of one recording: its signals.csv, or with --frames its
 // frames.csv through the set cli/view_frames.h's rules pick, *decoded
@@ -126,6 +154,9 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
         cli::frames_source(args.profile, recorded, own);
     ecuio_signal_file_t* file = nullptr;
     const ecuio_signal_set_t* set = nullptr;
+    // The file the set is of, where there is one: through it a computed
+    // signal goes by its author's key, as a recording of the file keeps it
+    const ecuio_signal_file_t* keyed = nullptr;
     if (source.own_file) {
         const ecuio_status_t st = load_signal_file(
             (std::string(folder) + "/signals.json").c_str(), &file, why, true);
@@ -133,6 +164,7 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
             return st;
         }
         set = ecuio_signal_file_set(file);
+        keyed = file;
         *decoded = "signals.json";
     } else if (source.profile.empty()) {
         *why = source.why;
@@ -146,9 +178,13 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
             return ECUIO_ERR_UNKNOWN_PROFILE;
         }
         *decoded = source.profile;
+        keyed = given_file(source.profile);
+        if (keyed != nullptr) {
+            set = ecuio_signal_file_set(keyed);
+        }
     }
-    const ecuio_status_t st = ecuio_recording_open_frames(
-        folder, set, view_open_interrupted, nullptr, r);
+    const ecuio_status_t st = ecuio_recording_open_frames_with(
+        folder, set, keyed, view_open_interrupted, nullptr, r);
     *why = ecuio_last_error_detail();
     ecuio_signal_file_free(file); /* the reader keeps its own copy */
     return st;
@@ -429,7 +465,25 @@ int run_view(ViewArgs& args)
             return v.find(name) != UINT32_MAX;
         });
     };
+    // A name two signals of one recording have names neither: usage, in
+    // core's words, which list their keys
+    const auto several = [&](const std::string& name) {
+        for (const Viewed& v : views) {
+            bool many = false;
+            (void)v.find(name, &many);
+            if (many) {
+                std::fprintf(stderr, "havne-cli: recording %u: %s\n",
+                             static_cast<unsigned>(&v - views.data()),
+                             ecuio_last_error_detail());
+                return true;
+            }
+        }
+        return false;
+    };
     for (const std::string& name : args.signals) {
+        if (several(name)) {
+            return kExitUsage;
+        }
         if (!in_any(name)) {
             std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
                          name.c_str());
@@ -439,6 +493,9 @@ int run_view(ViewArgs& args)
     const bool threshold = args.align.kind == cli::AlignOn::rise ||
                            args.align.kind == cli::AlignOn::fall;
     if (threshold) {
+        if (several(args.align.signal)) {
+            return kExitUsage;
+        }
         if (!in_any(args.align.signal)) {
             std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
                          args.align.signal.c_str());
@@ -457,6 +514,11 @@ int run_view(ViewArgs& args)
     }
 
     // --role's names, each a number signal of every recording
+    for (const auto& role : args.roles) {
+        if (several(role.second)) {
+            return kExitUsage;
+        }
+    }
     for (Viewed& v : views) {
         v.rules = args.rules;
         for (const auto& role : args.roles) {
@@ -800,7 +862,8 @@ int run_view(ViewArgs& args)
                 continue;
             }
             const int64_t t = args.at_us - v.offset_us;
-            BigLine b(256 + v.shown.size() * (128 + text.size() * 6));
+            BigLine b(256 + v.shown.size() *
+                                (128 + cli::kKeyFieldBytes + text.size() * 6));
             cli::at_begin(b.line, i, args.at_us);
             for (size_t n = 0; n < v.shown.size(); ++n) {
                 uint64_t host = ECUIO_RECORDING_NONE;

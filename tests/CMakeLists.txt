@@ -1179,6 +1179,18 @@ if(TARGET havne-cli)
             view-frames-missing-folder.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view
                ${CMAKE_CURRENT_BINARY_DIR}/never-there --frames)
+        # A signal named by its key or by a name one signal has (ADR-0065
+        # section 9): view and export on a recording with two signals of
+        # one name, log on the mock
+        add_test(NAME CliKeysRunTest.ViewAndExportTakeAKeyOrANameOneSignalHas
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py recording
+                    $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.LogTakesAKeyOrANameOneSignalHas
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py log
+                    $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.AComputedSignalGoesByItsAuthorsKey
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py file
+                    $<TARGET_FILE:havne-cli>)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
