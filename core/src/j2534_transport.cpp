@@ -527,7 +527,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     int64_t timing_at = 0;
     if (requests && t->probe) {
-        ecuio_engine_probe(&e, engine_now_us(t));
+        ecuio_engine_probe(&e);
     }
     if (requests) {
         /* A focus set before start applies from the first request */
@@ -599,7 +599,7 @@ void j2534_worker(ecuio_j2534_transport* t)
         if (h.recovered) {
             h.recovered = false;
             if (requests && t->probe) {
-                ecuio_engine_probe(&e, engine_now_us(t));
+                ecuio_engine_probe(&e);
             }
             if (requests) {
                 /* the scan's and identification's unanswered requests */

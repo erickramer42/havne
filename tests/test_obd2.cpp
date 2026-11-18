@@ -1047,7 +1047,7 @@ ecuio_reply answer_negative(ecuio_request_engine* e, uint32_t c,
 TEST(RequestEngineTest, ProbeWalksTheBitmapsBeforeTheRotation) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C, 0x42, 0x61}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
 
     int64_t now = 0;
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
@@ -1149,7 +1149,7 @@ TEST(RequestEngineTest, TheFirstVehiclesBitmapsDropOnly0x5C) {
     ecuio_engine_init(&e, 1);
     ASSERT_TRUE(ecuio_engine_derive(&e, ecuio_obd2_signal_set(), &rx, 1,
                                     nullptr));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     const struct {
         uint8_t pid;
         uint32_t bits;
@@ -1209,7 +1209,7 @@ void obd2_walked(ecuio_request_engine* e,
     if (!walk) {
         return;
     }
-    ecuio_engine_probe(e, 0);
+    ecuio_engine_probe(e);
     int64_t now = 0;
     for (const auto& b : car) {
         ASSERT_NO_FATAL_FAILURE(send_bitmap_request(e, 0, b.first, now));
@@ -1269,7 +1269,7 @@ TEST(RequestEngineTest, ADuplicateFuelRailPressureGoesSlow)
 TEST(RequestEngineTest, SilenceEndsTheWalkAndDropsNothing) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     EXPECT_TRUE(ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US));
     EXPECT_EQ(send_next(&e, 0, ECUIO_ENGINE_WAIT_US), 0x0Bu);
@@ -1297,7 +1297,7 @@ TEST(RequestEngineTest, AnotherPidsAnswerAsksTheBitmapAgainOnce)
     {
         ecuio_request_engine e;
         ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
-        ecuio_engine_probe(&e, 0);
+        ecuio_engine_probe(&e);
         int64_t now = 0;
         ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
         EXPECT_EQ(ecuio_engine_on_frame(&e, 0, run_time, sizeof(run_time),
@@ -1318,7 +1318,7 @@ TEST(RequestEngineTest, AnotherPidsAnswerAsksTheBitmapAgainOnce)
     {
         ecuio_request_engine e;
         ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
-        ecuio_engine_probe(&e, 0);
+        ecuio_engine_probe(&e);
         int64_t now = 0;
         for (int ask = 0; ask < 2; ++ask) {
             ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
@@ -1358,7 +1358,7 @@ TEST(RequestEngineTest, NegativeRepliesDropOnAnswersThatLast) {
                   ecuio_engine_add_result::added);
         ASSERT_EQ(ecuio_engine_add(&e, 0, known, 3),
                   ecuio_engine_add_result::added);
-        ecuio_engine_probe(&e, 0);   /* no Service 01, so no walk */
+        ecuio_engine_probe(&e);   /* no Service 01, so no walk */
         ASSERT_EQ(ecuio_engine_due(&e, 0, 0), 0) << std::hex << int{k.nrc};
         ecuio_engine_sent(&e, 0, 0, true, 0);
         EXPECT_EQ(answer_negative(&e, 0, 0x22, k.nrc, 4 * kMs),
@@ -1383,7 +1383,7 @@ TEST(RequestEngineTest, ServiceNotSupportedDropsTheServiceOnItsChannel) {
     ASSERT_EQ(ecuio_engine_add(&e, 0, b, 3), ecuio_engine_add_result::added);
     ASSERT_EQ(ecuio_engine_add(&e, 0, vin, 2), ecuio_engine_add_result::added);
     ASSERT_EQ(ecuio_engine_add(&e, 1, a, 3), ecuio_engine_add_result::added);
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_EQ(ecuio_engine_due(&e, 0, 0), 0);
     ecuio_engine_sent(&e, 0, 0, true, 0);
     EXPECT_EQ(answer_negative(&e, 0, 0x22, 0x11, 4 * kMs),
@@ -1422,7 +1422,7 @@ TEST(RequestEngineTest, WithoutTheProbeNothingIsDropped) {
 TEST(RequestEngineTest, ALateNegativeReplyDropsNothing) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     /* PIDs 01 to 1F supported, and the chain ends */
     ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0xFFFFFFFEu, 4 * kMs),
@@ -1456,7 +1456,7 @@ TEST(RequestEngineTest, ALateNegativeReplyDropsNothing) {
 TEST(RequestEngineTest, TheWalkResumesWhereItStopped) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x2F}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     /* 0x0C (bit 0x10 of the second byte), and the next bitmap */
     ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00100001u, 4 * kMs),
@@ -1474,7 +1474,7 @@ TEST(RequestEngineTest, TheWalkResumesWhereItStopped) {
     const uint8_t reply[3] = {0x41, 0x0C, 0x1F};
     ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply, 3, now + 4 * kMs, nullptr),
               ecuio_reply::positive);
-    ecuio_engine_probe(&e, now + 4 * kMs);
+    ecuio_engine_probe(&e);
     now += ECUIO_ENGINE_GAP_US;
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x20, now));
     /* 0x2F (bit 0x02 of the second byte), and the chain ends */
@@ -1485,7 +1485,7 @@ TEST(RequestEngineTest, TheWalkResumesWhereItStopped) {
     EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
     EXPECT_EQ(s.dropped, 0u);
 
-    ecuio_engine_probe(&e, now + 10 * kMs);
+    ecuio_engine_probe(&e);
     now += ECUIO_ENGINE_GAP_US;
     EXPECT_NE(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_ONCE)
         << "an answered chain was walked again";
@@ -1497,7 +1497,7 @@ TEST(RequestEngineTest, TheWalkResumesWhereItStopped) {
 TEST(RequestEngineTest, TheBudgetEndsTheWalk) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C, 0x2E}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     EXPECT_EQ(answer_negative(&e, 0, 0x01, ECUIO_NRC_RESPONSE_PENDING, 10 * kMs),
               ecuio_reply::pending);
@@ -1521,7 +1521,7 @@ TEST(RequestEngineTest, TheBudgetEndsTheWalk) {
 TEST(RequestEngineTest, ARefusedBitmapEndsTheWalk) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     EXPECT_EQ(answer_negative(&e, 0, 0x01, 0x12, 4 * kMs),
               ecuio_reply::negative);
@@ -1531,7 +1531,7 @@ TEST(RequestEngineTest, ARefusedBitmapEndsTheWalk) {
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
     const uint8_t did[3] = {0x22, 0x1E, 0x1C};
     ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     EXPECT_EQ(answer_negative(&e, 0, 0x01, 0x11, 4 * kMs),
               ecuio_reply::negative);
@@ -1540,7 +1540,7 @@ TEST(RequestEngineTest, ARefusedBitmapEndsTheWalk) {
     EXPECT_EQ(send_next(&e, 0, ECUIO_ENGINE_GAP_US), 0x1Eu) << "the DID stays";
 
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B}));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     const uint8_t short_bitmap[3] = {0x41, 0x00, 0xBE};
     EXPECT_EQ(ecuio_engine_on_frame(&e, 0, short_bitmap, 3, 4 * kMs, nullptr),
@@ -1558,7 +1558,7 @@ TEST(RequestEngineTest, OnlyChannelsAskingForPidsWalk) {
     const uint8_t pid[2] = {0x01, 0x0B}, did[3] = {0x22, 0x1E, 0x1C};
     ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
     ASSERT_EQ(ecuio_engine_add(&e, 1, did, 3), ecuio_engine_add_result::added);
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     EXPECT_EQ(send_next(&e, 1, 0), 0x1Eu);
 
@@ -2247,7 +2247,7 @@ void identify_after_a_silent_walk(ecuio_request_engine* e, int64_t* now)
     const uint8_t pid_0c[2] = {0x01, 0x0C};
     ASSERT_EQ(ecuio_engine_add(e, 0, pid_0c, 2), ecuio_engine_add_result::added);
     ecuio_engine_identify(e);
-    ecuio_engine_probe(e, *now);
+    ecuio_engine_probe(e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(e, 0, 0x00, *now));
     *now += ECUIO_ENGINE_WAIT_US;
     ASSERT_TRUE(ecuio_engine_expire(e, 0, *now));   /* the walk ends unjudged */
@@ -2270,7 +2270,7 @@ TEST(RequestEngineTest, RecoveryWalkWaitsForTheItemOut) {
     ASSERT_NO_FATAL_FAILURE(identify_after_a_silent_walk(&e, &now));
     ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now));   /* 09 02 */
 
-    ecuio_engine_probe(&e, now + kMs);   /* the driver's recovery calls */
+    ecuio_engine_probe(&e);   /* the driver's recovery calls */
     ecuio_engine_rescan(&e);
     EXPECT_TRUE(e.chans[0].walking);
     EXPECT_EQ(answer_ident(&e, 0, 0, reinterpret_cast<const uint8_t*>(kVin), 17,
@@ -2299,7 +2299,7 @@ TEST(RequestEngineTest, RecoveryWalkWaitsForAnUnsentItem) {
     ASSERT_TRUE(e.chans[0].identifying);
     ecuio_engine_sent(&e, 0, r, false, now);   /* the write failed */
 
-    ecuio_engine_probe(&e, now + kMs);   /* another channel recovered the link */
+    ecuio_engine_probe(&e);   /* another channel recovered the link */
     now += ECUIO_ENGINE_GAP_US;
     ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now));
     EXPECT_EQ(answer_ident(&e, 0, 0, reinterpret_cast<const uint8_t*>(kVin), 17,
@@ -3709,7 +3709,7 @@ void full_engine(ecuio_request_engine* e)
     const uint8_t rpm[2] = {0x01, 0x0C};
     ASSERT_EQ(ecuio_engine_add(e, 0, rpm, 2), ecuio_engine_add_result::added);
     ASSERT_TRUE(ecuio_engine_scan_add(e, 0, 0x1E20));
-    ecuio_engine_probe(e, 0);
+    ecuio_engine_probe(e);
     ecuio_engine_identify(e);
     ecuio_engine_diagnose(e, ecuio_obd2_signal_set());
 }
@@ -7299,7 +7299,7 @@ TEST(RequestEngineTest, TheWalkDropsUnderAFocusAndADropOutlivesIt)
     uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
     keep[1] = 1; /* 0x0C */
     ecuio_engine_focus(&e, keep);
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
     ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00180000u, 4 * kMs),
               ecuio_reply::positive);

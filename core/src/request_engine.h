@@ -3,7 +3,8 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: RequestEngineTest, RequestTableTest, DiagnosticsTest,
-//          ClearTest, SessionControlTest, EngineTalkTest (test_obd2);
+//          ClearTest, SessionControlTest, EngineTalkTest, RequestTurnsTest
+//          (test_obd2);
 //          HARNESS: J2534AdoptionTest (test_j2534_stream); J2534HealthTest
 //          (test_j2534_health); BENCH
 
@@ -116,9 +117,11 @@
  * on the first vehicle took 83 ms. A "response pending" reply extends it
  * to P2* (5 s) plus the same margin. The floor is the least time between
  * the starts of two writes on one channel: this default, or the driver's
- * (ecuio_request_engine::gap_us, the URI's ?gap=). The walk's budget
- * fits the whole chain, eight bitmaps, at a full wait each; no bitmap
- * request goes out after it. */
+ * (ecuio_request_engine::gap_us, the URI's ?gap=). The walk's budget is
+ * each channel's own, from its first bitmap, and fits the whole chain,
+ * eight bitmaps, at a full wait each: an adapter that asks one channel
+ * at a time leaves a walking channel the turn (request_turns.h). No
+ * bitmap request goes out after it. */
 constexpr int64_t ECUIO_ENGINE_WAIT_US = 100000;
 constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
@@ -357,6 +360,7 @@ struct ecuio_engine_channel {
     int64_t deadline_us = 0;    /* when that request's wait ends */
     int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
+    int64_t walk_until_us = 0;  /* the walk's budget ends (walk_timed) */
     uint32_t cursor = 0;        /* where the fast class resumes */
     uint32_t slow_cursor = 0;   /* where the slow class resumes */
     uint32_t fast_run = 0;      /* fast requests since the last slow one,
@@ -381,6 +385,8 @@ struct ecuio_engine_channel {
     bool walk_stray = false;    /* while it was out, a reply named another
                                  * Service 01 PID */
     bool walk_reasked = false;  /* it was asked again for one */
+    bool walk_timed = false;    /* walk_until_us is set; a probe clears it,
+                                 * and an untimed walk is inside it */
     bool probed = false;        /* a walk has started */
     bool walked = false;        /* the chain was answered to its end */
     uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
@@ -496,7 +502,6 @@ struct ecuio_request_engine {
      * its pool row when a focus first keeps it, and with no focus every
      * row is parked (ecuio_engine_pick_only) */
     bool pick_only = false;
-    int64_t walk_until_us = 0;  /* the walk's budget ends */
     /* The floor between the starts of two writes on a channel */
     int64_t gap_us = ECUIO_ENGINE_GAP_US;
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
@@ -2021,7 +2026,7 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
         return;
     }
     ch.walk.bytes[1] = static_cast<uint8_t>((range + 1) * 0x20u);
-    if (now_us >= e->walk_until_us) {
+    if (ch.walk_timed && now_us >= ch.walk_until_us) {
         ecuio_engine_end_walk(e, c);
     }
 }
@@ -2030,16 +2035,17 @@ inline void ecuio_engine_take_bitmap(ecuio_request_engine* e, uint32_t c,
  * Service 01 requests in its rotation and whose chain isn't answered to
  * its end yet. A walk resumes at the first bitmap it hasn't had, so the
  * one at connect and each after a recovery (the driver's call) together
- * ask each bitmap until it's answered. The budget starts now. A channel
- * whose one-shot is taken by an identification item or a scanned DID
- * keeps it: the walk waits in ch.walk until that one has settled
- * (ecuio_engine_due). */
-inline void ecuio_engine_probe(ecuio_request_engine* e, int64_t now_us)
+ * ask each bitmap until it's answered. Each channel's budget starts at
+ * its first bitmap (ecuio_engine_due), so other channels' turns before
+ * it never count. A channel whose one-shot is taken by an identification
+ * item or a scanned DID keeps it: the walk waits in ch.walk until that
+ * one has settled. */
+inline void ecuio_engine_probe(ecuio_request_engine* e)
 {
     e->probe = true;
-    e->walk_until_us = now_us + ECUIO_ENGINE_PROBE_BUDGET_US;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
+        ch.walk_timed = false; /* a walk under way starts its second again */
         if (ch.walked || ch.walking) {
             continue;
         }
@@ -2414,7 +2420,11 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.walking) {
-        if (now_us < e->walk_until_us) {
+        if (!ch.walk_timed) {
+            ch.walk_timed = true;
+            ch.walk_until_us = now_us + ECUIO_ENGINE_PROBE_BUDGET_US;
+        }
+        if (now_us < ch.walk_until_us) {
             ch.once = ch.walk;
             return ECUIO_ENGINE_ONCE;
         }
@@ -2637,7 +2647,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     } else if (once && ch.talk.out) {
         ecuio_talk_settle(ch.talk, ecuio_talk_end::unanswered, 0);
     } else if (once) {
-        if (ch.walk_stray && !ch.walk_reasked && now_us < e->walk_until_us) {
+        if (ch.walk_stray && !ch.walk_reasked &&
+            (!ch.walk_timed || now_us < ch.walk_until_us)) {
             ch.walk_reasked = true; /* due asks the same bitmap again */
         } else {
             ecuio_engine_end_walk(e, c);

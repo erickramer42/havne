@@ -148,7 +148,7 @@ ecuio_status_t walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
     (void)ecuio_engine_derive_planned(probe, set, t->rx_ids, t->channels,
                                       rows.data());
     int64_t now_us = 0;
-    ecuio_engine_probe(probe, now_us);
+    ecuio_engine_probe(probe);
     ecuio_mock_pid_walk(
         probe, 0,
         [t](const uint8_t* req, uint32_t len, uint8_t* out) {
