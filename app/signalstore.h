@@ -38,9 +38,10 @@ public:
     SignalStore& operator=(const SignalStore&) = delete;
 
     // A file's bytes into the store: { ok, words, sha256, name, profile,
-    // extends, count, own, kept }: extends the built-in set it adds to
-    // ("obd2", or ""), count its set's signals and own those less the
-    // base's. ok when core's loader reads it, its copy then
+    // extends, count, own, replacedNames, kept }: extends the built-in set it
+    // adds to ("obd2", or ""), count its set's signals, own those it adds
+    // to the base's and replacedNames the names of the base's it replaces
+    // (variantshape.h). ok when core's loader reads it, its copy then
     // written unless one is there already (kept true). words, when it
     // doesn't, are the loader's ("line 12, column 9: unknown key
     // 'scael'"), never a path. Registers nothing: use() does.
@@ -98,7 +99,8 @@ private:
         QString profile;
         QString extends; // the built-in set it adds to ("obd2"), or ""
         int count = 0;   // the set's signals, the base's included
-        int own = 0;     // the file's own: count less the base's
+        int own = 0;     // the signals the file adds to the base's
+        QStringList replacedNames; // the base signals it replaces, by name
     };
 
     static QString pathOf(const QString& sha);

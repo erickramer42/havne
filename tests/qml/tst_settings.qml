@@ -2573,8 +2573,9 @@ TestCase {
                 "Example: the simulated car 1.0.0 added: pick a variant below")
         compare(page.variantRows.map(r => page.rowTitle(r)),
                 ["Example: the simulated car 1.0.0: base", "Example: the simulated car 1.0.0: my2019"])
-        // Its Boost takes the place of obd2's, so base adds four to obd2
-        compare(page.variantRows.map(r => page.rowReads(r)), ["obd2 + 4 signals", "obd2 + 5 signals"])
+        // Its Boost takes the place of obd2's: the row says so, then what is added
+        compare(page.variantRows.map(r => page.rowReads(r)),
+                ["obd2, Boost replaced, 4 more", "obd2, Boost replaced, 5 more"])
         compare(page.picks, [], "several variants: the pick is the user's")
         verify(!find(rowOf(page, "plugin.example-sim.base"), "rowCaption").visible, "no VIN, no groups")
         compare(find(rowOf(page, "plugin.example-sim.my2019"), "rowUnused").text,
