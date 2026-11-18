@@ -1040,6 +1040,38 @@ sections 2, 3, 6 and 8, each with its reason:
   `id:<n>`. `ecuio_signal_set_keys` gives a computed signal and the later
   of two defs at one address the author's key from the file, else
   `id:<n>`.
-- **One find rule in core.** `ecuio_signal_set_find` is the rule for a
-  key or a name a person types: a key first, then a name one signal has; a
+- **One find rule in core.** `ecuio_signal_set_find` (and, with format 4,
+  `ecuio_recording_find_signal`) is the rule for `--signal`, a query and a
+  column a person names: a key first, then a name one signal has; a
   repeated name is refused with the first 8 of its keys and "and N more".
+- **Format 4 is format 3 with keys.** The first line is `ecuio session
+  recording, format 4 (ADR-0049)`. `signals.csv` is `host_us,<key>,<value>,
+  <unit>`. The header's lines: `signal  <key>,<name>,<kind>,<unit>,<dp>,
+  <rank>,<group>`, `label  <key>,<raw>,<label>`, and `focus` and `pick`
+  lines (and their activity lines) of keys. A key needs no CSV quoting.
+  Everything else is format 3's, so every reader gate on format 3 is "3 or
+  later".
+- **The recorder's keys** come from the signal file
+  `ecuio_recorder_signal_file` gave it, made in that call while it has the
+  file, else from the set alone, where a computed signal goes by `id:<n>`.
+- **The reader** fills `ecuio_recording_signal_t.key` (four of the
+  reserved words at offset 96) in a format 4 recording and in one opened
+  through its frames; a row whose key no `signal` line declares shows its
+  key as its name. Older formats have `key` "".
+  `ecuio_recording_open_frames_with` takes the set's signal file so the
+  keys are the ones a recording of that file is written under.
+- **The exports.** The long CSV's fifth column is the key, and the wide
+  CSV's head cell gains ` [key]` only where a head cell repeats (chosen
+  over a key on every column: a spreadsheet header stays readable, and a
+  second header row would break a reader that takes the first row as
+  names). The folder export copies rows and header as they are; its scrub
+  matches a text or identification def by key.
+- **Left to steps 4 and 5:** the other format 4 lines of section 6
+  (`plugin` lines for a merge, `module` lines, the health report's
+  modules). A reader passes by a line kind it doesn't know.
+- **The CSV import keeps writing format 3** (and format 2 for a log with
+  no enum): its signals are names, and nothing has an address.
+- **`havne-cli` names a signal by its key.** A line that names a signal
+  by its name carries `key` after it (`null` before format 4); the
+  lines' tables are in ADR-0031's note of 2026-11-17. `--signal` follows
+  the find rule, and `view --frames` decodes with the file's keys.

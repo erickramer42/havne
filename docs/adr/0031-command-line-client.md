@@ -587,3 +587,26 @@ whenever a module's diagnostic session changes under `?session=03`, carries
 the opening line's keys. A reader tells them apart by the `ecu` key: a
 `session` line with `ecu` is a module's. Schema 1 only grows, and `stream`
 has written the module's line since v0.7.2, so neither is renamed.
+
+## Note: a signal's key on the lines (2026-11-17)
+
+The tables above name a signal by its name on the `signals`, `focus`,
+`signal`, `columns`, `stats`, `stretch` and `at` lines; each also carries
+`key`.
+
+- **A signal's key (ADR-0065 section 9).** A line that names a signal by
+  its name carries `key` after it: what a recording keeps the signal
+  under, `null` where the recording is older than format 4. A reader that
+  held on to a name holds on to the key instead, since two signals may
+  share a name. Lines that go by `id` (`values`, `absent`, `refused`) are
+  unchanged; the `signals` line maps an id to its key.
+- **`--signal <text>`** is a key, else a name one signal has, by core's
+  rule (`ecuio_signal_set_find` for a session,
+  `ecuio_recording_find_signal` for a recording), and the refusals are
+  core's words. `view` over several recordings looks the text up in each
+  and refuses only when some recording has two signals of that name.
+- **Not changed:** `view`'s `delta` still pairs a signal across
+  recordings by its name and unit, so a recording made before format 4
+  still compares with one made after. Once two signals of a recording may
+  share a name, a pair should go by key where both recordings have one:
+  a follow-up.
