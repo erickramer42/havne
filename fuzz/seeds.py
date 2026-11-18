@@ -421,7 +421,7 @@ def main(argv):
 
     # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
     # faults), then what a host sends, CR-ended: python-OBD's opening,
-    # Havne's setup (core/src/elm327_transport.cpp) and a VIN read, each
+    # Havne's setup (core/src/elm327_setup.cpp) and a VIN read, each
     # in every mode
     hosts = {
         "python-obd": ["ATZ", "ATE0", "ATH1", "ATL0", "AT RV", "ATSP0", "0100",
