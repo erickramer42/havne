@@ -216,4 +216,46 @@ int run_devices()
     return ended(out, kExitOk);
 }
 
+// clear's arguments and its --yes, then run_clear_command
+int cmd_clear(int argc, char** argv)
+{
+    const char* uri = nullptr;
+    bool yes = false;
+    bool running = false;
+    bool moving = false;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--yes") {
+            yes = true;
+        } else if (a == "--engine-running") {
+            running = true;
+        } else if (a == "--moving") {
+            moving = true;
+        } else if (a.rfind("--", 0) == 0 || uri != nullptr) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else {
+            uri = argv[i];
+        }
+    }
+    if (uri == nullptr) {
+        std::fprintf(stderr, "havne-cli: clear needs a URI\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (!yes) {
+        std::fprintf(stderr, "havne-cli: clear erases the ECUs' trouble codes, "
+                             "freeze frame and readiness: it needs --yes\n");
+        return kExitUsage;
+    }
+    if (moving && !running) {
+        std::fprintf(stderr, "havne-cli: --moving is a word on top of "
+                             "--engine-running's\n");
+        return kExitUsage;
+    }
+    return run_clear_command(uri, (running ? ECUIO_CLEAR_ALLOW_RUNNING : 0u) |
+                                      (moving ? ECUIO_CLEAR_ALLOW_MOVING : 0u));
+}
+
 } // namespace cmd

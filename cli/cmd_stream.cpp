@@ -1,6 +1,7 @@
 // File/layer: cli/cmd_stream.cpp | havne-cli, stream (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliReplayTest, CliRecordTest,
-//          CliSignalTest, CliConditionsRunTest, CliExitTest (ctest);
+//          CliSignalTest, CliConditionsRunTest, CliExitTest,
+//          CliUsageTest (ctest);
 //          CliMarkLinesTest (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
@@ -567,6 +568,100 @@ int run_stream(const StreamArgs& args)
     g_done.store(true);
 #endif
     return code;
+}
+
+namespace {
+
+// The checks across stream's options: -1 to go on, else the exit code
+int check_stream_args(const StreamArgs& args)
+{
+    if (!args.uri) {
+        std::fprintf(stderr, "havne-cli: stream needs a URI\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.label && !args.record) {
+        std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.signals != nullptr && args.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
+                             "the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    return -1;
+}
+
+} // namespace
+
+// stream's arguments and its profile, then run_stream
+int cmd_stream(int argc, char** argv)
+{
+    StreamArgs args;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--values") {
+            args.values = true;
+        } else if (a == "--until-scanned") {
+            args.until_scanned = true;
+        } else if (a == "--count" && i + 1 < argc) {
+            if (!parse_count(argv[++i], args.count)) {
+                std::fprintf(
+                    stderr,
+                    "havne-cli: --count takes a whole number above 0\n");
+                return kExitUsage;
+            }
+        } else if (a == "--seconds" && i + 1 < argc) {
+            if (!parse_run_seconds(argv[++i], args.seconds)) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::run_seconds_why());
+                return kExitUsage;
+            }
+        } else if (a == "--record" && i + 1 < argc) {
+            args.record = argv[++i];
+            if (*args.record == '\0') {
+                std::fprintf(stderr, "havne-cli: --record takes a folder\n");
+                return kExitUsage;
+            }
+        } else if (a == "--label" && i + 1 < argc) {
+            args.label = argv[++i];
+        } else if (a == "--signals" && i + 1 < argc) {
+            args.signals = argv[++i];
+        } else if (a == "--plugin" && i + 1 < argc) {
+            args.plugin = argv[++i];
+        } else if (a == "--conditions" && i + 1 < argc &&
+                   args.conditions == nullptr && *argv[i + 1] != '\0') {
+            args.conditions = argv[++i];
+        } else if (a == "--conditions") {
+            std::fprintf(stderr,
+                         "havne-cli: --conditions takes one condition file\n");
+            return kExitUsage;
+        } else if (a == "--pick") {
+            if (i + 1 >= argc || !cli::parse_pick(argv[++i])) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::pick_why());
+                return kExitUsage;
+            }
+            args.pick_ranked = true;
+        } else if (a.rfind("--", 0) == 0 || args.uri) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else {
+            args.uri = argv[i];
+        }
+    }
+    const int checked = check_stream_args(args);
+    if (checked >= 0) {
+        return checked;
+    }
+    std::string opened;
+    const int rc =
+        take_profile_source(args.signals, args.plugin, &args.uri, &opened);
+    if (rc >= 0) {
+        return rc;
+    }
+    return run_stream(args);
 }
 
 } // namespace cmd

@@ -1382,6 +1382,10 @@ if(TARGET havne-cli)
         app_cli_usage_says(PlaySecondsPastTheCapIsUsage
             "play|mock://x|--to|vcan0|--seconds|31622401"
             "--seconds takes a whole number from 1 to 31622400")
+        app_cli_usage_says(PlayWithoutAnInterfaceIsUsage "play|mock://x"
+            "play needs a URI and --to <interface>")
+        app_cli_usage_says(PlayACountOfZeroIsUsage "play|mock://x|--to|vcan0|--count|0"
+            "--count takes a whole number above 0")
     else()
         app_cli_usage_says(PlayNeedsLinux
             "play|mock://x|--to|vcan0" "play needs Linux")
@@ -1429,10 +1433,14 @@ if(TARGET havne-cli)
         "log|mock://x|f|--conditions|" "--conditions takes one condition file")
     app_cli_usage_says(LogArmedWithoutConditionsIsUsage
         "log|mock://x|f|--armed" "--armed goes with --conditions")
-    app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
-    app_cli_usage(SignalsWithoutCheckIsUsage "signals")
-    app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
-    app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
+    app_cli_usage_says(SignalsCheckWithoutAFileIsUsage "signals|check"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsWithoutCheckIsUsage "signals"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsAnUnknownWordIsUsage "signals|lint|x.json"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json"
+        "signals takes check <file>")
     app_cli_usage_says(SignalsExprWithoutAFileIsUsage "signals|expr|a + b"
         "signals expr takes --signals")
     app_cli_usage_says(SignalsExprAFileAndAPluginIsUsage
@@ -1473,25 +1481,35 @@ if(TARGET havne-cli)
     app_cli_usage_says(SignalsExprAVariantThePluginLacksIsUsage
         "signals|expr|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|--variant|my2020|oil_temp"
         "--plugin needs --variant to name one of its variants: base, my2019")
-    app_cli_usage(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json")
-    app_cli_usage(SignalsImportFromAnotherFormatIsUsage
-        "signals|import|dbc|a.json|--out|b.json")
-    app_cli_usage(SignalsImportAYearBeforeOBDIIIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--year|1979")
-    app_cli_usage(SignalsImportAnUnknownOptionIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--fast")
-    app_cli_usage(SignalsImportAWmiWithoutAPluginIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ")
-    app_cli_usage(SignalsImportYearsWithoutAPluginIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ|--years|2015-2020")
-    app_cli_usage(SignalsImportYearsWithoutAWmiIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--years|2015-2020")
-    app_cli_usage(SignalsImportAWmiThatIsntOneIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZI")
-    app_cli_usage(SignalsImportYearsBackwardsIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZZ|--years|2020-2015")
-    app_cli_usage(SignalsImportAWmiWithoutCodesIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi")
+    app_cli_usage_says(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json"
+        "signals import obdb needs --out <file>")
+    app_cli_usage_says(SignalsImportFromAnotherFormatIsUsage
+        "signals|import|dbc|a.json|--out|b.json"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsImportAYearBeforeOBDIIIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--year|1979"
+        "--year takes a model year, 1980 to 2100")
+    app_cli_usage_says(SignalsImportAnUnknownOptionIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--fast"
+        "unexpected '--fast'")
+    app_cli_usage_says(SignalsImportAWmiWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ"
+        "--wmi and --years go with --plugin")
+    app_cli_usage_says(SignalsImportYearsWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ|--years|2015-2020"
+        "--wmi and --years go with --plugin")
+    app_cli_usage_says(SignalsImportYearsWithoutAWmiIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--years|2015-2020"
+        "--years goes with --wmi")
+    app_cli_usage_says(SignalsImportAWmiThatIsntOneIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZI"
+        "--wmi takes manufacturer codes")
+    app_cli_usage_says(SignalsImportYearsBackwardsIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZZ|--years|2020-2015"
+        "--years takes <from>-<to>")
+    app_cli_usage_says(SignalsImportAWmiWithoutCodesIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi"
+        "unexpected '--wmi'")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
@@ -1533,6 +1551,9 @@ if(TARGET havne-cli)
         "stream|mock://x?profile=plugin.example-sim.base|--plugin|${_usage_example}|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
     app_cli_usage(SimPluginWithoutItsVariantIsUsage
         "sim|mock://sim|--on|vcan0|--plugin|${_usage_example}")
+    app_cli_usage_says(SimSignalsAndAPluginIsUsage
+        "sim|mock://sim|--on|vcan0|--signals|a.json|--plugin|p"
+        "--signals and --plugin each give the profile")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
@@ -1563,57 +1584,88 @@ if(TARGET havne-cli)
     app_cli_usage(ClearAnUnknownOptionIsUsage "clear|mock://x|--yes|--force")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
-    app_cli_usage(ViewWithoutARecordingIsUsage "view")
-    app_cli_usage(ViewColumnsOfZeroIsUsage "view|x|--columns|0")
-    app_cli_usage(ViewTooManyColumnsIsUsage "view|x|--columns|10001")
-    app_cli_usage(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways")
-    app_cli_usage(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM")
-    app_cli_usage(ViewHysteresisWithoutARiseIsUsage
-        "view|x|--align-on|marker:pull|--hysteresis|5")
-    app_cli_usage(ViewANegativeHysteresisIsUsage
-        "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
-    app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
-        "view|x|--align-on|engine-start|--hysteresis|400")
-    app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
-    app_cli_usage(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:")
-    app_cli_usage(ViewPullZeroIsUsage "view|x|--align-on|pull:0")
-    app_cli_usage(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first")
+    app_cli_usage_says(ViewWithoutARecordingIsUsage "view"
+        "view needs a recording's folder")
+    app_cli_usage_says(ViewColumnsOfZeroIsUsage "view|x|--columns|0"
+        "--columns takes 1 to 10000")
+    app_cli_usage_says(ViewTooManyColumnsIsUsage "view|x|--columns|10001"
+        "--columns takes 1 to 10000")
+    app_cli_usage_says(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewHysteresisWithoutARiseIsUsage
+        "view|x|--align-on|marker:pull|--hysteresis|5"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewANegativeHysteresisIsUsage
+        "view|x|--align-on|rise:RPM:1|--hysteresis|-1"
+        "--hysteresis takes 0 or more")
+    app_cli_usage_says(ViewHysteresisWithAnEngineStartIsUsage
+        "view|x|--align-on|engine-start|--hysteresis|400"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewPullZeroIsUsage "view|x|--align-on|pull:0"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first"
+        "--align-on takes rise:<signal>:<level>")
     app_cli_usage_says(ViewAPullForEachOfAnotherCountIsUsage
         "view|x|y|--align-on|pull:1,2,3" "one for each of the 2")
-    app_cli_usage(ViewHysteresisWithAPullIsUsage
-        "view|x|--align-on|pull:1|--hysteresis|5")
-    app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
-    app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
-    app_cli_usage(ViewASpanWithoutItsEndIsUsage "view|x|--span|5")
-    app_cli_usage(ViewASpanBackwardsIsUsage "view|x|--span|5:3")
-    app_cli_usage(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5")
-    app_cli_usage(ViewASpanOfWordsIsUsage "view|x|--span|soon:later")
-    app_cli_usage(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3")
-    app_cli_usage(ViewAStretchLevelWithoutStretchesIsUsage
-        "view|x|--stretch-level|pull-gap=1")
-    app_cli_usage(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM")
-    app_cli_usage(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial")
-    app_cli_usage(ViewAnUnknownStretchLevelIsUsage
-        "view|x|--stretches|--stretch-level|pull-speed=1")
-    app_cli_usage(ViewANegativeStretchLevelIsUsage
-        "view|x|--stretches|--stretch-level|pull-gap=-1")
-    app_cli_usage(ViewANegativePullRiseIsUsage
-        "view|x|--stretches|--stretch-level|pull-rise=-1")
-    app_cli_usage(ViewAPullGainOfWordsIsUsage
-        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
-    app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewHysteresisWithAPullIsUsage
+        "view|x|--align-on|pull:1|--hysteresis|5"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5"
+        "--from must come before --to")
+    app_cli_usage_says(ViewSecondsThatArentAreUsage "view|x|--at|soon"
+        "--at takes seconds")
+    app_cli_usage_says(ViewASpanWithoutItsEndIsUsage "view|x|--span|5"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanBackwardsIsUsage "view|x|--span|5:3"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanOfWordsIsUsage "view|x|--span|soon:later"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3"
+        "--span takes A:B")
+    app_cli_usage_says(ViewAStretchLevelWithoutStretchesIsUsage
+        "view|x|--stretch-level|pull-gap=1"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewAnUnknownStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-speed=1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewANegativeStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-gap=-1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewANegativePullRiseIsUsage
+        "view|x|--stretches|--stretch-level|pull-rise=-1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewAPullGainOfWordsIsUsage
+        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal"
+        "--role takes throttle=, load=, speed= or rpm=")
     app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
         "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
     app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
         "view|x|--pull-end|lift" "--pull-end and --units go with")
-    app_cli_usage(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end")
+    app_cli_usage_says(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end"
+        "unexpected '--pull-end'")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")
     app_cli_usage_says(ViewStretchesPullsNamesNoFolder "view|--stretches|pulls"
         "view needs a recording's folder")
-    app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
-    app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
+    app_cli_usage_says(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs"
+        "--units takes metric or imperial")
+    app_cli_usage_says(ViewAnUnknownOptionIsUsage "view|x|--fast"
+        "unexpected '--fast'")
     set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
     app_cli_usage(ViewASignalNoRecordingHasIsUsage
         "view|${_cli_pull_early}|--signal|Boost")
@@ -1628,11 +1680,15 @@ if(TARGET havne-cli)
         "view|${_cli_pull_early}|--stretches|--role|speed=Speed")
     app_cli_usage(ViewARoleOnTextIsUsage
         "view|${_cli_pull_early}|--stretches|--role|throttle=VIN")
-    app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
-    app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
-    app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
-    app_cli_usage(ViewSignalsAndAPluginIsUsage
-        "view|x|--frames|--signals|a.json|--plugin|b")
+    app_cli_usage_says(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewSignalsAndAPluginIsUsage
+        "view|x|--frames|--signals|a.json|--plugin|b"
+        "--signals or --plugin, not both")
     app_cli_usage(ViewAProfileThatIsntTheSignalFilesIsUsage
         "view|${_cli_pull_early}|--frames|--profile|obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json")
     app_cli_usage(ViewAProfileThatIsntAVariantIsUsage

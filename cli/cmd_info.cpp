@@ -1,5 +1,5 @@
 // File/layer: cli/cmd_info.cpp | havne-cli, info (ADR-0049 section 6)
-// Testing: UNIT: CliGoldenTest (ctest); CliInfoTest (test_cli)
+// Testing: UNIT: CliGoldenTest, CliUsageTest (ctest); CliInfoTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
@@ -106,6 +106,52 @@ int run_info(const InfoArgs& args)
     cli::summary_line(l, summary, args.options);
     write_line(out, l);
     return ended(out, kExitOk);
+}
+
+// info's arguments read and checked, then run_info
+int cmd_info(int argc, char** argv)
+{
+    InfoArgs info;
+    info.options.gap_us = ECUIO_CHECK_DEFAULT_GAP_US;
+    info.options.rate_drop_x100 = ECUIO_CHECK_DEFAULT_RATE_DROP_X100;
+    info.options.settle_us = ECUIO_CHECK_DEFAULT_SETTLE_US;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        const bool has_value = i + 1 < argc;
+        if ((a == "--gap" || a == "--settle") && has_value) {
+            int64_t us = 0;
+            if (!cli::parse_seconds(argv[++i], us) || us <= 0) {
+                std::fprintf(stderr,
+                             "havne-cli: %s takes seconds, more than 0\n",
+                             a.c_str());
+                return kExitUsage;
+            }
+            (a == "--gap" ? info.options.gap_us : info.options.settle_us) =
+                static_cast<uint64_t>(us);
+        } else if (a == "--rate-drop" && has_value) {
+            if (!cli::parse_rate_drop(argv[++i], info.options.rate_drop_x100)) {
+                std::fprintf(stderr, "havne-cli: --rate-drop takes a "
+                                     "multiple of the median, more than "
+                                     "1\n");
+                return kExitUsage;
+            }
+        } else if (a.rfind("--", 0) == 0) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else if (info.folder != nullptr) {
+            std::fprintf(stderr, "havne-cli: info takes one recording\n");
+            return kExitUsage;
+        } else {
+            info.folder = argv[i];
+        }
+    }
+    if (info.folder == nullptr) {
+        std::fprintf(stderr, "havne-cli: info needs a recording's folder\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    return run_info(info);
 }
 
 } // namespace cmd
