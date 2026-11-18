@@ -94,8 +94,8 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
-        Bridge.useSignalFiles([])
-        Bridge.deleteUnusedSignalFiles([])
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
         Harness.clearFakeKnobs()
     }
 
@@ -142,6 +142,13 @@ TestCase {
         for (const label in gaugeSignals)
             verify(found[label], "the Dashboard has a gauge labeled " + label)
         return found
+    }
+
+    // A signal file's text kept as a plugin of the user's own; profile: its one variant's
+    function keptFile(text) {
+        const r = Bridge.keepSignalText(text, "", "", "")
+        return { ok: r.ok, words: r.words, sha256: r.sha256,
+                 profile: r.ok ? r.profiles[0] : "" }
     }
 
     function test_hubFindsSignalsByRef() {
@@ -199,7 +206,7 @@ TestCase {
     // A def with no range reaches the hub as NaN at both ends, beside a
     // scaled def's finite range (a signal file's text and number)
     function test_aTextEntryHasNoRange() {
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Text and number", source: { name: "t" },
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [
@@ -210,7 +217,6 @@ TestCase {
             ]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("mock://demo?profile=" + r.profile)
         const part = hub.byRef["key:part"]
@@ -374,7 +380,7 @@ TestCase {
     // name like obd2's def ("Rpm"), the tach reads obd2's def by its ID, and
     // the file's defs are theirs by key (a file's "RPM" would replace obd2's)
     function test_aGaugeBindsByRefNotByName() {
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Named alike", source: { name: "t" },
             extends: "obd2",
             ecus: [{ id: "pcm", rx: "7E8" }],
@@ -386,7 +392,6 @@ TestCase {
             ]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const page = createTemporaryObject(pageComponent, testCase)
         const hub = createTemporaryObject(hubComponent, testCase)
         const tach = gauges(page)["Engine speed"]
@@ -405,7 +410,7 @@ TestCase {
     // that named the base def by ID reads the file's def, and so does one that
     // names it by key
     function test_aReplacingDefIsFoundByTheBaseIdAndByKey() {
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Replaces", source: { name: "t" },
             extends: "obd2",
             ecus: [{ id: "pcm", rx: "7E8" }],
@@ -415,7 +420,6 @@ TestCase {
             ]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const hub = createTemporaryObject(hubComponent, testCase)
         connect("replay://" + Harness.replayFixtures
                 + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
@@ -513,9 +517,8 @@ TestCase {
                        ecus: [{ id: "pcm", rx: "7E8" }],
                        signals: [{ key: "a", name: "A", read: { service: "22", number: "D100" },
                                    field: { byte: 0, bits: 8 } }] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("extras.json", JSON.stringify(file)))
+        const r = keptFile(JSON.stringify(file))
         verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
         const cellA = { kind: "digital", w: 2, h: 4, label: "A", refs: ["key:a"], unit: "", options: {} }
         const cellZ = { kind: "digital", w: 2, h: 4, label: "Z", refs: ["key:z"], unit: "", options: {} }
         const d = DashboardBook.builtIn("desktop")
@@ -1070,14 +1073,13 @@ TestCase {
         const values = {}
         for (let raw = 0; raw < 256; ++raw)
             values[String(raw)] = "v" + raw
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Modes", source: { name: "t" },
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [{ key: "mode", name: "Mode", read: { service: "22", number: "1E1C" },
                         field: { byte: 0, bits: 8 }, kind: "enum", values: values }]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Mode", refs: ["key:mode"] }]), true)
         const hub = createTemporaryObject(hubComponent, testCase)
         const g = gaugeOf(findChild(page, "dashCell_0_0"))
@@ -1105,14 +1107,13 @@ TestCase {
     // A row the recording never holds reads "not in this recording" once
     // the replay's last frame has played
     function test_aRowTheRecordingNeverHoldsSaysSoAtTheReplaysEnd() {
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Never recorded", source: { name: "t" }, extends: "obd2",
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [{ key: "never", name: "Never", read: { service: "22", number: "F1FE" },
                         field: { byte: 0, bits: 8 } }]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Never", refs: ["key:never"] }]), true)
         const never = gaugeOf(findChild(page, "dashCell_0_0"))
         compare(never.note, "no session")
@@ -1129,14 +1130,13 @@ TestCase {
     function test_theEcusAnswersAreTheNotes() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = keptFile(JSON.stringify({
             havne_signals: 1, name: "Refusals", source: { name: "t" }, extends: "obd2",
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [{ key: "gone", name: "Gone", read: { service: "22", number: "F1FE" },
                         field: { byte: 0, bits: 8 } }]
         }))
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         Harness.armFakeKnob("ECUIO_FAKE_WITHHELD_PIDS", "0A,5C")
         const doc = DashboardBook.builtIn("desktop")
         doc.pages[0].cells.push({ kind: "digital", w: 2, h: 4, label: "Gone",

@@ -1955,6 +1955,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_one_store.cpp
         test_bridge_variantshape.cpp
         test_store_migration.cpp
+        test_store_removal.cpp
         ../app/recordingview.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
@@ -1979,6 +1980,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/adapterrelay.cpp
         ../app/windowtheme.cpp
         bridge_support.h
+        old_state.h
         fake_bt_socket.h
         fake_theme.h
     )

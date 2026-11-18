@@ -403,10 +403,10 @@ public:
     // when any was
     Q_INVOKABLE QVariantMap forgetVehicleImports(const QString& vehicle);
     Q_INVOKABLE QVariantMap forgetAllVehicleImports();
-    // The vehicles' signal files moved into the plugin store, once
-    // (ADR-0064 Q6, storemigration.h), with prefs the app's preferences:
-    // the lines for the activity log, none once the move is done. Called
-    // before QML loads, so the caller logs them when the Log page listens
+    // ADR-0064 Q6 (storemigration.h), prefs the app's preferences: the
+    // earlier version's data removed once an earlier start moved it, then
+    // the move, once. The lines for the activity log; called before QML
+    // loads, so the caller logs them when the Log page listens
     QStringList migrateStores(QSettings& prefs);
     // A signal file the move left behind (the vehicle book's unmigrated
     // record, by its hash) saved where the user chose, as saveVariantFile

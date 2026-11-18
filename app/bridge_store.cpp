@@ -426,7 +426,10 @@ QVariantMap SessionBridge::forgetAllVehicleImports()
 
 QStringList SessionBridge::migrateStores(QSettings& prefs)
 {
-    return StoreMigration::run(prefs, m_pluginStore).lines;
+    // Before the move: only a mark an earlier start set removes anything
+    QStringList lines = StoreMigration::removeOld(prefs, m_pluginStore).lines;
+    lines += StoreMigration::run(prefs, m_pluginStore).lines;
+    return lines;
 }
 
 QVariantMap SessionBridge::saveUnmigratedFile(const QString& sha,

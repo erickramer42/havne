@@ -485,16 +485,14 @@ QStringList refsOf(const QVariantList& rows)
     return refs;
 }
 
-// Imports bytes into the store and uses it alone; its profile
-QString useFile(SessionBridge& bridge, const QString& folder,
-                const QByteArray& bytes)
+// Keeps bytes as a plugin of the user's own; its variant's profile
+QString useFile(SessionBridge& bridge, const QByteArray& bytes)
 {
-    const QVariantMap r =
-        bridge.importSignalFile(writeScratch(folder, "f.json", bytes));
+    const QVariantMap r = bridge.keepSignalText(
+        QString::fromUtf8(bytes), QString(), QString(), QString());
     EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("words")).toString().toStdString();
-    EXPECT_EQ(bridge.useSignalFiles({sha256Of(bytes)}).size(), 1);
-    return r.value(QStringLiteral("profile")).toString();
+    return r.value(QStringLiteral("profiles")).toStringList().value(0);
 }
 
 // A signal file extending obd2: an 8-bit temperature at -40 and one at
@@ -610,14 +608,13 @@ TEST(BridgeTest, AProfileRowCarriesTheFilesGauge)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
     QByteArray gauged = signalFile(QStringLiteral("Gauged"));
     gauged.replace(
         R"("field":{"byte":0,"bits":8}})",
         R"("field":{"byte":0,"bits":8},)"
         R"("gauge":{"min":10,"max":16,"warn_low":11.5,"warn_high":15.25}})");
-    const QString profile = useFile(bridge, from.path(), gauged);
+    const QString profile = useFile(bridge, gauged);
     ASSERT_FALSE(profile.isEmpty());
     const QVariantList rows =
         bridge.profileSignals(QStringLiteral("mock://demo?profile=") + profile);
@@ -634,7 +631,7 @@ TEST(BridgeTest, AProfileRowCarriesTheFilesGauge)
     lowOnly.replace(R"("field":{"byte":0,"bits":8}})",
                     R"("field":{"byte":0,"bits":8},)"
                     R"("gauge":{"min":0,"max":100,"warn_low":20}})");
-    const QString lowProfile = useFile(bridge, from.path(), lowOnly);
+    const QString lowProfile = useFile(bridge, lowOnly);
     ASSERT_FALSE(lowProfile.isEmpty());
     const QVariantMap low =
         rowNamed(bridge.profileSignals(QStringLiteral("mock://demo?profile=") +
@@ -660,12 +657,11 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
     QByteArray extending = signalFile(QStringLiteral("Extending"));
     extending.replace(R"("source":{"name":"t"},)",
                       R"("source":{"name":"t"},"extends":"obd2",)");
-    const QString profile = useFile(bridge, from.path(), extending);
+    const QString profile = useFile(bridge, extending);
     ASSERT_FALSE(profile.isEmpty());
     const QString uri = QStringLiteral("mock://demo?profile=") + profile;
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
@@ -678,20 +674,18 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
     EXPECT_FALSE(refs.contains(QString()));
     EXPECT_EQ(refsOf(bridge.profileSignals(uri)), refs);
 
-    // A store change under a session leaves its rows' refs; the file's
-    // profile is gone from the registry, so profileSignals gives []
-    bridge.useSignalFiles({});
-    EXPECT_EQ(refsOf(modelRows(bridge)), refs);
-    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty());
     ASSERT_TRUE(disconnectAndWait(bridge));
 
-    const QString alone =
-        useFile(bridge, from.path(), signalFile(QStringLiteral("Alone")));
+    // The plugin removed: its profile is gone from the registry, so
+    // profileSignals gives []
+    ASSERT_EQ(removeEveryPlugin(bridge), 1);
+    EXPECT_TRUE(bridge.profileSignals(uri).isEmpty());
+
+    const QString alone = useFile(bridge, signalFile(QStringLiteral("Alone")));
     ASSERT_FALSE(alone.isEmpty());
     EXPECT_EQ(refsOf(bridge.profileSignals(
                   QStringLiteral("mock://demo?profile=") + alone)),
               QStringList{QStringLiteral("key:a")});
-    bridge.useSignalFiles({});
 }
 
 /* The mock answers Service 01 from its drive cycle and says what it
@@ -705,7 +699,6 @@ TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
     QStringList log;
     QObject::connect(&bridge, &SessionBridge::logMessage,
@@ -719,7 +712,7 @@ TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
         R"("field":{"byte":0,"bits":8}},)"
         R"({"key":"of_did","name":"Of DID","kind":"computed","expr":"did * 2"},)"
         R"({"key":"of_pid","name":"Of PID","kind":"computed","expr":"pid * 2"}]})");
-    const QString profile = useFile(bridge, from.path(), file);
+    const QString profile = useFile(bridge, file);
     ASSERT_FALSE(profile.isEmpty());
     ASSERT_TRUE(
         bridge.connectSession(QStringLiteral("mock://demo?profile=") + profile)
@@ -827,7 +820,6 @@ TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
     EXPECT_EQ(model->hiddenCount(), 0);
     EXPECT_TRUE(log.filter(QStringLiteral("ECU 0x7E8: supports ")).isEmpty());
     ASSERT_TRUE(disconnectAndWait(bridge));
-    bridge.useSignalFiles({});
 }
 
 /* A plugin variant's rows have refs, its file being the plugin
@@ -864,9 +856,8 @@ TEST(BridgeTest, ARowsRangeIsShownInTheUnitSystem)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
-    const QString profile = useFile(bridge, from.path(), rangesFile());
+    const QString profile = useFile(bridge, rangesFile());
     ASSERT_FALSE(profile.isEmpty());
     const QString uri = QStringLiteral("mock://demo?profile=") + profile;
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
@@ -944,7 +935,6 @@ TEST(BridgeTest, ARowsRangeIsShownInTheUnitSystem)
     }
     bridge.setUnitSystem(0);
     ASSERT_TRUE(disconnectAndWait(bridge));
-    bridge.useSignalFiles({});
 }
 
 /* A range whose end isn't a finite number (a 32-bit field at scale
@@ -957,7 +947,6 @@ TEST(BridgeTest, ARangeOfAnEndPastADoubleIsNoRange)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
     const QByteArray bytes(
         R"({"havne_signals":1,"name":"Huge","source":{"name":"t"},)"
@@ -971,7 +960,7 @@ TEST(BridgeTest, ARangeOfAnEndPastADoubleIsNoRange)
         R"({"key":"meet","name":"Meet","read":{"service":"22","number":"D103"},)"
         R"("field":{"byte":0,"bits":1,"order":"le"},"offset":1.75,)"
         R"("scale":2.220446049250313e-16,"unit":"km/h"}]})");
-    const QString profile = useFile(bridge, from.path(), bytes);
+    const QString profile = useFile(bridge, bytes);
     ASSERT_FALSE(profile.isEmpty());
     const QString uri = QStringLiteral("mock://demo?profile=") + profile;
     ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
@@ -1022,7 +1011,6 @@ TEST(BridgeTest, ARangeOfAnEndPastADoubleIsNoRange)
     }
     bridge.setUnitSystem(0);
     ASSERT_TRUE(disconnectAndWait(bridge));
-    bridge.useSignalFiles({});
 }
 
 /* profileSignals gives the rows of the profile a URI selects, and []
@@ -1065,11 +1053,13 @@ TEST(BridgeTest, ProfileSignalsOfAReplaysOwnFileFollowTheConnect)
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
     SessionBridge bridge;
-    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
-    const QString own = QStringLiteral("rec.") + sha256Of(v1).left(16);
-    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    const QString folder = recordWithSignalFile(
+        bridge, root.path(), signalFile(QStringLiteral("Recorded")));
     ASSERT_FALSE(folder.isEmpty());
-    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    const QString own =
+        QStringLiteral("rec.") +
+        sha256Of(readFile(folder + QStringLiteral("/signals.json"))).left(16);
+    EXPECT_EQ(removeEveryPlugin(bridge), 1);
     const QString uri = QStringLiteral("replay://") +
                         QDir::fromNativeSeparators(folder) +
                         QStringLiteral("?profile=") + own;
@@ -1593,7 +1583,7 @@ TEST(BridgeTest, PluginImportRepairsAChangedCopy)
 /* A session a plugin variant decodes records the variant's files merged
  * as signals.json, with the plugin's line (ADR-0052 section 4), as
  * havne-cli stream --plugin --record does; the mock answers the variant's
- * DIDs */
+ * DIDs. A session no file decodes records none (ADR-0051 section 4) */
 TEST(BridgeTest, PluginRecordingHoldsTheVariantsFile)
 {
     SettingsDirScope dir;
@@ -1615,10 +1605,17 @@ TEST(BridgeTest, PluginRecordingHoldsTheVariantsFile)
                     .isEmpty());
     EXPECT_TRUE(bridge.recordingActive());
     ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://plain")).isEmpty());
+    EXPECT_TRUE(bridge.recordingActive());
+    ASSERT_TRUE(disconnectAndWait(bridge));
 
-    const QStringList folders = recordingFolders(root.path());
-    ASSERT_EQ(folders.size(), 1);
+    QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 2);
+    folders.sort();
     const QString folder = root.path() + QStringLiteral("/") + folders[0];
+    EXPECT_FALSE(QFile::exists(root.path() + QStringLiteral("/") + folders[1] +
+                               QStringLiteral("/signals.json")));
     QFile copy(folder + QStringLiteral("/signals.json"));
     ASSERT_TRUE(copy.open(QIODevice::ReadOnly)) << "no signals.json";
     const QByteArray text = copy.readAll();
@@ -1649,7 +1646,7 @@ TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
         from.path() + QStringLiteral("/missing-extras.json"));
     SessionBridge bridge;
     for (const QVariantMap& r :
-         {bridge.importSignalFile(missing), bridge.importPlugin(missing)}) {
+         {bridge.readImport(missing), bridge.importPlugin(missing)}) {
         EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
         const QString words = r.value(QStringLiteral("words")).toString();
         EXPECT_EQ(words.toStdString(), "Couldn't read the file");
@@ -1891,10 +1888,10 @@ TEST(BridgeTest, ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument)
          [&](const QUrl& u) { return bridge.saveLayoutFile(QString(), u); }},
         {"over the bound",
          [&](const QUrl& u) { return bridge.saveLayoutFile(tooBig, u); }},
-        {"a signal file that isn't kept",
+        {"a file that didn't move, whose bytes aren't kept",
          [&](const QUrl& u) {
-             return bridge.saveSignalFile(QStringLiteral("0123456789abcdef"),
-                                          u);
+             return bridge.saveUnmigratedFile(
+                 QStringLiteral("0123456789abcdef"), u);
          }},
     };
     for (const Save& save : saves) {
