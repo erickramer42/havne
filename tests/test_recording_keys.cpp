@@ -819,6 +819,70 @@ TEST(RecordingKeysTest, TheHealthReportFindsAValueByItsKey)
     EXPECT_EQ(by_frames.report.values, 2u) << by_frames.text;
 }
 
+// Two signals of one name, which a set registered through the C API may
+// hold (ADR-0065 section 9): a recording older than format 4 read through
+// its frames decodes both under their keys, and the health report finds
+// each value by its key, never the first of the name twice
+TEST(RecordingKeysTest, TheHealthReportTellsTwoSignalsOfOneNameApart)
+{
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    const ecuio_signal_def_t* rpm = nullptr;
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        if (std::strcmp(obd2->defs[i].name, "RPM") == 0) {
+            rpm = &obd2->defs[i];
+        }
+    }
+    ASSERT_NE(rpm, nullptr);
+    /* Static: the registry keeps the set's pointer */
+    static ecuio_signal_def_t defs[2];
+    static ecuio_channel_decl_t channels[2];
+    static ecuio_signal_set_t set;
+    defs[0] = *rpm;
+    defs[0].plot_rank = 1;
+    defs[1] = defs[0];
+    defs[1].id = static_cast<uint16_t>(rpm->id + 1);
+    defs[1].message_id = 0x7E9;
+    channels[0] = {};
+    channels[0].rx_id = 0x7E8;
+    channels[0].tx_id = 0x7E0;
+    channels[1] = {};
+    channels[1].rx_id = 0x7E9;
+    channels[1].tx_id = 0x7E1;
+    set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    set.channel_count = 2;
+    set.channels = channels;
+    ecuio_validation_t v{};
+    ASSERT_EQ(ecuio_profile_register("test-two-rpm", &set, &v), ECUIO_OK)
+        << "code " << v.code;
+
+    Folder f;
+    f.write("two/events.log", events_of(rows::kFormat3, {}, "test-two-rpm"));
+    /* 0x0C80 / 4 is 800 rpm on 7E8, 0x1F40 / 4 is 2000 on 7E9 */
+    f.write("two/frames.csv",
+            "host_us,timestamp_us,id,flags,data\n"
+            "1000000,1000000,0x7E8,0x0,04 41 0C 0C 80 00 00 00\n"
+            "1000000,1000000,0x7E9,0x0,04 41 0C 1F 40 00 00 00\n");
+    const Reported two(f, "two");
+    /* Its values alone, by name: neither def can be told the rows' own */
+    f.write("rows/events.log",
+            events_of(rows::kFormat3, {"signal  RPM,number,rpm,0,2,1"},
+                      "test-two-rpm"));
+    f.write("rows/signals.csv",
+            "host_us,signal,value,unit\n1000000,RPM,800,rpm\n");
+    const Reported by_name(f, "rows");
+    EXPECT_EQ(ecuio_profile_unregister("test-two-rpm"), ECUIO_OK);
+    ASSERT_EQ(two.rc, ECUIO_OK) << two.detail;
+    EXPECT_EQ(two.report.values, 2u) << two.text;
+    EXPECT_NE(two.text.find(" 800 "), std::string::npos) << two.text;
+    EXPECT_NE(two.text.find(" 2000 "), std::string::npos) << two.text;
+    ASSERT_EQ(by_name.rc, ECUIO_OK) << by_name.detail;
+    EXPECT_EQ(by_name.report.values, 0u) << by_name.text;
+}
+
 // A text that is one signal's key and another signal's name is the
 // signal of that key, for the reader's find and for a named column
 TEST(RecordingKeysTest, AKeyComesBeforeAnotherSignalsName)

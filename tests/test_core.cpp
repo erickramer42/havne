@@ -2989,14 +2989,13 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
         EXPECT_EQ(v.reserved[1], 0u) << label;
     }
 
-    /* The signal file's one-name rule holds for a registered set too */
+    /* A registered set may repeat a name (ADR-0065 section 9) */
     defs[1].bit_length = mock->defs[1].bit_length;
     std::memcpy(defs[1].name, defs[0].name, sizeof defs[1].name);
     std::memset(&v, 0xAB, sizeof v);
-    EXPECT_EQ(ecuio_profile_register("test-why", &bad, &v),
-              ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_DUPLICATE_NAME);
-    EXPECT_EQ(v.index, 1u);
+    EXPECT_EQ(ecuio_profile_register("test-why", &bad, &v), ECUIO_OK);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_OK);
+    EXPECT_EQ(v.index, UINT32_MAX);
 
     std::memset(&v, 0xAB, sizeof v);
     EXPECT_EQ(ecuio_profile_register("test-why", mock, &v), ECUIO_OK);

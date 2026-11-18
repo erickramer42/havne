@@ -638,17 +638,22 @@ TEST(SignalFileTest, AChainThroughAReplacementIsChecked)
         << under_boost;
 }
 
-/* Two signals of a file with one name are refused, naming both: a recording
- * keys its values by name */
+/* Two signals of a file with one name are refused in format 1 and 2,
+ * naming both (ADR-0065 section 9), though a set the validator takes may
+ * repeat a name */
 TEST(SignalFileTest, ANameTwiceInOneFileIsRefusedNamingBoth)
 {
-    const std::string two =
-        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)"
-        R"({"key":"a","name":"Same","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
-        R"({"key":"b","name":"Same","read":{"service":"22","number":"D101"},"field":{"byte":0}}]})";
-    const std::string why = refusal(two);
-    EXPECT_TRUE(has(why, "signal 'b' has the name 'Same'"));
-    EXPECT_TRUE(has(why, "signal 'a' has too"));
+    for (const char* format : {"1", "2"}) {
+        const std::string two =
+            std::string(R"({"havne_signals":)") + format +
+            R"(,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)"
+            R"({"key":"a","name":"Same","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+            R"({"key":"b","name":"Same","read":{"service":"22","number":"D101"},"field":{"byte":0}}]})";
+        const std::string why = refusal(two);
+        EXPECT_TRUE(has(why, "signal 'b' has the name 'Same'"))
+            << "format " << format << ": " << why;
+        EXPECT_TRUE(has(why, "signal 'a' has too")) << why;
+    }
 }
 
 TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
