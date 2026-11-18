@@ -1,0 +1,28 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its eps",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up eps at 522",
+  "signals": [
+    {
+      "key": "eps_name",
+      "name": "Steering Module Name",
+      "kind": "text",
+      "ecu": "eps",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "eps_angle",
+      "name": "Steering Angle",
+      "ecu": "eps",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 16, "order": "be", "signed": true},
+      "scale": 0.1,
+      "unit": "°",
+      "decimals": 1,
+      "group": "vehicle",
+      "gauge": {"min": -780, "max": 780, "warn_low": -700, "warn_high": 700}
+    }
+  ]
+}

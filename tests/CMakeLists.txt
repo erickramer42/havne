@@ -95,7 +95,7 @@ app_enable_warnings(bench_recording)
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
     test_plugin_least_core.cpp test_plugin_conversation.cpp
     test_plugin_conversation_rules.cpp test_base64.cpp
     test_condition_file.cpp test_condition_eval.cpp)

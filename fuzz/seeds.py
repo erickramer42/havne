@@ -106,7 +106,6 @@ def main(argv):
         for path in variant["files"]:
             if path not in data_files:
                 data_files.append(path)
-    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
 
     # The JSON reader: every JSON file above, whole after the bounds
     # byte (0x1F: depth 32, the loaders' bound, and no size bound)
@@ -227,16 +226,10 @@ def main(argv):
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even
-    # first byte; the files inlined, no fixtures key, then a fixture)
-    after = SEP + fixtures[0] if fixtures else b""
-    folder = b"\x01" + manifest_bytes
-    for path in data_files:
-        folder += SEP + read(plugin + "/" + path)
-    write(out, "fuzz_plugin_manifest", "folder_example-sim", folder + after)
-    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
-    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
-    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
-    write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
+    # first byte; the files inlined, no fixtures key, then a fixture), for
+    # each example: example-car is a whole car of 18 modules
+    text, after = plugin_seeds(out, plugin)
+    plugin_seeds(out, "plugins/example-car")
     # The conversation tier (format 2): a packed package with its module
     # a binary file, the same as a folder (the module a piece of its own),
     # then one whose hash is another module's, one whose module imports,
@@ -547,6 +540,30 @@ SIM_SEEDS = {
     0x03: bytes([0x11, 0x92, 0x23, 0xA4, 0x35, 0xB6, 0x47, 0xC8, 0x59, 0xDA, 0x6B, 0xEC,
                  0x7D, 0xFE, 0x8F, 0x10]),
 }
+
+
+def plugin_seeds(out, plugin):
+    """fuzz_plugin_manifest's folder and packed seeds of one plugin folder;
+    the packed text and the fixture that follows a seed"""
+    manifest_bytes = read(plugin + "/manifest.json")
+    manifest = json.loads(manifest_bytes)
+    data_files = []  # each variant's files, in the order the loader asks for them
+    for variant in manifest["variants"]:
+        for path in variant["files"]:
+            if path not in data_files:
+                data_files.append(path)
+    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
+    name = os.path.basename(plugin)
+    after = SEP + fixtures[0] if fixtures else b""
+    folder = b"\x01" + manifest_bytes
+    for path in data_files:
+        folder += SEP + read(plugin + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_" + name, folder + after)
+    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
+    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
+    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_" + name, b"\x00" + text + after)
+    return text, after
 
 
 def sim_key(level, wrong=False):
