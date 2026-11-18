@@ -481,7 +481,7 @@ TEST(EngineTalkTest, FirstGoesAheadOfTheKeepAliveTheWalkAndTheRotation)
     const uint8_t pid[2] = {0x01, 0x0C};
     ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
     now += e.keepalive_us; /* the keep-alive is due */
-    ecuio_engine_probe(&e, now);
+    ecuio_engine_probe(&e);
     ASSERT_TRUE(e.chans[0].walking);
     const Bytes key = key_for(0x01);
     ASSERT_EQ(offer(&e, key, 2, true), ecuio_talk_offer::taken);
@@ -505,7 +505,7 @@ TEST(EngineTalkTest, FirstGoesAheadOfTheKeepAliveTheWalkAndTheRotation)
 
     /* Not first: the keep-alive and the walk's bitmap go before it */
     now += e.keepalive_us;
-    ecuio_engine_probe(&e, now); /* the walk's budget again */
+    ecuio_engine_probe(&e); /* the walk's budget again */
     ASSERT_TRUE(e.chans[0].walking);
     ASSERT_EQ(offer(&e, key, 2, false), ecuio_talk_offer::taken);
     EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kKeep);
@@ -522,7 +522,7 @@ TEST(EngineTalkTest, FirstGoesAheadOfTheKeepAliveTheWalkAndTheRotation)
     ASSERT_EQ(ecuio_engine_add(&plain, 0, pid, 2),
               ecuio_engine_add_result::added);
     const int64_t later = 3 * ECUIO_ENGINE_S3_US;
-    ecuio_engine_probe(&plain, later);
+    ecuio_engine_probe(&plain);
     ASSERT_TRUE(plain.chans[0].walking);
     const Bytes read = {0x22, 0xD3, 0x01};
     ASSERT_EQ(offer(&plain, read, 3, true), ecuio_talk_offer::taken);
@@ -670,7 +670,7 @@ TEST(EngineTalkTest, ARefusalSettlesItWithItsCodeAndDropsNoRow)
     Ecu ecu;
     int64_t now = 0;
     ecu.now = &now;
-    ecuio_engine_probe(&e, now); /* explicit answers drop rows */
+    ecuio_engine_probe(&e); /* explicit answers drop rows */
     ASSERT_TRUE(e.probe);
     /* 7F 22 11 to an identification item drops the channel's 22 rows; to
      * a talk it drops nothing: a plugin's request takes no row from the

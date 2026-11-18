@@ -337,7 +337,7 @@ TEST(SessionControlTest, ALostSessionIsEnteredAgainAndTheRequestAskedAgain)
     static ecuio_request_engine e;
     uds_engine(&e);
     ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    ecuio_engine_probe(&e, 0); /* drops on explicit answers */
+    ecuio_engine_probe(&e); /* drops on explicit answers */
     Ecu ecu;
     int64_t now = 0;
     (void)steps(&e, 0, &now, std::ref(ecu), 6);
@@ -747,7 +747,7 @@ TEST(SessionControlTest, ARefusalStraightAfterTheEntryIsTheReadsOwn)
     static ecuio_request_engine e;
     uds_engine(&e);
     ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     Ecu ecu;
     const Responder refuses = [&](const Bytes& q) -> Bytes {
         if (q.size() == 3 && q[0] == 0x22 && q[1] == (kDid >> 8)) {
@@ -819,7 +819,7 @@ TEST(SessionControlTest, ADidRefusedInTheSessionIsDroppedAlone)
     static ecuio_request_engine e;
     rotation_engine(&e, {kDid, kExtDid, kHeldDid});
     ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     Ecu ecu;
     const Responder respond = [&](const Bytes& q) {
         return holds_back(ecu, q);
@@ -926,7 +926,7 @@ TEST(SessionControlTest, SeveralHeldDidsEachDropAlone)
     rotation_engine(
         &e, {0xD110, kHeldDid, 0xD111, kHeldDid + 1, 0xD112, kHeldDid + 2});
     ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    ecuio_engine_probe(&e, 0);
+    ecuio_engine_probe(&e);
     Ecu ecu;
     const Responder respond = [&](const Bytes& q) {
         return holds_back(ecu, q);

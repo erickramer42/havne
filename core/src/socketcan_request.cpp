@@ -431,7 +431,7 @@ void request_worker(ecuio_socketcan_transport* t)
         uint8_t control[CMSG_SPACE(sizeof(struct timespec)) +
                         CMSG_SPACE(sizeof(uint32_t))];
     if (t->probe) {
-        ecuio_engine_probe(&e, now_us(t));
+        ecuio_engine_probe(&e);
     }
     /* A focus set before start applies from the first request, and the
      * seam's talk handed over before start is that request */
@@ -635,7 +635,7 @@ void request_worker(ecuio_socketcan_transport* t)
         if (h.recovered) {
             h.recovered = false;
             if (t->probe) {
-                ecuio_engine_probe(&e, now_us(t));
+                ecuio_engine_probe(&e);
             }
             ecuio_engine_rescan(&e);
         }

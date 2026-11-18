@@ -1376,7 +1376,7 @@ void elm327_worker(transport* t)
     uint32_t relisten_ms = 0;
     int64_t timing_at = 0;
     if (t->probe) {
-        ecuio_engine_probe(&e, now_us(t));
+        ecuio_engine_probe(&e);
     }
     /* A focus set before start applies from the first request */
     ecuio_take_focus(t->session, &e, focus_seen);
@@ -1500,7 +1500,7 @@ void elm327_worker(transport* t)
         if (h.recovered) {
             h.recovered = false;
             if (t->probe) {
-                ecuio_engine_probe(&e, now_us(t));
+                ecuio_engine_probe(&e);
             }
             /* the scan's and identification's unanswered requests */
             ecuio_engine_rescan(&e);
