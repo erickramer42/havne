@@ -1,0 +1,252 @@
+// File/layer: core/src/request_engine_send.h | internal, not ABI-exported;
+//             a part of the request engine, included by
+//             request_engine.h, whose description covers it
+// What a channel sends next (ecuio_engine_due), a talk's turn and
+// the next event.
+// C++17, Qt-free, no platform headers.
+// Testing: UNIT: RequestEngineTest, EngineTalkTest, RequestTurnsTest
+//          (test_obd2); HARNESS: every transport's suites
+
+#ifndef ECUIO_REQUEST_ENGINE_SEND_H
+#define ECUIO_REQUEST_ENGINE_SEND_H
+
+#include "request_engine_pack.h"
+#include "request_engine_focus.h"
+#include "request_engine_scan.h"
+#include "request_engine_walk.h"
+#include "request_engine_diag.h"
+#include "request_engine_session.h"
+
+/* Whether a talk offered first goes now: ahead of the keep-alive and
+ * every list, and behind a session entry that is due */
+inline bool ecuio_engine_talk_first(const ecuio_request_engine* e,
+                                    ecuio_engine_channel& ch, int64_t now_us)
+{
+    const bool entering = ecuio_engine_session_live(e, ch) &&
+                          (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+                           now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US);
+    return !entering && ecuio_talk_turn(ch.talk, true, false);
+}
+
+/* The offered talk takes channel c's one-shot */
+inline int32_t ecuio_engine_talk_slot(ecuio_engine_channel& ch, uint32_t c)
+{
+    ch.once = ecuio_request{};
+    ch.once.len = ecuio_talk_take_slot(ch.talk, ch.once.bytes);
+    ch.once.channel = static_cast<uint8_t>(c);
+    return ECUIO_ENGINE_ONCE;
+}
+
+/* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
+ * item, a diagnostics item, a clear's request or a scanned DID already
+ * in the one-shot (its write failed), then for a talk offered first,
+ * then while its walk has a bitmap
+ * to ask, then, taking turns with the rotation, for a clear's next
+ * request, the next identification item, then the next diagnostics
+ * item, then a talk and the next scanned DID in turns, else the next
+ * request of its rotation, or ECUIO_ENGINE_NONE while
+ * one is outstanding, before the floor, or when there is nothing to
+ * send; the rotation's own turn also waits for a focus's next sweep. A
+ * walk out of budget ends here. Moves the rotation past the request it
+ * returns; ecuio_engine_sent records what became of it. */
+inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
+                                int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    /* Taken before a probe started the walk: it goes first, so its reply
+     * settles it and no other request's reply does. */
+    if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
+        ch.sessioning || ch.talk.out) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_talk_first(e, ch, now_us)) {
+        return ecuio_engine_talk_slot(ch, c);
+    }
+    /* ADR-0060: the session first; while 10 03 is due nothing else goes */
+    if (ecuio_engine_session_due(e, c, now_us)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.walking) {
+        if (!ch.walk_timed) {
+            ch.walk_timed = true;
+            ch.walk_until_us = now_us + ECUIO_ENGINE_PROBE_BUDGET_US;
+        }
+        if (now_us < ch.walk_until_us) {
+            ch.once = ch.walk;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ecuio_engine_end_walk(e, c);
+    }
+    const bool once_turn = ch.requests == 0 || ch.scan_turn ||
+                           (e->scan_first && ch.scan_pending > 0);
+    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE && once_turn) {
+        ch.once = ecuio_request{};
+        if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
+            ch.once.bytes[0] = ECUIO_CLEAR_SPEED_REQUEST[0];
+            ch.once.bytes[1] = ECUIO_CLEAR_SPEED_REQUEST[1];
+            ch.once.len = 2;
+        } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
+            ch.once.bytes[0] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0];
+            ch.once.bytes[1] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[1];
+            ch.once.len = 2;
+        } else {
+            ch.once.bytes[0] = ECUIO_CLEAR_SERVICE;
+            ch.once.len = 1;
+        }
+        ch.once.channel = static_cast<uint8_t>(c);
+        ch.clearing = true;
+        ch.scan_turn = false;
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.ident_pending > 0 && once_turn) {
+        const int32_t i = ecuio_engine_ident_next(e, c);
+        if (i >= 0) {
+            const ecuio_identity_item_t& it = ch.ident[i];
+            ch.once = ecuio_request{};
+            for (uint8_t k = 0; k < it.length; ++k) {
+                ch.once.bytes[k] = it.request[k];
+            }
+            ch.once.len = it.length;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.identifying = true;
+            ch.ident_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.ident_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    if (ch.diag_pending > 0 && once_turn) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    if (ch.diag_pending > 0 && once_turn) {
+        const int32_t i = ecuio_engine_diag_next(e, c);
+        if (i >= 0) {
+            const ecuio_diag_item& it = ch.diag_items[i];
+            ch.once = ecuio_request{};
+            for (uint8_t k = 0; k < it.len; ++k) {
+                ch.once.bytes[k] = it.request[k];
+            }
+            ch.once.len = it.len;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.diagnosing = true;
+            ch.diag_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.diag_pending = 0; /* the count had drifted; nothing is unasked */
+    }
+    if (once_turn && ecuio_talk_turn(ch.talk, false, ch.scan_pending > 0)) {
+        ch.scan_turn = false;
+        return ecuio_engine_talk_slot(ch, c);
+    }
+    if (ch.scan_pending > 0 && once_turn) {
+        const int32_t i = ecuio_engine_scan_next(e, c);
+        if (i >= 0) {
+            const ecuio_scan_entry& s = e->scan[i];
+            ch.once = ecuio_request{};
+            ch.once.bytes[0] = 0x22;
+            ch.once.bytes[1] = static_cast<uint8_t>(s.did >> 8);
+            ch.once.bytes[2] = static_cast<uint8_t>(s.did);
+            ch.once.len = 3;
+            ch.once.channel = static_cast<uint8_t>(c);
+            ch.scanning = true;
+            ch.scan_index = static_cast<uint32_t>(i);
+            ch.scan_turn = false;
+            return ECUIO_ENGINE_ONCE;
+        }
+        ch.scan_pending = 0;   /* the count had drifted; nothing is unasked */
+    }
+    ch.scan_turn = true;
+    if (ch.check_due) {
+        /* The driver's check (ecuio_engine_ask_check): no sweep counts
+         * it, and a pick taken since it fell due withdraws it */
+        ch.check_due = false;
+        const int32_t row = ecuio_engine_unpicked(e)
+                                ? ecuio_engine_check_row(e, c)
+                                : ECUIO_ENGINE_NONE;
+        if (row >= 0) {
+            return row;
+        }
+    }
+    if (ch.requests == 0) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (e->min_sweep_us > 0 && now_us < ch.next_sweep_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    const bool slow_turn = ch.fast_run >= ECUIO_ENGINE_FAST_PER_SLOW;
+    int32_t i = ecuio_engine_next_of(e, c, slow_turn);
+    if (i < 0) {
+        i = ecuio_engine_next_of(e, c, !slow_turn);
+    }
+    if (i < 0) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (e->requests[i].slow != 0) {
+        ch.fast_run = 0;
+    } else if (ch.fast_run < ECUIO_ENGINE_FAST_PER_SLOW) {
+        ++ch.fast_run;
+    }
+    const int32_t asked = ecuio_engine_gather(e, c, i);
+    ecuio_engine_count_sweep(e, c, asked, now_us);
+    return asked;
+}
+
+/* Whether channel c has anything to send but its rotation: what a
+ * focus's wait between sweeps doesn't hold back. */
+inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
+{
+    return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
+           ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
+           ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+           ch.talk.offered || ch.talk.out;
+}
+
+/* Microseconds until the engine next has something to do: a wait
+ * ending, or a channel's floor passing while it has something to send
+ * (with only its rotation left, a focus's next sweep, when that is
+ * later); 0 when something is due now, INT64_MAX when nothing is. */
+inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
+                                          int64_t now_us)
+{
+    int64_t next = INT64_MAX;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
+            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
+            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+            !ch.talk.offered && !ecuio_engine_session_live(e, ch)) {
+            continue;
+        }
+        int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
+                                                           : ch.next_send_us;
+        const bool asks_more = ch.requests > 0 || ch.scan_pending > 0 ||
+                               ch.ident_pending > 0 || ch.diag_pending > 0 ||
+                               ch.walking || ch.talk.offered ||
+                               ch.clear_step != ECUIO_CLEAR_STEP_NONE;
+        if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
+            !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
+            at = ch.next_sweep_us;
+        }
+        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more) {
+            at = INT64_MAX; /* only the session's keepalive is left */
+        }
+        if (ch.outstanding == ECUIO_ENGINE_NONE) {
+            const int64_t s = ecuio_engine_session_next_us(e, ch);
+            if (s < at) {
+                at = s;
+            }
+        }
+        const int64_t in = (at > now_us) ? at - now_us : 0;
+        if (in < next) {
+            next = in;
+        }
+    }
+    return next;
+}
+
+#endif
