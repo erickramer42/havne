@@ -308,7 +308,7 @@ TestCase {
         click(page, "addKind_digital")
         compare(page.panel, "add", "the cell's own kind changes nothing")
         compare(JSON.stringify(page.doc), before)
-        page.startAdd()
+        page.addFlowPart.startAdd()
         verify(findChild(page, "addKind_blank"), "Add still offers a blank")
     }
 
@@ -317,7 +317,7 @@ TestCase {
     function test_aBlankCellIsOfferedAndNeedsNoSignal() {
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
-        page.startAdd()
+        page.addFlowPart.startAdd()
         verify(find(page, "preview_blank").item, "its preview loads")
         click(page, "addKind_blank")
         const added = page.doc.pages[0].cells[1]
@@ -420,7 +420,7 @@ TestCase {
             first.samples = [0, 1e9]
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
-        page.moveTo(1)
+        page.editsPart.moveTo(1)
         compare(labels(page), ["B", "A"])
         const now = gaugeAt(0).item
         verify(now.peakValue !== 1e9, "no peak of A's")
@@ -491,7 +491,7 @@ TestCase {
     function test_newCellsTakeTheFormsSpans(data) {
         const page = pageOf(data.props, docOf([cellOf("A")]))
         for (const kind in data.spans) {
-            const made = page.newCell(kind, { name: "x", ref: "id:1001", decodedUnit: "RPM",
+            const made = page.addFlowPart.newCell(kind, { name: "x", ref: "id:1001", decodedUnit: "RPM",
                                               decodedLow: 0, decodedHigh: 8000 })
             compare([made.w, made.h], data.spans[kind], kind)
         }

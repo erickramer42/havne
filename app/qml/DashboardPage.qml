@@ -101,7 +101,7 @@ Page {
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
-    onOfflineUriChanged: if (panel === "signal" || panel === "cell") refreshRows()
+    onOfflineUriChanged: if (panel === "signal" || panel === "cell") addFlow.refreshRows()
     // Settings' picked vehicle's sets ([{ profile, name, variant }], its
     // plugin first) and the names of the profiles it knows (profile: name)
     property var pickedSets: []
@@ -232,20 +232,6 @@ Page {
         id: history
         host: root
     }
-    readonly property alias canRedo: history.canRedo
-    readonly property alias canUndo: history.canUndo
-    readonly property alias groupMs: history.groupMs
-    property alias lastAt: history.lastAt
-    readonly property alias redoWords: history.redoWords
-    readonly property alias undoLimit: history.undoLimit
-    property alias undoLine: history.undoLine
-    property alias undoLineMs: history.undoLineMs
-    property alias undoStack: history.undoStack
-    readonly property alias undoWords: history.undoWords
-    function redo() { return history.redo() }
-    function showLine(words) { return history.showLine(words) }
-    function showStoredLayout() { return history.showStoredLayout() }
-    function undo() { return history.undo() }
     onFormChanged: history.clearHistory()
 
     // A cell's name in a step's words: its label, or its kind's name
@@ -314,7 +300,7 @@ Page {
         cancelHold()
         restored = false
         phoneEdit = on
-        showStoredLayout()
+        history.showStoredLayout()
         selected = -1
         panel = ""
         addKind = ""
@@ -322,7 +308,7 @@ Page {
         confirmRemovePage = false
         presetList = ""
         confirmReplaceKey = ""
-        noteLayout("")
+        layoutFile.noteLayout("")
         history.clearHistory()
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
         restored = true
@@ -339,7 +325,7 @@ Page {
         confirmRemovePage = false
         presetList = ""
         confirmReplaceKey = ""
-        noteLayout("")
+        layoutFile.noteLayout("")
         history.clearHistory()
     }
 
@@ -383,20 +369,13 @@ Page {
         id: layoutFile
         host: root
     }
-    function exportLayoutTo(url) { return layoutFile.exportLayoutTo(url) }
-    function layoutFileName() { return layoutFile.layoutFileName() }
-    property alias layoutNote: layoutFile.layoutNote
-    property alias layoutNoteBad: layoutFile.layoutNoteBad
-    function loadLayoutFrom(url, adding) { return layoutFile.loadLayoutFrom(url, adding) }
-    function noteLayout(words, bad) { return layoutFile.noteLayout(words, bad) }
-    function resetForm() { return layoutFile.resetForm() }
 
     function select(i) {
         commitTyping()
         selected = i
         // The cell's panel takes its decimals from the listed rows with no session
-        if (!Bridge.connected && (profileRows.length === 0 || addFlow.rowsFor !== offlineUri))
-            refreshRows()
+        if (!Bridge.connected && (addFlow.profileRows.length === 0 || addFlow.rowsFor !== offlineUri))
+            addFlow.refreshRows()
         panel = "cell"
     }
 
@@ -445,26 +424,17 @@ Page {
         host: root
     }
     function barTouched() { return drive.barTouched() }
-    property alias barTouches: drive.barTouches
-    property alias barsHeld: drive.barsHeld
     property alias barsShown: drive.barsShown
-    property alias barsUp: drive.barsUp
     property alias driveHideMs: drive.driveHideMs
     property alias driveInsetBottom: drive.driveInsetBottom
     property alias driveInsetTop: drive.driveInsetTop
-    property alias driveLogEnded: drive.driveLogEnded
     property alias driveLogSize: drive.driveLogSize
     property alias driveLogTime: drive.driveLogTime
     property alias driveOrientation: drive.driveOrientation
     property alias driveTabBarHeight: drive.driveTabBarHeight
-    function driveTap() { return drive.driveTap() }
-    property alias driveWindow: drive.driveWindow
     property alias driving: drive.driving
-    function enterDrive() { return drive.enterDrive() }
     function goBack() { return drive.goBack() }
-    function isReplay(uri) { return drive.isReplay(uri) }
     function leaveDrive(forGood) { return drive.leaveDrive(forGood) }
-    function raisesBars(state) { return drive.raisesBars(state) }
     // ---- Copy and paste (section 5)
 
     function copySelected() {
@@ -484,21 +454,6 @@ Page {
         id: addFlow
         host: root
     }
-    function changeKind() { return addFlow.changeKind() }
-    function changeSignal() { return addFlow.changeSignal() }
-    function leaveKindList() { return addFlow.leaveKindList() }
-    function pickKind(kind) { return addFlow.pickKind(kind) }
-    function pickable(kind) { return addFlow.pickable(kind) }
-    function pickedOwnRows(kind) { return addFlow.pickedOwnRows(kind) }
-    property alias profileRows: addFlow.profileRows
-    function refreshRows() { return addFlow.refreshRows() }
-    function startAdd() { return addFlow.startAdd() }
-    function addAllPlan(kind) { return addFlow.addAllPlan(kind) }
-    function addAllSignals() { return addFlow.addAllSignals() }
-    function addAllWords(plan) { return addFlow.addAllWords(plan) }
-    function newCell(kind, row) { return addFlow.newCell(kind, row) }
-    function pickSignal(row) { return addFlow.pickSignal(row) }
-    function startOptions(kind, row) { return addFlow.startOptions(kind, row) }
     // Bridge.alertLevels copied once per change, by def id: a bridge map read
     // in each cell's binding makes a JS wrapper per read (the Qt 6.12 sweep)
     property var alertLevels: {
@@ -526,22 +481,6 @@ Page {
         id: edits
         host: root
     }
-    function addBlankPage() { return edits.addBlankPage() }
-    function addPage() { return edits.addPage() }
-    function addPresetPage(key) { return edits.addPresetPage(key) }
-    function closePresets() { return edits.closePresets() }
-    function movePage(by) { return edits.movePage(by) }
-    function moveTo(to) { return edits.moveTo(to) }
-    function openPresets(mode) { return edits.openPresets(mode) }
-    function presetLabel(key) { return edits.presetLabel(key) }
-    function removeCell(i) { return edits.removeCell(i) }
-    function removePage() { return edits.removePage() }
-    function renamePage(name) { return edits.renamePage(name) }
-    function replaceChosen(key) { return edits.replaceChosen(key) }
-    function replaceWithPreset(key) { return edits.replaceWithPreset(key) }
-    function resize(w, h) { return edits.resize(w, h) }
-    function setLabel(text) { return edits.setLabel(text) }
-    function setOptions(changes, base) { return edits.setOptions(changes, base) }
     // ---- Pages
 
     property int pageIndex: 0
@@ -556,7 +495,7 @@ Page {
     onPagesChanged: goTo(pageIndex)
     // A page change closes whatever panel was open
     onPageIndexChanged: {
-        closePresets()
+        edits.closePresets()
         cancelHold()
         selected = -1
         panel = ""
@@ -596,19 +535,19 @@ Page {
     Shortcut {
         id: undoKey
         sequence: "Ctrl+Z"
-        enabled: root.undoKeys && root.canUndo
-        onActivated: root.undo()
+        enabled: root.undoKeys && history.canUndo
+        onActivated: history.undo()
     }
     Shortcut {
         id: redoKey
         sequence: "Ctrl+Shift+Z"
-        enabled: root.undoKeys && root.canRedo
-        onActivated: root.redo()
+        enabled: root.undoKeys && history.canRedo
+        onActivated: history.redo()
     }
     Shortcut {
         sequence: "Ctrl+Y"
-        enabled: root.undoKeys && root.canRedo
-        onActivated: root.redo()
+        enabled: root.undoKeys && history.canRedo
+        onActivated: history.redo()
     }
 
     // ---- The sweep and the peaks, on every page
@@ -662,8 +601,8 @@ Page {
             // The view comes back with a session only with Dash showing
             if (!Bridge.connected)
                 root.leaveDrive(false)
-            else if (store.phoneDrive && root.visible && !root.isReplay(Bridge.currentUri))
-                root.enterDrive()
+            else if (store.phoneDrive && root.visible && !drive.isReplay(Bridge.currentUri))
+                drive.enterDrive()
         }
         // A peak held in the old units would read wrong in the new ones
         function onUnitSystemChanged() { root.resetPeaks() }
@@ -801,7 +740,7 @@ Page {
         anchors.bottom: swipe.bottom
         width: Math.max(0, root.width - 2 * root.margin)
         height: Theme.touchTarget + 8
-        visible: root.undoLine !== "" && !root.driving
+        visible: history.undoLine !== "" && !root.driving
         color: Theme.surface
         border.width: 1
         border.color: Theme.hairline
@@ -818,7 +757,7 @@ Page {
                 wrapMode: Text.WordWrap
                 color: Theme.text
                 font.pixelSize: Theme.fontCaption
-                text: root.undoLine
+                text: history.undoLine
             }
             Label {
                 objectName: "dashUndoLineKeys"
@@ -831,10 +770,10 @@ Page {
                 objectName: "dashUndoLineUndo"
                 compact: true
                 visible: !root.editing
-                enabled: root.canUndo
+                enabled: history.canUndo
                 text: qsTr("Undo")
-                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
-                onClicked: root.undo()
+                Accessible.name: history.canUndo ? qsTr("Undo: %1").arg(history.undoWords) : qsTr("Undo")
+                onClicked: history.undo()
             }
         }
     }

@@ -47,13 +47,13 @@ Item {
         }
         Label {
             objectName: "driveStatusRun"
-            visible: Bridge.logActive || Bridge.recordingActive || driveStatus.host.driveLogEnded
+            visible: Bridge.logActive || Bridge.recordingActive || driveStatus.host.drivePart.driveLogEnded
             font.pixelSize: Theme.fontCaption
             color: Theme.text
             text: Bridge.logActive ? qsTr("Log")
                 : Bridge.armedRecording ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
                 : Bridge.armedActive ? qsTr("Armed")
-                : driveStatus.host.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
+                : driveStatus.host.drivePart.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
         }
         Label {
             objectName: "driveStatusTime"

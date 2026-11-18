@@ -1587,7 +1587,7 @@ TestCase {
         changed.pages[0].cells[0].label = "Changed"
         findChild(page, "dashStore").desktop = DashboardBook.serialize(changed)
         tryVerify(() => !page.builtInShown && page.pages[0].cells[0].label === "Changed", 1000, "a saved layout")
-        page.resetForm()
+        page.layoutFilePart.resetForm()
         tryVerify(() => page.builtInShown, 1000, "the built-in layout after Reset")
         compare(findChild(page, "dashStore").desktop, "", "nothing stored")
         compare(emptySquaresOf(view), 0, "no empty square after Reset")

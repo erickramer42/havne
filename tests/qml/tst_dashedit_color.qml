@@ -483,11 +483,11 @@ TestCase {
         cell.options.color = "#12ab9f"
         const url = layoutUrl("layout-custom-color.json")
         let page = storedPageOf({}, docOf([cell]))
-        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutFilePart.exportLayoutTo(url), page.layoutFilePart.layoutNote)
         page.destroy()
         page = storedPageOf({}, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
         compare(page.doc.pages[0].cells[0].options.color, "#12ab9f")
         page.destroy()
         const g = colored("digital", "dark", "#12ab9f")
@@ -679,7 +679,7 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         const note = find(page, "panelColorZones")
         verify(!note.visible, "a color and no zone: no note")
-        page.setOptions({ warnFrom: 90 })
+        page.editsPart.setOptions({ warnFrom: 90 })
         verify(note.visible, "a color and a zone level")
         compare(note.text, "A zone's color replaces this one while its level is reached")
         click(page, "panelColor_default")
@@ -767,12 +767,12 @@ TestCase {
     function test_aRenameThatChangesNothingIsNoUndoStep() {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        const depth = page.undoStack.length
+        const depth = page.historyPart.undoStack.length
         click(page, "dashMore")
         const name = find(page, "moreRename")
         name.forceActiveFocus()
         name.editingFinished()
-        compare(page.undoStack.length, depth, "the Page row's field")
+        compare(page.historyPart.undoStack.length, depth, "the Page row's field")
         const tab0 = find(page, "dashPageTab_0")
         const field = find(page, "dashPageRename_0")
         tryVerify(() => waitForPolish(tab0.Window.window), 3000)
@@ -780,7 +780,7 @@ TestCase {
         tryVerify(() => field.visible && field.activeFocus, 3000)
         verify(tab0.width >= 120, "a short name has room: " + tab0.width)
         keyClick(Qt.Key_Return)
-        compare(page.undoStack.length, depth, "the tab's field")
+        compare(page.historyPart.undoStack.length, depth, "the tab's field")
     }
 
     function test_leavingEditModeDropsAnOpenRename() {

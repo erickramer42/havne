@@ -376,9 +376,9 @@ TestCase {
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         const row = { ref: Bridge.gaugeSignals["rpm"][0], decodedUnit: "RPM", decodedLow: 0,
                       decodedHigh: 8000, gauge: { min: 0, max: 8000 } }
-        const light = page.startOptions("shift-light", row)
+        const light = page.addFlowPart.startOptions("shift-light", row)
         compare([light.from, light.to], [4500, 6500], "the band, not the file's 0-8000")
-        const dial = page.startOptions("analog", row)
+        const dial = page.addFlowPart.startOptions("analog", row)
         compare([dial.from, dial.to, dial.dangerFrom], [0, 8000, 6800],
                 "a dial takes the file's range and, with no levels, the table's zones")
     }
@@ -391,16 +391,16 @@ TestCase {
         const ref = Bridge.gaugeSignals["battery"][0]
         const row = { ref: ref, decodedUnit: "V", decodedLow: 0, decodedHigh: 20,
                       gauge: { min: 9, max: 17, warnLow: 11.5 } }
-        const o = page.startOptions("analog", row)
+        const o = page.addFlowPart.startOptions("analog", row)
         compare([o.from, o.to, o.warnBelow], [9, 17, 11.5], "the file's range and low level")
         for (const name of ["dangerBelow", "warnFrom", "dangerFrom", "coldBelow"])
             verify(o[name] === undefined, "not the table's " + name)
         row.gauge = { min: 9, max: 17, warnHigh: 15 }
-        const high = page.startOptions("analog", row)
+        const high = page.addFlowPart.startOptions("analog", row)
         compare(high.warnFrom, 15)
         verify(high.warnBelow === undefined, "no low level the file lacks")
         row.gauge = {}
-        const table = page.startOptions("analog", row)
+        const table = page.addFlowPart.startOptions("analog", row)
         compare([table.dangerBelow, table.warnBelow, table.warnFrom, table.dangerFrom],
                 [11.8, 12.4, 14.8, 15.2], "no gauge: the table")
     }
@@ -469,28 +469,28 @@ TestCase {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
-        page.refreshRows()
-        const rows = page.profileRows
+        page.addFlowPart.refreshRows()
+        const rows = page.addFlowPart.profileRows
         verify(rows.length > 0, "the session's rows")
-        const analog = page.pickable("analog")
-        const digital = page.pickable("digital")
+        const analog = page.addFlowPart.pickable("analog")
+        const digital = page.addFlowPart.pickable("digital")
         verify(analog.every(r => r.ref !== "" && !r.isText && !r.isEnum))
         verify(digital.every(r => r.ref !== "" && !r.isText))
         compare(digital.length, rows.filter(r => r.ref !== "" && !r.isText).length)
         // The demo has no enumeration: one made up, beside a number and a
         // text
-        page.profileRows = [{ ref: "key:mode", isText: false, isEnum: true },
+        page.addFlowPart.profileRows = [{ ref: "key:mode", isText: false, isEnum: true },
                             { ref: "key:rpm", isText: false, isEnum: false },
                             { ref: "key:vin", isText: true, isEnum: false }]
-        compare(page.pickable("bar").map(r => r.ref), ["key:rpm"])
-        compare(page.pickable("digital").map(r => r.ref), ["key:mode", "key:rpm"])
+        compare(page.addFlowPart.pickable("bar").map(r => r.ref), ["key:rpm"])
+        compare(page.addFlowPart.pickable("digital").map(r => r.ref), ["key:mode", "key:rpm"])
     }
 
     // No session: the rows of the last URI that connected; none, a line
     function test_withNoSessionThePickerReadsWhatSettingsChose() {
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
-        page.pickKind("ring")
+        page.addFlowPart.pickKind("ring")
         find(page, "dashSignalPanel")
         verify(find(page, "signalNone").visible, "nothing chosen, nothing to pick")
         compare(find(page, "signalNone").text,
@@ -717,7 +717,7 @@ TestCase {
     function test_aBatteryCellReadsOnEitherSet(data) {
         const page = pageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        page.pickKind("digital")
+        page.addFlowPart.pickKind("digital")
         page.offlineUri = data.uri
         const panel = find(page, "dashSignalPanel")
         const findField = find(panel, "filterText")

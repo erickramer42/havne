@@ -418,8 +418,8 @@ TestCase {
     // What changes the page under a held finger ends the hold: nothing
     // stays non-interactive, and the release moves and opens nothing
     function test_aChangeUnderTheFingerEndsTheHold_data() {
-        return [{ tag: "a cell removed before it", act: p => p.removeCell(0), left: ["B", "C", "D"] },
-                { tag: "another page added", act: p => p.addPage(), left: ["A", "B", "C", "D"] },
+        return [{ tag: "a cell removed before it", act: p => p.editsPart.removeCell(0), left: ["B", "C", "D"] },
+                { tag: "another page added", act: p => p.editsPart.addPage(), left: ["A", "B", "C", "D"] },
                 { tag: "Done", act: p => p.stopEditing(), left: ["A", "B", "C", "D"] }]
     }
     function test_aChangeUnderTheFingerEndsTheHold(data) {

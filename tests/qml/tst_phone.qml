@@ -196,16 +196,16 @@ TestCase {
                 page.select(1)
                 page.moreShown = true
             } else if (data.tag === "dashboardPhoneAdd") {
-                page.startAdd()
+                page.addFlowPart.startAdd()
             } else if (data.tag === "dashboardPhoneSignal") {
-                page.pickKind("analog")
+                page.addFlowPart.pickKind("analog")
             } else if (data.tag === "dashboardPhoneReset") {
                 page.moreShown = true
                 page.confirmReset = true
             } else if (data.tag === "dashboardPhoneUndo") {
                 page.stopEditing()
-                page.removeCell(1)
-                page.undo()
+                page.editsPart.removeCell(1)
+                page.historyPart.undo()
                 verify(find(page, "dashUndoLineUndo").visible, "the line with its Undo")
             }
         }
@@ -2123,9 +2123,9 @@ TestCase {
         find(dash, "dashMore").clicked()
         // Move page left and right show only with pages to move among
         tall(["moreRename", "moreAddPage", "moreRemovePage", "moreExport", "moreLoad", "moreReset"])
-        dash.addPage()
+        dash.editsPart.addPage()
         tall(["moreLeft", "moreRight"])
-        dash.removePage()
+        dash.editsPart.removePage()
         dash.confirmReset = true
         tall(["resetConfirm", "resetKeep"])
         dash.confirmReset = false
@@ -2139,9 +2139,9 @@ TestCase {
               "panelStart", "panelEnd", "panelCopy", "panelPaste", "panelRemove"])
         dash.copySelected()
         tall(["dashAddCell_0", "dashPasteCell_0"])
-        dash.startAdd()
+        dash.addFlowPart.startAdd()
         tall(["addClose", "addKind_analog", "addKind_digital"])
-        dash.pickKind("analog")
+        dash.addFlowPart.pickKind("analog")
         tall(["signalBack", "pickSignal_" + Bridge.gaugeSignals["rpm"][0]])
         dash.stopEditing()
     }
@@ -2203,11 +2203,11 @@ TestCase {
         settings.uriField.text = ""
         settings.uriPart.chooseProfile("obd2")
         dash.startEditing()
-        dash.pickKind("ring")
-        verify(dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+        dash.addFlowPart.pickKind("ring")
+        verify(dash.addFlowPart.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
                "obd2's speed, with no URI typed")
         settings.uriField.text = "mock://demo"
-        tryVerify(() => dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][0]),
+        tryVerify(() => dash.addFlowPart.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][0]),
                   3000, "the list follows the field")
         dash.stopEditing()
     }

@@ -25,7 +25,7 @@ GaugeCard {
     // With no session the hub has no row: the listed profile's row gives the decimals
     readonly property int listedDecimals: {
         const refs = cell && Array.isArray(cell.refs) ? cell.refs : []
-        for (const r of panelCard.host.profileRows) {
+        for (const r of panelCard.host.addFlowPart.profileRows) {
             if (refs.indexOf(r.ref) >= 0)
                 return r.decimals
         }
@@ -157,7 +157,7 @@ GaugeCard {
                 maximumLength: DashboardBook.maxLabel
                 text: panelCard.cell && panelCard.cell.label ? panelCard.cell.label : ""
                 onEditingFinished: {
-                    panelCard.host.setLabel(text)
+                    panelCard.host.editsPart.setLabel(text)
                     text = Qt.binding(() => panelCard.cell && panelCard.cell.label
                                             ? panelCard.cell.label : "")
                 }
@@ -171,13 +171,13 @@ GaugeCard {
                     objectName: "panelSignal"
                     Layout.fillWidth: true
                     text: qsTr("Change signal")
-                    onClicked: panelCard.host.changeSignal()
+                    onClicked: panelCard.host.addFlowPart.changeSignal()
                 }
                 ThemedButton {
                     objectName: "panelKind"
                     Layout.fillWidth: true
                     text: qsTr("Change kind")
-                    onClicked: panelCard.host.changeKind()
+                    onClicked: panelCard.host.addFlowPart.changeKind()
                 }
             }
 
@@ -248,7 +248,7 @@ GaugeCard {
                 from: 0
                 to: 6
                 value: panelCard.decimalsNow
-                onValueModified: panelCard.host.setOptions({ decimals: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ decimals: value })
             }
 
             // The span, in the grid's units, which the words name
@@ -260,7 +260,7 @@ GaugeCard {
                 from: 1
                 to: DashboardBook.maxColumns
                 value: panelCard.cell ? panelCard.cell.w : 1
-                onValueModified: panelCard.host.resize(value, panelCard.cell.h)
+                onValueModified: panelCard.host.editsPart.resize(value, panelCard.cell.h)
             }
             Caption { text: panelCard.host.phoneForm ? qsTr("Height") : qsTr("Rows") }
             SpinBox {
@@ -277,7 +277,7 @@ GaugeCard {
                     : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
                 stepSize: panelCard.host.spanScale
                 value: panelCard.cell ? panelCard.cell.h : 1
-                onValueModified: panelCard.host.resize(panelCard.cell.w, panelCard.host.phoneForm
+                onValueModified: panelCard.host.editsPart.resize(panelCard.cell.w, panelCard.host.phoneForm
                     ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
                     : value)
             }
@@ -293,7 +293,7 @@ GaugeCard {
                                          Theme.touchTarget)
                 checked: panelCard.cell && panelCard.cell.options
                          ? panelCard.cell.options.peak === true : false
-                onToggled: panelCard.host.setOptions({ peak: checked })
+                onToggled: panelCard.host.editsPart.setOptions({ peak: checked })
             }
 
             // The kind's own
@@ -316,7 +316,7 @@ GaugeCard {
                                                   ? panelCard.cell.options.caption : ""
                 text: current
                 onEditingFinished: {
-                    panelCard.host.setOptions({ caption: text === "" ? null : text })
+                    panelCard.host.editsPart.setOptions({ caption: text === "" ? null : text })
                     text = Qt.binding(() => current)
                 }
             }
@@ -332,7 +332,7 @@ GaugeCard {
                                                   ? panelCard.cell.options.description : ""
                 text: current
                 onEditingFinished: {
-                    panelCard.host.setOptions({ description: text === "" ? null : text })
+                    panelCard.host.editsPart.setOptions({ description: text === "" ? null : text })
                     text = Qt.binding(() => current)
                 }
             }
@@ -347,7 +347,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.cells !== undefined
                        ? panelCard.cell.options.cells : 24
-                onValueModified: panelCard.host.setOptions({ cells: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ cells: value })
             }
             Caption { visible: panelCard.kind === "segments"; text: qsTr("Curve") }
             OptionField {
@@ -369,7 +369,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.digits !== undefined
                        ? panelCard.cell.options.digits : panelCard.host.selectedDigits
-                onValueModified: panelCard.host.setOptions({ digits: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ digits: value })
             }
             Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
             SpinBox {
@@ -383,7 +383,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.window !== undefined
                        ? panelCard.cell.options.window : 30
-                onValueModified: panelCard.host.setOptions({ window: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ window: value })
             }
             Caption { visible: panelCard.kind === "bar"; text: qsTr("Standing up") }
             Switch {
@@ -407,7 +407,7 @@ GaugeCard {
                         base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, s, 4 * s)
                     else if (c && !on && c.w === s && c.h === 4 * s)
                         base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, 2 * s, 2 * s)
-                    panelCard.host.setOptions({ vertical: on }, base)
+                    panelCard.host.editsPart.setOptions({ vertical: on }, base)
                 }
             }
             Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
@@ -419,7 +419,7 @@ GaugeCard {
                                          Theme.touchTarget)
                 checked: panelCard.cell && panelCard.cell.options
                          ? panelCard.cell.options.marks !== false : true
-                onToggled: panelCard.host.setOptions({ marks: checked })
+                onToggled: panelCard.host.editsPart.setOptions({ marks: checked })
             }
             Caption { visible: panelCard.kind === "shift-light"; text: qsTr("Lights") }
             SpinBox {
@@ -432,7 +432,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.count !== undefined
                        ? panelCard.cell.options.count : panelCard.host.selectedCount
-                onValueModified: panelCard.host.setOptions({ count: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ count: value })
             }
         }
 
@@ -476,7 +476,7 @@ GaugeCard {
                     Accessible.name: qsTr("Default color")
                     checkable: true
                     checked: colorRow.current === "" && colorRow.custom === ""
-                    onClicked: { colorRow.customOpen = false; panelCard.host.setOptions({ color: null }) }
+                    onClicked: { colorRow.customOpen = false; panelCard.host.editsPart.setOptions({ color: null }) }
                 }
                 Repeater {
                     model: Theme.gaugeColorNames
@@ -489,7 +489,7 @@ GaugeCard {
                         checkable: true
                         checked: colorRow.current === modelData
                         Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
-                        onToggled: { toggle(); colorRow.customOpen = false; panelCard.host.setOptions({ color: modelData }) }
+                        onToggled: { toggle(); colorRow.customOpen = false; panelCard.host.editsPart.setOptions({ color: modelData }) }
                         contentItem: Item {}
                         background: Rectangle {
                             anchors.centerIn: parent
@@ -554,7 +554,7 @@ GaugeCard {
                     return
                 // A focus pass-through sends editingFinished with nothing typed: nothing to store
                 if (edited || !Qt.colorEqual(hex, base))
-                    panelCard.host.setOptions({ color: hex })
+                    panelCard.host.editsPart.setOptions({ color: hex })
                 rebind()
             }
             // Another gauge, or the row hidden: what was left typed doesn't follow
@@ -639,28 +639,28 @@ GaugeCard {
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected > 0
                 text: qsTr("Move earlier")
-                onClicked: panelCard.host.moveTo(panelCard.host.selected - 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.selected - 1)
             }
             ThemedButton {
                 objectName: "panelLater"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected < panelCard.host.shownCells.length - 1
                 text: qsTr("Move later")
-                onClicked: panelCard.host.moveTo(panelCard.host.selected + 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.selected + 1)
             }
             ThemedButton {
                 objectName: "panelStart"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected > 0
                 text: qsTr("To the start")
-                onClicked: panelCard.host.moveTo(0)
+                onClicked: panelCard.host.editsPart.moveTo(0)
             }
             ThemedButton {
                 objectName: "panelEnd"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected < panelCard.host.shownCells.length - 1
                 text: qsTr("To the end")
-                onClicked: panelCard.host.moveTo(panelCard.host.shownCells.length - 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.shownCells.length - 1)
             }
         }
 
@@ -671,7 +671,7 @@ GaugeCard {
             flat: true
             text: qsTr("Remove")
             Accessible.name: qsTr("Remove %1").arg(panelCard.name)
-            onClicked: panelCard.host.removeCell(panelCard.host.selected)
+            onClicked: panelCard.host.editsPart.removeCell(panelCard.host.selected)
         }
     }
 
@@ -702,11 +702,11 @@ GaugeCard {
         onEditingFinished: {
             const t = text.trim()
             if (t === "" && clearable) {
-                panelCard.host.setOptions({ [option]: null })
+                panelCard.host.editsPart.setOptions({ [option]: null })
             } else {
                 const v = Number(t)
                 if (t !== "" && isFinite(v))
-                    panelCard.host.setOptions({ [option]: converted ? panelCard.host.stored(cell.unit ?? "", v) : v })
+                    panelCard.host.editsPart.setOptions({ [option]: converted ? panelCard.host.stored(cell.unit ?? "", v) : v })
             }
             text = Qt.binding(() => field.shownText)
         }

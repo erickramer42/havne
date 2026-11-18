@@ -126,13 +126,13 @@ TestCase {
         const page = createTemporaryObject(dashComponent, testCase.Window.window.contentItem)
         page.vehicles = VehicleBook.pick(book, "v1")
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("doesn't pick") < 0, page.layoutFilePart.layoutNote)
 
         page.vehicles = VehicleBook.setPicks(VehicleBook.pick(book, "v1"), [own])
-        page.loadLayoutFrom(url)   // the layout already shown: only the note is new
-        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Shared PIDs") >= 0,
-               page.layoutNote)
+        page.layoutFilePart.loadLayoutFrom(url)   // the layout already shown: only the note is new
+        verify(page.layoutFilePart.layoutNote.indexOf("plugins this vehicle doesn't pick: Shared PIDs") >= 0,
+               page.layoutFilePart.layoutNote)
     }
 
     // The Signals page shows what the move made: every moved file a
