@@ -67,9 +67,11 @@ public:
     // Every kept copy loaded and its variants registered, once (later
     // calls only list): one entry a plugin, by name, { sha256, ok, words,
     // id, name, version, lineage, variants, profiles, extends, counts,
-    // owns, mine, importedFor, obdb }. extends, counts and owns run with
-    // variants: the built-in set a variant adds to ("obd2" or ""), its
-    // set's signals and those less the base's. obdb: the plugin is a
+    // owns, replacedNames, mine, importedFor, obdb }. extends, counts, owns and
+    // replacedNames run with variants: the built-in set a variant adds to
+    // ("obd2" or ""), its set's signals, the signals it adds to the base's
+    // and the names of the base's it replaces (variantshape.h; a replaced
+    // name is in neither the count's base part nor owns). obdb: the plugin is a
     // converted OBDb set. A copy that no longer loads is { sha256, ok
     // false, words }
     QVariantList all();
@@ -257,7 +259,8 @@ private:
         QStringList profiles;
         QStringList extends; // by variant: "obd2" or ""
         QVariantList counts; // by variant: the set's signals
-        QVariantList owns;   // by variant: those less the base's
+        QVariantList owns;   // by variant: the signals it adds to the base's
+        QVariantList replacedNames; // by variant: the base signals it replaces, by name
         bool obdb = false;   // a converted OBDb set
     };
     using HeldMap = std::map<QString, Held>;

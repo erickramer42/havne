@@ -270,7 +270,8 @@ Pane {
             rows.push({ sha256: o.sha256, id: o.id, name: o.name, version: o.version,
                         variant: o.variant, profile: o.profile, mine: o.mine === true,
                         obd2: o.extends === "obd2", count: at >= 0 ? p.counts[at] : 0,
-                        own: at >= 0 ? p.owns[at] : 0, several: p.variants.length > 1,
+                        own: at >= 0 ? p.owns[at] : 0, replacedNames: at >= 0 ? p.replacedNames[at] : [],
+                        several: p.variants.length > 1,
                         forCar: pickedVehicle !== null
                                 && (o.forThisCar === true || kept.indexOf(o.profile) >= 0
                                     || picks.indexOf(o.profile) >= 0),
@@ -307,10 +308,18 @@ Pane {
     }
     // What a row reads, and whose it is
     function rowReads(r) {
-        const n = r.obd2 ? r.own : r.count
-        const signals = n === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(n)
-        return (r.obd2 ? qsTr("obd2 + %1").arg(signals) : signals)
-               + (r.mine ? qsTr(" · yours") : "")
+        const yours = r.mine ? qsTr(" · yours") : ""
+        if (!r.obd2)
+            return (r.count === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(r.count)) + yours
+        // A file on obd2 adds signals and replaces some of obd2's by name
+        const swapped = r.replacedNames.length === 0 ? ""
+            : r.replacedNames.length <= 2 ? qsTr("%1 replaced").arg(r.replacedNames.join(qsTr(" and ")))
+            : qsTr("%1 replaced").arg(qsTr("%1 signals").arg(r.replacedNames.length))
+        const added = r.own === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(r.own)
+        if (swapped === "")
+            return qsTr("obd2 + %1").arg(added) + yours
+        return (r.own === 0 ? qsTr("obd2, %1").arg(swapped)
+                            : qsTr("obd2, %1, %2 more").arg(swapped, r.own)) + yours
     }
 
     // The picks no plugin here has (a version that dropped the variant, a
