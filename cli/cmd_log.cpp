@@ -138,22 +138,37 @@ void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
     }
 }
 
-} // namespace
-
-// The analysis log from the command line (ADR-0056 section 7): the
-// session, the focus on the signals named (core asks those alone, as
-// often as the bus allows), a recorder attached before start so the
-// folder's header carries the focus, and a log line each period of
-// session time with the recording's size; no frame or values lines, the
-// folder is the output. The names are checked against the session's set
-// before any line is written, so a typo is usage: exit 2, nothing on
-// stdout. Ends at Ctrl+C, --seconds, a failed recording (exit 1) or a
-// replay's last frame; a lost link is logged in health lines and waited
-// out. Exit codes as stream's.
-int run_log(const cli::LogArgs& args)
-{
-    Output out;
+// What run_log's phases share: the session and its lines, the focus,
+// the recording, the loop's clock and its end
+struct LogRun {
     ecuio_condition_set_t* conditions = nullptr;
+    ecuio_session_t* session = nullptr;
+    const ecuio_signal_set_t* set = nullptr;
+    std::vector<uint16_t> ids;
+    ecuio_session_info_t info{};
+    bool replay_ends = false;
+    uint32_t channels = 0;
+    cli::SessionSeen session_seen[ECUIO_MAX_CHANNELS] = {};
+    ShownConditions shown;
+    ecuio_recorder_t* recorder = nullptr;
+    bool recording_failed = false;
+    std::string folder;
+    cli::ArmedSeen armed_seen;
+    LogFrames frames;
+    uint64_t started = 0;
+    const char* reason = nullptr;
+};
+
+// A phase's answer: kGoOn, or the command's exit code
+constexpr int kGoOn = -1;
+
+// The conditions file, the connect, and the names against the set: a typo
+// is usage before any line is written
+int log_connect(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_condition_set_t*& conditions = r.conditions;
+    ecuio_session_t*& session = r.session;
+    std::vector<uint16_t>& ids = r.ids;
     if (args.conditions != nullptr) {
         std::string why;
         ecuio_status_t loaded = ECUIO_OK;
@@ -164,7 +179,6 @@ int run_log(const cli::LogArgs& args)
             return ended(out, kExitConnect);
         }
     }
-    ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st =
         create_within(out, args.uri, &session, &detail, /*start_first=*/true);
@@ -174,8 +188,8 @@ int run_log(const cli::LogArgs& args)
         write_error(out, st, detail.c_str());
         return ended(out, kExitConnect);
     }
-    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-    std::vector<uint16_t> ids;
+    r.set = ecuio_session_signal_set(session);
+    const ecuio_signal_set_t* set = r.set;
     std::string why;
     if (!cli::resolve_focus(set, args.names, ids, &why,
                             session_signal_file())) {
@@ -184,22 +198,40 @@ int run_log(const cli::LogArgs& args)
         std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
         return kExitUsage;
     }
+    return kGoOn;
+}
+
+// The start and session lines, and the conditions attached
+int log_session_lines(Output& out, const cli::LogArgs&, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_condition_set_t* conditions = r.conditions;
+    ecuio_session_info_t& info = r.info;
     write_start(out);
-    ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
-                             !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
+    r.replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
+                    !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, session, info);
-    const uint32_t channels = module_count(info);
-    cli::SessionSeen session_seen[ECUIO_MAX_CHANNELS] = {};
-    ShownConditions shown;
+    r.channels = module_count(info);
+    ShownConditions& shown = r.shown;
     if (conditions != nullptr &&
         !attach_conditions(out, session, conditions, "file", &shown)) {
         out.flush();
         ecuio_session_destroy(session);
         return ended(out, kExitConnect);
     }
+    return kGoOn;
+}
+
+// The focus: the names, or --pick ranked's default pick, set before the
+// recorder attaches, and its line
+int log_focus(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_condition_set_t* conditions = r.conditions;
+    const ecuio_signal_set_t* set = r.set;
+    std::vector<uint16_t>& ids = r.ids;
     // --pick ranked: the names join the set's ranked signals as a default
     // pick; with no pick to make, the names alone are the focus
     uint32_t flags = 0;
@@ -242,7 +274,7 @@ int run_log(const cli::LogArgs& args)
     }
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
-    st = ecuio_session_set_focus_with(
+    const ecuio_status_t st = ecuio_session_set_focus_with(
         session, ids.empty() ? nullptr : ids.data(),
         static_cast<uint32_t>(ids.size()), min_sweep_ms, flags);
     if (st != ECUIO_OK) {
@@ -258,8 +290,15 @@ int run_log(const cli::LogArgs& args)
                         session_signal_file());
         write_line(out, b.line);
     }
-    ecuio_recorder_t* recorder = nullptr;
-    bool recording_failed = false;
+    return kGoOn;
+}
+
+// The recording, and the folder the log and end lines name
+int log_recording(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_recorder_t*& recorder = r.recorder;
+    bool& recording_failed = r.recording_failed;
     if (!open_recording(out, session, args.folder, args.label, &recorder,
                         args.armed)) {
         out.flush();
@@ -269,12 +308,13 @@ int run_log(const cli::LogArgs& args)
     // The folder, which the log and end lines name: a path core can't give
     // whole is an error, never an empty or cut folder in the lines. An
     // armed log's is each window's as it opens, none before the first.
-    std::string folder;
-    cli::ArmedSeen armed_seen;
+    std::string& folder = r.folder;
+    cli::ArmedSeen& armed_seen = r.armed_seen;
     if (!args.armed) {
         char buf[4096];
         uint32_t len = 0;
-        st = ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
+        const ecuio_status_t st =
+            ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
         if (st != ECUIO_OK || len >= sizeof buf) {
             write_error(out, st != ECUIO_OK ? st : ECUIO_ERR_INVALID_ARGUMENT,
                         st != ECUIO_OK
@@ -299,11 +339,19 @@ int run_log(const cli::LogArgs& args)
         armed_seen.armed_said = true;
     }
     out.flush();
+    return kGoOn;
+}
 
-    LogFrames frames;
+// The frame callback and the start
+int log_start(Output& out, const cli::LogArgs&, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_recorder_t*& recorder = r.recorder;
+    bool& recording_failed = r.recording_failed;
+    LogFrames& frames = r.frames;
     ecuio_register_frame_callback(session, on_log_frame, &frames);
     install_handlers();
-    st = ecuio_session_start(session);
+    const ecuio_status_t st = ecuio_session_start(session);
     if (st != ECUIO_OK) {
         write_error(out, st);
         out.flush();
@@ -313,15 +361,32 @@ int run_log(const cli::LogArgs& args)
                         &recording_failed);
         return ended(out, kExitConnect);
     }
+    return kGoOn;
+}
 
+// The loop until its end's reason: the lines each poll writes
+void log_loop(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_recorder_t* recorder = r.recorder;
+    bool& recording_failed = r.recording_failed;
+    std::string& folder = r.folder;
+    cli::ArmedSeen& armed_seen = r.armed_seen;
+    cli::SessionSeen* session_seen = r.session_seen;
+    ShownConditions& shown = r.shown;
+    const ecuio_session_info_t& info = r.info;
+    const uint32_t channels = r.channels;
+    const bool replay_ends = r.replay_ends;
+    LogFrames& frames = r.frames;
+    const char*& reason = r.reason;
     // Session time's clock (ADR-0033): --seconds and the log line's
     // period count a sleep too
-    const uint64_t started = ecuio_clock_us();
+    r.started = ecuio_clock_us();
+    const uint64_t started = r.started;
     cli::SleepWatch sleep_watch(ecuio_clock_slept_us());
     cli::LogTicker ticker(started, log_every_us());
     int32_t last_error = ECUIO_OK;
     uint32_t episodes = 0;
-    const char* reason = nullptr;
     while (!reason) {
         std::this_thread::sleep_for(kPoll);
         const uint64_t now = ecuio_clock_us();
@@ -364,7 +429,15 @@ int run_log(const cli::LogArgs& args)
     if (reason == nullptr) {
         reason = "output-failed";
     }
+}
 
+// The close on a thread of its own, the recording ended first when an
+// interrupt finds the close still waiting
+void log_close(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_recorder_t*& recorder = r.recorder;
+    bool& recording_failed = r.recording_failed;
     // The close on a thread of its own, as stream's: interrupted and the
     // close still waiting (an adapter's teardown), the recording ends
     // whole now, the session going on unrecorded
@@ -384,7 +457,22 @@ int run_log(const cli::LogArgs& args)
         }
     }
     closer.join();
+}
 
+// The last lines, the end noted into the recording, the destroy and the
+// recording's close, then the end line and the exit code
+int log_end(Output& out, const cli::LogArgs& args, LogRun& r)
+{
+    ecuio_session_t* session = r.session;
+    ecuio_recorder_t*& recorder = r.recorder;
+    bool& recording_failed = r.recording_failed;
+    std::string& folder = r.folder;
+    cli::ArmedSeen& armed_seen = r.armed_seen;
+    cli::SessionSeen* session_seen = r.session_seen;
+    const uint32_t channels = r.channels;
+    LogFrames& frames = r.frames;
+    const uint64_t started = r.started;
+    const char* reason = r.reason;
     poll_sessions(out, session, channels, session_seen);
     int code = kExitOk;
     wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
@@ -424,6 +512,35 @@ int run_log(const cli::LogArgs& args)
     g_done.store(true);
 #endif
     return code;
+}
+
+} // namespace
+
+// The analysis log from the command line (ADR-0056 section 7): the
+// session, the focus on the signals named (core asks those alone, as
+// often as the bus allows), a recorder attached before start so the
+// folder's header carries the focus, and a log line each period of
+// session time with the recording's size; no frame or values lines, the
+// folder is the output. The names are checked against the session's set
+// before any line is written, so a typo is usage: exit 2, nothing on
+// stdout. Ends at Ctrl+C, --seconds, a failed recording (exit 1) or a
+// replay's last frame; a lost link is logged in health lines and waited
+// out. Exit codes as stream's.
+int run_log(const cli::LogArgs& args)
+{
+    Output out;
+    LogRun r;
+    for (int (*phase)(Output&, const cli::LogArgs&, LogRun&) :
+         {log_connect, log_session_lines, log_focus, log_recording,
+          log_start}) {
+        const int code = phase(out, args, r);
+        if (code != kGoOn) {
+            return code;
+        }
+    }
+    log_loop(out, args, r);
+    log_close(out, args, r);
+    return log_end(out, args, r);
 }
 
 // log's arguments and its profile, then run_log
