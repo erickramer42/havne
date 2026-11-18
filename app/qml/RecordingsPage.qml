@@ -247,10 +247,9 @@ Page {
         viewerSettings.views = JSON.stringify(ChartLayout.viewsWith(viewsBook, viewName, patch, Date.now()))
         chart.requestPaint()
     }
-    // A signal's id: its key, or its name where the open has none (an
-    // older recording's values as recorded, which has names alone)
+    // A signal's id: its key, else its name (ComparePairs.idOf)
     function idOf(s) {
-        return s.key !== undefined && s.key !== "" ? s.key : s.name
+        return ComparePairs.idOf(s)
     }
     // A format 4 recording keeps a pane by key; an older one by name, which
     // its values and its frames opens share
@@ -603,12 +602,13 @@ Page {
     // The recording's rows a second, every signal's together
     property real rowsPerSecond: 0
 
-    // A second recording overlaid (ADR-0049 step 5): its signals of the
-    // same names drawn dashed beside the first's, sharing their scales,
+    // A second recording overlaid (ADR-0049 step 5): each signal's pair
+    // there (comparePairs) drawn dashed beside it, sharing its scale,
     // on the first's axis at compareOffsetMs (its own time plus the
     // offset). alignOn says how the two line up: "start", "utc", "marker"
-    // (alignLabel), "rise" or "fall" (alignSignal reaching alignLevel, in
-    // display units, after being alignHysteresis beyond it), "engine"
+    // (alignLabel), "rise" or "fall" (the signal alignSignal, its idOf,
+    // and its pair there reaching alignLevel, in display units, after
+    // being alignHysteresis beyond it), "engine"
     // (each engine's first start: RPM reaching 500 after being below 100)
     // or "pull" (the start of a pull chosen in each: alignPullHere of
     // pullsHere on alignPullThere of pullsThere)
@@ -620,11 +620,12 @@ Page {
     property bool compareAligned: false
     property real compareOffsetMs: 0
     property string compareStatus: ""
-    property var compareByName: ({})
+    // Each signal's pair there by index (ComparePairs.made), at either list's change
+    property var comparePairs: []
     property real compareRowsPerSecond: 0
     // The comparison's difference traces (ADR-0056's appendix "a difference
-    // in the viewer"): for each plotted number the compared recording holds
-    // under the same name in the same unit, the compared one's mean less
+    // in the viewer"): for each plotted number whose pair there is in the
+    // same unit, the compared one's mean less
     // this one's in each column, a column the same stretch of the axis in
     // both (RecordingView.columnMeans)
     property bool differenceShown: false
@@ -644,6 +645,7 @@ Page {
     property string alignOn: "start"
     property string alignLabel: ""
     property string alignSignal: ""
+    property string alignSignalName: ""
     property real alignLevel: NaN
     property real alignHysteresis: 0
     // Each recording's pulls in time order (RecordingView.stretches; null
@@ -966,6 +968,7 @@ Page {
         alignOn = "start"
         alignLabel = ""
         alignSignal = ""
+        alignSignalName = ""
         alignLevel = NaN
         alignHysteresis = 0
         openedTitle = ""
@@ -1242,16 +1245,15 @@ Page {
         return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
-    // What a difference is taken between: a plotted number here and the
-    // compared recording's signal of the same name in the same unit (the
-    // unit's case aside), each with samples
+    // What a difference is taken between: a plotted number here and its
+    // pair there in the same unit (the unit's case aside), each with samples
     function differencePairs() {
         if (!compareAligned || recording.state !== RecordingView.Open)
             return []
         const sigs = recording.signalList
         const theirs = compare.signalList
         return sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
-                   .map(s => ({ mine: s.index, theirs: root.compareByName[s.name] }))
+                   .map(s => ({ mine: s.index, theirs: ComparePairs.pairOf(root.comparePairs, s.index) }))
                    .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
                                 && theirs[p.theirs].samples > 0
                                 && theirs[p.theirs].unit.toLowerCase() === sigs[p.mine].unit.toLowerCase())
@@ -1348,8 +1350,8 @@ Page {
         if (recording.state !== RecordingView.Open)
             return []
         // A plotted signal with no samples in this recording has nothing to
-        // draw here, so its columns aren't read; the compared recording's
-        // of the same name still draw. With nothing drawn the chart says so
+        // draw here, so its columns aren't read; its pair in the compared
+        // recording still draws. With nothing drawn the chart says so
         const sigs = recording.signalList
         const plotted = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
         if (plotted.length === 0)
@@ -1357,7 +1359,7 @@ Page {
         const indexes = plotted.filter(i => sigs[i].samples > 0)
         const theirs = compareAligned ? compare.signalList : []
         const pairs = !compareAligned ? []
-            : plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+            : plotted.map(i => ({ mine: i, theirs: ComparePairs.pairOf(root.comparePairs, i) }))
                      .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
                                   && theirs[p.theirs].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
@@ -1435,13 +1437,13 @@ Page {
     }
 
     // The compared recording's values at axis time t, by the first's
-    // signal index, the names matched
+    // signal index, each signal's pair
     function compareValuesAt(t) {
         const out = {}
         if (!compareAligned || isNaN(t) || t - compareOffsetMs < 0)
             return out
-        const mine = recording.signalList.filter(s => root.compareByName[s.name] !== undefined)
-        const got = compare.valuesAt(mine.map(s => root.compareByName[s.name]), t - compareOffsetMs)
+        const mine = recording.signalList.filter(s => ComparePairs.pairOf(root.comparePairs, s.index) !== undefined)
+        const got = compare.valuesAt(mine.map(s => root.comparePairs[s.index]), t - compareOffsetMs)
         for (let k = 0; k < got.length; ++k)
             out[mine[k].index] = got[k]
         return out
@@ -1468,7 +1470,7 @@ Page {
     }
 
     // The first recording's markers' labels, each once, and its number
-    // signals' names: what the alignment can be on
+    // signals: what the alignment can be on
     function markerLabels() {
         const out = []
         for (const m of recording.markers) {
@@ -1477,8 +1479,10 @@ Page {
         }
         return out
     }
-    function numberNames() {
-        return recording.signalList.filter(s => !s.isText).map(s => s.name)
+    // The alignment's signal, by its id, with its name for another decode
+    function chooseAlignSignal(s) {
+        alignSignal = s ? idOf(s) : ""
+        alignSignalName = s ? s.name : ""
     }
     // Asks each recording for its pulls, once: the answers align again
     function askPulls() {
@@ -1633,7 +1637,7 @@ Page {
         if (on === "marker" && alignLabel === "")
             alignLabel = markerLabels()[0] || ""
         if ((on === "rise" || on === "fall") && alignSignal === "")
-            alignSignal = numberNames()[0] || ""
+            chooseAlignSignal(ComparePairs.numbers(recording.signalList)[0])
         alignOn = on
     }
     // A number as typed, in the locale or plain; NaN for none
@@ -1675,14 +1679,14 @@ Page {
             here = alignLabel !== "" ? recording.findMarker(alignLabel) : -1
             there = alignLabel !== "" ? compare.findMarker(alignLabel) : -1
         } else if (alignOn === "rise" || alignOn === "fall") {
-            const s = recording.signalList.find(x => x.name === alignSignal)
+            const s = recording.signalList.find(x => idOf(x) === alignSignal)
             if (!s || isNaN(alignLevel)) {
                 compareStatus = qsTr("Dashed: %1. Choose a signal and type a level to align on").arg(compareTitle)
                 return
             }
             const verb = alignOn === "rise" ? qsTr("rising to %1") : qsTr("falling to %1")
-            what = qsTr("%1 %2").arg(alignSignal).arg(verb.arg(valueText(alignLevel, s.decimals, s.unit)))
-            const j = compareByName[alignSignal]
+            what = qsTr("%1 %2").arg(s.name).arg(verb.arg(valueText(alignLevel, s.decimals, s.unit)))
+            const j = ComparePairs.pairOf(comparePairs, s.index)
             here = recording.findThreshold(s.index, alignLevel, alignHysteresis, alignOn === "rise")
             there = j !== undefined ? compare.findThreshold(j, alignLevel, alignHysteresis, alignOn === "rise") : -1
         } else if (alignOn === "engine") {
@@ -1988,7 +1992,7 @@ Page {
             return true
         if (!compareAligned)
             return false
-        const theirs = compare.signalList[root.compareByName[s.name]]
+        const theirs = compare.signalList[ComparePairs.pairOf(root.comparePairs, s.index)]
         return theirs !== undefined && !theirs.isText && theirs.samples > 0
     }
     function noValuesText(names) {
@@ -2112,6 +2116,8 @@ Page {
             root.askStretches()
         }
         onSignalListChanged: {
+            root.comparePairs = ComparePairs.made(recording, compare)
+            root.alignSignal = ComparePairs.alignId(recording.signalList, root.alignSignal, root.alignSignalName)
             // An open, a close or new units: a range set before means nothing
             root.paneRanges = ({})
             if (root.hasCursor)
@@ -2144,20 +2150,18 @@ Page {
             root.pullsThereFailed = false
             root.pullsThereAsk = 0
             root.alignPullThere = 0
+            root.comparePairs = ComparePairs.made(recording, compare)
             if (compare.state === RecordingView.Open) {
-                const names = {}
                 let rows = 0
-                for (const s of compare.signalList) {
-                    names[s.name] = s.index
+                for (const s of compare.signalList)
                     rows += s.samples
-                }
-                root.compareByName = names
                 root.compareRowsPerSecond = rows / Math.max(1, compare.durationMs / 1000)
             }
             if (compare.state !== RecordingView.Opening)
                 root.align()
         }
         onSignalListChanged: {
+            root.comparePairs = ComparePairs.made(recording, compare)
             if (root.hasCursor)
                 root.setCursor(root.cursorMs)
         }

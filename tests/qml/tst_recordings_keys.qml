@@ -194,4 +194,115 @@ TestCase {
         for (const n of page.plottedNames)
             verify(names.indexOf(n) >= 0, n + " is a name")
     }
+
+    // A format 4 recording of two modules' RPM, each rising 10 rpm every
+    // tenth of a second from its own start
+    function twoRpmRecording(name, from7E8, from7E9) {
+        const folder = Harness.writeFramesRecording(name, 50, 100000)
+        verify(folder !== "", "the folder is made")
+        const header = "ecuio session recording, format 4 (ADR-0049)\n"
+                       + "started  2026-11-18 09:00:00.000 (local time)\n"
+                       + "profile  obd2\n"
+                       + "frame flags  complete\n"
+                       + "signal  7E8:410C:2.0:16,RPM,number,rpm,0,1,1\n"
+                       + "signal  7E9:410C:2.0:16,RPM,number,rpm,0,2,1\n"
+                       + "\n00:00:05.000  +5.000  end  test: 0 frames, 100 values, "
+                       + "0 records dropped, 0 notes dropped\n"
+        const rows = ["host_us,signal,value,unit"]
+        for (let t = 1; t <= 50; ++t) {
+            rows.push((t * 100000) + ",7E8:410C:2.0:16," + (from7E8 + 10 * t) + ",rpm")
+            rows.push((t * 100000) + ",7E9:410C:2.0:16," + (from7E9 + 10 * t) + ",rpm")
+        }
+        verify(Harness.writeScratchFile(name + "/events.log", header).toString() !== "")
+        verify(Harness.writeScratchFile(name + "/signals.csv", rows.join("\n") + "\n").toString() !== "")
+        return { title: name, uri: "replay://x?profile=obd2", source: "", folder: folder,
+                 profile: "obd2" }
+    }
+
+    // Compare pairs a signal by key, else by a name each recording has once
+    // (RecordingView.pairsWith, havne-cli view's rule): two modules' RPM
+    // each with its own, for the dashed values, the difference and a rise's
+    // alignment, and none with an older recording's one RPM
+    function test_compareGoesByKeyElseByANameEachHasOnce() {
+        const page = createPage()
+        page.open(twoRpmRecording("pairs-here", 800, 900))
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        page.compareWith(twoRpmRecording("pairs-there", 780, 700))
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        const sigs = page.recording.signalList
+        const theirs = find(page, "compareView").signalList
+        const e8 = sigs.find(s => s.key === "7E8:410C:2.0:16")
+        const e9 = sigs.find(s => s.key === "7E9:410C:2.0:16")
+        compare(theirs[ComparePairs.pairOf(page.comparePairs, e8.index)].key, e8.key)
+        compare(theirs[ComparePairs.pairOf(page.comparePairs, e9.index)].key, e9.key)
+
+        const got = page.compareValuesAt(1000)
+        compare(got[e8.index].text, "880", "7E8's own there")
+        compare(got[e9.index].text, "800", "7E9's own there")
+        const picks = {}
+        picks[e8.index] = true
+        picks[e9.index] = true
+        page.plotted = picks
+        const pairs = page.differencePairs()
+        compare(pairs.length, 2)
+        for (const p of pairs)
+            compare(theirs[p.theirs].key, sigs[p.mine].key)
+
+        // Rising to 850: here at 0.5 s; there 7E8 at 0.7 s, 7E9 at 1.5 s
+        page.setAlignOn("rise")
+        compare(page.alignSignal, e8.key, "the first number signal, by its key")
+        page.alignLevel = 850
+        page.align()
+        tryVerify(() => page.compareAligned, 5000, "aligned on the rise")
+        fuzzyCompare(page.compareOffsetMs, -200, 1, "on 7E8's pair, not 7E9's")
+        const box = find(page, "alignSignal")
+        compare(box.count, 2, "both RPMs listed")
+        box.activated(1)
+        compare(page.alignSignal, e9.key, "the second, by its key")
+        page.setAlignOn("start")
+        page.align()
+
+        page.compareWith(olderRecording("pairs-older"))
+        tryVerify(() => page.compareAligned && find(page, "compareView").signalList.length === 1,
+                  10000, "the older recording opens")
+        compare(ComparePairs.pairOf(page.comparePairs, e8.index), undefined, "a name this recording has twice pairs nothing")
+        compare(ComparePairs.pairOf(page.comparePairs, e9.index), undefined)
+        compare(page.differencePairs().length, 0)
+
+        // The first recording opened again through its frames while
+        // comparing: its rows are made again, and their pairs with them
+        page.decodeWith("obd2")
+        tryVerify(() => page.recording.state === RecordingView.Open
+                        && page.recording.decodedWith === "obd2", 10000, "its frames through obd2")
+        const paired = page.recording.signalList.filter(s => ComparePairs.pairOf(page.comparePairs, s.index) !== undefined)
+        compare(paired.map(s => s.name), ["RPM"], "obd2's one RPM, by its name there")
+        compare(find(page, "compareView").signalList[ComparePairs.pairOf(page.comparePairs, paired[0].index)].name, "RPM")
+    }
+
+    // A rise's signal kept across another decode: an older recording's
+    // RPM by name in its values, by obd2's key through its frames, and by
+    // name again
+    function test_theAlignmentsSignalOutlivesADecodeSwitch() {
+        const page = createPage()
+        page.open(olderRecording("align-older"))
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        page.compareWith(keyedRecording("align-keyed"))
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("rise")
+        compare(page.alignSignal, "RPM", "by its name: the values have no key")
+
+        page.decodeWith("obd2")
+        tryVerify(() => page.recording.state === RecordingView.Open
+                        && page.recording.decodedWith === "obd2", 10000, "its frames through obd2")
+        const rpm = page.recording.signalList.filter(s => s.name === "RPM")
+        compare(rpm.length, 1)
+        verify(rpm[0].key !== "", "obd2 gives RPM a key")
+        compare(page.alignSignal, rpm[0].key, "the one row of its name, by its key")
+
+        page.decodeWith("")
+        tryVerify(() => page.recording.state === RecordingView.Open
+                        && page.recording.decodedWith === "", 10000, "values as recorded")
+        compare(page.alignSignal, "RPM", "by its name again")
+        page.setAlignOn("start")
+    }
 }

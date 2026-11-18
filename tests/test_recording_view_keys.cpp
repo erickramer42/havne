@@ -4,7 +4,7 @@
 // The viewer's signals by key (ADR-0065 section 9): a format 4
 // recording's keys and none before it, and a frames open keyed by the
 // set's signal file: the recording's own, or a registered profile's
-// through RecordingFrameSet::setSignalFileText.
+// through RecordingFrameSet::setSignalFileText; and Compare's pairs.
 
 #include <gtest/gtest.h>
 
@@ -13,10 +13,12 @@
 #include <QCryptographicHash>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QStringList>
 #include <QTemporaryDir>
 #include <QVariantMap>
 
 #include <functional>
+#include <vector>
 
 #include "bridge_support.h"
 #include "recording_frameset.h"
@@ -278,4 +280,81 @@ TEST(RecordingViewTest, TheBridgesStoreFileKeysTheFramesOpen)
     ASSERT_TRUE(opened(v)) << v.error().toStdString();
     EXPECT_EQ(keyOf(v, "RPM in Thousands"), QStringLiteral("krpm"));
     EXPECT_EQ(removeEveryPlugin(bridge), 1);
+}
+
+namespace {
+
+// A recording of two values for each signal line ("<key>,<name>" in
+// format 4, "<name>" before it), each a number in rpm
+void writeValues(const QString& folder, int format,
+                 const std::vector<QByteArray>& heads)
+{
+    QByteArray log = "ecuio session recording, format " +
+                     QByteArray::number(format) +
+                     " (ADR-0049)\n"
+                     "started  2026-11-18 10:00:00.000 (local time)\n"
+                     "profile  test\n";
+    QByteArray first;
+    QByteArray second;
+    for (const QByteArray& head : heads) {
+        log += "signal  " + head + ",number,rpm,0,1,1\n";
+        const QByteArray id = format >= 4 ? head.left(head.indexOf(',')) : head;
+        first += "100000," + id + ",800,rpm\n";
+        second += "200000," + id + ",810,rpm\n";
+    }
+    const QByteArray csv = "host_us,signal,value,unit\n" + first + second;
+    writeFile(folder + QStringLiteral("/events.log"), log + "\n");
+    writeFile(folder + QStringLiteral("/signals.csv"), csv);
+}
+
+// Each row's pair as its key or name there, "" for none
+QStringList pairNames(RecordingView& here, RecordingView* there)
+{
+    QStringList out;
+    const QVariantList pairs = here.pairsWith(there);
+    for (const QVariant& p : pairs) {
+        const int j = p.toInt();
+        const QVariantMap m =
+            j < 0 ? QVariantMap{} : there->signalList().at(j).toMap();
+        const QString key = m.value(QStringLiteral("key")).toString();
+        out << (key.isEmpty() ? m.value(QStringLiteral("name")).toString()
+                              : key);
+    }
+    return out;
+}
+
+} // namespace
+
+/* Compare's pairs are havne-cli view's (cli/signal_pairs.h): by key, else
+ * by a name each recording has once, so two modules' RPM each pair with
+ * their own and with none of an older recording's one RPM */
+TEST(RecordingViewTest, PairsGoByKeyElseByANameEachHasOnce)
+{
+    QTemporaryDir a;
+    QTemporaryDir b;
+    QTemporaryDir c;
+    ASSERT_TRUE(a.isValid() && b.isValid() && c.isValid());
+    writeValues(a.path(), 4,
+                {"7E8:410C:2.0:16,RPM", "7E9:410C:2.0:16,RPM", "boost,Boost"});
+    writeValues(b.path(), 4, {"7E9:410C:2.0:16,RPM", "7E8:410C:2.0:16,RPM"});
+    writeValues(c.path(), 3, {"RPM", "Boost"});
+    RecordingView here;
+    RecordingView keyed;
+    RecordingView older;
+    here.open(a.path());
+    keyed.open(b.path());
+    older.open(c.path());
+    ASSERT_TRUE(opened(here)) << here.error().toStdString();
+    ASSERT_TRUE(opened(keyed)) << keyed.error().toStdString();
+    ASSERT_TRUE(opened(older)) << older.error().toStdString();
+    ASSERT_EQ(here.signalList().size(), 3);
+
+    EXPECT_EQ(pairNames(here, &keyed),
+              (QStringList{"7E8:410C:2.0:16", "7E9:410C:2.0:16", ""}));
+    EXPECT_EQ(pairNames(here, &older), (QStringList{"", "", "Boost"}));
+    EXPECT_EQ(pairNames(older, &here), (QStringList{"", "boost"}));
+    EXPECT_EQ(here.pairsWith(nullptr), (QVariantList{-1, -1, -1}));
+    older.close();
+    EXPECT_EQ(here.pairsWith(&older), (QVariantList{-1, -1, -1}))
+        << "a closed recording has nothing to pair with";
 }

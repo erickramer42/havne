@@ -223,6 +223,9 @@ public:
     // engine running from the first sample and never stopped) or a
     // recording not open.
     Q_INVOKABLE double findEngineStart();
+    // For each signal, the index of other's it compares with by havne-cli
+    // view's rule (cli/signal_pairs.h, app/recording_pairs.cpp), -1 for none
+    Q_INVOKABLE QVariantList pairsWith(RecordingView* other) const;
     // Each signal's value in force at tMs, as the cursor shows it: one map
     // each, { index, text (a number in display units, its decimals; a text
     // signal's as recorded; "" before its first sample), unit, atMs (-1

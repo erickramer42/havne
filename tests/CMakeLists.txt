@@ -303,7 +303,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp)
+        test_cli_expr.cpp test_cli_pairs.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -1215,6 +1215,9 @@ if(TARGET havne-cli)
         add_test(NAME CliKeysRunTest.AComputedSignalGoesByItsAuthorsKey
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py file
                     $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.ADeltaPairsByKeyElseByANameEachHasOnce
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py delta
+                    $<TARGET_FILE:havne-cli>)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
@@ -2033,6 +2036,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_store_removal.cpp
         ../app/recordingview.cpp
         ../app/recording_frameset.cpp
+        ../app/recording_pairs.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
         ${APP_BRIDGE_SOURCES}
