@@ -23,4 +23,5 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/sessionbridge.h
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.h
+    ${CMAKE_CURRENT_LIST_DIR}/signalplot.cpp
 )

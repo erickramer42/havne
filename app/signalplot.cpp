@@ -1,0 +1,141 @@
+// File/layer: app/signalplot.cpp | Qt6 Core, app layer, C++17
+// Testing: BRIDGE: BridgeTest (test_bridge)
+//
+// SignalListModel's plot choices: a row's tick, the lists a vehicle keeps
+// and which rows plot.
+
+#include "signallistmodel.h"
+
+#include <algorithm>
+#include <vector>
+
+void SignalListModel::toggleSubscribed(int row)
+{
+    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
+    Entry& e = m_entries[static_cast<size_t>(row)];
+    // A text row's default is unticked, so its tick is Plotted or Default
+    const bool plot = !e.subscribed;
+    e.choice = plot == e.plotDefault ? PlotChoice::Default
+             : plot                  ? PlotChoice::Plotted
+                                     : PlotChoice::Unplotted;
+    judgePlotted();
+    emit ticksChanged();
+}
+
+QStringList SignalListModel::plottedNames() const
+{
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (e.choice == PlotChoice::Plotted) {
+            names << QString::fromUtf8(e.name);
+        }
+    }
+    return names;
+}
+
+std::vector<uint16_t> SignalListModel::tickedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.choice == PlotChoice::Plotted) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
+}
+
+std::vector<uint16_t> SignalListModel::plottedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.subscribed && !e.hidden) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
+}
+
+QStringList SignalListModel::unplottedNames() const
+{
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (!e.isText && e.choice == PlotChoice::Unplotted) {
+            names << QString::fromUtf8(e.name);
+        }
+    }
+    return names;
+}
+
+void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
+{
+    for (Entry& e : m_entries) {
+        const QString name = QString::fromUtf8(e.name);
+        e.choice = (!e.isText && unplotted.contains(name))
+                       ? PlotChoice::Unplotted
+                   : plotted.contains(name) ? PlotChoice::Plotted
+                                            : PlotChoice::Default;
+    }
+    judgePlotted();
+    emit ticksChanged();
+}
+
+void SignalListModel::judgePlotted()
+{
+    // The default: every numeric row (none on a pick-only session, which
+    // asks only what is ticked), or in a ranked set the
+    // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
+    // set's order), so a row Live hides gives its place to the next. A
+    // refused row never has a value to draw, so it is no default either;
+    // a tick still plots it
+    std::vector<int> ranked;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        const Entry& e = m_entries[row];
+        if (e.plotRank != 0 && !e.isText && !e.hidden && e.refused.isEmpty()) {
+            ranked.push_back(static_cast<int>(row));
+        }
+    }
+    std::stable_sort(ranked.begin(), ranked.end(), [this](int a, int b) {
+        return m_entries[static_cast<size_t>(a)].plotRank
+             < m_entries[static_cast<size_t>(b)].plotRank;
+    });
+    if (ranked.size() > static_cast<size_t>(DefaultPlotted)) {
+        ranked.resize(static_cast<size_t>(DefaultPlotted));
+    }
+    for (Entry& e : m_entries) {
+        e.plotDefault =
+            !m_ranked && !m_pickOnly && !e.isText && e.refused.isEmpty();
+    }
+    for (int row : ranked) {
+        m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
+    }
+
+    int first = -1;
+    int last = -1;
+    int subscribed = 0;
+    int ticked = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        // A text row's tick asks it and never plots: subscribed shows the
+        // tick, and the count and chartData leave the row out
+        const bool plot = e.choice == PlotChoice::Plotted ||
+                          (e.choice == PlotChoice::Default && e.plotDefault);
+        if (plot != e.subscribed) {
+            e.subscribed = plot;
+            if (first < 0) first = static_cast<int>(row);
+            last = static_cast<int>(row);
+        }
+        subscribed += (e.subscribed && !e.isText && !e.hidden) ? 1 : 0;
+        ticked += (e.subscribed && !e.hidden) ? 1 : 0;
+    }
+    if (first >= 0) {
+        emit dataChanged(index(first), index(last), {SubscribedRole});
+    }
+    if (subscribed != m_subscribedCount) {
+        m_subscribedCount = subscribed;
+        emit subscribedCountChanged();
+    }
+    if (ticked != m_tickedCount) {
+        m_tickedCount = ticked;
+        emit tickedCountChanged();
+    }
+}
