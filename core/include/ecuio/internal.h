@@ -196,6 +196,28 @@ void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
  * at once. */
 void ecuio_set_unpicked_check_ms(uint32_t ms);
 
+/* TEST-ONLY, for the transports' own cases (ADR-0066 section 2.4): hands
+ * a session that asks requests one request of 1 to 60 bytes for
+ * channel's ECU, which its worker sends as a talk at its next pass
+ * (core/src/request_talk.h, talk_seam.h; handed over before start, a
+ * socketcan:// session's first request): the reply is matched on the
+ * request's first echo bytes (1 to 3), and first (non-zero) sends it
+ * ahead of the rotation and the keep-alive. Nothing outside tier 2's
+ * ceiling is sent: the result says refused. NULL_ARGUMENT for a NULL;
+ * INVALID_ARGUMENT for a session that asks nothing, a channel it lacks,
+ * no bytes or more than 60, or while the one before is unread. */
+ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
+                                       uint32_t channel, const uint8_t* pdu,
+                                       uint32_t len, uint8_t echo, int first);
+
+/* TEST-ONLY: the request above, once it has ended: 1, with *offer (0
+ * taken, 1 busy, 2 too long for the transport, 3 refused) and, when
+ * taken, *end (1 answered, 2 refused with its code in *nrc, 3
+ * unanswered, 4 unsent); read once. 0 while it is on its way, or there
+ * is none. */
+int ecuio_session_test_talk_result(ecuio_session_t* session, int* offer,
+                                   int* end, uint8_t* nrc);
+
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
  * real controller, and an error frame within quiet_us of the first echo

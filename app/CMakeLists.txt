@@ -47,6 +47,8 @@ qt_add_library(app_ui STATIC
     readonce.h
     exprcheck.cpp
     exprcheck.h
+    variantshape.cpp
+    variantshape.h
     pluginstore.cpp
     pluginstore.h
     signalstore.cpp

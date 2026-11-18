@@ -20,6 +20,7 @@
 #include "ecuio/signals.h"
 #include "ecuio/vin.h"
 #include "obdbimport.h"
+#include "variantshape.h"
 
 namespace {
 
@@ -439,6 +440,7 @@ QVariantMap PluginStore::entryOf(const QString& sha, const Held& h) const
             {QStringLiteral("extends"), h.extends},
             {QStringLiteral("counts"), h.counts},
             {QStringLiteral("owns"), h.owns},
+            {QStringLiteral("replacedNames"), h.replacedNames},
             {QStringLiteral("mine"), f.value(kMine).toBool()},
             {QStringLiteral("importedFor"), f.value(kImportedFor).toString()},
             {QStringLiteral("obdb"), h.obdb}};
@@ -486,22 +488,19 @@ bool PluginStore::take(const QString& sha, const QByteArray& bytes,
         }
         h.variants << QString::fromUtf8(variant);
         h.profiles << QString::fromUtf8(profile);
-        // What the variant adds to, and how many signals are its own: the
-        // set holds the base's first
-        const QByteArray base =
-            ecuio_signal_file_extends(ecuio_plugin_variant_file(h.plugin, i));
-        const ecuio_signal_set_t* set = ecuio_plugin_variant_set(h.plugin, i);
-        const int count = set != nullptr ? static_cast<int>(set->count) : 0;
-        int own = count;
+        // What the variant adds to, and what it adds and replaces there
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(h.plugin, i);
+        const QByteArray base = ecuio_signal_file_extends(file);
         const ecuio_signal_set_t* baseSet = nullptr;
-        if (!base.isEmpty() &&
-            ecuio_profile_lookup(base.constData(), &baseSet) == ECUIO_OK &&
-            baseSet != nullptr) {
-            own = std::max(0, count - static_cast<int>(baseSet->count));
+        if (base.isEmpty() ||
+            ecuio_profile_lookup(base.constData(), &baseSet) != ECUIO_OK) {
+            baseSet = nullptr;
         }
+        const variant_shape::Shape shape = variant_shape::of(file, baseSet);
         h.extends << QString::fromUtf8(base);
-        h.counts << count;
-        h.owns << own;
+        h.counts << shape.count;
+        h.owns << shape.added;
+        h.replacedNames << shape.replaced;
     }
     m_held.emplace(sha, h);
     return true;

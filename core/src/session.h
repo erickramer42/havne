@@ -14,6 +14,7 @@
 #include "profile_hold.h"
 #include "pull_queue.h"
 #include "recorder.h"
+#include "request_talk.h"
 #include "uds_generic.h"
 
 #include <array>
@@ -25,6 +26,25 @@
 #include <vector>
 
 #include "condition_eval.h"
+
+/* The transports' own cases' talk (ecuio_session_test_talk, internal.h;
+ * talk_seam.h has the rules): one request on its way to the requesting
+ * worker, then its result on the way back, handed over on state alone */
+constexpr uint8_t ECUIO_TEST_TALK_IDLE = 0;
+constexpr uint8_t ECUIO_TEST_TALK_ASKED = 1;   /* filled: the worker's */
+constexpr uint8_t ECUIO_TEST_TALK_OUT = 2;     /* with the worker's engine */
+constexpr uint8_t ECUIO_TEST_TALK_SETTLED = 3; /* its result: the caller's */
+
+struct ecuio_test_talk_slot {
+    std::atomic<uint8_t> state{ECUIO_TEST_TALK_IDLE};
+    uint32_t channel = 0;
+    uint32_t len = 0;
+    uint8_t echo = 0;
+    bool first = false;
+    uint8_t pdu[ECUIO_ENGINE_PDU_MAX] = {};
+    ecuio_talk_offer offer = ecuio_talk_offer::taken;
+    ecuio_talk_result result;
+};
 
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
@@ -202,6 +222,7 @@ struct ecuio_session {
         queues;
     uint32_t queue_count = 0;
     uint32_t value_queues = 0;
+    ecuio_test_talk_slot test_talk;
 };
 
 #endif /* ECUIO_SESSION_H */
