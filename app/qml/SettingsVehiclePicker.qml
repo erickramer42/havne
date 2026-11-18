@@ -41,7 +41,7 @@ ColumnLayout {
     }
     Label {
         objectName: "vehicleLockedNote"
-        visible: !root.host.idle
+        visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to add or change vehicles.")
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -55,8 +55,8 @@ ColumnLayout {
             text: qsTr("None")
             checkable: true
             checked: root.host.pickedVehicle === null
-            enabled: root.host.idle
-            onClicked: root.host.pickVehicle("")
+            enabled: root.host.ownPart.idle
+            onClicked: root.host.ownPart.pickVehicle("")
         }
         // Keyed by the count, not the list: each change makes a
         // new list, and a list model would rebuild every
@@ -74,16 +74,16 @@ ColumnLayout {
                 width: Math.min(implicitWidth, parent.width)
                 checkable: true
                 checked: vehicle !== undefined && root.host.vehicles.picked === vehicle.id
-                enabled: root.host.idle
-                onClicked: root.host.pickVehicle(vehicle.id)
+                enabled: root.host.ownPart.idle
+                onClicked: root.host.ownPart.pickVehicle(vehicle.id)
             }
         }
     }
 
     Label {
         objectName: "vehicleVinPickNote"
-        visible: root.host.vinPickNote !== ""
-        text: root.host.vinPickNote
+        visible: root.host.ownPart.vinPickNote !== ""
+        text: root.host.ownPart.vinPickNote
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -107,7 +107,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: labelRow.oneRow ? 300 : Number.POSITIVE_INFINITY
             Layout.columnSpan: labelRow.oneRow ? 1 : 3
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             placeholderText: qsTr("Label")
         }
         ThemedButton {
@@ -115,24 +115,24 @@ ColumnLayout {
             text: qsTr("New")
             Layout.fillWidth: true
             Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
-            enabled: root.host.idle && VehicleBook.labelProblem(root.host.vehicles, root.host.newLabel, "") === ""
-            onClicked: root.host.changeVehicles(VehicleBook.add(root.host.vehicles, root.host.newLabel))
+            enabled: root.host.ownPart.idle && VehicleBook.labelProblem(root.host.vehicles, root.host.newLabel, "") === ""
+            onClicked: root.host.ownPart.changeVehicles(VehicleBook.add(root.host.vehicles, root.host.newLabel))
         }
         ThemedButton {
             objectName: "vehicleDuplicate"
             text: qsTr("Duplicate")
             Layout.fillWidth: true
             Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
-            enabled: root.host.idle && root.host.pickedVehicle !== null
+            enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null
                      && VehicleBook.labelProblem(root.host.vehicles, root.host.copyLabel, "") === ""
-            onClicked: root.host.duplicateVehicle()
+            onClicked: root.host.ownPart.duplicateVehicle()
         }
         ThemedButton {
             objectName: "vehicleMore"
             text: qsTr("More")
             Layout.fillWidth: true
             Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             checkable: true
             checked: root.moreShown
             onClicked: root.moreShown = !root.moreShown
@@ -157,13 +157,13 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Rename")
-            enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
+            enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
                      && root.host.typedLabel !== root.host.pickedVehicle.label
                      && VehicleBook.labelProblem(root.host.vehicles, root.host.typedLabel,
                                                  root.host.pickedVehicle.id) === ""
             onClicked: {
                 root.moreShown = false
-                root.host.changeVehicles(VehicleBook.rename(root.host.vehicles, root.host.typedLabel))
+                root.host.ownPart.changeVehicles(VehicleBook.rename(root.host.vehicles, root.host.typedLabel))
             }
         }
         ThemedButton {
@@ -172,10 +172,10 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget the VIN")
-            enabled: root.host.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
+            enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
             onClicked: {
                 root.moreShown = false
-                root.host.changeVehicles(VehicleBook.forgetVin(root.host.vehicles))
+                root.host.ownPart.changeVehicles(VehicleBook.forgetVin(root.host.vehicles))
             }
         }
         ThemedButton {
@@ -184,7 +184,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget")
-            enabled: root.host.idle && root.host.pickedVehicle !== null
+            enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null
             onClicked: {
                 root.moreShown = false
                 root.host.confirming = "forget"
@@ -196,7 +196,7 @@ ColumnLayout {
             Layout.fillWidth: true
             Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
             text: qsTr("Forget all vehicles")
-            enabled: root.host.idle && root.host.vehicles.list.length > 0
+            enabled: root.host.ownPart.idle && root.host.vehicles.list.length > 0
             onClicked: {
                 root.moreShown = false
                 root.host.confirming = "forgetAll"
@@ -247,8 +247,8 @@ ColumnLayout {
             objectName: "vehicleConfirm"
             text: qsTr("Forget")
             highlighted: true
-            enabled: root.host.idle
-            onClicked: root.host.forgetVehicles(root.host.confirming === "forgetAll")
+            enabled: root.host.ownPart.idle
+            onClicked: root.host.ownPart.forgetVehicles(root.host.confirming === "forgetAll")
         }
         ThemedButton {
             objectName: "vehicleCancel"

@@ -168,11 +168,11 @@ TestCase {
     function importFile(page, fileName, name, did, obd2) {
         const url = Harness.writeScratchFile(fileName, signalFileText(name, did, obd2))
         verify(url.toString() !== "", "the scratch file is written")
-        return page.importFile(url) && page.keepPending("", "")
+        return page.importPart.importFile(url) && page.importPart.keepPending("", "")
     }
 
     function rowOf(page, profile) {
-        const i = page.variantRows.findIndex(e => e.profile === profile)
+        const i = page.picksPart.variantRows.findIndex(e => e.profile === profile)
         verify(i >= 0, profile + " is listed")
         return find(page, "signalRow_" + i)
     }
@@ -200,67 +200,67 @@ TestCase {
                               { name: "can1", kind: "can", up: true, modes: ["listen-only"] },
                               { name: "can2", kind: "can", up: false, modes: ["one-shot"] }]
         press(page, "vehicleNew")
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
         verify(importFile(page, "plain.json", "Plain"))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
         compare(page.connectProfileWords["elm327://COM5"], undefined)
         verify(importFile(page, "plus.json", "Plus", "D101", true))
         verify(importFile(page, "more.json", "More", "D102", true))
         const plus = "plugin.plus.base"
-        compare(page.picks, ["plugin.plain.base", plus, "plugin.more.base"])
+        compare(page.picksPart.picks, ["plugin.plain.base", plus, "plugin.more.base"])
 
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
                 "the first pick that reads obd2, not the last")
-        compare(page.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
-        compare(page.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
+        compare(page.connectFromPart.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
+        compare(page.connectFromPart.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
                 "elm327://192.168.0.10:35000?poll=0C&profile=" + plus,
                 "appended last, the other keys where they were")
-        compare(page.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
                 "an address that names a profile wins")
-        compare(page.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
                 "elm327://COM5?profile=raw&poll=0C")
-        compare(page.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
-        compare(page.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
+        compare(page.connectFromPart.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
+        compare(page.connectFromPart.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
 
-        compare(page.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
                 "a virtual bus sends")
-        compare(page.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
                 "a controller up in one-shot mode sends")
-        compare(page.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
-        compare(page.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
-        compare(page.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
+        compare(page.connectFromPart.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
+        compare(page.connectFromPart.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
+        compare(page.connectFromPart.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
 
         compare(page.connectProfileWords["elm327://COM5"], "obd2 + Plus")
         compare(page.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
         compare(page.connectProfileWords["socketcan://can1"], undefined,
                 "no word on a row that isn't composed")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
                 "a plugin's profile by its name")
-        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base"),
                 "elm327://COM5?profile=plugin.more.base", "a pick's profile, named, is read")
-        compare(page.listProfileWord("elm327://COM5?profile=raw"), "")
-        compare(page.listProfileWord("mock://demo"), "")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=raw"), "")
+        compare(page.connectFromPart.listProfileWord("mock://demo"), "")
 
         // A pick the store lacks stands in for nothing: the next does
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.more.base"]))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5")
 
         // A plugin's or a signal file's profile the vehicle doesn't pick is
         // dropped, as the field drops it; a built-in profile stays
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, [plus]))
-        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
                 "elm327://COM5?poll=0C&profile=" + plus, "the vehicle's own pick is read in its place")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
-        compare(page.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
-        compare(page.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
+        compare(page.connectFromPart.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
         press(page, "vehicle_none")
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
-        compare(page.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
                 "nor a plugin's profile")
-        compare(page.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
         compare(page.connectProfileWords["elm327://COM5"], undefined)
     }
 
@@ -276,12 +276,12 @@ TestCase {
         const closed = "elm327://127.0.0.1:1"
         page.connectFromList(closed)
         compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
-        compare(page.profileChoice, "plugin.plus.base", "the row follows the field")
+        compare(page.uriPart.profileChoice, "plugin.plus.base", "the row follows the field")
         verify(find(page, "profile_plugin.plus.base").checked)
         tryVerify(() => !Bridge.connecting, 10000, "the connect ends")
         verify(!Bridge.connected, "nothing listens there")
         verify(find(page, "errorLabel").text !== "")
-        compare(page.recentUris, [], "a failed connect is no recent address")
+        compare(page.connectFromPart.recentUris, [], "a failed connect is no recent address")
         compare(page.pickedVehicle.uri, "")
 
         // The demo is left as it is
@@ -329,7 +329,7 @@ TestCase {
 
         // Another vehicle, which picks nothing, reads the row as it is
         press(page, "vehicleNew")
-        compare(page.picks, [])
+        compare(page.picksPart.picks, [])
         compare(page.connectProfileWords[uri], undefined)
         page.connectFromList(uri)
         compare(field.text, uri)
@@ -354,13 +354,13 @@ TestCase {
         page.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
-        sameList(page.recentUris, [uri])
+        sameList(page.connectFromPart.recentUris, [uri])
         endSession()
         const raw = uri + "?profile=raw"
         find(page, "uriField").text = raw
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects")
-        sameList(page.recentUris, [raw, uri])
+        sameList(page.connectFromPart.recentUris, [raw, uri])
         endSession()
     }
 
@@ -378,20 +378,20 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects")
         tryVerify(() => page.pickedVehicle.uri === composed, 10000, "kept as typed")
-        sameList(page.recentUris, [composed])
+        sameList(page.connectFromPart.recentUris, [composed])
         endSession()
-        compare(page.listConnectUri(composed), composed, "its vehicle picks the plugin")
+        compare(page.connectFromPart.listConnectUri(composed), composed, "its vehicle picks the plugin")
         compare(page.connectProfileWords[composed], "Plus")
 
         press(page, "vehicleNew")
-        compare(page.listConnectUri(composed), uri)
+        compare(page.connectFromPart.listConnectUri(composed), uri)
         compare(page.connectProfileWords[composed], undefined, "no word: it reads Default")
         page.connectFromList(composed)
         compare(field.text, uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
         tryVerify(() => page.pickedVehicle.uri === uri, 10000, "nor is it remembered as this vehicle's")
-        sameList(page.recentUris, [uri, composed])
+        sameList(page.connectFromPart.recentUris, [uri, composed])
         compare(page.vehicles.list[0].uri, composed, "the first vehicle's stays")
         endSession()
     }
@@ -416,10 +416,10 @@ TestCase {
 
         page.open("signals")
         pressRow(page, "plugin.plus.base")
-        compare(page.picks, ["plugin.more.base"])
+        compare(page.picksPart.picks, ["plugin.more.base"])
         sameList(page.connectUris, [uri])
         compare(page.connectProfileWords[uri], "obd2 + More")
-        compare(page.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
+        compare(page.connectFromPart.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
         page.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, more)
@@ -433,9 +433,9 @@ TestCase {
         page = createPage()
         compare(find(page, "uriField").text, more, "and the field reads the pick of now")
 
-        verify(page.removePlugin(page.pluginList.find(p => p.id === "more").sha256))
-        compare(page.picks, [])
-        compare(page.listConnectUri(uri), uri)
+        verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
+        compare(page.picksPart.picks, [])
+        compare(page.connectFromPart.listConnectUri(uri), uri)
         compare(page.connectProfileWords[uri], undefined)
     }
 
@@ -443,13 +443,13 @@ TestCase {
 
     // The OBDb fixture read through Import under the year typed
     function obdbRead(page, year) {
-        if (!page.importFile(Harness.obdbFixture))
+        if (!page.importPart.importFile(Harness.obdbFixture))
             return false
         if (year !== "") {
             find(page, "obdbYearField").text = ""   // a year typed, even the one a VIN gave
             find(page, "obdbYearField").text = year
         }
-        return page.obdbReport !== null
+        return page.importPart.obdbReport !== null
     }
 
     // One Import, an OBDb set: the report shows what converted, what
@@ -475,19 +475,19 @@ TestCase {
         compare(find(page, "obdbSkipped").count, 5)
         compare(find(page, "obdbFileNotes").count, 2)
         compare(find(page, "obdbKeep").text, "Keep")
-        compare(page.pluginList.length, 0, "nothing kept yet")
+        compare(page.picksPart.pluginList.length, 0, "nothing kept yet")
         compare(Harness.storedPlugins(), [])
 
         press(page, "obdbKeep")
         verify(!find(page, "importPanel").visible)
-        compare(page.picks, ["plugin.daily-driver-obdb.my2021"], "a typed year names the variant")
+        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2021"], "a typed year names the variant")
         compare(find(page, "signalNote").text, "Daily driver OBDb 1.0.0 added: picked for Daily driver")
         const row = rowOf(page, "plugin.daily-driver-obdb.my2021")
         compare(find(row, "rowCaption").text, "For this car:")
         compare(find(row, "rowTitle").text, "Daily driver OBDb 1.0.0")
         compare(find(row, "rowReads").text, "obd2 + 7 signals · yours")
         compare(Harness.storedPlugins().length, 1)
-        verify(page.pluginList[0].obdb)
+        verify(page.picksPart.pluginList[0].obdb)
     }
 
     function test_anObdbSetDiscardedIsNotKept() {
@@ -498,16 +498,16 @@ TestCase {
         verify(find(page, "obdbReport").visible)
         press(page, "importDiscard")
         verify(!find(page, "importPanel").visible)
-        compare(page.pluginList.length, 0)
-        verify(!page.keepObdb(), "nothing to keep")
-        compare(page.pluginList.length, 0)
+        compare(page.picksPart.pluginList.length, 0)
+        verify(!page.importPart.keepObdb(), "nothing to keep")
+        compare(page.picksPart.pluginList.length, 0)
 
         // A report is the vehicle's it was read for
         verify(obdbRead(page, "2021"))
         press(page, "vehicleNew")
-        compare(page.pendingImport, null, "another vehicle picked: the file no longer waits")
-        verify(!page.keepObdb())
-        compare(page.pluginList.length, 0)
+        compare(page.importPart.pendingImport, null, "another vehicle picked: the file no longer waits")
+        verify(!page.importPart.keepObdb())
+        compare(page.picksPart.pluginList.length, 0)
     }
 
     // The set read again takes the place of the vehicle's earlier import,
@@ -520,8 +520,8 @@ TestCase {
         page.open("signals")
         verify(obdbRead(page, "2019"))
         press(page, "obdbKeep")
-        const earlier = page.pluginList[0].sha256
-        compare(page.picks, ["plugin.daily-driver-obdb.my2019"])
+        const earlier = page.picksPart.pluginList[0].sha256
+        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2019"])
 
         verify(obdbRead(page, "2021"))
         verify(find(page, "obdbSummary").text.endsWith(
@@ -538,9 +538,9 @@ TestCase {
                 "nothing past the column's right edge, " + column.width)
         page.width = width
         press(page, "obdbKeep")
-        compare(page.pluginList.length, 1)
-        verify(page.pluginList[0].sha256 !== earlier)
-        compare(page.picks, ["plugin.daily-driver-obdb.my2021"], "the pick follows the import")
+        compare(page.picksPart.pluginList.length, 1)
+        verify(page.picksPart.pluginList[0].sha256 !== earlier)
+        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2021"], "the pick follows the import")
         compare(find(page, "signalNote").text,
                 "Daily driver OBDb replaced the vehicle's earlier OBDb import")
         compare(Harness.storedPlugins().length, 1, "the earlier copy went")
@@ -548,7 +548,7 @@ TestCase {
         // The same year again is the same plugin
         verify(obdbRead(page, "2021"))
         press(page, "obdbKeep")
-        compare(page.pluginList.length, 1)
+        compare(page.picksPart.pluginList.length, 1)
         compare(find(page, "signalNote").text, "Daily driver OBDb is here already")
 
         // A plugin the user named so is the user's: the import takes an
@@ -559,7 +559,7 @@ TestCase {
         verify(obdbRead(page, "2021"))
         verify(!find(page, "obdbSummary").text.includes("replaces"))
         press(page, "obdbKeep")
-        compare(page.pluginList.filter(p => p.name === "Weekend car OBDb").map(p => p.id),
+        compare(page.picksPart.pluginList.filter(p => p.name === "Weekend car OBDb").map(p => p.id),
                 ["weekend-car-obdb", "weekend-car-obdb-2"])
     }
 
@@ -571,11 +571,11 @@ TestCase {
         const page = createPage()
         press(page, "vehicleNew")
         page.open("signals")
-        compare(page.obdbVinYear(), 0)
+        compare(page.importPart.obdbVinYear(), 0)
         find(page, "vinLookupField").text = "1FAFAKE10M0000001"
-        compare(page.obdbVinYear(), 2021)
+        compare(page.importPart.obdbVinYear(), 2021)
         find(page, "vinLookupField").text = "not one"
-        compare(page.obdbVinYear(), 0)
+        compare(page.importPart.obdbVinYear(), 0)
         find(page, "vinLookupField").text = ""
 
         find(page, "uriField").text = "mock://demo"
@@ -583,17 +583,17 @@ TestCase {
         tryVerify(() => Bridge.connected, 5000, "connected")
         verify(!find(page, "signalImport").enabled, "nothing changes the store while it runs")
         Bridge.identifyForTesting("1FAFAKE13Y0000001")
-        compare(page.obdbVinYear(), 0, "not the picked vehicle's VIN")
+        compare(page.importPart.obdbVinYear(), 0, "not the picked vehicle's VIN")
         const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
         const doc = VehicleBook.copy(page.vehicles)
         doc.salt = salt
         page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
         Bridge.identifyForTesting("1FAFAKE13Y0000001")
-        compare(page.obdbVinYear(), 2000)
+        compare(page.importPart.obdbVinYear(), 2000)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
         compare(Bridge.vinModelYear(""), 0, "the VIN went with the session")
-        compare(page.obdbVinYear(), 2000, "its year stays")
+        compare(page.importPart.obdbVinYear(), 2000, "its year stays")
         verify(find(page, "signalImport").enabled)
 
         verify(obdbRead(page, "19x") === false)
@@ -605,14 +605,14 @@ TestCase {
         find(page, "obdbYearField").text = "2021"
         compare(find(page, "signalProblem").text, "")
         verify(find(page, "obdbReport").visible)
-        compare(page.obdbReport.year, 2021)
+        compare(page.importPart.obdbReport.year, 2021)
 
         verify(obdbRead(page, ""))
         compare(find(page, "obdbYearField").text, "2000", "the field takes the car's year")
-        verify(page.obdbYearFromVin)
-        compare(page.obdbReport.year, 2000)
+        verify(page.importPart.obdbYearFromVin)
+        compare(page.importPart.obdbReport.year, 2000)
         press(page, "obdbKeep")
-        compare(page.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
+        compare(page.picksPart.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
     }
 
     // A model year typed digit by digit refuses nothing until its fourth
@@ -634,7 +634,7 @@ TestCase {
         compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
         field.text = "2021"
         compare(find(page, "signalProblem").text, "")
-        compare(page.obdbReport.year, 2021)
+        compare(page.importPart.obdbReport.year, 2021)
     }
 
     // The year in the field is the waiting set's: it goes with a discard
@@ -646,18 +646,18 @@ TestCase {
         find(page, "vinLookupField").text = "1FAFAKE10M0000001"
         verify(obdbRead(page, ""))
         compare(find(page, "obdbYearField").text, "2021")
-        verify(page.obdbYearFromVin)
-        page.discardImport()
+        verify(page.importPart.obdbYearFromVin)
+        page.importPart.discardImport()
         compare(find(page, "obdbYearField").text, "")
-        verify(!page.obdbYearFromVin)
+        verify(!page.importPart.obdbYearFromVin)
         find(page, "vinLookupField").text = ""
 
         verify(obdbRead(page, "2019"))
-        compare(page.obdbReport.year, 2019)
+        compare(page.importPart.obdbReport.year, 2019)
         press(page, "vehicleNew")
         compare(find(page, "obdbYearField").text, "", "the last vehicle's year isn't this one's")
         verify(obdbRead(page, ""))
-        compare(page.obdbReport.year, 0)
+        compare(page.importPart.obdbReport.year, 0)
     }
 
     // A long report shows a list's first rows and counts the rest
@@ -672,10 +672,10 @@ TestCase {
                                                  fmt: { len: 8, unit: "scalar" } }] })
         const url = Harness.writeScratchFile("long.json", JSON.stringify({ commands: commands }))
         find(page, "obdbYearField").text = ""
-        verify(page.importFile(url))
-        compare(page.obdbReport.skipped.length, 120)
-        compare(find(page, "obdbSkipped").count, page.obdbRowsShown)
-        compare(find(page, "obdbSkippedMore").text, "and " + (120 - page.obdbRowsShown) + " more")
+        verify(page.importPart.importFile(url))
+        compare(page.importPart.obdbReport.skipped.length, 120)
+        compare(find(page, "obdbSkipped").count, page.importPart.obdbRowsShown)
+        compare(find(page, "obdbSkippedMore").text, "and " + (120 - page.importPart.obdbRowsShown) + " more")
         page.open("signals")
         verify(find(page, "obdbSkippedMore").visible)
         verify(!find(page, "obdbChangedMore").visible)
@@ -691,7 +691,7 @@ TestCase {
                find(page, "obdbSummary").text)
         press(page, "obdbKeep")
         compare(find(page, "signalNote").text, "OBDb set 1.0.0 added")
-        compare(page.pluginList[0].importedFor, "")
+        compare(page.picksPart.pluginList[0].importedFor, "")
         verify(find(rowOf(page, "plugin.obdb-set.base"), "rowUnused").visible)
     }
 }

@@ -20,46 +20,46 @@ Item {
     }
 
     function markMine(sha) {
-        host.signalNote = ""
-        const p = host.pluginBySha[sha]
+        host.picksPart.signalNote = ""
+        const p = host.picksPart.pluginBySha[sha]
         const r = Bridge.markPluginMine(sha)
-        host.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalProblem = r.ok ? "" : r.words
         if (r.ok) {
             copyShown = false   // Copy is for someone else's
-            host.signalNote = qsTr("%1 is yours now").arg(p !== undefined ? p.name : qsTr("The plugin"))
-                         + host.saidToo(r)
+            host.picksPart.signalNote = qsTr("%1 is yours now").arg(p !== undefined ? p.name : qsTr("The plugin"))
+                         + host.importPart.saidToo(r)
         }
-        ++host.storeRev
+        ++host.picksPart.storeRev
     }
 
     // Copy to my plugin (ADR-0064 Q8): the variant into a new plugin of
     // the user's own (into "") or one of theirs
     function copyVariantTo(row, into) {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         const r = Bridge.copyVariant(row.sha256, row.variant, into, "")
-        host.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalProblem = r.ok ? "" : r.words
         if (!r.ok)
             return false
         copyShown = false
-        ++host.storeRev
-        host.signalNote = qsTr("%1 copied into %2 %3").arg(host.profileName(row.profile), r.name, r.version)
-                     + host.saidToo(r)
+        ++host.picksPart.storeRev
+        host.picksPart.signalNote = qsTr("%1 copied into %2 %3").arg(host.picksPart.profileName(row.profile), r.name, r.version)
+                     + host.importPart.saidToo(r)
         return true
     }
 
     // A variant out of a plugin of the user's own, every vehicle's pick
     // of it undone
     function removeVariant(row) {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         const r = Bridge.dropPluginVariant(row.sha256, row.variant)
-        host.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalProblem = r.ok ? "" : r.words
         if (!r.ok)
             return false
         host.saveVehicles(VehicleBook.dropProfiles(host.vehicles, [row.profile]))
-        if (host.profileChoice === row.profile)
-            host.chooseProfile("default")
+        if (host.uriPart.profileChoice === row.profile)
+            host.uriPart.chooseProfile("default")
         openRow = ""
-        ++host.storeRev
+        ++host.picksPart.storeRev
         return true
     }
 
@@ -72,7 +72,7 @@ Item {
     // A plugin of the user's own has no copy anywhere else, so its
     // removal asks first
     function askRemovePlugin(sha) {
-        const p = host.pluginBySha[sha]
+        const p = host.picksPart.pluginBySha[sha]
         if (p !== undefined && p.mine)
             host.confirming = "removePlugin:" + sha
         else
@@ -82,7 +82,7 @@ Item {
     function confirmingPlugin() {
         for (const head of ["removePlugin:", "removeOwn:"]) {
             if (host.confirming.startsWith(head))
-                return host.pluginBySha[host.confirming.substring(head.length)] || null
+                return host.picksPart.pluginBySha[host.confirming.substring(head.length)] || null
         }
         return null
     }
@@ -114,7 +114,7 @@ Item {
         const p = confirmingPlugin()
         host.confirming = ""
         if (asked.startsWith("removeVariant:")) {
-            const row = host.variantRows.find(r => "removeVariant:" + r.profile === asked)
+            const row = host.picksPart.variantRows.find(r => "removeVariant:" + r.profile === asked)
             return row !== undefined && removeVariant(row)
         }
         if (asked.startsWith("removeUnmigrated:")) {
@@ -133,19 +133,19 @@ Item {
     // more, and the field reads Default when it named one
     function removePlugin(sha) {
         host.confirming = ""
-        host.signalNote = ""
-        const p = host.pluginBySha[sha]
+        host.picksPart.signalNote = ""
+        const p = host.picksPart.pluginBySha[sha]
         const profiles = p !== undefined ? p.profiles : []
         const r = Bridge.removePlugin(sha)
-        host.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalProblem = r.ok ? "" : r.words
         if (r.ok && profiles.length > 0) {
             host.saveVehicles(VehicleBook.dropProfiles(host.vehicles, profiles))
-            if (profiles.indexOf(host.profileChoice) >= 0)
-                host.chooseProfile("default")
+            if (profiles.indexOf(host.uriPart.profileChoice) >= 0)
+                host.uriPart.chooseProfile("default")
         }
         if (r.ok)
             openRow = ""
-        ++host.storeRev
+        ++host.picksPart.storeRev
         return r.ok
     }
 
@@ -172,11 +172,11 @@ Item {
     // has several; a plugin's packed copy; a file that didn't move
     function variantSave(row) {
         return { kind: "variant", sha256: row.sha256, variant: row.variant,
-                 name: host.profileName(row.profile),
+                 name: host.picksPart.profileName(row.profile),
                  file: (row.several ? row.id + "-" + row.variant : row.id) + ".json" }
     }
     function pluginSave(sha) {
-        const p = host.pluginBySha[sha]
+        const p = host.picksPart.pluginBySha[sha]
         return p === undefined ? null
              : { kind: "plugin", sha256: sha, variant: "", name: p.name,
                  file: p.id + ".havne-plugin.json" }
@@ -198,9 +198,9 @@ Item {
 
     // True when the export waits: on its note's Save..., or refused
     function exportWaits(sha) {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         const r = Bridge.pluginExportNote(sha)
-        host.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalProblem = r.ok ? "" : r.words
         exportNote = r.ok ? r.note : ""
         return !r.ok || r.note !== ""
     }
@@ -227,8 +227,8 @@ Item {
         const r = what.kind === "variant" ? Bridge.saveVariantFile(what.sha256, what.variant, url)
                 : what.kind === "plugin" ? Bridge.exportPlugin(what.sha256, url)
                 : Bridge.saveUnmigratedFile(what.sha256, url)
-        host.signalProblem = r.ok ? "" : r.words
-        host.signalNote = !r.ok ? ""
+        host.picksPart.signalProblem = r.ok ? "" : r.words
+        host.picksPart.signalNote = !r.ok ? ""
                    : what.kind === "plugin" ? qsTr("%1 exported to the file you chose").arg(what.name)
                    : qsTr("%1 saved to the file you chose").arg(what.name)
         return r.ok
@@ -271,8 +271,8 @@ Item {
     // The record out of the book; its kept bytes go once nothing lists
     // them. The earlier version's folder is never touched
     function removeUnmigrated(record) {
-        host.signalProblem = ""
-        host.signalNote = ""
+        host.picksPart.signalProblem = ""
+        host.picksPart.signalNote = ""
         host.saveVehicles(record.loose ? VehicleBook.dropLooseUnmigrated(host.vehicles, record.sha256)
                                   : VehicleBook.dropUnmigrated(host.vehicles, record.sha256))
         if (!VehicleBook.hashListed(host.vehicles, record.sha256))

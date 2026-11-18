@@ -27,8 +27,8 @@ Item {
     readonly property string pickedId: host.pickedVehicle !== null ? host.pickedVehicle.id : ""
     onPickedIdChanged: {
         host.confirming = ""
-        host.discardImport()   // a file waiting was read for the last vehicle
-        host.openRow = ""
+        host.importPart.discardImport()   // a file waiting was read for the last vehicle
+        host.rowActionsPart.openRow = ""
         clearForm()
         dropAnotherVehiclesProfile()
     }
@@ -47,11 +47,11 @@ Item {
     function dropAnotherVehiclesProfile() {
         if (!idle)
             return
-        const p = host.profileChoice
+        const p = host.uriPart.profileChoice
         if (!p.startsWith("user.") && !p.startsWith("plugin."))
             return
-        if (host.picksNow().indexOf(p) < 0)
-            host.chooseProfile("default")
+        if (host.picksPart.picksNow().indexOf(p) < 0)
+            host.uriPart.chooseProfile("default")
     }
 
     function clearForm() {
@@ -142,7 +142,7 @@ Item {
             formProblem = formWords(r.words)
             return false
         }
-        ++host.storeRev
+        ++host.picksPart.storeRev
         if (place === null) {
             const profile = r.profiles[0]
             let next = VehicleBook.setOwn(host.vehicles, profile)
@@ -222,7 +222,7 @@ Item {
                       p => p === from.own ? (r.ok ? r.profiles[0] : "") : p).filter(p => p !== ""))
             if (r.ok)
                 doc = VehicleBook.setOwn(doc, r.profiles[0])
-            ++host.storeRev
+            ++host.picksPart.storeRev
         }
         changeVehicles(doc)
     }
@@ -247,7 +247,7 @@ Item {
             Bridge.forgetAllVehicleImports()
         else if (id !== "")
             Bridge.forgetVehicleImports(id)
-        ++host.storeRev
+        ++host.picksPart.storeRev
     }
 
     // Picking fills the field with the vehicle's connection as a list
@@ -258,7 +258,7 @@ Item {
         vinPickNote = ""
         host.saveVehicles(VehicleBook.pick(host.vehicles, id))
         if (host.pickedVehicle !== null && host.pickedVehicle.uri !== "")
-            host.uriField.text = host.listConnectUri(host.pickedVehicle.uri)
+            host.uriField.text = host.connectFromPart.listConnectUri(host.pickedVehicle.uri)
     }
 
     // A change of the list from the page's buttons: the field empties

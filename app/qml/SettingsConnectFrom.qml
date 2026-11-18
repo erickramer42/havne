@@ -65,7 +65,7 @@ Item {
     // (ADR-0064 Q5) ----
     // The first pick that loads and reads all of obd2, null for none
     readonly property var listStandIn:
-        (host.storeRev >= 0 ? Bridge.pickRow(host.picks, true) : []).find(r => r.standIn) || null
+        (host.picksPart.storeRev >= 0 ? Bridge.pickRow(host.picksPart.picks, true) : []).find(r => r.standIn) || null
 
     // Whether a pick that reads obd2 is read at the address: a J2534 or
     // ELM327 adapter's, or a CAN interface that sends requests (a virtual
@@ -84,9 +84,9 @@ Item {
     // signal file's profile the vehicle doesn't pick is dropped, as the
     // field drops it, so no connect reads another vehicle's signals
     function listAddress(uri) {
-        const named = host.queryValue(host.splitUri(uri).pairs, "profile")
+        const named = host.uriPart.queryValue(host.uriPart.splitUri(uri).pairs, "profile")
         return typeof named === "string" && (named.startsWith("plugin.") || named.startsWith("user."))
-               && host.picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
+               && host.picksPart.picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
     }
 
     // The address a list's row connects: with the stand-in's profile
@@ -103,10 +103,10 @@ Item {
     // names its profile; "" otherwise
     function listProfileWord(uri) {
         const plain = listAddress(uri)
-        const named = host.queryValue(host.splitUri(plain).pairs, "profile")
+        const named = host.uriPart.queryValue(host.uriPart.splitUri(plain).pairs, "profile")
         if (typeof named === "string" && named.startsWith("plugin."))
-            return host.placeOf(named) !== null ? host.profileName(named) : qsTr("a plugin not in the store")
-        return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(host.profileName(listStandIn.profile)) : ""
+            return host.picksPart.placeOf(named) !== null ? host.picksPart.profileName(named) : qsTr("a plugin not in the store")
+        return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(host.picksPart.profileName(listStandIn.profile)) : ""
     }
     // The lists' rows by address, for those with a word
     readonly property var connectProfileWords: {

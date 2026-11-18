@@ -49,7 +49,7 @@ ColumnLayout {
                 text: qsTr("Edit")
                 enabled: root.host.confirming === ""
                 onClicked: {
-                    root.host.editOwnSignal(ownRow.modelData.key)
+                    root.host.ownPart.editOwnSignal(ownRow.modelData.key)
                     root.host.openOwnForm()
                 }
             }
@@ -57,8 +57,8 @@ ColumnLayout {
                 objectName: "ownRemove_" + ownRow.index
                 flat: true
                 text: qsTr("Remove")
-                enabled: root.host.idle && root.host.confirming === ""
-                onClicked: root.host.removeOwnSignal(ownRow.modelData.key)
+                enabled: root.host.ownPart.idle && root.host.confirming === ""
+                onClicked: root.host.ownPart.removeOwnSignal(ownRow.modelData.key)
             }
         }
     }
@@ -66,16 +66,16 @@ ColumnLayout {
     // The last signal's Remove asks here, under the list it was pressed in
     RemoveQuestion {
         objectName: "ownConfirm"
-        words: root.host.ownQuestion()
-        canRemove: root.host.idle
-        onRemoveChosen: root.host.confirmRemoval()
+        words: root.host.rowActionsPart.ownQuestion()
+        canRemove: root.host.ownPart.idle
+        onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
         onCancelChosen: root.host.confirming = ""
     }
 
     Label {
         objectName: "ownSignalsNote"
         visible: text !== ""
-        text: root.host.formNote
+        text: root.host.ownPart.formNote
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -87,7 +87,7 @@ ColumnLayout {
         enabled: root.host.confirming === ""
         onClicked: {
             // A new signal starts from an empty form, not the last one edited
-            root.host.clearForm()
+            root.host.ownPart.clearForm()
             root.host.openOwnForm()
         }
     }

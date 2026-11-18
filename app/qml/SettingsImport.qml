@@ -31,29 +31,29 @@ Item {
     // An import that gave one variant is picked for the picked vehicle at
     // once; the note ends with what happened to it
     function pickKept(profile, note) {
-        if (host.pickedVehicle === null || !host.idle || host.picks.indexOf(profile) >= 0) {
-            host.signalNote = note
+        if (host.pickedVehicle === null || !host.ownPart.idle || host.picksPart.picks.indexOf(profile) >= 0) {
+            host.picksPart.signalNote = note
             return
         }
-        const how = host.pickProfile(profile)
+        const how = host.picksPart.pickProfile(profile)
         // The row's word where it says more than the name: obd2 + <name>
-        const shown = host.profiles.find(p => p.name === profile)
+        const shown = host.uriPart.profiles.find(p => p.name === profile)
         const label = shown !== undefined ? shown.label : ""
-        host.signalNote = how === "" ? note
-                   : how === "read" && label !== "" && label !== host.profileName(profile)
+        host.picksPart.signalNote = how === "" ? note
+                   : how === "read" && label !== "" && label !== host.picksPart.profileName(profile)
                      ? qsTr("%1: picked for %2, now reading %3").arg(note, host.pickedVehicle.label, label)
                    : qsTr("%1: picked for %2").arg(note, host.pickedVehicle.label)
     }
 
     // The file the user chose. True when it was kept or is waiting
     function importFile(url) {
-        host.signalProblem = ""
-        host.signalNote = ""
+        host.picksPart.signalProblem = ""
+        host.picksPart.signalNote = ""
         const target = replaceTarget
         discardImport()
         const r = Bridge.readImport(url, target !== null ? "signals" : "")
         if (!r.ok) {
-            host.signalProblem = r.words
+            host.picksPart.signalProblem = r.words
             return false
         }
         if (r.kind === "plugin") {
@@ -73,7 +73,7 @@ Item {
         host.obdbYearField.text = y > 0 ? String(y) : ""
         obdbYearFromVin = y > 0
         pendingImport = { kind: "obdb" }
-        obdbVehicle = host.pickedId
+        obdbVehicle = host.ownPart.pickedId
         return previewObdb()
     }
 
@@ -84,7 +84,7 @@ Item {
         const before = r.replacedProfiles !== undefined ? r.replacedProfiles : []
         if (before.length > 0)
             host.saveVehicles(VehicleBook.dropVinMatches(host.vehicles, before))
-        ++host.storeRev
+        ++host.picksPart.storeRev
         const note = r.updated !== "" ? qsTr("%1 updated from %2 to %3").arg(r.name, r.updated, r.version)
                    : r.replaced !== "" ? qsTr("%1 %2 replaces %3").arg(r.name, r.version, r.replaced)
                    : r.kept ? qsTr("%1 %2 is here already").arg(r.name, r.version)
@@ -92,7 +92,7 @@ Item {
         if (r.profiles.length === 1 && !r.kept)
             pickKept(r.profiles[0], note)
         else
-            host.signalNote = r.kept || r.updated !== "" || r.replaced !== "" || host.pickedVehicle === null
+            host.picksPart.signalNote = r.kept || r.updated !== "" || r.replaced !== "" || host.pickedVehicle === null
                        ? note : qsTr("%1: pick a variant below").arg(note)
     }
 
@@ -109,21 +109,21 @@ Item {
     // user's own, picked unless it is Replace's (replacing). A refusal
     // leaves it waiting. True when kept
     function keepPending(into, variant, replacing) {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         if (pendingImport === null || pendingImport.kind !== "signals")
             return false
-        const before = host.pluginBySha[into]
+        const before = host.picksPart.pluginBySha[into]
         const id = importVariantId(variant)
         const had = before !== undefined && before.variants.indexOf(id) >= 0
-        const r = Bridge.keepSignals(into, variant, into === "" ? host.pickedId : "")
+        const r = Bridge.keepSignals(into, variant, into === "" ? host.ownPart.pickedId : "")
         if (!r.ok) {
-            host.signalProblem = r.words
+            host.picksPart.signalProblem = r.words
             return false
         }
-        host.signalProblem = ""
+        host.picksPart.signalProblem = ""
         pendingImport = null
         importInto = ""
-        ++host.storeRev
+        ++host.picksPart.storeRev
         const at = into === "" ? 0 : r.variants.indexOf(id)
         const profile = at >= 0 && at < r.profiles.length ? r.profiles[at] : ""
         const made = at >= 0 && at < r.variants.length ? r.variants[at] : id
@@ -134,7 +134,7 @@ Item {
         if (profile !== "" && replacing !== true)
             pickKept(profile, note)
         else
-            host.signalNote = note
+            host.picksPart.signalNote = note
         return true
     }
 
@@ -145,20 +145,20 @@ Item {
         replaceTarget = null
         obdbReport = null
         host.obdbYearField.text = ""   // the set's year, and with it the VIN's mark
-        host.signalProblem = ""
-        host.signalNote = ""
+        host.picksPart.signalProblem = ""
+        host.picksPart.signalNote = ""
     }
 
     // Replace... on a variant of the user's own: the next file read
     // takes its place
     function startReplace(row) {
-        replaceTarget = { sha256: row.sha256, variant: row.variant, name: host.profileName(row.profile) }
+        replaceTarget = { sha256: row.sha256, variant: row.variant, name: host.picksPart.profileName(row.profile) }
     }
 
     // What Into's field would do in the chosen plugin: "" for a new
     // variant, else the words for one it takes the place of
     function importReplaces(variant) {
-        const p = host.pluginBySha[importInto]
+        const p = host.picksPart.pluginBySha[importInto]
         const id = importVariantId(variant)
         return p !== undefined && p.variants.indexOf(id) >= 0 ? qsTr("replaces %1").arg(id) : ""
     }
@@ -175,7 +175,7 @@ Item {
     // A list's rows shown at most, the rest counted: a set of thousands
     // of signals would otherwise lay out thousands of labels on a phone
     readonly property int obdbRowsShown: 50
-    readonly property bool obdbShown: obdbReport !== null && host.pickedId === obdbVehicle
+    readonly property bool obdbShown: obdbReport !== null && host.ownPart.pickedId === obdbVehicle
 
     // The name an OBDb import takes: the picked vehicle's, so its next
     // import finds this one
@@ -185,7 +185,7 @@ Item {
     // The picked vehicle's earlier conversion of that name, which Keep
     // takes the place of while it has one variant: its entry, null for none
     readonly property var obdbEarlier: host.pickedVehicle === null ? null
-        : host.pluginList.find(p => p.ok && p.obdb === true && p.importedFor === host.pickedVehicle.id
+        : host.picksPart.pluginList.find(p => p.ok && p.obdb === true && p.importedFor === host.pickedVehicle.id
                                && p.name === obdbName()) || null
     readonly property bool obdbReplaces: obdbEarlier !== null && obdbEarlier.variants.length === 1
 
@@ -224,22 +224,22 @@ Item {
     // the bridge's words why not. True when there's a report. While typing,
     // one to three digits are a year on its way: no report and no refusal
     function previewObdb(typing) {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         obdbReport = null
         if (pendingImport === null || pendingImport.kind !== "obdb")
             return false
         const year = obdbYear()
         if (year < 0) {
-            host.signalProblem = typing === true && /^[0-9]{1,3}$/.test(host.obdbYearField.text.trim())
+            host.picksPart.signalProblem = typing === true && /^[0-9]{1,3}$/.test(host.obdbYearField.text.trim())
                 ? "" : qsTr("A model year is 1980 to 2039, or empty for none")
             return false
         }
         const r = Bridge.previewObdbImport(year, obdbName())
         if (!r.ok) {
-            host.signalProblem = r.words
+            host.picksPart.signalProblem = r.words
             return false
         }
-        host.signalProblem = ""
+        host.picksPart.signalProblem = ""
         obdbReport = r
         return true
     }
@@ -266,26 +266,26 @@ Item {
     // follow it. A refusal (a session reading the earlier import) keeps
     // the report up. True when kept
     function keepObdb() {
-        host.signalNote = ""
+        host.picksPart.signalNote = ""
         if (!obdbShown)
             return false
         const typed = host.obdbYearField.text.trim() !== "" && !obdbYearFromVin
         const r = Bridge.keepObdbPlugin(obdbVehicle, typed)
         if (!r.ok) {
-            host.signalProblem = r.words
+            host.picksPart.signalProblem = r.words
             return false
         }
-        host.signalProblem = ""
+        host.picksPart.signalProblem = ""
         pendingImport = null
         obdbReport = null
         const gone = (r.replacedProfiles !== undefined ? r.replacedProfiles : [])
             .filter(p => r.profiles.indexOf(p) < 0)
         if (gone.length > 0 && r.profiles.length === 1) {
-            if (gone.indexOf(host.profileChoice) >= 0)
-                host.chooseProfile(r.profiles[0])
+            if (gone.indexOf(host.uriPart.profileChoice) >= 0)
+                host.uriPart.chooseProfile(r.profiles[0])
             host.saveVehicles(VehicleBook.movePicks(host.vehicles, gone, r.profiles[0]))
         }
-        ++host.storeRev
+        ++host.picksPart.storeRev
         const made = r.merged === true ? r.profiles[r.profiles.length - 1] : r.profiles[0]
         const note = (r.merged === true ? qsTr("%1 %2: kept as a variant of the earlier OBDb import").arg(r.name, r.version)
                       : r.replaced !== undefined && r.replaced !== ""

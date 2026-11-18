@@ -155,18 +155,18 @@ TestCase {
     function importFile(page, fileName, name, did, obd2) {
         const url = Harness.writeScratchFile(fileName, signalFileText(name, did, obd2))
         verify(url.toString() !== "", "the scratch file is written")
-        return page.importFile(url) && page.keepPending("", "")
+        return page.importPart.importFile(url) && page.importPart.keepPending("", "")
     }
 
     // The list's row for a profile: what the page holds, and its item
     function rowData(page, profile) {
-        const r = page.variantRows.find(e => e.profile === profile)
+        const r = page.picksPart.variantRows.find(e => e.profile === profile)
         verify(r !== undefined, profile + " is listed")
         return r
     }
 
     function rowOf(page, profile) {
-        const i = page.variantRows.findIndex(e => e.profile === profile)
+        const i = page.picksPart.variantRows.findIndex(e => e.profile === profile)
         verify(i >= 0, profile + " is listed")
         return find(page, "signalRow_" + i)
     }
@@ -189,7 +189,7 @@ TestCase {
     function test_theFormsBoxesKeepTheirNamesOnceTyped() {
         const page = createPage()
         press(page, "vehicleNew")
-        compare(page.formKind, "number")
+        compare(page.ownPart.formKind, "number")
         const caption = name => find(page, name).parent.children[0]
         const named = { formName: "Name", formRx: "Reply ID", formTx: "Request ID",
                         formNumber: "DID", formByte: "Byte", formBits: "Bits",
@@ -223,7 +223,7 @@ TestCase {
         compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
         const own = "plugin.vehicle-1-signals.base"
         compare(page.pickedVehicle.own, own, "the vehicle's own variant")
-        compare(page.picks, [own], "made with the first save, and picked")
+        compare(page.picksPart.picks, [own], "made with the first save, and picked")
         compare(find(rowOf(page, own), "rowTitle").text, "Vehicle 1 signals 1.0.0")
         compare(find(rowOf(page, own), "rowReads").text, "1 signal · yours")
         compare(find(rowOf(page, own), "rowCaption").text, "For this car:")
@@ -231,7 +231,7 @@ TestCase {
         compare(Harness.storedPlugins().length, 1)
 
         // A second signal goes into the same variant; the last copy goes
-        page.fillForm(SignalForm.emptyFields())
+        page.ownPart.fillForm(SignalForm.emptyFields())
         typeSignal(page, "Gear", "D101")
         press(page, "formKind_enum")
         find(page, "formValues").text = "0=Park, 3=Drive"
@@ -239,26 +239,26 @@ TestCase {
         compare(page.ownSignals.map(s => s.key), ["trans_temp", "gear"])
         compare(page.ownSignals[1].values, { "0": "Park", "3": "Drive" })
         compare(Harness.storedPlugins().length, 1, "one copy: the plugin's newest")
-        compare(page.pluginList.length, 1, "no second plugin")
+        compare(page.picksPart.pluginList.length, 1, "no second plugin")
         compare(page.pickedVehicle.own, own)
-        compare(page.picks, [own])
+        compare(page.picksPart.picks, [own])
         compare(find(rowOf(page, own), "rowReads").text, "2 signals · yours")
 
         // Edit fills the form; Save replaces the signal of that name
         press(page, "ownEdit_0")
         compare(find(page, "formName").text, "Trans Temp")
         compare(find(page, "formBits").text, "16")
-        compare(page.formKind, "number")
+        compare(page.ownPart.formKind, "number")
         find(page, "formNumber").text = "1E1D"
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
 
         // The variant as a signal file, named by its plugin
-        const what = page.variantSave(rowData(page, own))
+        const what = page.rowActionsPart.variantSave(rowData(page, own))
         compare(what.file, "vehicle-1-signals.json")
         const url = Harness.writeScratchFile("own.json", "")
-        page.saving = what
-        verify(page.saveTo(url))
+        page.rowActionsPart.saving = what
+        verify(page.rowActionsPart.saveTo(url))
         compare(JSON.parse(Harness.readScratchFile(url)).signals.map(s => s.name),
                 ["Trans Temp", "Gear"])
 
@@ -274,7 +274,7 @@ TestCase {
         compare(find(question, "signalsConfirmText").text,
                 "Remove Vehicle 1 signals? It is yours, and no other copy exists")
         find(question, "signalsConfirmRemove").clicked()
-        compare(page.picks, [])
+        compare(page.picksPart.picks, [])
         compare(page.pickedVehicle.own, "")
         compare(Harness.storedPlugins(), [])
 
@@ -283,7 +283,7 @@ TestCase {
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.pickedVehicle.own, own)
-        compare(page.picks, [own])
+        compare(page.picksPart.picks, [own])
     }
 
     // The last signal's Remove of a plugin with several variants asks as
@@ -295,8 +295,8 @@ TestCase {
         press(page, "formSave")
         const own = page.pickedVehicle.own
         const url = Harness.writeScratchFile("second.json", signalFileText("Second", "D105"))
-        verify(page.importFile(url))
-        verify(page.keepPending(page.ownPlace.plugin.sha256, "second"))
+        verify(page.importPart.importFile(url))
+        verify(page.importPart.keepPending(page.ownPlace.plugin.sha256, "second"))
         compare(page.ownPlace.plugin.variants.length, 2, "a second variant")
         press(page, "ownRemove_0")
         compare(page.pickedVehicle.own, own, "asked first, nothing removed")
@@ -357,7 +357,7 @@ TestCase {
         find(page, "formDecimals").text = "1"
         press(page, "formReadOnce")
         compare(find(page, "formProblem").text, "")
-        tryVerify(() => page.readResult !== null, 15000, "the read ends")
+        tryVerify(() => page.ownPart.readResult !== null, 15000, "the read ends")
         compare(find(page, "formReadResult").text, "Asked 22 1E 1C, got 62 1E 1C 12 34: 466.0 kPa")
         verify(!Bridge.connected, "no session left behind")
     }
@@ -577,7 +577,7 @@ TestCase {
         press(page, "vehicleNew")
         verify(importFile(page, "extras.json", "Extras"))
         find(page, "uriField").text = uri
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         compare(find(page, "uriField").text, uri + "?profile=plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
@@ -586,7 +586,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         compare(find(page, "uriField").text, uri, "Default at the session's end")
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
 
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
@@ -611,7 +611,7 @@ TestCase {
         // Another car's VIN: the fake's is no vehicle's yet
         page.saveVehicles(VehicleBook.change(page.vehicles, v => v.vinKey = "another-cars-key"))
         find(page, "uriField").text = uri
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id !== weekend, 30000, "the VIN adds a vehicle")
         // The connect result keeps the URI on its own turn, after the VIN
