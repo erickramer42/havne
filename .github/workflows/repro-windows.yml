@@ -4,10 +4,18 @@ name: Reproducible Windows build
 # the second time in another folder with every file dated a day later,
 # and requires every .exe and .dll to match byte for byte (ADR-0035). The
 # release zip and the symbols zip are compared and reported. About 30
-# minutes of runner, so it runs on request, not on a push:
+# minutes of runner, so a push runs it only when a file it checks changed,
+# on build/** branches and dev. A manual run needs the file on main
+# (GitHub dispatches only workflows the default branch has):
 #   gh workflow run repro-windows.yml --ref <branch>
 # release.yml may call it with `uses: ./.github/workflows/repro-windows.yml`.
 on:
+  push:
+    branches: ['build/**', dev]
+    paths:
+      - CMakeLists.txt
+      - packaging/windows/**
+      - .github/workflows/repro-windows.yml
   workflow_dispatch:
   workflow_call:
     inputs:
