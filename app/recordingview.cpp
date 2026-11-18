@@ -2,6 +2,7 @@
 // Testing: BRIDGE: RecordingViewTest (test_bridge)
 
 #include "recordingview.h"
+#include "recording_frameset.h"
 #include "urlwrite.h"
 
 #include "healthreport.h"
@@ -91,32 +92,6 @@ QString detailOr(ecuio_status_t rc)
 }
 
 } // namespace
-
-// A set copied on the GUI thread for the open's thread: the registry's
-// can be unregistered, and a plugin's freed, while the open runs
-struct RecordingView::FrameSet {
-    std::vector<ecuio_signal_def_t> defs;
-    std::vector<ecuio_channel_decl_t> channels;
-    std::vector<ecuio_enum_entry_t> enums;
-    std::vector<ecuio_computed_t> computed;
-    ecuio_signal_set_t set{};
-    QString decodedWith;
-
-    explicit FrameSet(const ecuio_signal_set_t& s)
-        : defs(s.defs, s.defs + (s.defs != nullptr ? s.count : 0)),
-          channels(s.channels,
-                   s.channels + (s.channels != nullptr ? s.channel_count : 0)),
-          enums(s.enums, s.enums + (s.enums != nullptr ? s.enum_count : 0)),
-          computed(s.computed,
-                   s.computed + (s.computed != nullptr ? s.computed_count : 0))
-    {
-        set = s;
-        set.defs = defs.empty() ? nullptr : defs.data();
-        set.channels = channels.empty() ? nullptr : channels.data();
-        set.enums = enums.empty() ? nullptr : enums.data();
-        set.computed = computed.empty() ? nullptr : computed.data();
-    }
-};
 
 // One entry of conditionSpans, as the open's thread pairs it
 struct RecordingView::ConditionSpan {
@@ -428,7 +403,7 @@ RecordingView::~RecordingView()
 void RecordingView::run(const std::shared_ptr<Result>& res,
                         std::atomic<bool>* cancel, RecordingView* view,
                         quint64 generation, const QString& folder,
-                        const std::shared_ptr<FrameSet>& frames)
+                        const std::shared_ptr<RecordingFrameSet>& frames)
 {
     const QDir dir(folder);
     const double frameBytes = static_cast<double>(
@@ -449,11 +424,15 @@ void RecordingView::run(const std::shared_ptr<Result>& res,
 
     Pass opening{cancel,    view, generation, 0.0,
                  openShare, post, nullptr,    nullptr};
-    res->rc =
-        frames ? ecuio_recording_open_frames(path.constData(), &frames->set,
-                                             onProgress, &opening, &res->reader)
-               : ecuio_recording_open(path.constData(), onProgress, &opening,
-                                      &res->reader);
+    if (frames) {
+        frames->loadText();
+    }
+    res->rc = frames
+                  ? ecuio_recording_open_frames_with(
+                        path.constData(), frames->openSet(), frames->file.get(),
+                        onProgress, &opening, &res->reader)
+                  : ecuio_recording_open(path.constData(), onProgress, &opening,
+                                         &res->reader);
     if (res->rc == ECUIO_OK) {
         pairConditions(*res, folder, cancel);
     }
@@ -512,7 +491,7 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
                  "its signals.json isn't the file it was recorded with"));
         return;
     }
-    std::shared_ptr<FrameSet> frames;
+    std::shared_ptr<RecordingFrameSet> frames;
     if (source.own_file) {
         QFile file(QDir(folder).filePath(QStringLiteral("signals.json")));
         // A byte past the bound, so a longer copy is refused, never cut
@@ -528,8 +507,7 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
                      .arg(QString::fromUtf8(ecuio_last_error_detail())));
             return;
         }
-        frames = std::make_shared<FrameSet>(*ecuio_signal_file_set(loaded));
-        ecuio_signal_file_free(loaded);
+        frames = std::make_shared<RecordingFrameSet>(loaded);
         frames->decodedWith = QStringLiteral("signals.json");
     } else if (source.profile.empty()) {
         fail(
@@ -561,14 +539,15 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
                      .arg(name));
             return;
         }
-        frames = std::make_shared<FrameSet>(*set);
+        frames = std::make_shared<RecordingFrameSet>(*set);
         frames->decodedWith = name;
+        frames->fileText = RecordingFrameSet::signalFileText(set);
     }
     start(folder, frames);
 }
 
 void RecordingView::start(const QString& folder,
-                          const std::shared_ptr<FrameSet>& frames)
+                          const std::shared_ptr<RecordingFrameSet>& frames)
 {
     m_folder = folder;
     m_error.clear();
@@ -1010,6 +989,7 @@ QVariantList RecordingView::signalList() const
         }
         list.append(QVariantMap{
             {QStringLiteral("index"), static_cast<int>(i)},
+            {QStringLiteral("key"), QString::fromUtf8(s.pub.key)},
             {QStringLiteral("name"), QString::fromUtf8(s.pub.name)},
             {QStringLiteral("unit"), unit},
             {QStringLiteral("decimals"), decimals},

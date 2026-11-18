@@ -1223,10 +1223,10 @@ TEST(SignalsTest, SetValidationRejectsDuplicateIds)
     EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
 }
 
-/* A recording keys its values by name: two defs never share one, byte
- * for byte, so two empty names are a repeat and a name in another case
- * isn't; the second of the pair is the one named */
-TEST(SignalsTest, SetValidationRejectsARepeatedName)
+/* Two defs may share a name (ADR-0065 section 9: a recording keeps a
+ * value under its key), byte for byte and the empty one too; an id still
+ * names one def */
+TEST(SignalsTest, SetValidationTakesARepeatedName)
 {
     ecuio_signal_def_t defs[3] = {four_byte_def(ECUIO_VALUE_UINT),
                                   four_byte_def(ECUIO_VALUE_UINT),
@@ -1238,21 +1238,17 @@ TEST(SignalsTest, SetValidationRejectsARepeatedName)
     set.count = 3;
     set.defs = defs;
     ecuio_validation_t v{};
-    EXPECT_EQ(ecuio_validate_signal_set(&set, &v),
-              ECUIO_VALIDATE_ERR_DUPLICATE_NAME);
-    EXPECT_EQ(v.index, 1u);
+    EXPECT_EQ(ecuio_validate_signal_set(&set, &v), ECUIO_VALIDATE_OK)
+        << "three empty names";
+    EXPECT_EQ(v.index, UINT32_MAX);
     std::snprintf(defs[0].name, sizeof defs[0].name, "%s", "Boost");
     std::snprintf(defs[1].name, sizeof defs[1].name, "%s", "Lambda");
-    std::snprintf(defs[2].name, sizeof defs[2].name, "%s", "boost");
-    EXPECT_EQ(ecuio_validate_signal_set(&set, &v), ECUIO_VALIDATE_OK);
     std::snprintf(defs[2].name, sizeof defs[2].name, "%s", "Boost");
-    EXPECT_EQ(ecuio_validate_signal_set(&set, &v),
-              ECUIO_VALIDATE_ERR_DUPLICATE_NAME);
-    EXPECT_EQ(v.index, 2u);
-    /* Ids first: a set with both repeats says the id's */
+    EXPECT_EQ(ecuio_validate_signal_set(&set, &v), ECUIO_VALIDATE_OK);
     defs[2].id = 1;
     EXPECT_EQ(ecuio_validate_signal_set(&set, &v),
               ECUIO_VALIDATE_ERR_DUPLICATE_ID);
+    EXPECT_EQ(v.index, 2u);
 }
 
 TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
@@ -1314,7 +1310,7 @@ TEST(SignalsTest, SetValidationNamesTheFailingElement)
     expect("duplicate id", &set, ECUIO_VALIDATE_ERR_DUPLICATE_ID, 2u);
     defs[2].id = 3;
     std::memcpy(defs[2].name, defs[1].name, sizeof defs[2].name);
-    expect("repeated name", &set, ECUIO_VALIDATE_ERR_DUPLICATE_NAME, 2u);
+    expect("repeated name", &set, ECUIO_VALIDATE_OK, UINT32_MAX);
     std::snprintf(defs[2].name, sizeof defs[2].name, "%s", "Signal 2");
     channels[1].tx_id = 0;
     expect("bad channel id", &set, ECUIO_VALIDATE_ERR_CHANNEL_ID, 1u);

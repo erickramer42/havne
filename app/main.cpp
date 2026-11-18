@@ -28,6 +28,7 @@
 #include "bluetoothdevices.h"
 #include "bridgesingleton.h"
 #include "carryover.h"
+#include "recording_frameset.h"
 #include "recordingexport.h"
 #include "sessionbridge.h"
 #if defined(Q_OS_ANDROID) || defined(Q_OS_WIN) || defined(Q_OS_LINUX)
@@ -139,6 +140,11 @@ int main(int argc, char *argv[])
     // Declared before the engine, so it outlives everything QML holds.
     SessionBridge bridge;
     BridgeSingleton::instance = &bridge;
+    // Keys a frames open through a registered profile by its signal file
+    RecordingFrameSet::setSignalFileText(
+        [&bridge](const ecuio_signal_set_t* set) {
+            return bridge.signalFileTextOfSet(set);
+        });
     bluetooth.attachTo(&bridge);
     // A paired adapter relayed to a computer over USB (ADR-0047): the
     // phone's build alone has a factory, so elsewhere it can't start

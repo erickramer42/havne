@@ -121,6 +121,14 @@ SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
     return file;
 }
 
+QByteArray
+SessionBridge::signalFileTextOfSet(const ecuio_signal_set_t* set) const
+{
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(fileOfSet(set), &length);
+    return QByteArray(text, static_cast<qsizetype>(length));
+}
+
 QString SessionBridge::profileOfUri(const QString& uri)
 {
     // Core's scheme routing and defaults (core.cpp, ecuio_session_create):
