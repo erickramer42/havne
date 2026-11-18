@@ -514,11 +514,11 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 #define ECUIO_VALIDATE_ERR_OUT_OF_MEMORY    (-24)  /* no room to check the
                                                       chains: the set may
                                                       be valid */
-#define ECUIO_VALIDATE_ERR_DUPLICATE_NAME   (-25)  /* two defs share a name,
-                                                      byte for byte, an
-                                                      empty one too: a
-                                                      recording keys its
-                                                      values by name */
+#define ECUIO_VALIDATE_ERR_DUPLICATE_NAME   (-25)  /* retired, never
+                                                      returned or reused:
+                                                      two defs may share
+                                                      a name (ADR-0065
+                                                      section 9) */
 #define ECUIO_VALIDATE_ERR_CHANNEL_RESERVED (-26)  /* a channel's flags or
                                                       reserved word not
                                                       zero */
@@ -576,7 +576,7 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
 
 /* The layout version, before any other member is read; the set's
  * reserved fields; every def (ecuio_validate_signal; the first failing
- * def's code); unique def ids; unique def names; the channel
+ * def's code); unique def ids (a name may repeat); the channel
  * declarations; then the tables: each NULL only when empty, each def's
  * range in them, each enum entry, each program and its inputs, then the
  * chains (no circle, none past ECUIO_COMPUTED_MAX_DEPTH; checked with a

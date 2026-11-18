@@ -34,6 +34,10 @@ add_library(ecuio-core STATIC
     src/j2534_loader.cpp
     src/j2534_transport.cpp
     src/elm327_transport.cpp
+    src/elm327_worker.cpp
+    src/elm327_setup.cpp
+    src/elm327_listen.cpp
+    src/elm327_close.cpp
     src/elm327_port.cpp
     src/elm327_tcp.cpp
     src/elm327_stream.cpp

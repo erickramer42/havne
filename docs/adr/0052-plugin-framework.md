@@ -82,6 +82,14 @@ Writes go only through tier 3, which needs its own manifest tier, a
 signature and the user's opt-in. The more a tier can do, the more of
 it core runs itself.
 
+> **Note of 2026-11-18.** The table's Built column is superseded for
+> tiers 2 and 3 by the appendix of 2026-11-18 below: v0.9.0 builds
+> tier 2 and takes the write path's first steps, decided in
+> [ADR-0066](0066-conversation-tier-and-write-gates.md). The rule that
+> tier 2 never sends a write stands, now pinned at the sub-function
+> level (ADR-0066 section 1). The signature the last paragraph requires
+> of a writes plugin is dropped (ADR-0066 section 2.4).
+
 ### 2. The package
 
 ```
@@ -271,6 +279,14 @@ inferred from the car. The VIN narrows the choice:
   logic runs in CI with no car.
 - **Signing** is decided with the tier.
 
+> **Note of 2026-11-18.** The runtime is WAMR's classic interpreter with
+> instruction metering, the guest ABI sits over the ops table, and
+> "signing is decided with the tier" is decided: no signature is
+> required to run a plugin (ADR-0066 sections 2.1, 2.2 and 2.4). The
+> ceiling gains the sub-function split (`10 03` but never `10 02`;
+> `2C 01` and `2C 03` but never `2C 02`), and `23` joins the services it
+> never allows (ADR-0066 section 1).
+
 ### 7. The writes tier (bounded here, designed in its own ADR)
 
 What this ADR fixes, so the earlier tiers don't paint it into a
@@ -294,6 +310,11 @@ corner:
 
 Tier 1 is not signed: it is data, validated whole at load, and its
 `source` block says where it came from.
+
+> **Note of 2026-11-18.** The writes tier no longer waits whole for 2.0:
+> v0.9.0 takes its first steps behind gates 1 to 3, and the signature
+> bullet above is reversed (ADR-0066 sections 2.4 and 3.4). The
+> appendix of 2026-11-18 below lists what moves and what stays 2.0's.
 
 ### 8. Fixtures and `plugins check`
 
@@ -642,3 +663,60 @@ covers, and `stream` reads the variant its URI names.
 > only when none has. So a variant made from a file with its own
 > attribution keeps it in every recording, whatever else the plugin
 > holds.
+
+## Appendix: what v0.9.0 takes of tiers 2 and 3 (2026-11-18)
+
+[ADR-0066](0066-conversation-tier-and-write-gates.md) decides everything
+below; this appendix says which of this record's open points it closes
+and which stay open. Sections 1, 6 and 7 above keep their text, each
+with a dated note.
+
+**Tier 2, built in v0.9.0** (ADR-0066 section 2; section 9's step 1):
+
+- **The runtime:** WAMR, classic interpreter, instruction metering on
+  (section 2.1; "Step 1 as built" there records why classic).
+- **The guest ABI** over section 6's ops table (section 2.2), and
+  security access (`27`) as the first conversation, core owning the
+  key's attempts and lockout (section 2.3).
+- **The trust model:** no signature is required to run any plugin, code
+  included. The sandbox, the declared services under core's ceiling, the
+  preview of a plugin's services and the gates are the protection
+  (section 2.4). Ed25519 is not adopted. Section 6's "signing is decided
+  with the tier" is closed by this, and section 6's native-module rule
+  stands: a release build runs WASM only.
+- **Manifest format 2:** `tiers` gains `"conversation"` and `"write"`,
+  a binary file is carried with a `kind` and its SHA-256, and a format-1
+  reader refuses a format-2 package whole (section 2.8). Section 2's
+  `["data"]` and size bounds are the format-1 rules.
+- **What stays v0.10.0's:** gateway routing, dynamically defined DIDs
+  and periodic reads, the rest of section 1's tier-2 row, designed
+  against the discovery capture. Nothing enrols `2A` before then.
+
+**The write path's first steps, in v0.9.0** (ADR-0066 sections 3 to 9):
+
+- **Where it lives:** core runs the transfer and the plan, the plugin
+  carries data and, later, a sandboxed sequence (section 3.4). Section 7
+  here said a write plan is core-run and plugin code only computes a
+  value or a key; the first steps keep that.
+- **Gates 1 to 3 before any flash:** the original copy and its dump
+  (section 4), the write flow's envelope (section 5) and the per-feature
+  legal record (section 6). The standalone dump needs no write.
+- **The flash** as a declarative plan over a write-qualified transport,
+  J2534 first, proven on the simulated ECU in CI before any car
+  (section 7; section 9's step 4).
+- **The multi-step plan,** after the single-download flash: an ordered,
+  bounded list of download, upload, routine and reset steps with each
+  blob pinned by its SHA-256, a kernel-assisted read treated as a write
+  (ADR-0066's appendix of 2026-11-18, items 1 to 3).
+- **The functional steps,** accepted: a functional suppressed `10 82`,
+  `3E 80` and `11 81`, each declared and previewed, with core owning the
+  end (the same appendix, item 4). Section 6's ceiling for tier 2 is
+  unchanged by them: only a tier-3 plan sends one.
+
+**What stays 2.0's:** the public write product, as ADR-0048 and the
+roadmap set it: map definitions, table editors, diff and undo, tune
+management, actuator tests (`2F`), manufacturers' plugins, and gateway
+research. A signing or trust-store feature may return in a later ADR for
+provenance, never as a precondition to run a plugin. Whether a public
+build carries the write services at all stays open (ADR-0066 "What stays
+open").

@@ -4,6 +4,7 @@
 //
 // Public headers only: what any program linking core can do.
 
+#include "signal_pairs.h"
 #include "view_frames.h"
 #include "view_lines.h"
 #include "jsonl.h"
@@ -417,6 +418,41 @@ ecuio_status_t column_means(const Viewed& v, const cli::Window& w,
     return ECUIO_OK;
 }
 
+// kept's means views[i]'s signal k takes its delta from (*from, its place):
+// the first before i showing k's pair as a number in k's unit; else NULL
+const double* delta_source(const std::vector<Viewed>& views, uint32_t i,
+                           uint32_t k, uint32_t columns,
+                           const std::vector<std::vector<double>>& kept,
+                           std::vector<std::vector<uint32_t>>& pairs,
+                           uint32_t* from)
+{
+    const Viewed& v = views[i];
+    for (uint32_t j = 0; j < i; ++j) {
+        const Viewed& u = views[j];
+        if (kept[j].empty()) {
+            continue;
+        }
+        if (pairs[j].empty()) {
+            pairs[j] = cli::pair_signals(
+                static_cast<uint32_t>(v.signals.size()),
+                [&](uint32_t n) -> const auto& { return v.signals[n]; },
+                static_cast<uint32_t>(u.signals.size()),
+                [&](uint32_t n) -> const auto& { return u.signals[n]; });
+        }
+        const uint32_t t = pairs[j][k];
+        const auto at = std::find(u.shown.begin(), u.shown.end(), t);
+        if (at == u.shown.end() ||
+            (u.signals[t].flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0 ||
+            !cli::same_unit(v.signals[k], u.signals[t])) {
+            continue;
+        }
+        *from = j;
+        return kept[j].data() +
+               static_cast<size_t>(at - u.shown.begin()) * columns;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 // A recording read offline (ADR-0049 section 5): every recording opens,
@@ -753,9 +789,8 @@ int run_view(ViewArgs& args)
         write_line(out, l);
     }
     std::vector<ecuio_recording_column_t> cols;
-    // Each number signal's means in the first aligned recording to show
-    // it, by name and unit, which a later recording's delta is taken from
-    std::map<std::string, std::pair<uint32_t, std::vector<double>>> firsts;
+    // Each aligned recording's means, which a later one's delta is taken from
+    std::vector<std::vector<double>> kept(views.size());
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         if (g_interrupted.load()) {
@@ -825,33 +860,32 @@ int run_view(ViewArgs& args)
             return ended(out, kExitConnect);
         }
         std::vector<double> delta(axis.columns);
+        std::vector<std::vector<uint32_t>> pairs(i);
         for (size_t n = 0; n < v.shown.size(); ++n) {
             const ecuio_recording_signal_t& s = v.signals[v.shown[n]];
             const double* mean = means.data() + n * axis.columns;
             const double* less = nullptr;
             uint32_t delta_from = 0;
-            if ((s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0) {
-                const std::string key = cli::delta_key(s);
-                const auto first = firsts.find(key);
-                if (first == firsts.end()) {
-                    firsts[key] = {
-                        i, std::vector<double>(mean, mean + axis.columns)};
-                } else if (first->second.first != i) {
-                    /* Another recording's: a signal named twice has no
-                     * delta from itself */
-                    /* NaN where either column is empty */
-                    for (uint32_t c = 0; c < axis.columns; ++c) {
-                        delta[c] = mean[c] - first->second.second[c];
-                    }
-                    less = delta.data();
-                    delta_from = first->second.first;
+            const double* first =
+                (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0
+                    ? nullptr
+                    : delta_source(views, i, v.shown[n], axis.columns, kept,
+                                   pairs, &delta_from);
+            if (first != nullptr) {
+                /* NaN where either column is empty */
+                for (uint32_t c = 0; c < axis.columns; ++c) {
+                    delta[c] = mean[c] - first[c];
                 }
+                less = delta.data();
             }
             BigLine b(cli::columns_line_bytes(axis.columns));
             cli::columns_line(b.line, i, s, w, axis.columns,
                               any ? cols.data() + n * w.count : nullptr, mean,
                               less, delta_from);
             write_line(out, b.line);
+        }
+        if (i + 1 < views.size()) {
+            kept[i] = std::move(means); // the last one's are never a delta's
         }
     }
     if (args.has_at) {
