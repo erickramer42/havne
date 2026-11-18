@@ -4,6 +4,11 @@ add_library(ecuio-core STATIC
     src/frame_decoder.cpp
     src/dtc_titles.cpp
     src/export.cpp
+    src/export_csv.cpp
+    src/export_events.cpp
+    src/export_folder.cpp
+    src/export_pcapng.cpp
+    src/export_wide.cpp
     src/health.cpp
     src/host_clock.cpp
     src/frames_read.cpp

@@ -50,6 +50,7 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 - The surrogate pipe's replies have no fuzz target, and its protections (DACL, first-instance flag, remote-client rejection) have no direct test.
 - The fake is simpler than J2534: its default read model, no segmented replies, no filter gating.
 - The scrub can't see a VIN sent raw in frames that aren't ISO-TP, and can refuse a folder copy whose marker label looks like a VIN.
+- No QML case pins a pick whose plugin copy doesn't load (listed, the unpick offered): the case went with a rewrite, and the bridge's test covers only the replace path.
 - The Python declarations' signedness isn't checked: the generated types are held to the headers' sizes and offsets only.
 - Warnings fail a build only where `HAVNE_WARNINGS_AS_ERRORS` is set (CI's GCC and Clang jobs): MSVC's never do, and a runner's newer compiler can fail a commit that passed.
 
@@ -92,7 +93,7 @@ it inside that table.
 | `test_c_abi` (ctest name `c_abi`) | Every public header compiles as ISO C11 with extensions off (`-pedantic` on GCC and Clang) and links unmangled; layout asserts | A C compiler |
 | `test_c_abi_shared` (ctest name `c_abi_shared`) | `tests/test_c_abi.c` again, linked against the shared core: each call resolves through its export table (internal hooks left out) | The shared core (`HAVNE_SHARED_CORE`, off on Android and iOS) |
 | `test_bridge` | `BridgeTest`, `RecordingViewTest`, `ReadOnceTest`, `FrameFilterTest`, `ObdbImportTest`, `RecordingExportTest`, `ViewerFramesTest` | Qt Core and Qt Network |
-| `test_qml` | One ctest case per `tests/qml/tst_*.qml` file, `QmlTest.<name>` (`QmlTest.theme` for `tst_theme.qml`); the slowest files (`tst_dashboard.qml`, `tst_dashedit.qml`, `tst_driveview.qml`, `tst_phone.qml`) run as several entries each, `QmlTest.<name>-1of<n>` to `-<n>of<n>` (three, five for `tst_phone.qml` and four for `tst_dashedit.qml`), every nth case, so a citation of `QmlTest.phone` or the others in this document names the file's entries | Qt Quick; the quiet, fault and requests cases need the fake DLL (Windows) and skip elsewhere |
+| `test_qml` | One ctest case per `tests/qml/tst_*.qml` file, `QmlTest.<name>` (`QmlTest.theme` for `tst_theme.qml`); the slowest files (`tst_dashboard.qml`, `tst_driveview.qml`, `tst_phone.qml`) run as several entries each, `QmlTest.<name>-1of<n>` to `-<n>of<n>` (three, five for `tst_phone.qml`), every nth case, so a citation of `QmlTest.phone` or the others in this document names the file's entries. `tst_dashedit.qml` and its six siblings (`tst_dashedit_panel.qml`, `_gesture`, `_color`, `_cells`, `_undo`, `_layout`) are one entry each (`QmlTest.dashedit`, `QmlTest.dashedit_panel`, ...). | Qt Quick; the quiet, fault and requests cases need the fake DLL (Windows) and skip elsewhere |
 | `test_j2534_discovery` | `J2534DiscoveryTest` | Windows |
 | `test_j2534_load` | `FakeFixture` | Windows and the fake DLL |
 | `test_j2534_stream` | `J2534StreamTest`, `J2534QueryParamTest`, `J2534AdoptionTest` | Windows and the fake DLL |

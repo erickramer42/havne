@@ -1,11 +1,12 @@
 // File/layer: app/storemigration.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest.OneStoreMigration* (test_bridge, a scratch
-//          ini and a HAVNE_SETTINGS_DIR of its own)
+// Testing: BRIDGE: BridgeTest.OneStoreMigration*, .OneStoreRemoval*
+//          (test_bridge, a scratch ini and a HAVNE_SETTINGS_DIR of its own)
 //
 // The vehicles' signal files moved into the plugin store, once (ADR-0064
-// Q6). What an older Havne reads is only read: the vehicle book under
-// vehicles/document and the copies in signals/. What the move writes is
-// new: a plugin of the user's own for each file the book names, the
+// Q6). What an older Havne reads is only read by the move: the vehicle
+// book under vehicles/document and the copies in signals/. A start after
+// the one that set the mark removes them (removeOld). What the move writes
+// is new: a plugin of the user's own for each file the book names, the
 // book's format 2 under vehicles/book, the bytes of a file that didn't
 // move under plugins/unmigrated/, and the store's mark, last. The saved
 // addresses (session/uri, session/recentUris) alone change in place: a
@@ -30,9 +31,9 @@
 // order, then the plugin pick); own becomes the own file's profile; uri
 // is text, "" when it wasn't. A list element that isn't an object is
 // left out. A file that didn't move is listed under the entry's
-// unmigrated as { sha256, name, words }, with kept false when its bytes
-// couldn't be copied and so are only in the old folder: that folder's
-// removal must spare every copy a kept false names. With an old book
+// unmigrated as { sha256, name, words }, with kept false when its copy
+// is there but its bytes couldn't be copied, and so are only in the old
+// folder. With an old book
 // that can't be read no entry exists, and the files that didn't move
 // are listed the same way under the book's own unmigrated, kept false
 // each, since their bytes stay where they are. VehicleBook.qml judges
@@ -70,6 +71,28 @@ public:
     // before any page reads the book
     static Report run(QSettings& prefs, PluginStore& store);
 
+    // The earlier version's data removed, before run, once a start before
+    // this one set the store's mark, so the start that moves the files
+    // keeps them. Only with vehicles/book a format 2 object: a copy in
+    // signals/ stays while a record (an entry's unmigrated or the book's
+    // own) names it with kept false or with no bytes in plugins/unmigrated,
+    // judged by name alone (a copy changed since is still its record's).
+    // In order, each step safe to stop after: vehicles/document (a failed
+    // sync stops it, nothing deleted, as does the key still read after it:
+    // the registry's failed delete, a fallback file's key), then every
+    // other <sha256>.json in signals/, then the folder if it ends empty. A
+    // file of another name is left. The lines for the activity log, none
+    // when there was nothing to remove
+    struct Removal {
+        bool oldBook = false; // vehicles/document removed
+        int removed = 0;      // copies deleted
+        int spared = 0;       // copies whose bytes are nowhere else
+        int stuck = 0;        // copies that couldn't be deleted
+        bool stopped = false; // the test seam ended it
+        QStringList lines;
+    };
+    static Removal removeOld(QSettings& prefs, PluginStore& store);
+
     // <HAVNE_SETTINGS_DIR>/signals, else <AppDataLocation>/signals: the
     // old store's copies, <sha256>.json
     static QString oldSignalsRoot();
@@ -93,7 +116,10 @@ public:
     // Test seam: the next run returns, as a killed app would, after the
     // nth file is wrapped (File), after every file is (Wrapped), after
     // the unmigrated bytes are copied (Copied), after the book is
-    // written (Book) or after the addresses are (Addresses). None ends it
-    enum class Step { None, File, Wrapped, Copied, Book, Addresses };
+    // written (Book) or after the addresses are (Addresses); the next
+    // removal after the old book goes (OldBook) or after the nth copy
+    // does (OldCopy). None ends it
+    enum class Step { None, File, Wrapped, Copied, Book, Addresses, OldBook,
+                      OldCopy };
     static void stopAfterForTesting(Step step, int file = 0);
 };

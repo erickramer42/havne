@@ -297,3 +297,8 @@ different VIN; the bridge then takes the new one, once.
   its decode, as the identity line's `vin`) once per new VIN, when the
   flag is set, ahead of the identity line.
 - Python's `Session.vin()` is "" until the flag is set.
+
+## Appendix: plotted and unplotted by key (2026-11-18)
+
+- `plotted` and `unplotted` hold signal keys ([ADR-0065](0065-car-sized-profile.md) section 9). `SignalListModel::setPlotChoices` takes each stored text as a key, else as a name one row has, so an entry kept by name applies as before; `plottedKeys()` and `unplottedKeys()` give keys, so the next `rememberPlotting` writes keys. No format change: both are lists of strings.
+- A stored text no row of the session's set answers is carried through that session's saves, after the rows' keys, at most 1024 in each list (the newest). A vehicle a VIN adds takes the session's own ticks and none carried for the vehicle picked before.
