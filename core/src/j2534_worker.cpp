@@ -351,33 +351,21 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
     }
 }
 
-/* The pass's sends: every channel's wait that ran out, then each channel,
- * in the hold's order, writes what the hold gives it (j2534_hold.h:
- * due's request, unless a segmented reply keeps it or another waiting) */
+/* The pass's sends (j2534_hold_pass): each wait that ran out, and what
+ * the hold gives each channel to write (due's request, unless a segmented
+ * reply keeps it or another waiting) */
 void ask_channels(ecuio_j2534_transport* t, ecuio_request_engine& e,
                   link_health& h, j2534_hold& hold)
 {
-    const int64_t now = engine_now_us(t);
-    for (uint32_t c = 0; c < e.chan_count; ++c) {
-        if (ecuio_engine_expire(&e, c, now)) {
-            ecuio_request_timed_out(e, h);
-        }
-    }
-    uint32_t order[ECUIO_MAX_CHANNELS];
-    j2534_hold_order(hold, &e, order);
-    uint32_t held_now = 0;
-    for (uint32_t k = 0; k < e.chan_count; ++k) {
-        const uint32_t c = order[k];
-        const int32_t r = j2534_hold_next(hold, &e, c, now, &held_now);
-        if (r != ECUIO_ENGINE_NONE) {
+    j2534_hold_pass(
+        hold, &e, engine_now_us(t),
+        [&](uint32_t) { ecuio_request_timed_out(e, h); },
+        [&](uint32_t c, int32_t r) {
             const int64_t start = engine_now_us(t);
-            const bool sent =
-                send_request(t, ecuio_engine_request_of(&e, c, r), h,
-                             r == ECUIO_ENGINE_ONCE);
+            const bool sent = send_request(t, ecuio_engine_request_of(&e, c, r),
+                                           h, r == ECUIO_ENGINE_ONCE);
             ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
-        }
-    }
-    j2534_hold_pass_end(hold, held_now);
+        });
 }
 
 } // namespace
@@ -448,9 +436,9 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
          * request can time out, so the session reads as a passive one
          * does: empty reads count toward quiet, which can't tell an
          * ECU that went away from one with nothing left to answer. */
-        const int64_t next_us = requests
-            ? ecuio_engine_next_event_us(&e, engine_now_us(t))
-            : INT64_MAX;
+        const int64_t next_us =
+            requests ? j2534_hold_next_event_us(hold, &e, engine_now_us(t))
+                     : INT64_MAX;
         const bool asking = next_us != INT64_MAX;
         /* Every reply in and only a floor (or a focus's sweep) to wait
          * for: the worker's own timer, no vendor read, which the VX holds
@@ -479,6 +467,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
                 e.stamp_breaks = t->clock.host_steps;
                 (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                             engine_now_us(t), nullptr);
+                j2534_hold_answered(hold, o.chan);
             }
             const bool unpicked = !asking && ecuio_engine_unpicked(&e);
             update_health(h, o, !asking && !unpicked);
@@ -488,6 +477,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
         }
         if (h.recovered) {
             h.recovered = false;
+            j2534_hold_recovered(hold);
             if (requests && t->probe) {
                 ecuio_engine_probe(&e);
             }

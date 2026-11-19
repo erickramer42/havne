@@ -6,7 +6,9 @@
 #include <gtest/gtest.h>
 
 #include "../core/src/j2534_hold.h"
+#include "../core/src/link_health.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <utility>
@@ -34,9 +36,10 @@ struct Exchange {
 
 /* Modules answering a J2534 worker's pass: each request's first frame
  * after first_us, each frame more 5 ms later; a module's reply_of gives
- * its answer (empty: silence). The pass is the worker's: expire, then
- * each channel in the hold's order through j2534_hold_next, or due when
- * the hold is left out (plain). */
+ * its answer (empty: silence; 7F xx 78 keeps the request out). The pass is
+ * the worker's, j2534_hold_pass, or (plain) the pass a worker makes with
+ * no hold, written out: each channel's wait ended and its due request
+ * written in turn. */
 struct Bus {
     ecuio_request_engine e;
     j2534_hold hold;
@@ -53,43 +56,56 @@ struct Bus {
     };
     std::vector<Due> due;
 
-    void pass()
+    void deliver()
     {
         for (size_t i = 0; i < due.size();) {
             if (due[i].at > now) {
                 ++i;
                 continue;
             }
-            (void)ecuio_engine_on_frame(
+            const ecuio_reply r = ecuio_engine_on_frame(
                 &e, due[i].c, due[i].bytes.data(),
                 static_cast<uint16_t>(due[i].bytes.size()), now, nullptr);
-            exchanges[due[i].exchange].ended_us = now;
-            exchanges[due[i].exchange].answered = true;
+            j2534_hold_answered(hold, due[i].c);
+            if (r != ecuio_reply::pending) {
+                exchanges[due[i].exchange].ended_us = now;
+                exchanges[due[i].exchange].answered = true;
+            }
             due.erase(due.begin() + static_cast<std::ptrdiff_t>(i));
         }
-        for (uint32_t c = 0; c < e.chan_count; ++c) {
-            if (ecuio_engine_expire(&e, c, now)) {
-                for (Exchange& x : exchanges) {
-                    if (x.c == c && x.ended_us == INT64_MAX) {
-                        x.ended_us = now;
-                    }
+    }
+
+    void end_open(uint32_t c)
+    {
+        for (Exchange& x : exchanges) {
+            if (x.c == c && x.ended_us == INT64_MAX) {
+                x.ended_us = now;
+            }
+        }
+    }
+
+    void pass()
+    {
+        deliver();
+        if (plain) {
+            for (uint32_t c = 0; c < e.chan_count; ++c) {
+                if (ecuio_engine_expire(&e, c, now)) {
+                    end_open(c);
+                }
+                const int32_t r = ecuio_engine_due(&e, c, now);
+                if (r != ECUIO_ENGINE_NONE) {
+                    write(c, r, false);
                 }
             }
-        }
-        uint32_t order[ECUIO_MAX_CHANNELS];
-        j2534_hold_order(hold, &e, order);
-        uint32_t held_now = 0;
-        for (uint32_t k = 0; k < e.chan_count; ++k) {
-            const uint32_t c = order[k];
-            const bool chosen = !plain && hold.chosen[c] != ECUIO_ENGINE_NONE;
-            const int32_t r =
-                plain ? ecuio_engine_due(&e, c, now)
-                      : j2534_hold_next(hold, &e, c, now, &held_now);
-            if (r != ECUIO_ENGINE_NONE) {
-                write(c, r, chosen);
+        } else {
+            bool chosen[ECUIO_MAX_CHANNELS] = {};
+            for (uint32_t c = 0; c < e.chan_count; ++c) {
+                chosen[c] = hold.chosen[c] != ECUIO_ENGINE_NONE;
             }
+            j2534_hold_pass(
+                hold, &e, now, [&](uint32_t c) { end_open(c); },
+                [&](uint32_t c, int32_t r) { write(c, r, chosen[c]); });
         }
-        j2534_hold_pass_end(hold, held_now);
         now += kStepUs;
     }
 
@@ -296,9 +312,10 @@ TEST(J2534HoldTest, EachChannelKeepsAPace)
     }
 }
 
-/* A chosen request waits only for the replies out: a silent module's
- * request holds it for that request's wait, and it is written then */
-TEST(J2534HoldTest, AChosenRequestGoesWhenTheOthersWaitRunsOut)
+/* A chosen request waits only for the replies out: a module falling
+ * silent holds it for that request's wait, and it is written then; gone
+ * silent, the module's next requests keep nothing waiting */
+TEST(J2534HoldTest, AChosenRequestWaitsForASilentModuleOnce)
 {
     Bus b;
     ASSERT_NO_FATAL_FAILURE(two_modules(b));
@@ -313,19 +330,21 @@ TEST(J2534HoldTest, AChosenRequestGoesWhenTheOthersWaitRunsOut)
     };
     const size_t from = b.exchanges.size();
     b.until(1200 * kMs);
-    for (size_t i = from; i < b.exchanges.size(); ++i) {
-        const Exchange& x = b.exchanges[i];
-        if (x.c == 0) {
-            EXPECT_FALSE(overlaps_another(b.exchanges, i)) << "exchange " << i;
-        }
-    }
+    const Exchange* silent = nullptr;
+    const Exchange* first = nullptr;
     size_t zero = 0;
     for (size_t i = from; i < b.exchanges.size(); ++i) {
-        zero += b.exchanges[i].c == 0 ? 1u : 0u;
+        const Exchange& x = b.exchanges[i];
+        silent = silent == nullptr && x.c == 1 ? &x : silent;
+        first = first == nullptr && x.c == 0 ? &x : first;
+        zero += x.c == 0 ? 1u : 0u;
     }
-    /* each lap: channel 1's 100 ms wait, then channel 0's 13 ms */
-    EXPECT_GE(zero, 8u);
-    EXPECT_LE(zero, 10u);
+    ASSERT_NE(silent, nullptr);
+    ASSERT_NE(first, nullptr);
+    EXPECT_GE(first->sent_us, silent->ended_us) << "the first wait is held";
+    /* then channel 0's 13 ms exchanges back to back: about 70 in 900 ms;
+     * waiting out each of channel 1's 100 ms waits, about 9 */
+    EXPECT_GT(zero, 50u);
 }
 
 /* Off (?hold=0) or with one channel, the hold is due itself: the same
@@ -588,4 +607,285 @@ TEST(J2534HoldTest, AChosenRowGoesUnlessTheFocusParkedItMeanwhile)
             << (parked_meanwhile ? "parked meanwhile" : "parked when chosen");
         EXPECT_EQ(hold.chosen[0], ECUIO_ENGINE_NONE);
     }
+}
+
+/* A request in a pending wait (7F 22 78: 5.05 s) holds no one. Under
+ * ?session=03 the other channel goes on asking and keeps its session;
+ * waiting out the pending reply would stop its data for 5 s and lapse its
+ * session past S3 */
+TEST(J2534HoldTest, APendingReplyHoldsNoOneAndTheOthersKeepTheirSession)
+{
+    Bus b;
+    ASSERT_TRUE(ecuio_engine_init(&b.e, 2));
+    b.e.gap_us = 5 * kMs;
+    ASSERT_TRUE(ecuio_engine_session(&b.e, ECUIO_SESSION_EXTENDED,
+                                     ECUIO_ENGINE_KEEPALIVE_US));
+    const uint8_t did[3] = {0x22, 0x1E, 0x80};
+    ASSERT_EQ(ecuio_engine_add(&b.e, 1, did, 3),
+              ecuio_engine_add_result::added);
+    ASSERT_TRUE(ecuio_engine_scan_add(&b.e, 0, 0xF190)); /* segmented */
+    b.reply_of = [](uint32_t, const ecuio_request& q) {
+        switch (q.bytes[0]) {
+        case 0x10:
+            return Bytes{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+        case 0x3E:
+            return Bytes{0x7E, 0x00};
+        default:
+            break;
+        }
+        if (q.bytes[1] == 0xF1) {
+            return Bytes{0x7F, 0x22, 0x78}; /* its answer never comes */
+        }
+        return Bytes{0x62, q.bytes[1], q.bytes[2], 0x12, 0x34};
+    };
+    b.until(7000 * kMs);
+    const Exchange* pending = nullptr;
+    for (const Exchange& x : b.exchanges) {
+        pending =
+            pending == nullptr && x.c == 0 && x.bytes[1] == 0xF1 ? &x : pending;
+    }
+    ASSERT_NE(pending, nullptr);
+    EXPECT_GE(pending->ended_us - pending->sent_us, 5000 * kMs);
+    int64_t last = pending->sent_us;
+    for (const Exchange& x : b.exchanges) {
+        if (x.c == 1 && x.sent_us > pending->sent_us &&
+            x.sent_us < pending->ended_us) {
+            EXPECT_LT(x.sent_us - last, 50 * kMs) << "channel 1 held";
+            last = x.sent_us;
+        }
+    }
+    EXPECT_GT(last, pending->ended_us - 50 * kMs);
+    EXPECT_EQ(b.e.chans[1].session_lost, 0u);
+}
+
+/* A held channel's due session request goes through: a hold never ages a
+ * session past S3. The keep-alive waits behind a talk offered first unless
+ * it is taken already (its write failed); an entry (10 03, or S3 passed)
+ * doesn't. Not due, or with another
+ * one-shot taken (due hands that out first), the channel is held. */
+TEST(J2534HoldTest, AHeldChannelsDueSessionRequestGoesThrough)
+{
+    struct Variant {
+        const char* name;
+        bool keepalive_due;
+        /* 0 none; 1-5 identifying to the talk out; 6 talk first; 7 talk
+         * first with 3E 00 taken (its write failed) */
+        int taken;
+        int session; /* 0 entered; 1 entering; 2 S3 passed */
+        uint8_t sid; /* what goes out, 0 held */
+    };
+    const Variant variants[] = {
+        {"due", true, 0, 0, 0x3E},
+        {"not due", false, 0, 0, 0},
+        {"identifying", true, 1, 0, 0},
+        {"diagnosing", true, 2, 0, 0},
+        {"scanning", true, 3, 0, 0},
+        {"clearing", true, 4, 0, 0},
+        {"talk out", true, 5, 0, 0},
+        {"talk first", true, 6, 0, 0},
+        {"talk first, entering", false, 6, 1, 0x10},
+        {"talk first, S3 passed", true, 6, 2, 0x10},
+        {"talk first, 3E 00 taken", true, 7, 0, 0x3E},
+    };
+    for (const Variant& v : variants) {
+        ecuio_request_engine e;
+        ASSERT_TRUE(ecuio_engine_init(&e, 2));
+        ASSERT_TRUE(ecuio_engine_session(&e, ECUIO_SESSION_EXTENDED,
+                                         ECUIO_ENGINE_KEEPALIVE_US));
+        const uint8_t a[3] = {0x22, 0x1E, 0x00};
+        const uint8_t b[3] = {0x22, 0x1E, 0x80};
+        ASSERT_EQ(ecuio_engine_add(&e, 0, a, 3),
+                  ecuio_engine_add_result::added);
+        ASSERT_EQ(ecuio_engine_add(&e, 1, b, 3),
+                  ecuio_engine_add_result::added);
+        const int64_t now = 3000 * kMs;
+        for (uint32_t c = 0; c < 2; ++c) {
+            e.chans[c].session_step = ECUIO_SESSION_STATE_ENTERED;
+        }
+        ecuio_engine_channel& ch = e.chans[1];
+        ch.last_sent_us = v.session == 2    ? now - ECUIO_ENGINE_S3_US
+                          : v.keepalive_due ? now - ECUIO_ENGINE_KEEPALIVE_US
+                                            : now - kMs;
+        if (v.session == 1) {
+            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+        }
+        e.requests[0].reply_frames = 3;
+        ecuio_engine_sent(&e, 0, 0, true, now - kMs); /* segmented, out */
+        ch.identifying = v.taken == 1;
+        ch.diagnosing = v.taken == 2;
+        ch.scanning = v.taken == 3;
+        ch.clearing = v.taken == 4;
+        ch.talk.out = v.taken == 5;
+        if (v.taken == 7) {
+            ch.sessioning = true;
+            ch.once.bytes[0] = 0x3E;
+            ch.once.len = 2;
+        }
+        if (v.taken >= 6) {
+            const uint8_t pdu[3] = {0x22, 0xF1, 0x90};
+            ASSERT_EQ(ecuio_engine_talk(ch.talk, e.pdu_max, pdu, 3, 3, true),
+                      ecuio_talk_offer::taken);
+        }
+        j2534_hold hold;
+        uint32_t held = 0;
+        const int32_t r = j2534_hold_next(hold, &e, 1, now, &held);
+        if (v.sid != 0) {
+            ASSERT_EQ(r, ECUIO_ENGINE_ONCE) << v.name;
+            EXPECT_EQ(ch.once.bytes[0], v.sid) << v.name;
+            EXPECT_EQ(held, 0u) << v.name;
+        } else {
+            EXPECT_EQ(r, ECUIO_ENGINE_NONE) << v.name;
+            EXPECT_EQ(held, 2u) << v.name;
+        }
+    }
+}
+
+/* Two channels, channel 0's segmented row out at 0 and channel 1's row
+ * due beside it */
+void segmented_out(ecuio_request_engine& e)
+{
+    ASSERT_TRUE(ecuio_engine_init(&e, 2));
+    e.gap_us = 5 * kMs;
+    const uint8_t a[3] = {0x22, 0x1E, 0x00};
+    const uint8_t b[3] = {0x22, 0x1E, 0x80};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, a, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 1, b, 3), ecuio_engine_add_result::added);
+    e.requests[0].reply_frames = 3;
+    ecuio_engine_sent(&e, 0, 0, true, 0);
+}
+
+/* A channel goes silent when its wait runs out in a pass and holds no one
+ * then; a frame from it, or the link's recovery (the rescan's
+ * identification asked again on every channel), makes it hold again */
+TEST(J2534HoldTest, AChannelIsSilentUntilAFrameOrARecovery)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(segmented_out(e));
+    j2534_hold hold;
+    uint32_t held = 0;
+    EXPECT_EQ(j2534_hold_next(hold, &e, 1, 10 * kMs, &held), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(held, 2u) << "in step, channel 0 holds";
+    const auto nothing = [](uint32_t, int32_t) {};
+    j2534_hold_pass(hold, &e, ECUIO_ENGINE_WAIT_US, [](uint32_t) {}, nothing);
+    EXPECT_EQ(hold.silent, 1u) << "channel 0's wait ran out";
+    for (int how = 0; how < 2; ++how) {
+        hold.silent = 1;
+        ecuio_engine_sent(&e, 0, 0, true, 200 * kMs);
+        e.chans[1].outstanding = ECUIO_ENGINE_NONE;
+        e.chans[1].next_send_us = 0;
+        held = 0;
+        EXPECT_EQ(j2534_hold_next(hold, &e, 1, 210 * kMs, &held), 1)
+            << "silent, channel 0 holds no one";
+        e.chans[1].outstanding = ECUIO_ENGINE_NONE;
+        if (how == 0) {
+            j2534_hold_answered(hold, 0);
+        } else {
+            j2534_hold_recovered(hold);
+        }
+        held = 0;
+        EXPECT_EQ(j2534_hold_next(hold, &e, 1, 210 * kMs, &held),
+                  ECUIO_ENGINE_NONE)
+            << (how == 0 ? "after a frame" : "after a recovery");
+        EXPECT_EQ(held, 2u);
+    }
+}
+
+/* A silent channel's segmented row goes out at once, not chosen: kept
+ * waiting it would hold the others until the bus drains */
+TEST(J2534HoldTest, ASilentChannelsSegmentedRowIsNotChosen)
+{
+    for (const bool silent : {true, false}) {
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(segmented_out(e));
+        e.chans[0].outstanding = ECUIO_ENGINE_NONE;
+        ecuio_engine_sent(&e, 1, 1, true, 0); /* a Single Frame out */
+        j2534_hold hold;
+        hold.silent = silent ? 1u : 0u;
+        uint32_t held = 0;
+        const int32_t r = j2534_hold_next(hold, &e, 0, 10 * kMs, &held);
+        EXPECT_EQ(r, silent ? 0 : ECUIO_ENGINE_NONE);
+        EXPECT_EQ(hold.chosen[0], silent ? ECUIO_ENGINE_NONE : 0);
+    }
+}
+
+/* Off, the pass is the plain one to the link's counters: channel 0's
+ * write fails before channel 1's wait is ended, so the latch keeps that
+ * timeout from counting. On, every wait is ended first, so it counts. */
+TEST(J2534HoldTest, OffThePassIsThePlainOneToTheLinksCounts)
+{
+    struct Run {
+        std::atomic<int32_t> published{ECUIO_OK};
+        std::atomic<uint32_t> episodes{0};
+        link_health h{published, episodes};
+        ecuio_request_engine e;
+    };
+    const auto make = [](Run& run) {
+        ASSERT_NO_FATAL_FAILURE(segmented_out(run.e));
+        run.e.requests[0].reply_frames = 0;
+        run.e.chans[0].outstanding = ECUIO_ENGINE_NONE;
+        ecuio_engine_sent(&run.e, 1, 1, true, 0); /* its wait ends at 100 */
+    };
+    const int64_t now = ECUIO_ENGINE_WAIT_US;
+    const auto fail = [now](Run& run, uint32_t c, int32_t r) {
+        link_on_write(run.h, false);
+        ecuio_engine_sent(&run.e, c, r, false, now);
+    };
+    Run plain;
+    ASSERT_NO_FATAL_FAILURE(make(plain));
+    for (uint32_t c = 0; c < 2; ++c) {
+        if (ecuio_engine_expire(&plain.e, c, now)) {
+            link_on_request_timeout(plain.h);
+        }
+        const int32_t r = ecuio_engine_due(&plain.e, c, now);
+        if (r != ECUIO_ENGINE_NONE) {
+            fail(plain, c, r);
+        }
+    }
+    for (const bool on : {false, true}) {
+        Run run;
+        ASSERT_NO_FATAL_FAILURE(make(run));
+        j2534_hold hold;
+        hold.on = on;
+        j2534_hold_pass(
+            hold, &run.e, now,
+            [&](uint32_t) { link_on_request_timeout(run.h); },
+            [&](uint32_t c, int32_t r) { fail(run, c, r); });
+        const bool same = run.h.unanswered == plain.h.unanswered &&
+                          run.h.quiet_runs == plain.h.quiet_runs &&
+                          run.h.write_failed == plain.h.write_failed &&
+                          run.published.load() == plain.published.load() &&
+                          run.episodes.load() == plain.episodes.load();
+        EXPECT_EQ(same, !on) << (on ? "on" : "off");
+    }
+    EXPECT_FALSE(plain.h.unanswered);
+    EXPECT_TRUE(plain.h.write_failed);
+}
+
+/* A held channel, or one whose chosen request waits, waits on another's
+ * reply: the worker's next event is that reply's wait, not the held
+ * channel's floor (a read of 1 ms over and over) */
+TEST(J2534HoldTest, HeldAndChosenChannelsWaitOnTheOthersReply)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(segmented_out(e));
+    j2534_hold hold;
+    const int64_t now = 10 * kMs;
+    uint32_t held = 0;
+    ASSERT_EQ(j2534_hold_next(hold, &e, 1, now, &held), ECUIO_ENGINE_NONE);
+    j2534_hold_pass_end(hold, held);
+    EXPECT_EQ(ecuio_engine_next_event_us(&e, now), 0);
+    EXPECT_EQ(j2534_hold_next_event_us(hold, &e, now),
+              ECUIO_ENGINE_WAIT_US - now)
+        << "held";
+    hold.held = 0;
+    hold.chosen[1] = 1;
+    EXPECT_EQ(j2534_hold_next_event_us(hold, &e, now),
+              ECUIO_ENGINE_WAIT_US - now)
+        << "chosen";
+    hold.chosen[1] = ECUIO_ENGINE_NONE;
+    hold.held = 3; /* nothing else left: the whole figure */
+    EXPECT_EQ(j2534_hold_next_event_us(hold, &e, now), 0);
+    hold.held = 2;
+    hold.on = false;
+    EXPECT_EQ(j2534_hold_next_event_us(hold, &e, now), 0) << "off";
 }
