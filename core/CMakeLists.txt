@@ -27,6 +27,8 @@ add_library(ecuio-core STATIC
     src/recorder_writer.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/recording_reader_events.cpp
+    src/recording_reader_source.cpp
     src/scrub.cpp
     src/scrub_frames.cpp
     src/mock_transport.cpp
