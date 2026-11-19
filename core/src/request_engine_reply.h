@@ -253,6 +253,9 @@ inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
                                               uint8_t code, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    if (out >= 0) {
+        e->requests[out].reply_frames = 1; /* 7F <sid> <code> */
+    }
     if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
         ch.outstanding = ECUIO_ENGINE_NONE;
         ecuio_engine_session_settle(e, c, ECUIO_DIAG_REFUSED, code, now_us);

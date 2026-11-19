@@ -9,6 +9,7 @@
 #include "../core/src/request_engine.h"
 
 #include <cstdint>
+#include <ios>
 #include <vector>
 
 namespace {
@@ -66,10 +67,10 @@ TEST(RequestEngineTest, ARequestNotYetAnsweredCountsAsOneFrame)
     EXPECT_FALSE(segmented(e, 2));
 }
 
-/* A row's last positive reply sets it: 7 bytes are a Single Frame, 8 a
- * First Frame and a Consecutive Frame; a negative reply teaches nothing,
- * and a shorter reply after a long one makes it one frame again */
-TEST(RequestEngineTest, ARowsLastPositiveReplySetsItsFrames)
+/* A row's last answer sets it: 7 bytes are a Single Frame, 8 a First
+ * Frame and a Consecutive Frame, a negative reply one frame, and a
+ * shorter reply after a long one makes it one frame again */
+TEST(RequestEngineTest, ARowsLastAnswerSetsItsFrames)
 {
     ecuio_request_engine e;
     ASSERT_TRUE(ecuio_engine_init(&e, 1));
@@ -88,11 +89,22 @@ TEST(RequestEngineTest, ARowsLastPositiveReplySetsItsFrames)
     now += 100 * kMs;
     ASSERT_EQ(ask(&e, 0, now, {0x7F, 0x22, 0x31}), 0);
     ASSERT_EQ(e.requests[0].dropped, 0u) << "no probe: nothing drops";
-    EXPECT_TRUE(segmented(e, 0)) << "a negative reply teaches nothing";
+    EXPECT_EQ(e.requests[0].reply_frames, 1u);
+    EXPECT_FALSE(segmented(e, 0)) << "a refused row holds nothing";
 
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E00, 5)), 0);
+    EXPECT_TRUE(segmented(e, 0));
     now += 100 * kMs;
     ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E00, 4)), 0);
     EXPECT_FALSE(segmented(e, 0));
+
+    /* a pending reply (7F 22 78) is no answer: the row keeps its frames */
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E00, 5)), 0);
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {0x7F, 0x22, 0x78}), 0);
+    EXPECT_TRUE(segmented(e, 0));
 }
 
 /* A pack's reply is its records' lengths added: 7 bytes one frame, 8
@@ -151,44 +163,59 @@ TEST(RequestEngineTest, ALateScanReplySeedsItsRowsFrames)
     EXPECT_TRUE(segmented(e, 0));
 }
 
-/* A one-shot asking for the VIN (09 02, 22 F1 90: 17 characters) is
- * segmented before any answer, an identification item or a scanned DID;
- * every other identification item is one frame, and a talk in the
- * one-shot is never judged */
-TEST(RequestEngineTest, TheVinsIdentificationItemsAreSegmented)
+/* Every identification and diagnostics item is segmented before any
+ * answer (most answers take several frames: a VIN or CALID three, an ECU
+ * name four, a part number past four characters two), and so is a
+ * scanned F190; a talk in the one-shot is never judged, and the walk's
+ * bitmaps and any other scanned DID count as one frame */
+TEST(RequestEngineTest, EveryIdentificationAndDiagnosticsItemIsSegmented)
 {
     ecuio_request_engine e;
     ASSERT_TRUE(ecuio_engine_init(&e, 1));
     ecuio_engine_identify(&e);
+    ecuio_engine_diagnose(&e, nullptr);
     int64_t now = 0;
-    uint32_t vins = 0;
-    for (uint32_t i = 0; i < ECUIO_IDENT_COUNT; ++i, now += 100 * kMs) {
+    uint32_t idents = 0;
+    uint32_t diags = 0;
+    for (int i = 0; i < 40 && (e.chans[0].ident_pending > 0 ||
+                               e.chans[0].diag_pending > 0);
+         ++i, now += 100 * kMs) {
         const int32_t r = ecuio_engine_due(&e, 0, now);
         ASSERT_EQ(r, ECUIO_ENGINE_ONCE) << "item " << i;
-        const ecuio_request& q = e.chans[0].once;
-        const bool vin =
-            (q.len == 2 && q.bytes[0] == 0x09 && q.bytes[1] == 0x02) ||
-            (q.len == 3 && q.bytes[0] == 0x22 && q.bytes[1] == 0xF1 &&
-             q.bytes[2] == 0x90);
-        EXPECT_EQ(segmented(e, ECUIO_ENGINE_ONCE), vin) << "item " << i;
-        if (vin) {
-            ++vins;
-            e.chans[0].talk.out = true;
-            EXPECT_FALSE(segmented(e, ECUIO_ENGINE_ONCE)) << "a talk";
-            e.chans[0].talk.out = false;
-        }
+        ASSERT_TRUE(e.chans[0].identifying || e.chans[0].diagnosing);
+        idents += e.chans[0].identifying ? 1u : 0u;
+        diags += e.chans[0].diagnosing ? 1u : 0u;
+        EXPECT_TRUE(segmented(e, ECUIO_ENGINE_ONCE)) << "item " << i;
+        e.chans[0].talk.out = true;
+        EXPECT_FALSE(segmented(e, ECUIO_ENGINE_ONCE)) << "a talk";
+        e.chans[0].talk.out = false;
         ecuio_engine_sent(&e, 0, r, true, now);
-        const Bytes refused = {0x7F, q.bytes[0], 0x31};
+        const uint8_t sid = e.chans[0].once.bytes[0];
+        const Bytes refused = {0x7F, sid, 0x31};
         (void)ecuio_engine_on_frame(&e, 0, refused.data(), 3, now + 4 * kMs,
                                     nullptr);
     }
-    EXPECT_EQ(vins, 2u);
-    EXPECT_FALSE(e.chans[0].identifying);
+    EXPECT_EQ(idents, ECUIO_IDENT_COUNT);
+    EXPECT_GT(diags, 0u);
 
-    ecuio_request_engine scan;
-    ASSERT_TRUE(ecuio_engine_init(&scan, 1));
-    ASSERT_TRUE(ecuio_engine_scan_add(&scan, 0, 0xF190));
-    ASSERT_EQ(ecuio_engine_due(&scan, 0, 0), ECUIO_ENGINE_ONCE);
-    ASSERT_TRUE(scan.chans[0].scanning);
-    EXPECT_TRUE(ecuio_engine_reply_segmented(&scan, 0, ECUIO_ENGINE_ONCE));
+    for (const uint16_t did : {uint16_t{0xF190}, uint16_t{0x1E20}}) {
+        ecuio_request_engine scan;
+        ASSERT_TRUE(ecuio_engine_init(&scan, 1));
+        ASSERT_TRUE(ecuio_engine_scan_add(&scan, 0, did));
+        ASSERT_EQ(ecuio_engine_due(&scan, 0, 0), ECUIO_ENGINE_ONCE);
+        ASSERT_TRUE(scan.chans[0].scanning);
+        EXPECT_EQ(ecuio_engine_reply_segmented(&scan, 0, ECUIO_ENGINE_ONCE),
+                  did == 0xF190)
+            << std::hex << did;
+    }
+
+    ecuio_request_engine walk;
+    ASSERT_TRUE(ecuio_engine_init(&walk, 1));
+    const uint8_t pid[2] = {0x01, 0x0C};
+    ASSERT_EQ(ecuio_engine_add(&walk, 0, pid, 2),
+              ecuio_engine_add_result::added);
+    ecuio_engine_probe(&walk);
+    ASSERT_EQ(ecuio_engine_due(&walk, 0, 0), ECUIO_ENGINE_ONCE);
+    ASSERT_TRUE(walk.chans[0].walking);
+    EXPECT_FALSE(ecuio_engine_reply_segmented(&walk, 0, ECUIO_ENGINE_ONCE));
 }

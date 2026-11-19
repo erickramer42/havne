@@ -32,10 +32,11 @@ inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
 
 /* Whether the reply to request r of channel c is expected to take more
  * than one CAN frame (Known Issue #42's hold): a pack by its records'
- * lengths, a table row by its last positive reply, a one-shot asking for
- * the VIN (09 02 or 22 F1 90, an identification item or a scanned DID:
- * 17 characters) always; anything not seen yet counts as one frame, and
- * a talk is never judged. */
+ * lengths, a table row by its last answer, and always an identification
+ * or diagnostics item (most answers take several frames, and these go
+ * out on every channel at once at connect and on recovery) or any
+ * one-shot asking for the VIN (09 02, 22 F1 90: 17 characters); anything
+ * not seen yet counts as one frame, and a talk is never judged. */
 inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
                                          uint32_t c, int32_t r)
 {
@@ -49,7 +50,8 @@ inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
             q.len == 2 && q.bytes[0] == 0x09 && q.bytes[1] == 0x02;
         const bool vin_22 = q.len == 3 && q.bytes[0] == 0x22 &&
                             q.bytes[1] == 0xF1 && q.bytes[2] == 0x90;
-        return !ch.talk.out && (vin_09 || vin_22);
+        return !ch.talk.out &&
+               (ch.identifying || ch.diagnosing || vin_09 || vin_22);
     }
     return r >= 0 && static_cast<uint32_t>(r) < e->count &&
            e->requests[r].reply_frames > 1;
