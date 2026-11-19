@@ -128,7 +128,7 @@ GaugeCard {
     readonly property var axis: {
         let a = 0, b = 100
         let snap = false
-        const d = DashboardBook.defaultRange(cellUnit)
+        const d = DashboardEdit.defaultRange(cellUnit)
         const f = opt("from", d.from), t = opt("to", d.to)
         if (mismatch) {
             const lo = entry.rangeLow, hi = entry.rangeHigh
@@ -190,7 +190,7 @@ GaugeCard {
     // and its ticks
     readonly property int cells: opt("cells", 24)
     readonly property real rise: opt("rise", 1.6)
-    readonly property int digits: opt("digits", DashboardBook.digitsFor(from, to, decimals))
+    readonly property int digits: opt("digits", DashboardEdit.digitsFor(from, to, decimals))
     readonly property int windowS: opt("window", 30)
     readonly property bool vertical: opt("vertical", false)
     readonly property bool marks: opt("marks", true)

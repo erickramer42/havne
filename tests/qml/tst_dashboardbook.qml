@@ -370,7 +370,7 @@ TestCase {
         compare(grown, 65536 + 480, "two bytes for each of its cells")
         compare(grown, DashboardBook.maxBytes, "exactly the allowance")
         compare(DashboardBook.documentProblem(r.doc), "")
-        const edited = DashboardBook.renamePage(r.doc, 0, "Q")
+        const edited = DashboardEdit.renamePage(r.doc, 0, "Q")
         compare(edited.pages[0].name, "Q", "the first edit is kept")
         const again = DashboardBook.parse(DashboardBook.serialize(edited), "phone")
         compare(again.problem, "")
@@ -382,19 +382,19 @@ TestCase {
     // ---- The phone's height control
 
     function test_aRowStepMovesToTheNextMultipleOfThree() {
-        compare(DashboardBook.heightInColumns(18), "4.5", "a square dial's 18 rows")
-        compare(DashboardBook.heightInColumns(12), "3")
-        compare(DashboardBook.heightInColumns(3), "0.75", "one step")
-        compare(DashboardBook.heightInColumns(7), "1.75", "a stored odd height")
-        compare(DashboardBook.stepRows(12, true), 15)
-        compare(DashboardBook.stepRows(12, false), 9)
-        compare(DashboardBook.stepRows(4, true), 6, "a stored odd h, up")
-        compare(DashboardBook.stepRows(4, false), 3, "and down")
-        compare(DashboardBook.stepRows(1, true), 3)
-        compare(DashboardBook.stepRows(3, false), 3, "no lower than one step")
-        compare(DashboardBook.stepRows(2, false), 2, "an odd h under it stays")
-        compare(DashboardBook.stepRows(47, true), 48)
-        compare(DashboardBook.stepRows(48, true), 48, "the bound")
+        compare(DashboardEdit.heightInColumns(18), "4.5", "a square dial's 18 rows")
+        compare(DashboardEdit.heightInColumns(12), "3")
+        compare(DashboardEdit.heightInColumns(3), "0.75", "one step")
+        compare(DashboardEdit.heightInColumns(7), "1.75", "a stored odd height")
+        compare(DashboardEdit.stepRows(12, true), 15)
+        compare(DashboardEdit.stepRows(12, false), 9)
+        compare(DashboardEdit.stepRows(4, true), 6, "a stored odd h, up")
+        compare(DashboardEdit.stepRows(4, false), 3, "and down")
+        compare(DashboardEdit.stepRows(1, true), 3)
+        compare(DashboardEdit.stepRows(3, false), 3, "no lower than one step")
+        compare(DashboardEdit.stepRows(2, false), 2, "an odd h under it stays")
+        compare(DashboardEdit.stepRows(47, true), 48)
+        compare(DashboardEdit.stepRows(48, true), 48, "the bound")
     }
 
     // ---- Reading
@@ -423,7 +423,7 @@ TestCase {
         verify(!DashboardBook.knownAccent("amber"))
         verify(DashboardBook.knownAccent("info"))
         // A write elsewhere keeps them
-        const w = DashboardBook.renamePage(r.doc, 1, "Laps")
+        const w = DashboardEdit.renamePage(r.doc, 1, "Laps")
         compare(w.theme, { night: true })
         compare(w.pages[0].cells[2], d.pages[0].cells[2])
     }
@@ -668,7 +668,7 @@ TestCase {
         for (const [problem, stored] of cases) {
             const r = DashboardBook.parse(stored, "phone")
             compare(r.problem, problem, stored)
-            const edited = DashboardBook.renamePage(r.doc, 0, "Street")
+            const edited = DashboardEdit.renamePage(r.doc, 0, "Street")
             const s = DashboardBook.saveTexts(r.problem, stored, edited)
             compare(s.text, DashboardBook.serialize(edited), problem)
             compare(s.unread, problem === "damaged" || problem === "newer" || problem === "dropped"
@@ -768,31 +768,31 @@ TestCase {
         const table = [["RPM", 0, 8000], ["km/h", 0, 260], [degC, 0, 150], ["%", 0, 100],
                        ["kPa", 0, 300], ["V", 0, 16], ["g/s", 0, 300], ["L/h", 0, 60]]
         for (const [unit, from, to] of table)
-            compare(DashboardBook.defaultRange(unit, -1e6, 1e6), { from: from, to: to }, unit)
-        compare(DashboardBook.defaultRange("N\u00B7m", -10, 50), { from: -10, to: 50 })
-        compare(DashboardBook.defaultRange("", -40, 215), { from: -40, to: 215 })
+            compare(DashboardEdit.defaultRange(unit, -1e6, 1e6), { from: from, to: to }, unit)
+        compare(DashboardEdit.defaultRange("N\u00B7m", -10, 50), { from: -10, to: 50 })
+        compare(DashboardEdit.defaultRange("", -40, 215), { from: -40, to: 215 })
         // A name an object already has is no unit in the table
-        compare(DashboardBook.defaultRange("toString", 1, 2), { from: 1, to: 2 })
+        compare(DashboardEdit.defaultRange("toString", 1, 2), { from: 1, to: 2 })
         const fallback = [[NaN, NaN], [NaN, 10], [0, Infinity], [5, 5], [6, 5],
                           [undefined, undefined], ["0", "10"]]
         for (const [lo, hi] of fallback)
-            compare(DashboardBook.defaultRange("lb", lo, hi), { from: 0, to: 100 }, lo + " " + hi)
+            compare(DashboardEdit.defaultRange("lb", lo, hi), { from: 0, to: 100 }, lo + " " + hi)
     }
 
     // ---- Writes
 
     function test_aCellMovesWithinItsPage() {
         const d = pageOf(4)
-        compare(labels(DashboardBook.moveCell(d, 0, 0, 3), 0), ["c1", "c2", "c3", "c0"])
-        compare(labels(DashboardBook.moveCell(d, 0, 3, 0), 0), ["c3", "c0", "c1", "c2"])
-        compare(labels(DashboardBook.moveCell(d, 0, 1, 2), 0), ["c0", "c2", "c1", "c3"])
-        compare(labels(DashboardBook.moveCell(d, 0, 2, 1), 0), ["c0", "c2", "c1", "c3"])
-        compare(labels(DashboardBook.moveCell(d, 0, 2, 2), 0), ["c0", "c1", "c2", "c3"])
+        compare(labels(DashboardEdit.moveCell(d, 0, 0, 3), 0), ["c1", "c2", "c3", "c0"])
+        compare(labels(DashboardEdit.moveCell(d, 0, 3, 0), 0), ["c3", "c0", "c1", "c2"])
+        compare(labels(DashboardEdit.moveCell(d, 0, 1, 2), 0), ["c0", "c2", "c1", "c3"])
+        compare(labels(DashboardEdit.moveCell(d, 0, 2, 1), 0), ["c0", "c2", "c1", "c3"])
+        compare(labels(DashboardEdit.moveCell(d, 0, 2, 2), 0), ["c0", "c1", "c2", "c3"])
     }
 
     function test_aResizeIsClampedToTheBounds() {
         const size = (w, h) => {
-            const c = DashboardBook.resizeCell(book(), 0, 0, w, h).pages[0].cells[0]
+            const c = DashboardEdit.resizeCell(book(), 0, 0, w, h).pages[0].cells[0]
             return [c.w, c.h]
         }
         compare(size(0, 0), [1, 1])
@@ -803,12 +803,12 @@ TestCase {
     }
 
     function test_cellsAreAddedAndRemoved() {
-        const added = DashboardBook.addCell(book(), 1, cell("Boost"))
+        const added = DashboardEdit.addCell(book(), 1, cell("Boost"))
         compare(labels(added, 1), ["Boost"])
-        const more = DashboardBook.addCell(added, 1, cell("MAP"))
+        const more = DashboardEdit.addCell(added, 1, cell("MAP"))
         compare(labels(more, 1), ["Boost", "MAP"])
-        compare(labels(DashboardBook.removeCell(more, 1, 0), 1), ["MAP"])
-        compare(labels(DashboardBook.removeCell(book(), 0, 1), 0), ["IAT"])
+        compare(labels(DashboardEdit.removeCell(more, 1, 0), 1), ["MAP"])
+        compare(labels(DashboardEdit.removeCell(book(), 0, 1), 0), ["IAT"])
     }
 
     // Several cells in one write, at the page's end; a list that would
@@ -817,44 +817,44 @@ TestCase {
     function test_cellsAreAddedSeveralAtOnceOrNotAtAll() {
         const d = book()
         const before = DashboardBook.serialize(d)
-        const added = DashboardBook.addCells(d, 0, [cell("Boost"), cell("MAP")])
+        const added = DashboardEdit.addCells(d, 0, [cell("Boost"), cell("MAP")])
         compare(labels(added, 0), ["IAT", "Oil", "Boost", "MAP"])
         compare(DashboardBook.serialize(DashboardBook.parse(DashboardBook.serialize(added), "desktop").doc),
                 DashboardBook.serialize(added), "reads back as written")
         compare(DashboardBook.serialize(d), before, "the input is unchanged")
         for (const refused of [[], null, [cell("A"), { kind: "digital", w: 1, h: 1, refs: [],
                                                        options: { from: Date } }]])
-            compare(DashboardBook.serialize(DashboardBook.addCells(d, 0, refused)), before)
-        compare(DashboardBook.serialize(DashboardBook.addCells(d, 5, [cell("A")])), before, "no such page")
+            compare(DashboardBook.serialize(DashboardEdit.addCells(d, 0, refused)), before)
+        compare(DashboardBook.serialize(DashboardEdit.addCells(d, 5, [cell("A")])), before, "no such page")
 
         const full = pageOf(DashboardBook.maxCells - 1)
         const fullBefore = DashboardBook.serialize(full)
-        compare(labels(DashboardBook.addCells(full, 0, [cell("last")]), 0).length, DashboardBook.maxCells,
+        compare(labels(DashboardEdit.addCells(full, 0, [cell("last")]), 0).length, DashboardBook.maxCells,
                 "up to the page's room")
-        compare(DashboardBook.serialize(DashboardBook.addCells(full, 0, [cell("A"), cell("B")])),
+        compare(DashboardBook.serialize(DashboardEdit.addCells(full, 0, [cell("A"), cell("B")])),
                 fullBefore, "one past it refuses both")
         compare(DashboardBook.serialize(full), fullBefore)
     }
 
     function test_setOptionsMergesAndNullRemoves() {
-        const d = DashboardBook.setOptions(book(), 0, 0, { warnFrom: 55, from: -40, flash: true })
+        const d = DashboardEdit.setOptions(book(), 0, 0, { warnFrom: 55, from: -40, flash: true })
         compare(d.pages[0].cells[0].options, { from: -40, to: 120, warnFrom: 55, flash: true })
-        const e = DashboardBook.setOptions(d, 0, 0, { warnFrom: null, flash: null })
+        const e = DashboardEdit.setOptions(d, 0, 0, { warnFrom: null, flash: null })
         compare(e.pages[0].cells[0].options, { from: -40, to: 120 })
         // A cell stored without options gets them
         const bare = book()
         delete bare.pages[0].cells[0].options
-        compare(DashboardBook.setOptions(bare, 0, 0, { peak: true }).pages[0].cells[0].options,
+        compare(DashboardEdit.setOptions(bare, 0, 0, { peak: true }).pages[0].cells[0].options,
                 { peak: true })
     }
 
     function test_setCellChangesLabelRefsAndUnit() {
-        const d = DashboardBook.setCell(book(), 0, 0, { label: "Intake", refs: ["key:iat2"],
+        const d = DashboardEdit.setCell(book(), 0, 0, { label: "Intake", refs: ["key:iat2"],
                                                         unit: "\u00B0F" })
         const c = d.pages[0].cells[0]
         compare([c.label, c.refs, c.unit, c.kind, c.w, c.h], ["Intake", ["key:iat2"], "\u00B0F",
                                                                "digital", 1, 4])
-        const e = DashboardBook.setCell(d, 0, 0, { label: null, unit: null })
+        const e = DashboardEdit.setCell(d, 0, 0, { label: null, unit: null })
         compare(e.pages[0].cells[0].label, undefined)
         compare(e.pages[0].cells[0].unit, undefined)
         compare(DashboardBook.labelOf(e.pages[0].cells[0]), "")
@@ -865,19 +865,19 @@ TestCase {
     function test_setKindKeepsEverythingElse() {
         const own = cell("IAT", "analog")
         own.options = { from: 0, to: 8000, warnFrom: 6000, majorStep: 1000, caption: "x" }
-        const d = DashboardBook.addCell(book(), 0, own)
+        const d = DashboardEdit.addCell(book(), 0, own)
         const at = d.pages[0].cells.length - 1
-        const ring = DashboardBook.setKind(d, 0, at, "ring")
+        const ring = DashboardEdit.setKind(d, 0, at, "ring")
         const c = ring.pages[0].cells[at]
         compare(c.kind, "ring")
         compare([c.label, c.refs, c.unit, c.w, c.h], [own.label, own.refs, own.unit, own.w, own.h])
         compare(c.options, own.options, "every option, the dial's own included")
-        compare(JSON.stringify(DashboardBook.setKind(ring, 0, at, d.pages[0].cells[at].kind).pages[0].cells[at]),
+        compare(JSON.stringify(DashboardEdit.setKind(ring, 0, at, d.pages[0].cells[at].kind).pages[0].cells[at]),
                 JSON.stringify(d.pages[0].cells[at]), "and back is the cell it was")
     }
 
     function test_setKindRefusesWhatItCannotDraw() {
-        const d = DashboardBook.addCell(book(), 0, { kind: "blank", w: 1, h: 4, refs: [] })
+        const d = DashboardEdit.addCell(book(), 0, { kind: "blank", w: 1, h: 4, refs: [] })
         const s = JSON.stringify
         for (const [what, doc, i, kind] of [
                 ["a blank target", book(), 0, "blank"],
@@ -886,35 +886,35 @@ TestCase {
                 ["a blank cell", d, 2, "ring"],
                 ["no cell", book(), 5, "ring"],
                 ["no page", book(), -1, "ring"]])
-            compare(s(DashboardBook.setKind(doc, what === "no page" ? 9 : 0, i, kind)), s(doc), what)
+            compare(s(DashboardEdit.setKind(doc, what === "no page" ? 9 : 0, i, kind)), s(doc), what)
     }
 
     function test_thePageFunctions() {
-        const added = DashboardBook.addPage(book(), "  Laps  ")
+        const added = DashboardEdit.addPage(book(), "  Laps  ")
         compare(added.pages.map(p => p.name), ["Engine", "Track", "Laps"])
         compare(added.pages[2].cells, [])
-        compare(DashboardBook.renamePage(added, 1, " Street ").pages[1].name, "Street")
-        compare(DashboardBook.movePage(added, 2, 0).pages.map(p => p.name),
+        compare(DashboardEdit.renamePage(added, 1, " Street ").pages[1].name, "Street")
+        compare(DashboardEdit.movePage(added, 2, 0).pages.map(p => p.name),
                 ["Laps", "Engine", "Track"])
-        compare(DashboardBook.movePage(added, 0, 1).pages.map(p => p.name),
+        compare(DashboardEdit.movePage(added, 0, 1).pages.map(p => p.name),
                 ["Track", "Engine", "Laps"])
-        compare(DashboardBook.removePage(added, 0).pages.map(p => p.name), ["Track", "Laps"])
-        compare(DashboardBook.removePage(added, 0).pages[0].cells, [])
+        compare(DashboardEdit.removePage(added, 0).pages.map(p => p.name), ["Track", "Laps"])
+        compare(DashboardEdit.removePage(added, 0).pages[0].cells, [])
     }
 
     function test_theControlsState() {
         const nine = book()
         while (nine.pages.length < 9)
             nine.pages.push({ name: "P", cells: [] })
-        verify(DashboardBook.canAddPage(nine))
-        verify(!DashboardBook.canAddPage(DashboardBook.addPage(nine, "Last")))
-        verify(DashboardBook.canRemovePage(book()))
-        verify(!DashboardBook.canRemovePage(DashboardBook.removePage(book(), 1)))
-        verify(DashboardBook.canAddCell(pageOf(23), 0))
-        verify(!DashboardBook.canAddCell(pageOf(24), 0))
-        verify(!DashboardBook.canAddCell(book(), 2))
-        verify(!DashboardBook.canAddCell(book(), -1))
-        verify(!DashboardBook.canAddPage({ format: 1, pages: "x" }))
+        verify(DashboardEdit.canAddPage(nine))
+        verify(!DashboardEdit.canAddPage(DashboardEdit.addPage(nine, "Last")))
+        verify(DashboardEdit.canRemovePage(book()))
+        verify(!DashboardEdit.canRemovePage(DashboardEdit.removePage(book(), 1)))
+        verify(DashboardEdit.canAddCell(pageOf(23), 0))
+        verify(!DashboardEdit.canAddCell(pageOf(24), 0))
+        verify(!DashboardEdit.canAddCell(book(), 2))
+        verify(!DashboardEdit.canAddCell(book(), -1))
+        verify(!DashboardEdit.canAddPage({ format: 1, pages: "x" }))
         compare(DashboardBook.cellProblem(cell("IAT")), "")
         verify(DashboardBook.cellProblem(cell("IAT", { w: 0 })) !== "")
         compare(DashboardBook.pageNameProblem("Track"), "")
@@ -929,63 +929,63 @@ TestCase {
         while (tenPages.pages.length < 10)
             tenPages.pages.push({ name: "P", cells: [] })
         const refused = [
-            ["a 25th cell", pageOf(24), d => DashboardBook.addCell(d, 0, cell("x"))],
-            ["a bad cell", book(), d => DashboardBook.addCell(d, 0, cell("x", { w: 0 }))],
-            ["a cell not an object", book(), d => DashboardBook.addCell(d, 0, "x")],
-            ["a cell on no page", book(), d => DashboardBook.addCell(d, 2, cell("x"))],
-            ["a cell past the size bound", near, d => DashboardBook.addCell(d, 0,
+            ["a 25th cell", pageOf(24), d => DashboardEdit.addCell(d, 0, cell("x"))],
+            ["a bad cell", book(), d => DashboardEdit.addCell(d, 0, cell("x", { w: 0 }))],
+            ["a cell not an object", book(), d => DashboardEdit.addCell(d, 0, "x")],
+            ["a cell on no page", book(), d => DashboardEdit.addCell(d, 2, cell("x"))],
+            ["a cell past the size bound", near, d => DashboardEdit.addCell(d, 0,
                                                  cell("x", { more: "y".repeat(200) }))],
-            ["removing no cell", book(), d => DashboardBook.removeCell(d, 0, 2)],
-            ["removing a cell of no page", book(), d => DashboardBook.removeCell(d, 5, 0)],
-            ["moving from no cell", book(), d => DashboardBook.moveCell(d, 0, 2, 0)],
-            ["moving to no cell", book(), d => DashboardBook.moveCell(d, 0, 0, -1)],
-            ["moving past the end", book(), d => DashboardBook.moveCell(d, 0, 0, 2)],
-            ["moving a fraction", book(), d => DashboardBook.moveCell(d, 0, 0.5, 1)],
-            ["a resize to NaN", book(), d => DashboardBook.resizeCell(d, 0, 0, NaN, 2)],
-            ["a resize by text", book(), d => DashboardBook.resizeCell(d, 0, 0, "2", 2)],
-            ["a resize of no cell", book(), d => DashboardBook.resizeCell(d, 1, 0, 2, 2)],
-            ["setCell's kind", book(), d => DashboardBook.setCell(d, 0, 0, { kind: "ring" })],
-            ["setCell's span", book(), d => DashboardBook.setCell(d, 0, 0, { w: 2 })],
-            ["setCell's options", book(), d => DashboardBook.setCell(d, 0, 0, { options: {} })],
-            ["9 refs", book(), d => DashboardBook.setCell(d, 0, 0,
+            ["removing no cell", book(), d => DashboardEdit.removeCell(d, 0, 2)],
+            ["removing a cell of no page", book(), d => DashboardEdit.removeCell(d, 5, 0)],
+            ["moving from no cell", book(), d => DashboardEdit.moveCell(d, 0, 2, 0)],
+            ["moving to no cell", book(), d => DashboardEdit.moveCell(d, 0, 0, -1)],
+            ["moving past the end", book(), d => DashboardEdit.moveCell(d, 0, 0, 2)],
+            ["moving a fraction", book(), d => DashboardEdit.moveCell(d, 0, 0.5, 1)],
+            ["a resize to NaN", book(), d => DashboardEdit.resizeCell(d, 0, 0, NaN, 2)],
+            ["a resize by text", book(), d => DashboardEdit.resizeCell(d, 0, 0, "2", 2)],
+            ["a resize of no cell", book(), d => DashboardEdit.resizeCell(d, 1, 0, 2, 2)],
+            ["setCell's kind", book(), d => DashboardEdit.setCell(d, 0, 0, { kind: "ring" })],
+            ["setCell's span", book(), d => DashboardEdit.setCell(d, 0, 0, { w: 2 })],
+            ["setCell's options", book(), d => DashboardEdit.setCell(d, 0, 0, { options: {} })],
+            ["9 refs", book(), d => DashboardEdit.setCell(d, 0, 0,
                                      { refs: ["a", "b", "c", "d", "e", "f", "g", "h", "i"] })],
-            ["refs removed", book(), d => DashboardBook.setCell(d, 0, 0, { refs: null })],
-            ["a label of 41", book(), d => DashboardBook.setCell(d, 0, 0,
+            ["refs removed", book(), d => DashboardEdit.setCell(d, 0, 0, { refs: null })],
+            ["a label of 41", book(), d => DashboardEdit.setCell(d, 0, 0,
                                                                  { label: "x".repeat(41) })],
-            ["setCell with no fields", book(), d => DashboardBook.setCell(d, 0, 0, null)],
-            ["from at to", book(), d => DashboardBook.setOptions(d, 0, 0, { from: 120 })],
-            ["decimals 7", book(), d => DashboardBook.setOptions(d, 0, 0, { decimals: 7 })],
-            ["accent not text", book(), d => DashboardBook.setOptions(d, 0, 0, { accent: 1 })],
-            ["options not an object", book(), d => DashboardBook.setOptions(d, 0, 0, [1])],
-            ["options of no cell", book(), d => DashboardBook.setOptions(d, 1, 0, { peak: true })],
-            ["an 11th page", tenPages, d => DashboardBook.addPage(d, "More")],
-            ["a page with no name", book(), d => DashboardBook.addPage(d, "  ")],
-            ["a page named by a number", book(), d => DashboardBook.addPage(d, 7)],
-            ["a page's name of 41", book(), d => DashboardBook.renamePage(d, 0, "x".repeat(41))],
-            ["renaming no page", book(), d => DashboardBook.renamePage(d, 2, "x")],
-            ["moving no page", book(), d => DashboardBook.movePage(d, 0, 2)],
-            ["removing the last page", DashboardBook.removePage(book(), 1),
-             d => DashboardBook.removePage(d, 0)],
-            ["removing no page", book(), d => DashboardBook.removePage(d, 2)],
+            ["setCell with no fields", book(), d => DashboardEdit.setCell(d, 0, 0, null)],
+            ["from at to", book(), d => DashboardEdit.setOptions(d, 0, 0, { from: 120 })],
+            ["decimals 7", book(), d => DashboardEdit.setOptions(d, 0, 0, { decimals: 7 })],
+            ["accent not text", book(), d => DashboardEdit.setOptions(d, 0, 0, { accent: 1 })],
+            ["options not an object", book(), d => DashboardEdit.setOptions(d, 0, 0, [1])],
+            ["options of no cell", book(), d => DashboardEdit.setOptions(d, 1, 0, { peak: true })],
+            ["an 11th page", tenPages, d => DashboardEdit.addPage(d, "More")],
+            ["a page with no name", book(), d => DashboardEdit.addPage(d, "  ")],
+            ["a page named by a number", book(), d => DashboardEdit.addPage(d, 7)],
+            ["a page's name of 41", book(), d => DashboardEdit.renamePage(d, 0, "x".repeat(41))],
+            ["renaming no page", book(), d => DashboardEdit.renamePage(d, 2, "x")],
+            ["moving no page", book(), d => DashboardEdit.movePage(d, 0, 2)],
+            ["removing the last page", DashboardEdit.removePage(book(), 1),
+             d => DashboardEdit.removePage(d, 0)],
+            ["removing no page", book(), d => DashboardEdit.removePage(d, 2)],
             ["writing to a document that doesn't read", { format: 1, pages: [] },
-             d => DashboardBook.addPage(d, "P")],
+             d => DashboardEdit.addPage(d, "P")],
             // Values stored text doesn't hold as they are
             ["a cell holding a function", book(),
-             d => DashboardBook.addCell(d, 0, cell("x", { onTap: () => 1 }))],
+             d => DashboardEdit.addCell(d, 0, cell("x", { onTap: () => 1 }))],
             ["a cell's option a date", book(),
-             d => DashboardBook.addCell(d, 0, cell("x", { options: { caption: new Date(0) } }))],
-            ["a label a date", book(), d => DashboardBook.setCell(d, 0, 0, { label: new Date(0) })],
+             d => DashboardEdit.addCell(d, 0, cell("x", { options: { caption: new Date(0) } }))],
+            ["a label a date", book(), d => DashboardEdit.setCell(d, 0, 0, { label: new Date(0) })],
             ["refs holding a date", book(),
-             d => DashboardBook.setCell(d, 0, 0, { refs: ["key:a", new Date(0)] })],
+             d => DashboardEdit.setCell(d, 0, 0, { refs: ["key:a", new Date(0)] })],
             ["refs holding undefined", book(),
-             d => DashboardBook.setCell(d, 0, 0, { refs: ["key:a", undefined] })],
+             d => DashboardEdit.setCell(d, 0, 0, { refs: ["key:a", undefined] })],
             ["an option a date", book(),
-             d => DashboardBook.setOptions(d, 0, 0, { caption: new Date(0) })],
+             d => DashboardEdit.setOptions(d, 0, 0, { caption: new Date(0) })],
             ["an option a function", book(),
-             d => DashboardBook.setOptions(d, 0, 0, { flash: () => 1 })],
-            ["an unknown option NaN", book(), d => DashboardBook.setOptions(d, 0, 0, { glow: NaN })],
+             d => DashboardEdit.setOptions(d, 0, 0, { flash: () => 1 })],
+            ["an unknown option NaN", book(), d => DashboardEdit.setOptions(d, 0, 0, { glow: NaN })],
             ["an unknown option holding Infinity", book(),
-             d => DashboardBook.setOptions(d, 0, 0, { extra: { a: Infinity } })]
+             d => DashboardEdit.setOptions(d, 0, 0, { extra: { a: Infinity } })]
         ]
         for (const [name, input, write] of refused) {
             const before = JSON.stringify(input)
@@ -1000,19 +1000,19 @@ TestCase {
     // was passed afterwards leaves the result as it was
     function test_aWriteSharesNothingWithItsArguments() {
         const c = cell("Boost")
-        const added = DashboardBook.addCell(book(), 1, c)
+        const added = DashboardEdit.addCell(book(), 1, c)
         c.refs.push("id:9")
         c.options.from = -5
         compare(added.pages[1].cells[0].refs, ["id:1005", "id:7005"])
         compare(added.pages[1].cells[0].options.from, 0)
 
         const refs = ["key:a"]
-        const set = DashboardBook.setCell(book(), 0, 0, { refs: refs })
+        const set = DashboardEdit.setCell(book(), 0, 0, { refs: refs })
         refs.push("key:b")
         compare(set.pages[0].cells[0].refs, ["key:a"])
 
         const extra = { a: 1 }
-        const opt = DashboardBook.setOptions(book(), 0, 0, { extra: extra })
+        const opt = DashboardEdit.setOptions(book(), 0, 0, { extra: extra })
         extra.a = 2
         compare(opt.pages[0].cells[0].options.extra, { a: 1 })
     }
@@ -1020,11 +1020,11 @@ TestCase {
     // A key holding undefined is left out: of a change, of a cell added,
     // and of the result, which reads back with the same keys
     function test_aKeyHoldingUndefinedIsLeftOut() {
-        const d = DashboardBook.setOptions(book(), 0, 0, { from: undefined, warnFrom: 50 })
+        const d = DashboardEdit.setOptions(book(), 0, 0, { from: undefined, warnFrom: 50 })
         compare(d.pages[0].cells[0].options, { from: 0, to: 120, warnFrom: 50 })
-        const e = DashboardBook.setCell(book(), 0, 0, { label: undefined, unit: "x" })
+        const e = DashboardEdit.setCell(book(), 0, 0, { label: undefined, unit: "x" })
         compare([e.pages[0].cells[0].label, e.pages[0].cells[0].unit], ["IAT", "x"])
-        const f = DashboardBook.addCell(book(), 1, cell("x", {
+        const f = DashboardEdit.addCell(book(), 1, cell("x", {
             unit: undefined, options: { from: 0, to: 1, caption: undefined } }))
         const added = f.pages[1].cells[0]
         verify(!("unit" in added))
@@ -1037,22 +1037,22 @@ TestCase {
     // never changes its input
     function test_eachWriteReadsBack() {
         const writes = [
-            ["addCell", d => DashboardBook.addCell(d, 1, cell("Boost"))],
-            ["removeCell", d => DashboardBook.removeCell(d, 0, 0)],
-            ["moveCell", d => DashboardBook.moveCell(d, 0, 0, 1)],
-            ["resizeCell", d => DashboardBook.resizeCell(d, 0, 1, 3, 9)],
-            ["setCell", d => DashboardBook.setCell(d, 0, 1, { label: emoji + " Oil",
+            ["addCell", d => DashboardEdit.addCell(d, 1, cell("Boost"))],
+            ["removeCell", d => DashboardEdit.removeCell(d, 0, 0)],
+            ["moveCell", d => DashboardEdit.moveCell(d, 0, 0, 1)],
+            ["resizeCell", d => DashboardEdit.resizeCell(d, 0, 1, 3, 9)],
+            ["setCell", d => DashboardEdit.setCell(d, 0, 1, { label: emoji + " Oil",
                                                               refs: ["key:oil"] })],
-            ["setOptions", d => DashboardBook.setOptions(d, 0, 1, { peak: true, to: null,
+            ["setOptions", d => DashboardEdit.setOptions(d, 0, 1, { peak: true, to: null,
                                                                     accent: "amber" })],
-            ["addPage", d => DashboardBook.addPage(d, "Laps")],
-            ["renamePage", d => DashboardBook.renamePage(d, 1, "Laps")],
-            ["movePage", d => DashboardBook.movePage(d, 1, 0)],
-            ["removePage", d => DashboardBook.removePage(d, 0)]
+            ["addPage", d => DashboardEdit.addPage(d, "Laps")],
+            ["renamePage", d => DashboardEdit.renamePage(d, 1, "Laps")],
+            ["movePage", d => DashboardEdit.movePage(d, 1, 0)],
+            ["removePage", d => DashboardEdit.removePage(d, 0)]
         ]
         for (const form of ["", "phone", "desktop"]) {
             for (const [name, write] of writes) {
-                const input = form === "" ? book() : DashboardBook.addPage(
+                const input = form === "" ? book() : DashboardEdit.addPage(
                                                          DashboardBook.builtIn(form), "Track")
                 const before = JSON.stringify(input)
                 const out = write(input)
@@ -1070,59 +1070,59 @@ TestCase {
 
     function test_copyCellGivesACellOfItsOwn() {
         const d = book()
-        const c = DashboardBook.copyCell(d, 0, 1)
+        const c = DashboardEdit.copyCell(d, 0, 1)
         compare(c, d.pages[0].cells[1])
         c.options.from = 99
         compare(d.pages[0].cells[1].options.from, 0, "the source is its own")
-        compare(DashboardBook.copyCell(d, 0, 2), null, "past the end")
-        compare(DashboardBook.copyCell(d, 5, 0), null, "no such page")
-        compare(DashboardBook.copyCell(d, 0, 0.5), null, "not an index")
-        compare(DashboardBook.copyCell({ format: 99 }, 0, 0), null, "not a document")
+        compare(DashboardEdit.copyCell(d, 0, 2), null, "past the end")
+        compare(DashboardEdit.copyCell(d, 5, 0), null, "no such page")
+        compare(DashboardEdit.copyCell(d, 0, 0.5), null, "not an index")
+        compare(DashboardEdit.copyCell({ format: 99 }, 0, 0), null, "not a document")
     }
 
     function test_pasteCellPutsACopyAfterTheIndex() {
         const d = pageOf(3)
-        const paste = DashboardBook.copyCell(d, 0, 0)
+        const paste = DashboardEdit.copyCell(d, 0, 0)
         paste.label = "new"
-        compare(labels(DashboardBook.pasteCell(d, 0, -1, paste), 0), ["new", "c0", "c1", "c2"])
-        compare(labels(DashboardBook.pasteCell(d, 0, 0, paste), 0), ["c0", "new", "c1", "c2"])
-        compare(labels(DashboardBook.pasteCell(d, 0, 2, paste), 0), ["c0", "c1", "c2", "new"])
+        compare(labels(DashboardEdit.pasteCell(d, 0, -1, paste), 0), ["new", "c0", "c1", "c2"])
+        compare(labels(DashboardEdit.pasteCell(d, 0, 0, paste), 0), ["c0", "new", "c1", "c2"])
+        compare(labels(DashboardEdit.pasteCell(d, 0, 2, paste), 0), ["c0", "c1", "c2", "new"])
         compare(labels(d, 0), ["c0", "c1", "c2"], "its input unchanged")
 
-        const out = DashboardBook.pasteCell(d, 0, 0, paste)
+        const out = DashboardEdit.pasteCell(d, 0, 0, paste)
         out.pages[0].cells[1].options.from = 42
         compare(paste.options.from, 0, "the pasted cell is its own")
     }
 
     function test_pasteCellRefusesWhatItCantTake() {
         const d = pageOf(2)
-        const c = DashboardBook.copyCell(d, 0, 0)
+        const c = DashboardEdit.copyCell(d, 0, 0)
         const same = out => compare(DashboardBook.serialize(out), DashboardBook.serialize(d))
-        same(DashboardBook.pasteCell(d, 0, -2, c))
-        same(DashboardBook.pasteCell(d, 0, 2, c))
-        same(DashboardBook.pasteCell(d, 3, 0, c))
-        same(DashboardBook.pasteCell(d, 0, 0.5, c))
-        same(DashboardBook.pasteCell(d, 0, 0, null))
-        same(DashboardBook.pasteCell(d, 0, 0, { kind: "digital", w: 99, h: 1, refs: [] }))
-        same(DashboardBook.pasteCell(d, 0, 0, { kind: "digital", w: 1, h: 1, refs: [],
+        same(DashboardEdit.pasteCell(d, 0, -2, c))
+        same(DashboardEdit.pasteCell(d, 0, 2, c))
+        same(DashboardEdit.pasteCell(d, 3, 0, c))
+        same(DashboardEdit.pasteCell(d, 0, 0.5, c))
+        same(DashboardEdit.pasteCell(d, 0, 0, null))
+        same(DashboardEdit.pasteCell(d, 0, 0, { kind: "digital", w: 99, h: 1, refs: [] }))
+        same(DashboardEdit.pasteCell(d, 0, 0, { kind: "digital", w: 1, h: 1, refs: [],
                                                 options: { from: Date } }))
     }
 
     function test_aFullPageRefusesAPaste() {
         const d = pageOf(DashboardBook.maxCells)
-        const c = DashboardBook.copyCell(d, 0, 0)
-        const out = DashboardBook.pasteCell(d, 0, 0, c)
+        const c = DashboardEdit.copyCell(d, 0, 0)
+        const out = DashboardEdit.pasteCell(d, 0, 0, c)
         compare(DashboardBook.serialize(out), DashboardBook.serialize(d))
-        verify(!DashboardBook.canAddCell(d, 0))
+        verify(!DashboardEdit.canAddCell(d, 0))
     }
 
     // ---- A drag's order
 
     function test_reorderedMovesOneAndLeavesItsInput() {
         const list = ["a", "b", "c", "d"]
-        compare(DashboardBook.reordered(list, 0, 2), ["b", "c", "a", "d"])
-        compare(DashboardBook.reordered(list, 3, 1), ["a", "d", "b", "c"])
-        compare(DashboardBook.reordered(list, 1, 1), list)
+        compare(DashboardEdit.reordered(list, 0, 2), ["b", "c", "a", "d"])
+        compare(DashboardEdit.reordered(list, 3, 1), ["a", "d", "b", "c"])
+        compare(DashboardEdit.reordered(list, 1, 1), list)
         compare(list, ["a", "b", "c", "d"], "its input unchanged")
     }
 
@@ -1131,9 +1131,9 @@ TestCase {
         const list = ["a", "b", "c", "d", "e"]
         for (let from = 0; from < list.length; ++from) {
             for (let to = 0; to < list.length; ++to) {
-                const out = DashboardBook.reordered(list, from, to)
+                const out = DashboardEdit.reordered(list, from, to)
                 for (let i = 0; i < list.length; ++i) {
-                    compare(out[DashboardBook.movedIndex(i, from, to)], list[i],
+                    compare(out[DashboardEdit.movedIndex(i, from, to)], list[i],
                             from + " to " + to + ", item " + i)
                 }
             }
@@ -1142,7 +1142,7 @@ TestCase {
 
     function test_dropBoxesAreTheBoxesOfEachPlace() {
         const cells = [{ w: 2, h: 2 }, { w: 2, h: 2 }, { w: 2, h: 2 }]
-        const boxes = DashboardBook.dropBoxes(cells, 0, 4)
+        const boxes = DashboardEdit.dropBoxes(cells, 0, 4)
         compare(boxes.length, 3)
         compare([boxes[0].x, boxes[0].y], [0, 0])
         compare([boxes[1].x, boxes[1].y], [2, 0])
@@ -1151,10 +1151,10 @@ TestCase {
 
     function test_nearestTakesTheClosestAndTheFirstOnATie() {
         const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 0, y: 10 }]
-        compare(DashboardBook.nearest(pts, 9, 1), 1)
-        compare(DashboardBook.nearest(pts, 1, 9), 2)
-        compare(DashboardBook.nearest(pts, 5, 0), 0, "a tie is the first")
-        compare(DashboardBook.nearest([], 0, 0), -1)
+        compare(DashboardEdit.nearest(pts, 9, 1), 1)
+        compare(DashboardEdit.nearest(pts, 1, 9), 2)
+        compare(DashboardEdit.nearest(pts, 5, 0), 0, "a tie is the first")
+        compare(DashboardEdit.nearest([], 0, 0), -1)
     }
 
     // ---- The blank kind
@@ -1175,9 +1175,9 @@ TestCase {
         const r = read(d)
         compare(r.problem, "")
         compare(r.doc.pages[0].cells[1], blank, "it reads back as written")
-        const copied = DashboardBook.copyCell(r.doc, 0, 1)
+        const copied = DashboardEdit.copyCell(r.doc, 0, 1)
         compare(copied, blank)
-        const pasted = DashboardBook.pasteCell(r.doc, 0, 0, copied)
+        const pasted = DashboardEdit.pasteCell(r.doc, 0, 0, copied)
         compare(pasted.pages[0].cells[1], blank)
     }
 
@@ -1326,7 +1326,7 @@ TestCase {
         ]
     }
     function test_digitsFor(data) {
-        compare(DashboardBook.digitsFor(data.from, data.to, data.d), data.want)
+        compare(DashboardEdit.digitsFor(data.from, data.to, data.d), data.want)
     }
 
     // ---- The layout file (ADR-0057's appendix on the layout file)
@@ -1618,7 +1618,7 @@ TestCase {
         compare(DashboardBook.insertPages(d, 0, [{ name: "", cells: [] }]), d, "a page that doesn't read back")
         let full = d
         while (full.pages.length < DashboardBook.maxPages)
-            full = DashboardBook.addPage(full, "P" + full.pages.length)
+            full = DashboardEdit.addPage(full, "P" + full.pages.length)
         compare(DashboardBook.insertPages(full, 0, [page]), full, "past the form's pages")
         compare(DashboardBook.insertPages(d, 0, [page, page]).pages.length, 4, "several at once")
     }

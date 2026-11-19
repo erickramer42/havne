@@ -325,7 +325,7 @@ TestCase {
         compare(c.when.unit, "kPa", "the file keeps the def's unit")
         // Exactly: compare() passes numbers within 1e-5
         verify(c.when.above === 206.842719, "30 psi in kPa, six decimals: " + c.when.above)
-        compare(c.when.above, DashboardBook.roundStored(Bridge.decodedValue("kPa", 30)),
+        compare(c.when.above, DashboardEdit.roundStored(Bridge.decodedValue("kPa", 30)),
                 "the Dashboard's rounding")
         compare(c.when.clear, 190, "the clear left as it was")
         rowOf(page, 0).clicked()
@@ -791,7 +791,7 @@ TestCase {
         page.startEditing()
         page.select(0)
         find(page, "panelAlert").clicked()
-        const range = DashboardBook.defaultRange("°C")
+        const range = DashboardEdit.defaultRange("°C")
         fuzzyCompare(asked[0].when.clear, 115 - ConditionBook.clearShare * (range.to - range.from), 1e-9)
         verify(asked[0].when.clear < 115, "it clears inside the level")
     }

@@ -150,7 +150,7 @@ ColumnLayout {
         ThemedButton {
             objectName: "dashAdd"
             compact: topBar.host.form === "phone"
-            enabled: DashboardBook.canAddCell(topBar.host.doc, topBar.host.pageIndex)
+            enabled: DashboardEdit.canAddCell(topBar.host.doc, topBar.host.pageIndex)
             text: topBar.host.compact ? qsTr("Add") : qsTr("Add gauge")
             Accessible.name: qsTr("Add a gauge")
             onClicked: topBar.host.addFlowPart.startAdd()
@@ -263,7 +263,7 @@ ColumnLayout {
             id: moreAddPage
             objectName: "moreAddPage"
             visible: topBar.host.phoneForm
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("Add page")
             Accessible.name: qsTr("Add a page: choose a blank page or a preset")
             onClicked: topBar.host.editsPart.openPresets("add")
@@ -294,7 +294,7 @@ ColumnLayout {
         ThemedButton {
             id: moreRemovePage
             objectName: "moreRemovePage"
-            enabled: DashboardBook.canRemovePage(topBar.host.doc)
+            enabled: DashboardEdit.canRemovePage(topBar.host.doc)
             text: qsTr("Remove page")
             onClicked: topBar.host.confirmRemovePage = true
         }
@@ -439,7 +439,7 @@ ColumnLayout {
             objectName: "preset_blank"
             compact: topBar.host.form === "phone"
             visible: presetFlow.adding
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("Blank page")
             Accessible.name: qsTr("Add a blank page")
             onClicked: topBar.host.editsPart.addBlankPage()
@@ -450,7 +450,7 @@ ColumnLayout {
                 required property var modelData
                 objectName: "preset_" + modelData.key
                 compact: topBar.host.form === "phone"
-                enabled: !presetFlow.adding || DashboardBook.canAddPage(topBar.host.doc)
+                enabled: !presetFlow.adding || DashboardEdit.canAddPage(topBar.host.doc)
                 text: modelData.label
                 Accessible.name: presetFlow.adding
                     ? qsTr("Add the %1 preset as a new page").arg(modelData.label)
@@ -463,7 +463,7 @@ ColumnLayout {
             objectName: "preset_file"
             compact: topBar.host.form === "phone"
             visible: presetFlow.adding
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("From a file...")
             onClicked: {
                 topBar.host.layoutFilePart.noteLayout("")
@@ -579,7 +579,7 @@ ColumnLayout {
                 pages: topBar.host.pages
                 current: topBar.host.pageIndex
                 editing: topBar.host.editing
-                canAddPage: DashboardBook.canAddPage(topBar.host.doc)
+                canAddPage: DashboardEdit.canAddPage(topBar.host.doc)
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
                 onAddRequested: topBar.host.editsPart.openPresets("add")
