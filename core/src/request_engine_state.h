@@ -154,6 +154,8 @@ struct ecuio_request {
                              it, which a focus's end restores */
     uint8_t swept;        /* 1: counted in its channel's sweep under way (a
                              focus's minimum time, ecuio_engine_count_sweep) */
+    uint8_t reply_frames; /* a table row's last positive reply in CAN
+                             frames, 0 before one (reply_segmented) */
 };
 
 struct ecuio_scan_entry {

@@ -141,7 +141,7 @@ inline void ecuio_engine_once_answered(ecuio_request_engine* e, uint32_t c,
     } else if (ch.diagnosing) {
         ecuio_engine_diag_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
     } else if (ch.scanning) {
-        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
+        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0, len);
     } else if (ch.talk.out) {
         ecuio_talk_settle(ch.talk, ecuio_talk_end::answered, 0);
     } else if (len >= ECUIO_BITMAP_REPLY_LEN) {
@@ -165,6 +165,9 @@ inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
     if (out >= 0) {
         ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true, false,
                                 now_us);
+    }
+    if (out >= 0) {
+        e->requests[out].reply_frames = ecuio_engine_reply_frames(len);
     }
     if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
         ecuio_engine_learn_pid_len(ch, r, len);
