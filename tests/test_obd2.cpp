@@ -3199,11 +3199,13 @@ TEST_F(FakeEcuTest, AModuleAnswersItsOwnDidsAndRefusesTheRest)
             << "a bad spec empties it";
     }
     std::string many;
-    for (int i = 0; i < 17; ++i) {
-        many += "7E9:D8" + std::string(i < 16 ? "0" : "1") +
-                "0123456789ABCDEF"[i % 16] + "=01;";
+    for (uint32_t i = 0; i <= fake_ecu::kModuleRowsMax; ++i) {
+        char row[16];
+        std::snprintf(row, sizeof row, "7E9:D%03X=01;", i);
+        many += row;
     }
-    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str())) << "17 rows";
+    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str()))
+        << "kModuleRowsMax + 1 rows";
     ASSERT_TRUE(fake_ecu::set_module_dids(""));
     EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}),
               (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
