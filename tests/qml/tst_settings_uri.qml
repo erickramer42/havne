@@ -370,6 +370,23 @@ TestCase {
                 "ELM327 takes keepalive_ms and gap")
     }
 
+    // packframes is a key the three adapter schemes take and the mock doesn't
+    function test_anotherSchemeKeepsPackframes() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "elm327://COM5?packframes=1&gap=10")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?packframes=1&gap=10", "J2534 takes packframes")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?packframes=1&gap=10",
+                "ELM327 takes packframes")
+        verify(page.uriPart.schemeKeys["socketcan"].indexOf("packframes") >= 0,
+               "SocketCAN takes packframes")
+        verify(page.uriPart.schemeKeys["mock"].indexOf("packframes") < 0,
+               "the mock doesn't")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {

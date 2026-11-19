@@ -120,6 +120,13 @@ inline int64_t isotp_stmin_us(uint8_t b)
     return 127000;
 }
 
+/* The frames a message of len bytes takes: one Single Frame up to 7,
+ * else a First Frame (6) and a Consecutive Frame for each 7 after it. */
+constexpr uint32_t isotp_frames(uint32_t len)
+{
+    return len <= 7 ? 1u : 1u + (len - 6u + 6u) / 7u;
+}
+
 /* ---- The receiver --------------------------------------------------- */
 
 struct isotp_rx_slot {

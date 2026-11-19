@@ -79,6 +79,9 @@ extern const char* const ecuio_j2534_query_keys[];
 extern const char* const ecuio_replay_query_keys[];
 extern const char* const ecuio_elm327_query_keys[];
 extern const char* const ecuio_socketcan_query_keys[];
+/* The room create's refusal joins a list into ("a, b and c", its NUL
+ * too); QueryKeysTest holds every list to it */
+#define ECUIO_QUERY_KEYS_TEXT_MAX 256
 
 /* SocketCAN builds on Linux alone (ADR-0032): Android's kernels ship
  * without CAN */
