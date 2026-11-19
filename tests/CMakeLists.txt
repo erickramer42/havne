@@ -2601,6 +2601,21 @@ endif()
 # platform has (ADR-0042 section 4), a measurement for docs/performance.md;
 # built with the tests, never run by ctest
 find_package(Threads REQUIRED)
+# The request engine on a simulated clock (tests/pacing_bench.h):
+# test_pacing gates the pacing on the model's figures; bench_pacing
+# prints them for docs/performance.md (not in ctest)
+add_executable(test_pacing test_pacing.cpp)
+target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_pacing)
+gtest_discover_tests(test_pacing DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+add_executable(bench_pacing bench_pacing.cpp)
+target_include_directories(bench_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(bench_pacing PRIVATE ecuio-core)
+app_enable_warnings(bench_pacing)
+
 add_executable(bench_timing bench_timing.cpp)
 target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
 # core/src: fake_ecus.h's sim_security.h
