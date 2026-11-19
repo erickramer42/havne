@@ -504,6 +504,37 @@ struct OneDid {
     ecuio_signal_set_t m_set{};
 };
 
+// The engine ECU's segmented DID (a 10-byte text, two frames) and a
+// second module's one-frame DID (a byte), registered as TwoModules is
+struct TwoDids {
+    TwoDids()
+    {
+        static ecuio_signal_def_t defs[] = {
+            did_word(1, 0x7E8, 0xD200, "Engine text"),
+            did_word(2, 0x7E9, 0xD201, "Module byte"),
+        };
+        defs[0].kind = ECUIO_VALUE_TEXT;
+        defs[0].bit_length = 0;
+        defs[0].byte_length = 10;
+        defs[1].bit_length = 8;
+        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
+                                                        {0x7E9, 0x7E1, 0, 0}};
+        static ecuio_signal_set_t set{};
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 2;
+        set.defs = defs;
+        set.channel_count = 2;
+        set.channels = channels;
+        ecuio_validation_t why{};
+        EXPECT_EQ(ecuio_profile_register(kName, &set, &why), ECUIO_OK)
+            << "code " << why.code << " at " << why.index;
+    }
+    ~TwoDids() { EXPECT_EQ(ecuio_profile_unregister(kName), ECUIO_OK); }
+    TwoDids(const TwoDids&) = delete;
+    TwoDids& operator=(const TwoDids&) = delete;
+    static constexpr const char* kName = "pacing-two-dids";
+};
+
 // A car run's model, checked to be the same run with ?hold=0: one
 // module's channel, which the hold leaves alone
 pacing::bench_result car_run(pacing::bench_config cfg)
@@ -517,10 +548,12 @@ pacing::bench_result car_run(pacing::bench_config cfg)
     return r;
 }
 
-// The car's figure, replies a second, and the model's within 10% of it
-void near_the_car(const pacing::bench_result& r, double car)
+// The car's figure, replies a second, and the model's within a share of
+// it, 10% unless a case says why
+void near_the_car(const pacing::bench_result& r, double car,
+                  double within = 0.1)
 {
-    EXPECT_NEAR(r.requests_per_s(), car, 0.1 * car)
+    EXPECT_NEAR(r.requests_per_s(), car, within * car)
         << r.requests_per_s() << " a second against the car's " << car;
 }
 
@@ -558,10 +591,13 @@ TEST(PacingTest, TheVxUnpackedRunsAtTheCarsPace)
     near_the_car(car_run(cfg), 140.3);
 }
 
-/* D3, obd2 whole through the MX+ over Bluetooth: 40.9 */
+/* D3, obd2 whole through the MX+ over Bluetooth: 40.9, within 5%. The
+ * car's own D3 and D8 differ by 2.4%, so 5% still leaves room, and at
+ * 10% a character or a command time set back a step (about 6% each)
+ * would pass */
 TEST(PacingTest, TheMxPlusRunsAtTheCarsPace)
 {
-    near_the_car(car_run(the_car(pacing::elm327_bluetooth())), 40.9);
+    near_the_car(car_run(the_car(pacing::elm327_bluetooth())), 40.9, 0.05);
 }
 
 /* D9 and D10, one DID through the VX: a Single Frame on 0x7E9, 147; a
@@ -585,6 +621,64 @@ TEST(PacingTest, OneDidThroughTheVxRunsAtTheCarsPace)
     cfg.params.identify = true;
     cfg.params.diagnose = true;
     near_the_car(car_run(cfg), 80.0);
+}
+
+/* D11, two modules through the VX with ?hold=0, as the car ran it: the
+ * engine ECU's segmented DID and a second module's one-frame DID, Known
+ * Issue #42's loss under lost_under_segments. The car: 0x7E8 answered
+ * 83.7 a second; 0x7E9 asked 18.0 and answered 0.551 of them. The model
+ * gives one timing to every module, where the car's second module
+ * answered faster than the engine ECU, so the model's replies land under
+ * the segments more often: its share runs about 10 points under the
+ * car's, pinned within 0.15. With the knob off nothing is lost */
+TEST(PacingTest, TwoModulesThroughTheVxLoseAsTheCarDid)
+{
+    const TwoDids profile;
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.profile = TwoDids::kName;
+    cfg.picks.clear();
+    cfg.seconds = 60;
+    cfg.model.hold = false;
+    const pacing::bench_result clean = run(cfg);
+    EXPECT_EQ(clean.lost + clean.timeouts, 0u);
+
+    cfg.model.lost_under_segments = true;
+    const pacing::bench_result r = run(cfg);
+    const double engine = static_cast<double>(r.answered[0]) / 60.0;
+    const double asked = static_cast<double>(r.asked[1]) / 60.0;
+    const double share =
+        static_cast<double>(r.answered[1]) / static_cast<double>(r.asked[1]);
+    EXPECT_NEAR(engine, 83.7, 8.37);
+    EXPECT_NEAR(asked, 18.0, 1.8);
+    EXPECT_NEAR(share, 0.551, 0.15);
+    EXPECT_GT(r.lost, 0u);
+    /* each loss is a wait run out, the last perhaps after the run's end */
+    EXPECT_LE(r.timeouts, r.lost);
+    EXPECT_GE(r.timeouts + 1, r.lost);
+}
+
+/* The hold's prediction for D11's shape, the model's alone: no car run
+ * has measured it. With the hold on the second module loses next to
+ * nothing, and the engine ECU's rate falls to about two thirds of the
+ * run without it, as each segmented reply waits out the other's */
+TEST(PacingTest, TheHoldsPredictionForTwoModulesThroughTheVx)
+{
+    const TwoDids profile;
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.profile = TwoDids::kName;
+    cfg.picks.clear();
+    cfg.seconds = 60;
+    cfg.model.lost_under_segments = true;
+    const pacing::bench_result held = run(cfg);
+    cfg.model.hold = false;
+    const pacing::bench_result plain = run(cfg);
+    EXPECT_LE(held.lost, 2u);
+    EXPECT_GT(static_cast<double>(held.answered[1]),
+              0.99 * static_cast<double>(held.asked[1]));
+    const double kept = static_cast<double>(held.answered[0]) /
+                        static_cast<double>(plain.answered[0]);
+    EXPECT_GT(kept, 0.55);
+    EXPECT_LT(kept, 0.75);
 }
 
 /* The J2534 model's pass is the worker's (j2534_hold_pass), the hold on by

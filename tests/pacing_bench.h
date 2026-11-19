@@ -59,6 +59,10 @@ struct adapter_model {
     int64_t write_us = 1500;   /* J2534: a write through the surrogate */
     int64_t deliver_us = 1000; /* J2534: the last frame to the engine */
     bool hold = true;         /* J2534: ?hold= (j2534_hold.h) */
+    /* J2534: Known Issue #42 through the VX, a Single Frame reply ending
+     * while another module's segmented reply is on the bus (its First
+     * Frame's end to its last Consecutive Frame's end) is lost */
+    bool lost_under_segments = false;
     int64_t fc_turn_us = 170; /* the adapter's Flow Control after a FF */
     int64_t echo_us = 100;    /* SocketCAN: the request's echo */
     /* ELM327: the link's one way (half a Bluetooth or USB round trip), a
@@ -123,6 +127,9 @@ struct bench_result {
     uint64_t timeouts = 0;
     uint64_t cuts = 0;    /* ELM327: replies the prompt ended early */
     uint64_t headers = 0; /* ELM327: AT SH switches */
+    uint64_t lost = 0;    /* J2534: replies lost_under_segments dropped */
+    std::vector<uint64_t> asked;    /* each channel's requests */
+    std::vector<uint64_t> answered; /* each channel's replies delivered */
 
     // Requests a second in the tally's window
     double requests_per_s() const
@@ -280,6 +287,15 @@ private:
     void on_reply_frame(const event& ev);
     void on_deliver(const event& ev);
     void schedule_look(int64_t now);
+    // Whether a Single Frame from can_id ends under another module's
+    // segmented reply with adapter_model::lost_under_segments on
+    bool lost_under_segments(uint32_t can_id) const
+    {
+        return m_cfg.model.kind == adapter::j2534 &&
+               m_cfg.model.lost_under_segments &&
+               std::any_of(m_segments.begin(), m_segments.end(),
+                           [can_id](uint32_t id) { return id != can_id; });
+    }
 
     bench_config m_cfg;
     ecuio_session_t* m_session = nullptr;
@@ -295,6 +311,8 @@ private:
     uint64_t m_seq = 0;
     int64_t m_look = INT64_MAX;
     int64_t m_bus_free = 0;
+    std::vector<uint32_t> m_segments; /* J2534: reply IDs with a segmented
+                                       * reply on the bus */
     bool m_echo_pending = false;
     uint32_t m_next_chan = 0;
     /* ELM327: the worker's turn, its one-frame PIDs and long DIDs, the
@@ -359,6 +377,8 @@ inline bool bench::open(std::string* why)
             sim_timing_rng(m_cfg.timing.seed, m_session->info.rx_ids[c]));
     }
     m_result.tally = cli::SummaryTally(set, m_cfg.picks);
+    m_result.asked.assign(m_engine->chan_count, 0);
+    m_result.answered.assign(m_engine->chan_count, 0);
     elm327_one_frame_pids_for(set, &m_one_frame);
     return true;
 }
@@ -475,6 +495,7 @@ inline void bench::send(uint32_t c, int32_t r, int64_t now)
     f.row = r;
     m_flights.push_back(std::move(f));
     m_result.sent_us.push_back(now);
+    ++m_result.asked[c];
     at(now, request, static_cast<uint32_t>(m_flights.size() - 1));
 }
 
@@ -544,8 +565,19 @@ inline void bench::on_reply_frame(const event& ev)
         const int64_t start = end - kFrameUs;
         at(std::max(start + m_cfg.timing.cf_us, end), reply_frame, ev.slot);
     } else if (k == 0 && f.frames > 1) {
+        if (m_cfg.model.kind == adapter::j2534) {
+            m_segments.push_back(f.can_id);
+        }
         at(end + m_cfg.model.fc_turn_us, tester_fc, ev.slot);
     } else if (!elm) {
+        const auto open =
+            std::find(m_segments.begin(), m_segments.end(), f.can_id);
+        if (f.frames > 1 && open != m_segments.end()) {
+            m_segments.erase(open);
+        } else if (f.frames == 1 && lost_under_segments(f.can_id)) {
+            ++m_result.lost; /* never delivered: the engine's wait runs out */
+            return;
+        }
         at(end + m_cfg.model.deliver_us, deliver, ev.slot);
     } else if (!f.cut) {
         at(f.line_at, deliver, ev.slot); /* read as its last line arrives */
@@ -566,6 +598,7 @@ inline void bench::on_deliver(const event& ev)
                                     static_cast<uint16_t>(f.data.size()), ev.at,
                                     nullptr);
         j2534_hold_answered(m_hold, c);
+        ++m_result.answered[c];
     }
     ecuio_frame_t frame;
     std::memset(&frame, 0, sizeof frame);
