@@ -2705,12 +2705,12 @@ TEST(FolderExportTest, TheSessionKeysAreKeptInTheUri)
     Folder f;
     recording(f, row(1000, 0x7E8, 0, {0x02, 0x41, 0x00}), "",
               "uri  elm327://COM3?profile=uds-generic&did=F40C&session=03&"
-              "keepalive_ms=2000\nprofile  uds-generic\n");
+              "keepalive_ms=2000&packframes=1\nprofile  uds-generic\n");
     FolderExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
     EXPECT_NE(e.files["events.log"].find(
                   "\nuri  elm327://<address>?profile=uds-generic&did=F40C&"
-                  "session=03&keepalive_ms=2000\n"),
+                  "session=03&keepalive_ms=2000&packframes=1\n"),
               std::string::npos)
         << e.files["events.log"];
 

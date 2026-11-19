@@ -29,7 +29,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp test_pick_only.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -127,7 +127,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp)
+    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -159,8 +159,10 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
 # test_elm327_talk.cpp: a talk through the test seam, against the fake.
 # test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
+# test_elm327_pack.cpp: packs sized by their reply's frames, against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp)
+    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
+    test_elm327_pack.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -2463,6 +2465,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
     target_include_directories(test_j2534_stream PRIVATE
