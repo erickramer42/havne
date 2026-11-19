@@ -117,8 +117,9 @@ Page {
     property alias guessPreview: importPanel.guessPreview
     property alias importInterface: importPanel.importInterface
     property alias importLabel: importPanel.importLabel
-    property alias mapDialog: mapDialog
-    property alias reportDialog: reportDialog
+    property alias importDialog: recordingDialogs.importDialog
+    property alias mapDialog: recordingDialogs.mapDialog
+    property alias reportDialog: recordingDialogs.reportDialog
     property alias chart: chartFrame.chart
     property alias pan: chartFrame.pan
     property alias pinch: chartFrame.pinch
@@ -712,40 +713,7 @@ Page {
         }
     }
 
-    // Import's file and a CSV's column map
-    DocumentOpenDialog {
-        id: importDialog
-        objectName: "importDialog"
-        title: qsTr("Import a log")
-        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
-        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: openPart.chooseImportFile(importDialog.selectedFile, importDialog.selectedName)
-        onFailed: words => openPart.importPickFailed(words)
-    }
-    DocumentOpenDialog {
-        id: mapDialog
-        objectName: "mapDialog"
-        title: qsTr("The logger's column map")
-        nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
-        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: openPart.chooseImportMap(mapDialog.selectedFile, mapDialog.selectedName)
-        onFailed: words => openPart.importPickFailed(words)
-    }
-
-    // Save report's file: text first, the one a shop or a buyer reads
-    DocumentSaveDialog {
-        id: reportDialog
-        objectName: "reportDialog"
-        title: qsTr("Save the health report")
-        defaultSuffix: "txt"
-        nameFilters: [qsTr("Text (*.txt)"), qsTr("JSON (*.json)")]
-        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-                     + "/health-report.txt"
-        onAccepted: reportPart.saveReportTo(reportDialog.selectedFile,
-                                      reportDialog.selectedNameFilter.index)
-        onFailed: words => { root.reportFailed = true; root.reportNote = qsTr("Report not saved: %1").arg(words) }
-    }
+    RecordingDialogs { id: recordingDialogs; host: root }
 
     // The signal rows' filter: Live has its own
     SignalFilter {
