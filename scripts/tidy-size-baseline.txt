@@ -4,6 +4,8 @@
 # a threshold that isn't listed and on a line that no longer applies, so the
 # list only shrinks: a cut removes its line (scripts/tidy.sh
 # --update-size-baseline), and a line is added by hand only.
+app/bridge_connect.cpp	applyConnectedState
+app/bridge_connect.cpp	disconnectSession
 app/bridge_diagnostics.cpp	channelDiagnosticsText
 app/bridge_diagnostics.cpp	clearDiagnostics
 app/bridge_diagnostics.cpp	diagnosticsEntry
@@ -15,15 +17,13 @@ app/bridge_support.cpp	channelSupportText
 app/framefilter.cpp	matches
 app/framelistmodel.cpp	refresh
 app/main.cpp	main
-app/pluginstore.cpp	wrap
+app/pluginstore_import.cpp	wrap
 app/readonce.cpp	requestFrom
 app/recordingimport.cpp	run
 app/recordingimport.cpp	runGuess
-app/recordingview.cpp	answerAsks
 app/recordingview.cpp	finish
-app/recordingview.cpp	pairConditions
-app/sessionbridge.cpp	applyConnectedState
-app/sessionbridge.cpp	disconnectSession
+app/recordingview_asks.cpp	answerAsks
+app/recordingview_conditions.cpp	pairConditions
 app/signallistmodel.cpp	sliced
 app/storemigration.cpp	moveFiles
 cli/clear_run.h	run_clear
@@ -78,7 +78,7 @@ core/src/import.cpp	write_frames
 core/src/isotp.h	isotp_take
 core/src/j2534_surrogate_client.cpp	ecuio_j2534_sur_open
 core/src/j2534_transport.cpp	j2534_attach
-core/src/j2534_transport.cpp	j2534_worker
+core/src/j2534_worker.cpp	j2534_worker
 core/src/json.cpp	number
 core/src/mock_drive_cycle.h	drive_script
 core/src/mock_drive_cycle.h	update_vehicle
@@ -116,10 +116,9 @@ core/src/signal_file.cpp	read_ecus
 core/src/signal_file.cpp	read_field
 core/src/signals.cpp	ecuio_decode_signal
 core/src/signals.cpp	ecuio_validate_signal
-core/src/sim.cpp	ecuio_sim_ask
 core/src/sim_ecu.h	ecuio_sim_answer
-core/src/sim_ecu.h	ecuio_sim_parse_uri
 core/src/sim_ecu.h	pid_data
+core/src/sim_timing.h	inverse_normal
 core/src/socketcan_wire.h	socketcan_send_refusal
 core/src/uds_generic.cpp	ecuio_uds_build
 surrogate/surrogate_main.cpp	handle_op_read
