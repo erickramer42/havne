@@ -252,6 +252,18 @@ TEST_F(J2534QueryParamTest, FlagsAcceptHexAndDecimalAndCombineWithBaud)
     EXPECT_EQ(last_flags, 10u);
 }
 
+/* ?hold= (Known Issue #42's hold, j2534_hold.h) takes 0 and 1, the last
+ * of several winning; its refusals are MalformedQueriesRejectedAtSessionCreate's */
+TEST_F(J2534QueryParamTest, HoldTakesZeroOrOne)
+{
+    char uri[600];
+    for (const char* q : {"?hold=0", "?hold=1", "?hold=1&hold=0"}) {
+        snprintf(uri, sizeof(uri), "j2534://%s%s&profile=raw",
+                 FAKE_J2534_DLL_PATH, q);
+        EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << q;
+    }
+}
+
 /* A 29-bit channel opens 29-bit: CAN_29BIT_ID joins the connect flags
  * whenever the channels' IDs are wider than 11 bits, on top of any
  * ?flags=, so the channel matches the width its filter and writes use. */
@@ -378,6 +390,12 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?packframes=1.5",
         "?packframes= 1",
         "?pack=0&packframes=1",
+        "?hold=",
+        "?hold=2",
+        "?hold=yes",
+        "?hold=0x1",
+        "?hold=1&hold=",
+        "?Hold=0",
         /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
          * other profile takes */
         "?did=1E1C",
@@ -430,7 +448,10 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
                  "j2534:// takes no query key 'band', only baud, flags, "
                  "filter, txid, poll, probe, identify, diagnose, pack, scan, "
                  "gap, profile, did, "
-                 "session, keepalive_ms and packframes");
+                 "session, keepalive_ms, packframes and hold");
+    snprintf(uri, sizeof(uri), "j2534://%s?hold=yes", FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(), "?hold= needs 0 or 1, not 'yes'");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");

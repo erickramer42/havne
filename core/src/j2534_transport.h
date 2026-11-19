@@ -101,13 +101,17 @@ struct ecuio_j2534_transport {
      *                ?probe=0 or ?poll=. Frozen pre-thread.
      *   identify     ADR-0021: each channel asks its ECU's identity
      *                once; on with the set's requests unless ?identify=0
-     *                or ?poll=. Frozen pre-thread. */
+     *                or ?poll=. Frozen pre-thread.
+     *   hold         Known Issue #42's hold (j2534_hold.h): on unless
+     *                ?hold=0; it acts with two or more channels. Frozen
+     *                pre-thread. */
     j2534_channel chans[ECUIO_MAX_CHANNELS] = {};
     uint32_t chan_count = 0;
     ecuio_request_engine engine;
     std::unique_ptr<ecuio_timing_table> timing; /* the engine's, ADR-0042 */
     bool probe = false;
     bool identify = false;
+    bool hold = true;
     /* Frame time (j2534_clock.h): the host's at the first frame, counted
      * from epoch, the end of attach; the vendor's deltas after that.
      * Worker-only, through pump_one. */

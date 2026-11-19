@@ -265,6 +265,19 @@ SettingsKit {
                "the mock doesn't")
     }
 
+    // hold (Known Issue #42's hold) is J2534's alone: another scheme drops it
+    function test_onlyJ2534KeepsHold() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "j2534://?hold=0&gap=10")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?gap=10", "ELM327 takes no hold")
+        for (const scheme of ["elm327", "socketcan", "mock", "replay"])
+            verify(page.uriPart.schemeKeys[scheme].indexOf("hold") < 0, scheme + " takes no hold")
+        verify(page.uriPart.schemeKeys["j2534"].indexOf("hold") >= 0, "J2534 takes hold")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {
