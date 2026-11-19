@@ -1,0 +1,14 @@
+{
+  "havne_signals": 1,
+  "signals": [
+    {
+      "key": "boost",
+      "name": "Boost",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "F40E" },
+      "field": { "byte": 0, "bits": 8 },
+      "scale": 1, "offset": -100,
+      "unit": "kPa", "decimals": 0, "group": "engine"
+    }
+  ]
+}

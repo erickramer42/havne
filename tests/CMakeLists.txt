@@ -96,7 +96,7 @@ add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_compute
     test_signal_keys.cpp
     test_computed_grammar.cpp
     test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
-    test_plugin_least_core.cpp test_plugin_conversation.cpp
+    test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_base64.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
@@ -305,7 +305,8 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp test_cli_pairs.cpp test_cli_summary.cpp)
+        test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
+        test_cli_summary.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -1001,6 +1002,16 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
             plugins-check-format2.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
+        # A plugin's Dashboard pages (ADR-0052's appendix on pages): a page
+        # line for each, through the layout check, and the requires_core
+        # line its older requires.core earns
+        app_cli_golden(PluginsCheckJudgesAPluginsPages plugins-check-pages.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages)
+        # A key no variant has, a cell the layout check drops and a second
+        # page of one name: each page fails, so the check does
+        app_cli_golden(PluginsCheckFailsAPageThatWontRead plugins-check-pages-bad.jsonl
+            --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages-bad.json)
         # A format 2 plugin with the conversation tier (ADR-0066): what its
         # manifest lets its module cause to be sent, after the plugin line;
         # then the same plugin as a folder with its module a file, a
@@ -2038,6 +2049,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_one_store.cpp
         test_bridge_variantshape.cpp
         test_bridge_plugincopies.cpp
+        test_bridge_pluginpages.cpp
         test_store_migration.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
@@ -2053,6 +2065,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/exprcheck.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
@@ -2132,6 +2145,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp

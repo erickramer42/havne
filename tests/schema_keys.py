@@ -9,7 +9,8 @@
 # exactly those keys plus "notes", with "^x-" free and nothing else
 # (additionalProperties false), as only_keys allows. A call the table
 # doesn't map, an entry no call matches, and a schema object no call maps
-# all fail, so a key added on either side alone fails. The loaders' word
+# all fail, so a key added on either side alone fails, but for an OPEN
+# object, whose loader checks no keys on purpose. The loaders' word
 # lists that a schema spells as an enum (kinds, groups, services, byte
 # orders, extends, tiers) are compared too, and a schema's request count
 # with profile.h's ECUIO_PROFILE_MAX_REQUESTS.
@@ -65,6 +66,12 @@ CALLS = {
     ("condition_file.cpp", "w", 1): ("condition-file", "/$defs/join"),
     ("condition_file.cpp", "a", 1): ("condition-file", "/$defs/alert"),
     ("condition_file.cpp", "r", 1): ("condition-file", "/$defs/record"),
+}
+
+# Objects whose loader takes keys it doesn't know, on purpose -> why
+OPEN = {
+    ("plugin-manifest", "/$defs/pageFile"):
+        "a page is a layout file, which keeps keys it doesn't know (ADR-0057)",
 }
 
 # (source, a pattern whose group 1 is one word of the list) -> (schema,
@@ -247,7 +254,7 @@ def main():
             failures.append(f"CALLS maps {key} to {schema}.schema.json#{ptr}, "
                             f"but no only_keys call has that context and place")
 
-    mapped = {(s, p) for s, p in CALLS.values()}
+    mapped = {(s, p) for s, p in CALLS.values()} | set(OPEN)
     for s in SCHEMAS:
         for ptr in object_schemas(schemas[s]):
             if (s, ptr) not in mapped:

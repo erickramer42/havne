@@ -244,6 +244,25 @@ def main(argv):
     for name, data in conversation_seeds().items():
         write(out, "fuzz_plugin_manifest", name, data)
     talker = conversation_seeds()["packed_conversation"][1:]
+    # A page for each form (ADR-0052's appendix on pages): the folder's
+    # pieces in the loader's order, its pages before its data files
+    pages_dir = "tests/fixtures/plugins/pages"
+    pages_bytes = read(pages_dir + "/manifest.json")
+    pages_manifest = json.loads(pages_bytes)
+    pages_data = []
+    for variant in pages_manifest["variants"]:
+        for path in variant["files"]:
+            if path not in pages_data:
+                pages_data.append(path)
+    pages_folder = b"\x01" + pages_bytes
+    for path in pages_manifest["pages"] + pages_data:
+        pages_folder += SEP + read(pages_dir + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_pages", pages_folder)
+    pages_packed = dict(pages_manifest)
+    pages_packed["files"] = {p: json.loads(read(pages_dir + "/" + p))
+                             for p in pages_data + pages_manifest["pages"]}
+    pages_text = json.dumps(pages_packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_pages", b"\x00" + pages_text)
 
     # Making and changing a packed plugin: a switches byte, then a signal
     # file to wrap, 0x1E and a signal file to put into the result; with
@@ -261,6 +280,7 @@ def main(argv):
         write(out, "fuzz_plugin_wrap", "packed_put_" + name, b"\x40" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "packed_slug_" + name, b"\x50" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "conversation_put_" + name, b"\x40" + talker + SEP + data)
+        write(out, "fuzz_plugin_wrap", "pages_put_" + name, b"\x40" + pages_text + SEP + data)
         for other, second in wrap_files:
             write(out, "fuzz_plugin_wrap", "put_" + name + "_" + other,
                   b"\x00" + data + SEP + second)

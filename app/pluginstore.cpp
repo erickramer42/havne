@@ -441,6 +441,7 @@ QVariantMap PluginStore::entryOf(const QString& sha, const Held& h) const
             {QStringLiteral("counts"), h.counts},
             {QStringLiteral("owns"), h.owns},
             {QStringLiteral("replacedNames"), h.replacedNames},
+            {QStringLiteral("pages"), pagesOf(h.plugin)},
             {QStringLiteral("mine"), f.value(kMine).toBool()},
             {QStringLiteral("importedFor"), f.value(kImportedFor).toString()},
             {QStringLiteral("obdb"), h.obdb}};

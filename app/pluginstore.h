@@ -152,6 +152,11 @@ public:
     // longer hashes to its name
     QByteArray packed(const QString& sha, QString* words) const;
 
+    // The text of page index of the loaded plugin with the id (ADR-0052's
+    // appendix on pages): a layout file of one page, as core writes it.
+    // "" for no such plugin or page. The Dashboard judges it
+    QString pageText(const QString& id, int index);
+
     // A variant's signal file (ADR-0064 Q7): its files merged and written
     // as one, with a notes line naming the plugin, its version and the
     // variant, which loads anywhere a signal file does, under
@@ -268,6 +273,8 @@ private:
     static QString pathOf(const QString& sha);
     static QString indexPath();
     QVariantMap entryOf(const QString& sha, const Held& h) const;
+    // The plugin's pages, in the manifest's order: { index, form, path }
+    static QVariantList pagesOf(const ecuio_plugin_t* plugin);
     // Loads a package and registers every variant: false with *words
     // saying why not (another copy of its id loaded, a profile refused)
     bool take(const QString& sha, const QByteArray& bytes, QString* words);

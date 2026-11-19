@@ -1,0 +1,18 @@
+{
+  "format": 2,
+  "form": "phone",
+  "files": [],
+  "pages": [
+    {
+      "name": "Engine",
+      "cells": [
+        { "kind": "digital", "w": 3, "h": 9, "label": "Oil temp",
+          "refs": ["key:oil_temp"], "unit": "°C",
+          "options": { "from": 0, "to": 160 } },
+        { "kind": "digital", "w": 3, "h": 9, "label": "Coolant",
+          "refs": ["id:2001", "id:7002"], "unit": "°C",
+          "options": { "from": 0, "to": 130 } }
+      ]
+    }
+  ]
+}
