@@ -214,8 +214,8 @@ TestCase {
         }
         // Without a phase the columns count from 0 px
         const seg = [{ x: 0.5, y: 0 }, { x: 3.5, y: 0 }]
-        compare(ChartLayout.bandPieces(seg, 2, 6)[0].points.map(p => p.x), [0.5, 2, 3.5])
-        compare(ChartLayout.bandPieces(seg, 2, 6, 1)[0].points.map(p => p.x), [0.5, 1, 3, 3.5])
+        compare(ChartBands.bandPieces(seg, 2, 6)[0].points.map(p => p.x), [0.5, 2, 3.5])
+        compare(ChartBands.bandPieces(seg, 2, 6, 1)[0].points.map(p => p.x), [0.5, 1, 3, 3.5])
     }
 
     // A holding chart's label column fits the window's extremes and only
