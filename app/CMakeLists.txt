@@ -177,6 +177,7 @@ qt_add_qml_module(app_ui
         qml/RecordingsPage.qml
         qml/SettingsPage.qml
         qml/Captioned.qml
+        qml/HeaderButton.qml
         qml/Heading.qml
         qml/LabeledFlow.qml
         qml/SettingsAdapter.qml

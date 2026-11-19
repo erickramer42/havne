@@ -365,15 +365,6 @@ ApplicationWindow {
         onTriggered: Bridge.logEvent(root.displayLine)
     }
 
-    // On a phone a header button is a touch's size each way (headerRow's
-    // touchMin) and draws smaller, so the bar's rule shows under it
-    component HeaderButton: ThemedButton {
-        compact: Theme.compact
-        Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
-        topInset: Theme.compact ? 6 : 0
-        bottomInset: Theme.compact ? 6 : 0
-    }
-
     // Over a bar in the drive view: a press restarts its hide delay and goes on
     // to what's under it
     component BarTouch: MouseArea {
