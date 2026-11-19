@@ -159,8 +159,10 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
 # test_elm327_talk.cpp: a talk through the test seam, against the fake.
 # test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
+# test_elm327_pack.cpp: packs sized by their reply's frames, against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp)
+    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
+    test_elm327_pack.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -2459,6 +2461,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
     target_include_directories(test_j2534_stream PRIVATE

@@ -61,6 +61,10 @@
 //                pads with zeros to 13 data bytes, a First Frame and two
 //                Consecutive Frames: an ECU answering longer than J1979's
 //                length for it
+//   multi_frame_prompt_ms  the prompt this long after a reply of more
+//                than one frame, whatever the count digit: the OBDX Pro
+//                VX in ELM mode (ADR-0056's appendix of 2026-11-08, a
+//                pack 100-113 ms against 21 ms for one PID); 0 none
 
 #ifndef ECUIO_TESTS_FAKE_ELM327_KNOBS_H
 #define ECUIO_TESTS_FAKE_ELM327_KNOBS_H
@@ -95,6 +99,7 @@ struct knobs {
     uint32_t cut_gap_ms = 0;
     bool monitor_eats_cfs = false;
     int longer_pid = -1;
+    uint32_t multi_frame_prompt_ms = 0;
 };
 
 } // namespace fake_elm327

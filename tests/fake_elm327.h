@@ -787,8 +787,12 @@ private:
             busy_until_ =
                 at + (int64_t{frames} - count_digit) * k.cut_gap_ms * 1000;
         }
-        end_line(at);
-        prompt(at);
+        /* The VX in ELM mode: a reply of more than one frame ends its
+         * prompt late, whatever the count digit */
+        const int64_t end =
+            frames > 1 ? at + int64_t{k.multi_frame_prompt_ms} * 1000 : at;
+        end_line(end);
+        prompt(end);
     }
 };
 
