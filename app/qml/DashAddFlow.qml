@@ -126,6 +126,23 @@ Item {
         }
         return options
     }
+    // True when startOptions' range is the unit table's or the field's own
+    // extremes: no gauge block and no common signal's table entry
+    function rangeIsGuess(kind, row) {
+        const g = row.gauge ?? ({})
+        const hasGauge = g.min !== undefined && g.max !== undefined
+        return kind !== "shift-light" && !hasGauge && part.host.keyOfRef(row.ref) === ""
+    }
+    // The cell whose From and To were guessed at add time: { page, index, ref,
+    // from, to }, or null. Page state only, never written to the layout; the
+    // panel's note shows while the cell still holds those two values
+    property var guessed: null
+    function noteGuess(kind, row, index) {
+        const o = startOptions(kind, row)
+        guessed = rangeIsGuess(kind, row)
+                  ? { page: part.host.pageIndex, index: index, ref: row.ref, from: o.from, to: o.to }
+                  : null
+    }
     // A new gauge's cell (section 5): the row's name, its unit and what a
     // gauge on it starts with (startOptions); decimals follow the row
     function newCell(kind, row) {
@@ -141,6 +158,7 @@ Item {
                      part.host.historyPart.stepOf("", qsTr("added %1").arg(part.host.cellName(cell)), -1, part.host.shownCells.length))) {
                 part.host.addKind = ""
                 part.host.select(part.host.shownCells.length - 1)
+                noteGuess(cell.kind, row, part.host.selected)
             }
             return
         }
@@ -160,6 +178,7 @@ Item {
                                         Object.assign(cleared, startOptions(part.host.selectedCell.kind, row)))
         part.host.edit(next, part.host.historyPart.stepOf("", qsTr("changed %1's signal").arg(part.host.cellName(part.host.selectedCell)), part.host.selected, part.host.selected))
         part.host.panel = "cell"
+        noteGuess(part.host.selectedCell.kind, row, part.host.selected)
     }
 
     // Add's every signal of a set: the listed profile's own rows (a signal

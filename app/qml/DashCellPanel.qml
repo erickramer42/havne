@@ -219,6 +219,20 @@ GaugeCard {
                 fallback: panelCard.range.to
             }
             Caption {
+                objectName: "panelRangeGuess"
+                readonly property var g: panelCard.host.addFlowPart.guessed
+                visible: panelCard.hasSignal && g !== null && panelCard.cell !== null
+                         && g.page === panelCard.host.pageIndex && g.index === panelCard.host.selected
+                         && g.ref === (panelCard.cell.refs ?? [])[0]
+                         && panelCard.cell.options !== undefined
+                         && panelCard.cell.options.from === g.from && panelCard.cell.options.to === g.to
+                Layout.fillWidth: true
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                text: qsTr("Range guessed: set From and To.")
+            }
+            Caption {
                 objectName: "panelShiftHint"
                 visible: panelCard.kind === "shift-light"
                 Layout.fillWidth: true

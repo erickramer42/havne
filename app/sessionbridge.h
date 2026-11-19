@@ -1200,6 +1200,9 @@ private:
     // or a copy missing, changed or refused, comes back as given, with a
     // log line saying why. GUI thread, before the connect.
     QString replayUriWithOwnSignals(const QString& uri);
+    // The log line naming the profile a replayed recording was made under,
+    // and saying so when it holds no signal values (never its path)
+    void logReplayMadeUnder(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;
