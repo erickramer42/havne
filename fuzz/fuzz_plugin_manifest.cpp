@@ -160,8 +160,12 @@ void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
         check(sv.reserved[0] == 0 && sv.reserved[1] == 0);
     }
     check(ecuio_plugin_service(a, count, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
-    sv.struct_size = sizeof sv - 1;
-    check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        sv.struct_size = sizeof sv - 1;
+        const ecuio_plugin_service_t untouched = sv;
+        check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&sv, &untouched, sizeof sv) == 0);
+    }
 }
 
 /* Each security level on one of the group's ECUs, once, inside its
@@ -197,8 +201,13 @@ void check_levels(const ecuio_plugin_t* a, uint32_t count,
     }
     check(ecuio_plugin_security_level(a, count, &lv) ==
           ECUIO_ERR_INVALID_ARGUMENT);
-    lv.struct_size = sizeof lv - 1;
-    check(ecuio_plugin_security_level(a, 0, &lv) == ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        lv.struct_size = sizeof lv - 1;
+        const ecuio_plugin_security_level_t untouched = lv;
+        check(ecuio_plugin_security_level(a, 0, &lv) ==
+              ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&lv, &untouched, sizeof lv) == 0);
+    }
 }
 
 /* Each ECU the module talks to, once: one of the plugin's, so a channel

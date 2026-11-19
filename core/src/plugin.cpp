@@ -337,8 +337,12 @@ ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
         out->struct_size < sizeof(ecuio_plugin_service_t)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    ecuio_plugin_service_t service = plugin->conversation->services[index];
+    const ecuio_plugin_service_t& from = plugin->conversation->services[index];
+    ecuio_plugin_service_t service{};
     service.struct_size = sizeof(ecuio_plugin_service_t);
+    service.sid = from.sid;
+    service.sub_count = from.sub_count;
+    std::memcpy(service.subs, from.subs, sizeof service.subs);
     *out = service;
     return ECUIO_OK;
 }
@@ -355,8 +359,16 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
         out->struct_size < sizeof(ecuio_plugin_security_level_t)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    ecuio_plugin_security_level_t level = plugin->conversation->levels[index];
+    const ecuio_plugin_security_level_t& from =
+        plugin->conversation->levels[index];
+    ecuio_plugin_security_level_t level{};
     level.struct_size = sizeof(ecuio_plugin_security_level_t);
+    level.rx_id = from.rx_id;
+    level.level = from.level;
+    level.seed_bytes = from.seed_bytes;
+    level.key_bytes = from.key_bytes;
+    level.delay_ms = from.delay_ms;
+    level.key_window_ms = from.key_window_ms;
     *out = level;
     return ECUIO_OK;
 }
