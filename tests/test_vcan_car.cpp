@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -141,13 +142,14 @@ bool wait_for(Pred pred, std::chrono::milliseconds limit)
     return true;
 }
 
-bool put(int fd, uint32_t id, std::vector<uint8_t> data)
+bool put(int fd, uint32_t id, std::initializer_list<uint8_t> data)
 {
-    data.resize(8, vcan_bus::kPad);
     can_frame f{};
     f.can_id = id;
     f.len = 8;
-    std::memcpy(f.data, data.data(), 8);
+    std::memset(f.data, vcan_bus::kPad, sizeof f.data);
+    std::copy_n(data.begin(), std::min<size_t>(data.size(), sizeof f.data),
+                f.data);
     return ::write(fd, &f, sizeof f) == static_cast<ssize_t>(sizeof f);
 }
 
