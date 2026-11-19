@@ -367,3 +367,39 @@ TEST(ScanRetryTest, ALateReplyEndingTheRoundLeavesNothingPending)
     EXPECT_EQ(s.e.chans[0].scan_pending, 0u);
     EXPECT_FALSE(s.asks_scan(0));
 }
+
+/* A round of n entries on channel 0, the last lost of them unanswered:
+ * how many the retry asks again */
+uint32_t asked_again(uint32_t n, uint32_t lost)
+{
+    Scan s(std::initializer_list<uint16_t>{});
+    for (uint32_t i = 0; i < n; ++i) {
+        EXPECT_TRUE(
+            ecuio_engine_scan_add(&s.e, 0, static_cast<uint16_t>(0x1E00 + i)));
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint16_t did = static_cast<uint16_t>(0x1E00 + i);
+        s.ask(0, did);
+        if (i < n - lost) {
+            s.found(0, did);
+        } else {
+            s.lost(0);
+        }
+    }
+    return s.e.chans[0].scan_pending;
+}
+
+/* Up to an eighth of a channel's entries unanswered, and 16 on a short
+ * scan, are lost replies: each is asked again */
+TEST(ScanRetryTest, AnEighthOrSixteenUnansweredAreAskedAgain)
+{
+    EXPECT_EQ(asked_again(24, 16), 16u);
+    EXPECT_EQ(asked_again(160, 20), 20u);
+}
+
+/* Past that the unanswered are the module's silence: none is asked again */
+TEST(ScanRetryTest, MoreUnansweredAreTheModulesSilence)
+{
+    EXPECT_EQ(asked_again(24, 17), 0u);
+    EXPECT_EQ(asked_again(160, 21), 0u);
+}

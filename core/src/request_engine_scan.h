@@ -63,22 +63,27 @@ inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
 
 /* Channel c's scan has asked every entry: the ones whose wait ran out go
  * once more, since a reply lost on a busy bus or adapter isn't the
- * module's silence. A channel that answered no entry at all is silent,
- * and isn't asked again; an entry asked again stands as it settles. */
+ * module's silence. A channel that answered no entry is silent, and so
+ * is one whose unanswered are more than an eighth of its entries (16 at
+ * least): neither is asked again. An entry asked again stands as it
+ * settles. */
 inline void ecuio_engine_scan_retry(ecuio_request_engine* e, uint32_t c)
 {
     bool answered = false;
+    uint32_t entries = 0;
     uint32_t lost = 0;
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         const ecuio_scan_entry& s = e->scan[i];
         if (s.channel != c) {
             continue;
         }
+        ++entries;
         answered = answered || s.outcome == ECUIO_SCAN_FOUND ||
                    s.outcome == ECUIO_SCAN_REFUSED;
         lost += (s.outcome == ECUIO_SCAN_UNANSWERED && s.retried == 0) ? 1 : 0;
     }
-    if (!answered || lost == 0) {
+    const uint32_t bound = entries / 8 > 16 ? entries / 8 : 16;
+    if (!answered || lost == 0 || lost > bound) {
         return;
     }
     for (uint32_t i = 0; i < e->scan_count; ++i) {
