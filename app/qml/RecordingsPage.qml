@@ -28,6 +28,14 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias comparePart: comparePart
+    readonly property var compareValuesAt: comparePart.compareValuesAt
+    readonly property var compareWith: comparePart.compareWith
+    readonly property var stopComparing: comparePart.stopComparing
+    readonly property var applyStretchRules: comparePart.applyStretchRules
+    readonly property var stretchesOf: comparePart.stretchesOf
+    readonly property var setAlignOn: comparePart.setAlignOn
+    readonly property var align: comparePart.align
     property alias decodePart: decodePart
     readonly property var decodeWith: decodePart.decodeWith
     property alias rowInfoPart: rowInfoPart
@@ -562,13 +570,13 @@ Page {
     property int pullsThereAsk: 0
     property int alignPullHere: 0
     property int alignPullThere: 0
-    onAlignPullHereChanged: align()
-    onAlignPullThereChanged: align()
-    onAlignOnChanged: align()
-    onAlignLabelChanged: align()
-    onAlignSignalChanged: align()
-    onAlignLevelChanged: align()
-    onAlignHysteresisChanged: align()
+    onAlignPullHereChanged: comparePart.align()
+    onAlignPullThereChanged: comparePart.align()
+    onAlignOnChanged: comparePart.align()
+    onAlignLabelChanged: comparePart.align()
+    onAlignSignalChanged: comparePart.align()
+    onAlignLevelChanged: comparePart.align()
+    onAlignHysteresisChanged: comparePart.align()
 
     // The frame test (developer mode; ADR-0049 section 10 step 5's 60 fps
     // on pan and pinch): four signals plotted, then for frameTestSeconds
@@ -601,6 +609,8 @@ Page {
 
     RecordingDecode { id: decodePart; host: root }
 
+    RecordingCompare { id: comparePart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -616,168 +626,6 @@ Page {
     // view rests
     readonly property int settleMs: 150
     readonly property real handleDropPx: 4
-    // The compared recording's values at axis time t, by the first's
-    // signal index, each signal's pair
-    function compareValuesAt(t) {
-        const out = {}
-        if (!compareAligned || isNaN(t) || t - compareOffsetMs < 0)
-            return out
-        const mine = recording.signalList.filter(s => ComparePairs.pairOf(root.comparePairs, s.index) !== undefined)
-        const got = compare.valuesAt(mine.map(s => root.comparePairs[s.index]), t - compareOffsetMs)
-        for (let k = 0; k < got.length; ++k)
-            out[mine[k].index] = got[k]
-        return out
-    }
-
-    function compareWith(row) {
-        compareOpen = true
-        compareTitle = row.title
-        compareAligned = false
-        compareStatus = qsTr("Opening %1…").arg(row.title)
-        compare.open(row.folder)
-    }
-    function stopComparing() {
-        compareOpen = false
-        compare.close()
-        compareTitle = ""
-        compareStatus = ""
-        compareAligned = false
-        compareReadout = ({})
-        differenceShown = false
-        seriesPart.forgetDifference()
-        if (recording.state === RecordingView.Open)
-            cursorsPart.showAll()
-    }
-
-    // The first recording's markers' labels, each once, and its number
-    // signals: what the alignment can be on
-    function markerLabels() {
-        const out = []
-        for (const m of recording.markers) {
-            if (out.indexOf(m.label) < 0)
-                out.push(m.label)
-        }
-        return out
-    }
-    // The alignment's signal, by its id, with its name for another decode
-    function chooseAlignSignal(s) {
-        alignSignal = s ? panesPart.idOf(s) : ""
-        alignSignalName = s ? s.name : ""
-    }
-    // Asks each recording for its pulls, once: the answers align again
-    function askPulls() {
-        if (pullsHere === null && stretchAsk === 0)
-            askStretches()
-        if (pullsThere === null && pullsThereAsk === 0)
-            pullsThereAsk = compare.stretches(true, false, forcedRules())
-    }
-    // One ask for both kinds: only the newest ask per view is answered, so
-    // the Jump row, the bands and the alignment share it
-    function askStretches() {
-        if (recording.state !== RecordingView.Open)
-            return
-        rulesProblem = ""
-        stretchUnits = Bridge.unitSystem
-        let used = stretchRules
-        let request = recording.stretches(true, true, used)
-        if (request === 0 && recording.stretchesProblem !== "") {
-            // A stored level that is none today: the defaults, with the
-            // words under the panel's fields, never a refused ask
-            rulesProblem = recording.stretchesProblem
-            used = ({})
-            request = recording.stretches(true, true, used)
-        }
-        stretchAsk = request
-        if (request === 0) {
-            stretchFailed = true
-            pullsHereFailed = true
-            pullsHere = []
-        } else {
-            askedRules = used
-        }
-    }
-    // The levels in force for the compared recording's ask too, so a pull is
-    // counted by one rule in both
-    function forcedRules() {
-        return askedRules
-    }
-    // Asks again with the levels in force, here and there: a change of unit
-    // system reads the same typed numbers in the other unit
-    function reaskStretches() {
-        stretchList = null
-        stretchFailed = false
-        pullsHere = null
-        pullsHereFailed = false
-        jumpIndex = -1
-        askStretches()
-        if (compare.state === RecordingView.Open) {
-            pullsThere = null
-            alignPullThere = 0
-            pullsThereAsk = compare.stretches(true, false, askedRules)
-        }
-    }
-    // Asks again with the panel's levels. A refusal leaves the earlier answer
-    // standing and its words under the fields
-    function applyStretchRules(rules) {
-        const request = recording.stretches(true, true, rules)
-        if (request === 0) {
-            rulesProblem = recording.stretchesProblem
-            if (rulesProblem === "")
-                stretchFailed = true
-            return
-        }
-        rulesProblem = ""
-        askedRules = rules
-        stretchUnits = Bridge.unitSystem
-        viewerSettings.stretchRules = JSON.stringify(rules)
-        stretchAsk = request
-        stretchList = null
-        stretchFailed = false
-        pullsHere = null
-        jumpIndex = -1
-        if (compare.state === RecordingView.Open) {
-            pullsThere = null
-            alignPullThere = 0
-            pullsThereAsk = compare.stretches(true, false, rules)
-        }
-        // On a phone the panel stood where the chart is: back to it
-        if (Theme.compact)
-            stretchesOpen = false
-    }
-    function stretchesOf(kind) {
-        return stretchList === null ? [] : stretchList.filter(s => s.kind === kind)
-    }
-    // Where a jump goes on from: the cursor, else the view's start
-    function jumpBase() {
-        return hasCursor ? cursorMs : viewT0
-    }
-    // The place in a kind's list of the first stretch after the base, or
-    // of the last before it; -1 for none
-    function nextStretch(kind) {
-        const at = jumpBase()
-        return stretchesOf(kind).findIndex(s => s.fromMs > at + 0.5)
-    }
-    function previousStretch(kind) {
-        const at = jumpBase()
-        const list = stretchesOf(kind)
-        for (let i = list.length - 1; i >= 0; --i) {
-            if (list[i].fromMs < at - 0.5)
-                return i
-        }
-        return -1
-    }
-    // The stretch in view with a margin, the cursor at its start
-    function jump(kind, direction) {
-        const i = direction > 0 ? nextStretch(kind) : previousStretch(kind)
-        if (i < 0)
-            return
-        const s = stretchesOf(kind)[i]
-        const margin = Math.max(minSpanMs, (s.toMs - s.fromMs) / 4)
-        cursorsPart.setView(s.fromMs - margin, s.toMs + margin)
-        cursorsPart.setCursor(s.fromMs)
-        jumpKind = kind
-        jumpIndex = i
-    }
     // What the row says for no pull: a recording with neither a throttle nor
     // an engine-load signal has nothing a pull is judged by, whatever the
     // levels, and the row says so. A phone's row must stay one line at any
@@ -793,13 +641,13 @@ Page {
             return qsTr("Its stretches couldn't be read")
         if (stretchList === null)
             return qsTr("Looking for stretches…")
-        const list = jumpIndex >= 0 ? stretchesOf(jumpKind) : []
+        const list = jumpIndex >= 0 ? comparePart.stretchesOf(jumpKind) : []
         const at = jumpIndex >= 0 ? list[jumpIndex] : undefined
         if (at !== undefined && hasCursor && Math.abs(cursorMs - at.fromMs) < 0.5)
             return qsTr("%1 %2 of %3 · %4").arg(jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
                        .arg(jumpIndex + 1).arg(list.length).arg(formatPart.timeText(at.fromMs, true))
-        const pulls = stretchesOf("pull").length
-        const cruises = stretchesOf("cruise").length
+        const pulls = comparePart.stretchesOf("pull").length
+        const cruises = comparePart.stretchesOf("cruise").length
         return (pulls === 0 ? noPullText
                             : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
                + (cruises === 0 ? qsTr("No cruise found")
@@ -807,120 +655,6 @@ Page {
     }
     // What a screen reader says for the status: the reason in full
     readonly property string jumpStatusSpoken: jumpStatus.replace(noPullText, noPullWhy)
-    // A recording's pulls as the choices' rows: its number, start and length
-    function pullRows(pulls, here) {
-        return (pulls || []).map((p, i) =>
-            (here ? qsTr("Pull %1 here · %2 · %3") : qsTr("Pull %1 there · %2 · %3"))
-                .arg(i + 1).arg(formatPart.timeText(p.fromMs, true)).arg(formatPart.lengthText(p.toMs - p.fromMs)))
-    }
-    function setAlignOn(on) {
-        if (on === "marker" && alignLabel === "")
-            alignLabel = markerLabels()[0] || ""
-        if ((on === "rise" || on === "fall") && alignSignal === "")
-            chooseAlignSignal(ComparePairs.numbers(recording.signalList)[0])
-        alignOn = on
-    }
-    // A number as typed, in the locale or plain; NaN for none
-    function numberOf(text) {
-        if (text.trim() === "")
-            return NaN
-        try {
-            return Number.fromLocaleString(Qt.locale(), text.trim())
-        } catch (e) {
-            const v = Number(text.trim())
-            return isFinite(v) ? v : NaN
-        }
-    }
-
-    // Lines the compared recording up on the first: its offset, whether
-    // it's drawn, and the status saying so
-    function align() {
-        compareAligned = false
-        compareStatus = compare.state === RecordingView.Failed
-                        ? qsTr("%1 can't be opened: %2").arg(compareTitle).arg(compare.error) : ""
-        if (compare.state === RecordingView.Open && recording.state === RecordingView.Open)
-            alignOpen()
-        if (recording.state !== RecordingView.Open)
-            return
-        cursorsPart.showAll()
-        if (hasCursor)
-            cursorsPart.setCursor(cursorMs)
-    }
-    function alignOpen() {
-        let here = 0
-        let there = 0
-        let what = qsTr("their starts")
-        if (alignOn === "utc") {
-            what = qsTr("their UTC starts")
-            here = recording.info.utcStartMs > 0 ? recording.info.utcStartMs : -1
-            there = compare.info.utcStartMs > 0 ? compare.info.utcStartMs : -1
-        } else if (alignOn === "marker") {
-            what = qsTr("the marker %1").arg(alignLabel)
-            here = alignLabel !== "" ? recording.findMarker(alignLabel) : -1
-            there = alignLabel !== "" ? compare.findMarker(alignLabel) : -1
-        } else if (alignOn === "rise" || alignOn === "fall") {
-            const s = recording.signalList.find(x => panesPart.idOf(x) === alignSignal)
-            if (!s || isNaN(alignLevel)) {
-                compareStatus = qsTr("Dashed: %1. Choose a signal and type a level to align on").arg(compareTitle)
-                return
-            }
-            const verb = alignOn === "rise" ? qsTr("rising to %1") : qsTr("falling to %1")
-            what = qsTr("%1 %2").arg(s.name).arg(verb.arg(formatPart.valueText(alignLevel, s.decimals, s.unit)))
-            const j = ComparePairs.pairOf(comparePairs, s.index)
-            here = recording.findThreshold(s.index, alignLevel, alignHysteresis, alignOn === "rise")
-            there = j !== undefined ? compare.findThreshold(j, alignLevel, alignHysteresis, alignOn === "rise") : -1
-        } else if (alignOn === "engine") {
-            what = qsTr("their engine starts")
-            here = recording.findEngineStart()
-            there = compare.findEngineStart()
-        } else if (alignOn === "pull") {
-            if (pullsHere === null || pullsThere === null) {
-                askPulls()
-                compareStatus = qsTr("Dashed: %1. Finding each recording's pulls…").arg(compareTitle)
-                return
-            }
-            if (pullsHereFailed || pullsThereFailed) {
-                compareStatus = (pullsHereFailed && pullsThereFailed
-                                 ? qsTr("%1 isn't drawn: neither recording's pulls could be read")
-                                 : pullsHereFailed ? qsTr("%1 isn't drawn: this recording's pulls couldn't be read")
-                                 : qsTr("%1 isn't drawn: its pulls couldn't be read")).arg(compareTitle)
-                return
-            }
-            what = qsTr("pull %1 here and pull %2 there").arg(alignPullHere + 1).arg(alignPullThere + 1)
-            here = alignPullHere < pullsHere.length ? pullsHere[alignPullHere].fromMs : -1
-            there = alignPullThere < pullsThere.length ? pullsThere[alignPullThere].fromMs : -1
-        }
-        if (here < 0 || there < 0) {
-            compareStatus = alignOn === "utc"
-                ? (here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has a UTC start").arg(compareTitle)
-                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no UTC start").arg(compareTitle)
-                   : qsTr("%1 isn't drawn: it has no UTC start").arg(compareTitle))
-                : alignOn === "engine"
-                ? (here < 0 && there < 0
-                   ? qsTr("%1 isn't drawn: neither has an engine start (RPM reaching 500 after being below 100)")
-                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no engine start (RPM reaching 500 after being below 100)")
-                   : qsTr("%1 isn't drawn: it has no engine start (RPM reaching 500 after being below 100)"))
-                  .arg(compareTitle)
-                : alignOn === "pull"
-                ? (here < 0 && there < 0
-                   ? qsTr("%1 isn't drawn: neither recording has a pull (full throttle for a second while it accelerates)")
-                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no pull (full throttle for a second while it accelerates)")
-                   : qsTr("%1 isn't drawn: it has no pull (full throttle for a second while it accelerates)"))
-                  .arg(compareTitle)
-                : here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has %2").arg(compareTitle).arg(what)
-                : here < 0 ? qsTr("%1 isn't drawn: this recording has no %2").arg(compareTitle).arg(what)
-                : qsTr("%1 isn't drawn: it has no %2").arg(compareTitle).arg(what)
-            return
-        }
-        compareOffsetMs = alignOn === "utc" ? there - here : here - there
-        compareAligned = true
-        compareStatus = alignOn === "start" ? qsTr("Dashed: %1, aligned on %2").arg(compareTitle).arg(what)
-            : alignOn === "utc" ? qsTr("Dashed: %1, aligned on %2, %3 apart").arg(compareTitle).arg(what)
-                                    .arg(formatPart.timeText(Math.abs(compareOffsetMs), true))
-            : qsTr("Dashed: %1, aligned on %2, at %3 here and %4 there").arg(compareTitle).arg(what)
-                  .arg(formatPart.timeText(here, true)).arg(formatPart.timeText(there, true))
-    }
-
     // RecordingView.findings and markers copied once at each change, with
     // the fields the chart's paint reads: the bridge map rule
     property var chartFindings: recording.findings.map(f => ({ kind: f.kind, atMs: f.atMs,
@@ -1067,7 +801,7 @@ Page {
             root.pullsHereFailed = !ok
             root.pullsHere = found.filter(s => s.kind === "pull")
             if (root.comparing)
-                root.align()
+                comparePart.align()
         }
         onStateChanged: {
             seriesPart.forgetDifference()
@@ -1108,7 +842,7 @@ Page {
             root.framesFilterOpen = false
             framesFilterPanel.clear()
             cursorsPart.showAll()
-            root.askStretches()
+            comparePart.askStretches()
         }
         onSignalListChanged: {
             root.comparePairs = ComparePairs.made(recording, compare)
@@ -1120,7 +854,7 @@ Page {
             if (root.hasCursorB)
                 cursorsPart.setCursorB(root.cursorBMs)
             if (recording.state === RecordingView.Open && root.stretchUnits !== Bridge.unitSystem)
-                root.reaskStretches()
+                comparePart.reaskStretches()
             chart.requestPaint()
         }
     }
@@ -1137,7 +871,7 @@ Page {
             root.alignPullThere = 0
             root.pullsThereFailed = !ok
             root.pullsThere = found
-            root.align()
+            comparePart.align()
         }
         onStateChanged: {
             seriesPart.forgetDifference()
@@ -1153,7 +887,7 @@ Page {
                 root.compareRowsPerSecond = rows / Math.max(1, compare.durationMs / 1000)
             }
             if (compare.state !== RecordingView.Opening)
-                root.align()
+                comparePart.align()
         }
         onSignalListChanged: {
             root.comparePairs = ComparePairs.made(recording, compare)
@@ -1495,7 +1229,7 @@ Page {
             problem: root.rulesProblem
             bandsShown: root.bandsShown
             onBandsToggled: root.bandsShown = !root.bandsShown
-            onApplyRequested: rules => root.applyStretchRules(rules)
+            onApplyRequested: rules => comparePart.applyStretchRules(rules)
             onCloseRequested: root.stretchesOpen = false
         }
         // The recording's conditions, each row centering the view on its
@@ -1531,15 +1265,15 @@ Page {
             Layout.fillWidth: true
             status: root.jumpStatus
             statusSpoken: root.jumpStatusSpoken
-            canPreviousPull: root.previousStretch("pull") >= 0
-            canNextPull: root.nextStretch("pull") >= 0
-            canPreviousCruise: root.previousStretch("cruise") >= 0
-            canNextCruise: root.nextStretch("cruise") >= 0
+            canPreviousPull: comparePart.previousStretch("pull") >= 0
+            canNextPull: comparePart.nextStretch("pull") >= 0
+            canPreviousCruise: comparePart.previousStretch("cruise") >= 0
+            canNextCruise: comparePart.nextStretch("cruise") >= 0
             bandsShown: root.bandsShown
             stretchesOpen: root.stretchesOpen
             conditionsShown: root.conditionList.length > 0 || recording.info.conditionEventsLost > 0
             conditionsOpen: root.conditionsOpen
-            onJumpRequested: (kind, direction) => root.jump(kind, direction)
+            onJumpRequested: (kind, direction) => comparePart.jump(kind, direction)
             onBandsToggled: root.bandsShown = !root.bandsShown
             onStretchesToggled: {
                 root.stretchesOpen = !root.stretchesOpen

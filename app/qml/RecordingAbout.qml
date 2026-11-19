@@ -137,7 +137,7 @@ ColumnLayout {
             Accessible.name: qsTr("Compare with another recording")
             onActivated: index => {
                 if (index > 0)
-                    root.host.compareWith(others[index - 1])
+                    root.host.comparePart.compareWith(others[index - 1])
                 currentIndex = 0
             }
         }
@@ -146,7 +146,7 @@ ColumnLayout {
             visible: root.host.comparing
             text: qsTr("Stop")
             Accessible.name: qsTr("Stop comparing")
-            onClicked: root.host.stopComparing()
+            onClicked: root.host.comparePart.stopComparing()
         }
     }
     Flow {
@@ -170,7 +170,7 @@ ColumnLayout {
                     { text: qsTr("Align a fall"), value: "fall" },
                     { text: qsTr("Align engine starts"), value: "engine" },
                     { text: qsTr("Align a pull"), value: "pull" }]
-            onActivated: root.host.setAlignOn(currentValue)
+            onActivated: root.host.comparePart.setAlignOn(currentValue)
         }
         ComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
@@ -180,7 +180,7 @@ ColumnLayout {
             visible: root.host.alignOn === "pull"
             width: 220
             enabled: count > 0
-            model: root.host.pullRows(root.host.pullsHere, true)
+            model: root.host.comparePart.pullRows(root.host.pullsHere, true)
             currentIndex: root.host.alignPullHere
             Accessible.name: qsTr("This recording's pull to align on")
             // A pick ends the binding: put it back, so the box
@@ -198,7 +198,7 @@ ColumnLayout {
             visible: root.host.alignOn === "pull"
             width: 220
             enabled: count > 0
-            model: root.host.pullRows(root.host.pullsThere, false)
+            model: root.host.comparePart.pullRows(root.host.pullsThere, false)
             currentIndex: root.host.alignPullThere
             Accessible.name: qsTr("The compared recording's pull to align on")
             onActivated: index => {
@@ -213,7 +213,7 @@ ColumnLayout {
             objectName: "alignMarker"
             visible: root.host.alignOn === "marker"
             width: 150
-            model: root.host.recording.state === RecordingView.Open ? root.host.markerLabels() : []
+            model: root.host.recording.state === RecordingView.Open ? root.host.comparePart.markerLabels() : []
             onActivated: root.host.alignLabel = currentText
         }
         ComboBox {
@@ -226,7 +226,7 @@ ColumnLayout {
             model: root.host.recording.state === RecordingView.Open
                    ? ComparePairs.numbers(root.host.recording.signalList) : []
             textRole: "name"
-            onActivated: index => root.host.chooseAlignSignal(model[index])
+            onActivated: index => root.host.comparePart.chooseAlignSignal(model[index])
         }
         ThemedTextField {
             objectName: "alignLevel"
@@ -234,7 +234,7 @@ ColumnLayout {
             width: 100
             placeholderText: qsTr("Level")
             inputMethodHints: Qt.ImhFormattedNumbersOnly
-            onEditingFinished: root.host.alignLevel = root.host.numberOf(text)
+            onEditingFinished: root.host.alignLevel = root.host.comparePart.numberOf(text)
         }
         ThemedTextField {
             objectName: "alignHysteresis"
@@ -243,7 +243,7 @@ ColumnLayout {
             placeholderText: qsTr("Hysteresis")
             inputMethodHints: Qt.ImhFormattedNumbersOnly
             onEditingFinished: {
-                const v = root.host.numberOf(text)
+                const v = root.host.comparePart.numberOf(text)
                 root.host.alignHysteresis = v >= 0 ? v : 0
             }
         }

@@ -133,7 +133,7 @@ Item {
     // The compared recording's values at the cursor the rows read: the first,
     // or the earlier of two
     function refreshCompareReadout() {
-        part.host.compareReadout = part.host.compareValuesAt(part.host.hasSpan ? part.host.spanFromMs : part.host.cursorMs)
+        part.host.compareReadout = part.host.comparePart.compareValuesAt(part.host.hasSpan ? part.host.spanFromMs : part.host.cursorMs)
     }
     function clearCursorB() {
         part.host.cursorBMs = NaN

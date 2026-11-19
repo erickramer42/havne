@@ -106,7 +106,7 @@ Rectangle {
             }
             if (!root.host.bandsShown || root.host.stretchList === null)
                 return
-            const chosen = root.host.jumpIndex >= 0 ? root.host.stretchesOf(root.host.jumpKind)[root.host.jumpIndex]
+            const chosen = root.host.jumpIndex >= 0 ? root.host.comparePart.stretchesOf(root.host.jumpKind)[root.host.jumpIndex]
                                                : undefined
             for (const s of root.host.stretchList) {
                 const x0 = Math.max(l.left, xOf(s.fromMs))

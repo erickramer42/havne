@@ -127,8 +127,8 @@ Item {
         if (part.host.baselineRow === null)
             return
         part.host.alignChoice.currentIndex = part.host.alignChoice.indexOfValue("engine")
-        part.host.setAlignOn("engine")
-        part.host.compareWith(part.host.baselineRow)
+        part.host.comparePart.setAlignOn("engine")
+        part.host.comparePart.compareWith(part.host.baselineRow)
     }
 
     function open(row) {
@@ -161,7 +161,7 @@ Item {
         part.host.viewFrames.clear()
         part.host.detailView = "values"
         part.host.decodeReopen = false
-        part.host.stopComparing()
+        part.host.comparePart.stopComparing()
         part.host.alignChoice.currentIndex = 0
         part.host.alignOn = "start"
         part.host.alignLabel = ""
