@@ -14,8 +14,9 @@
 //
 // The engine reads no clock: the loop hands it the simulated time, so
 // nothing in core changes. The models mirror their workers' calls (the
-// J2534 worker's pass, SocketCAN's one request awaiting its echo); each
-// constant is the adapter's, calibrated against the car.
+// J2534 worker's pass, SocketCAN's one request awaiting its echo, the
+// ELM327 worker's turn and its one command to the prompt); each constant
+// is the adapter's, calibrated against the car.
 
 #ifndef ECUIO_TESTS_PACING_BENCH_H
 #define ECUIO_TESTS_PACING_BENCH_H
@@ -23,8 +24,10 @@
 #include "pacing_timing.h"
 #include "summary_lines.h"
 
+#include "elm327_protocol.h"
 #include "request_engine.h"
 #include "request_setup.h"
+#include "request_turns.h"
 #include "session.h"
 
 #include "ecuio/core.h"
@@ -39,7 +42,7 @@
 
 namespace pacing {
 
-enum class adapter { j2534, socketcan };
+enum class adapter { j2534, socketcan, elm327 };
 
 // An adapter model's constants (the defaults are the 2026-11-09
 // baseline's and the 2026-11-03 tap's, uncalibrated)
@@ -49,14 +52,48 @@ struct adapter_model {
     int64_t deliver_us = 500; /* J2534: the last frame to the engine */
     int64_t fc_turn_us = 170; /* the adapter's Flow Control after a FF */
     int64_t echo_us = 100;    /* SocketCAN: the request's echo */
+    /* ELM327: the link's one way (half a Bluetooth or USB round trip), a
+     * character on the line, a command's CR to its frame on the bus, the
+     * adaptive wait after a reply's last frame with no count digit, and
+     * AT ST19's wait for a first frame */
+    int64_t link_us = 7000;
+    int64_t char_us = 50;
+    int64_t command_us = 500;
+    int64_t wait_us = 20000;
+    int64_t st_us = 100000;
+    /* The VX in ELM mode: a multi-frame reply's prompt this long after its
+     * last frame, the count digit or not (ADR-0056's appendix of
+     * 2026-11-08); 0 for an adapter that keeps the digit */
+    int64_t late_prompt_us = 0;
 };
 
-// One run: the profile the session and the simulated car share, the
-// session's request parameters (as the URI's keys set them), the
-// adapter, each module's timing, the picks (none: the whole set), the
-// Service 01 PIDs the bitmaps list (none: the simulated car's own)
+// The MX+ over Bluetooth and the VX in ELM mode over USB at 115,200 baud
+// (10 bits a character), uncalibrated
+inline adapter_model elm327_bluetooth()
+{
+    adapter_model m;
+    m.kind = adapter::elm327;
+    return m;
+}
+inline adapter_model vx_elm_mode()
+{
+    adapter_model m;
+    m.kind = adapter::elm327;
+    m.link_us = 500;
+    m.char_us = 87;
+    m.late_prompt_us = 100000;
+    return m;
+}
+
+// One run: the profile the session and the simulated car share (with any
+// keys of the session's own: "uds-generic&did=..."), the simulated car's
+// keys in its place when set ("modules=2"), the session's request
+// parameters (as the URI's keys set them), the adapter, each module's
+// timing, the picks (none: the whole set), the Service 01 PIDs the
+// bitmaps list (none: the simulated car's own)
 struct bench_config {
     std::string profile = "obd2";
+    std::string sim_keys;
     request_params params;
     adapter_model model;
     sim_timing timing;
@@ -71,6 +108,8 @@ struct bench_result {
     cli::SummaryTally tally{nullptr};
     std::vector<int64_t> sent_us;
     uint64_t timeouts = 0;
+    uint64_t cuts = 0;    /* ELM327: replies the prompt ended early */
+    uint64_t headers = 0; /* ELM327: AT SH switches */
 
     // Requests a second in the tally's window
     double requests_per_s() const
@@ -144,7 +183,7 @@ public:
     bench_result run();
 
 private:
-    enum kind { look, request, reply_frame, tester_fc, echo, deliver };
+    enum kind { look, request, reply_frame, tester_fc, echo, deliver, prompt };
     struct event {
         int64_t at;
         uint64_t seq;
@@ -163,6 +202,23 @@ private:
         uint32_t next = 0;      /* the next frame to send */
         int64_t last_start = 0; /* the last Consecutive Frame's start */
         int32_t row = 0;        /* the request it answers (SocketCAN) */
+        int64_t line_at = 0;    /* ELM327: its last line at the host */
+        bool cut = false;       /* ELM327: the prompt came before its end */
+    };
+    // ELM327: the one command out, from its write to its prompt
+    struct command {
+        bool out = false;
+        uint32_t chan = 0;
+        int32_t row = 0;
+        uint8_t count = 0;  /* the response-count digit, 0 for none */
+        uint32_t lines = 0; /* the frame lines it has read */
+        bool pack = false;
+        bool did_ask = false; /* a one-DID 0x22 request */
+        uint16_t did = 0;
+        uint8_t pid = 0;
+        bool prompted = false;
+        bool cut = false;         /* a reply still under way at the prompt */
+        uint32_t frames_left = 0; /* its Consecutive Frames still to come */
     };
 
     void at(int64_t t, kind what, uint32_t slot = 0)
@@ -189,6 +245,11 @@ private:
 
     void look_j2534(int64_t now);
     void look_socketcan(int64_t now);
+    void look_elm327(int64_t now);
+    void ask_elm327(uint32_t c, int32_t r, int64_t now);
+    void line_elm327(uint32_t slot, int64_t end);
+    void prompt_at(int64_t from_adapter, uint32_t chars);
+    void on_prompt(const event& ev);
     void send(uint32_t c, int32_t r, int64_t now);
     void on_request(const event& ev);
     void on_reply_frame(const event& ev);
@@ -209,6 +270,17 @@ private:
     int64_t m_bus_free = 0;
     bool m_echo_pending = false;
     uint32_t m_next_chan = 0;
+    /* ELM327: the worker's turn, its one-frame PIDs and long DIDs, the
+     * header set, the line toward the host, each channel's cut hold */
+    ecuio_engine_turns m_turns;
+    elm327_one_frame_pids m_one_frame;
+    std::unique_ptr<elm327_long_dids> m_long_dids =
+        std::make_unique<elm327_long_dids>();
+    uint32_t m_header_tx = 0;
+    bool m_header_set = false;
+    int64_t m_line_free = 0;
+    int64_t m_hold_until[ECUIO_MAX_CHANNELS] = {};
+    command m_cmd;
 };
 
 inline bool bench::open(std::string* why)
@@ -245,10 +317,12 @@ inline bool bench::open(std::string* why)
     }
     ecuio_focus_seen seen;
     ecuio_take_focus(m_session, m_engine.get(), seen);
-    const std::string sim_uri =
-        m_cfg.profile == "obd2"
-            ? std::string("mock://pacing?values=canned")
-            : "mock://pacing?values=canned&profile=" + m_cfg.profile;
+    std::string sim_uri = "mock://pacing?values=canned";
+    if (!m_cfg.sim_keys.empty()) {
+        sim_uri += "&" + m_cfg.sim_keys;
+    } else if (m_cfg.profile != "obd2") {
+        sim_uri += "&profile=" + m_cfg.profile;
+    }
     if (ecuio_sim_create_unbound(sim_uri.c_str(), 0, &m_sim) != ECUIO_OK) {
         *why = std::string("sim: ") + ecuio_last_error_detail();
         return false;
@@ -258,6 +332,7 @@ inline bool bench::open(std::string* why)
             sim_timing_rng(m_cfg.timing.seed, m_session->info.rx_ids[c]));
     }
     m_result.tally = cli::SummaryTally(set, m_cfg.picks);
+    elm327_one_frame_pids_for(set, &m_one_frame);
     return true;
 }
 
@@ -273,9 +348,17 @@ inline bench_result bench::run()
         case look:
             if (ev.at == m_look) {
                 m_look = INT64_MAX;
-                m_cfg.model.kind == adapter::j2534 ? look_j2534(ev.at)
-                                                   : look_socketcan(ev.at);
+                if (m_cfg.model.kind == adapter::j2534) {
+                    look_j2534(ev.at);
+                } else if (m_cfg.model.kind == adapter::socketcan) {
+                    look_socketcan(ev.at);
+                } else {
+                    look_elm327(ev.at);
+                }
             }
+            break;
+        case prompt:
+            on_prompt(ev);
             break;
         case request:
         case tester_fc:
@@ -392,7 +475,10 @@ inline void bench::on_request(const event& ev)
     if (ecuio_sim_ask(m_sim, req.can_id, req.data.data(),
                       static_cast<uint32_t>(req.data.size()), end, replies,
                       ECUIO_SIM_MAX_REPLIES, &n) != ECUIO_OK) {
-        return;
+        n = 0;
+    }
+    if (n == 0 && m_cfg.model.kind == adapter::elm327) {
+        prompt_at(end + m_cfg.model.st_us, 10); /* "NO DATA", CR CR, '>' */
     }
     for (uint32_t i = 0; i < n && i < ECUIO_SIM_MAX_REPLIES; ++i) {
         flight f;
@@ -423,15 +509,19 @@ inline void bench::on_reply_frame(const event& ev)
     }
     flight& f = m_flights[ev.slot];
     const uint32_t k = f.next++;
-    if (f.frames == 1) {
-        at(end + m_cfg.model.deliver_us, deliver, ev.slot);
-    } else if (k == 0) {
-        at(end + m_cfg.model.fc_turn_us, tester_fc, ev.slot);
-    } else if (k + 1 < f.frames) {
+    const bool elm = m_cfg.model.kind == adapter::elm327;
+    if (elm) {
+        line_elm327(ev.slot, end);
+    }
+    if (k > 0 && k + 1 < f.frames) {
         const int64_t start = end - kFrameUs;
         at(std::max(start + m_cfg.timing.cf_us, end), reply_frame, ev.slot);
-    } else {
+    } else if (k == 0 && f.frames > 1) {
+        at(end + m_cfg.model.fc_turn_us, tester_fc, ev.slot);
+    } else if (!elm) {
         at(end + m_cfg.model.deliver_us, deliver, ev.slot);
+    } else if (!f.cut) {
+        at(f.line_at, deliver, ev.slot); /* read as its last line arrives */
     }
 }
 
@@ -465,6 +555,167 @@ inline void bench::on_deliver(const event& ev)
         batch.count = count;
         batch.values = m_session->decoder.values.data();
         m_result.tally.on_batch(batch);
+    }
+    if (m_cfg.model.kind != adapter::elm327) {
+        look_at(ev.at); /* an ELM327 asks again at its prompt */
+    }
+}
+
+// The ELM327 worker's pass: the waits that ran out, then the turn's
+// request (request_turns.h) with the cut channels held; with nothing due,
+// a wait to the floor or the engine's next event in whole milliseconds,
+// at most ELM327_WAIT_SLICE_MS, or the idle read's 100 ms
+inline void bench::look_elm327(int64_t now)
+{
+    ecuio_request_engine* e = m_engine.get();
+    if (m_cmd.out) {
+        return;
+    }
+    uint32_t held = 0;
+    int64_t held_left = INT64_MAX;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (ecuio_engine_expire(e, c, now)) {
+            ++m_result.timeouts;
+        }
+        if (m_hold_until[c] > now) {
+            held |= 1u << c;
+            held_left = std::min(held_left, m_hold_until[c] - now);
+        }
+    }
+    uint32_t c = 0;
+    int64_t floor_us = 0;
+    const int32_t r =
+        ecuio_engine_take_turn(e, m_turns, held, now, &c, &floor_us);
+    if (r != ECUIO_ENGINE_NONE) {
+        ask_elm327(c, r, now);
+        return;
+    }
+    int64_t next_us =
+        floor_us > 0 ? floor_us : ecuio_engine_next_event_us(e, now);
+    if (next_us == 0 && held_left != INT64_MAX) {
+        next_us = held_left;
+    }
+    if (next_us == INT64_MAX) {
+        look_at(now + 100000);
+        return;
+    }
+    const int64_t ms = (next_us + 999) / 1000;
+    look_at(now + std::min<int64_t>(std::max<int64_t>(ms, 1), 10) * 1000);
+}
+
+// ask() in elm327_worker.cpp: AT SH when another channel's header is set,
+// then the request with its response-count digit, sent as it's written
+inline void bench::ask_elm327(uint32_t c, int32_t r, int64_t now)
+{
+    ecuio_request_engine* e = m_engine.get();
+    const adapter_model& m = m_cfg.model;
+    const uint32_t tx = m_session->info.tx_ids[c];
+    if (!m_header_set || m_header_tx != tx) {
+        char cmds[2][24];
+        const size_t n = elm327_format_header(tx, tx > 0x7FFu, cmds);
+        for (size_t i = 0; i < n; ++i) {
+            /* the command, then "OK", CR CR and the prompt */
+            const auto chars = static_cast<int64_t>(std::strlen(cmds[i]) + 5);
+            now += 2 * m.link_us + chars * m.char_us + m.command_us;
+        }
+        m_header_set = true;
+        m_header_tx = tx;
+        ++m_result.headers;
+    }
+    const ecuio_request& q = ecuio_engine_request_of(e, c, r);
+    const bool talk = r == ECUIO_ENGINE_ONCE && e->chans[c].talk.out;
+    uint32_t len = 0;
+    const uint8_t* pdu =
+        ecuio_engine_pdu_of(e->chans[c].talk, talk, q.bytes, q.len, &len);
+    command k;
+    k.out = true;
+    k.chan = c;
+    k.row = r;
+    k.pack = r == ECUIO_ENGINE_PACK;
+    k.count = k.pack ? elm327_pack_count(q.reply_len, tx)
+              : talk ? uint8_t{0}
+                     : elm327_response_count(q.bytes, q.len, tx, m_one_frame,
+                                             *m_long_dids);
+    k.did_ask = !k.pack && !talk && q.len == 3 && q.bytes[0] == 0x22;
+    k.did = static_cast<uint16_t>((q.bytes[1] << 8) | q.bytes[2]);
+    k.pid = q.bytes[1];
+    char cmd[40];
+    const size_t chars =
+        elm327_format_request(pdu, len, k.count, cmd, sizeof cmd);
+    ecuio_engine_sent(e, c, r, true, now);
+    m_cmd = k;
+    send(c, r,
+         now + static_cast<int64_t>(chars) * m.char_us + m.link_us +
+             m.command_us);
+}
+
+// A reply frame's line toward the host after the frame's end (the ID and
+// 8 bytes in hex with ATH1 ATS0 ATD0, then CR), queued behind the line's
+// earlier characters; the prompt after the count digit's last line, else
+// after the adaptive wait (the VX in ELM mode: its late prompt)
+inline void bench::line_elm327(uint32_t slot, int64_t end)
+{
+    flight& f = m_flights[slot];
+    if (f.cut || !m_cmd.out || m_cmd.prompted) {
+        f.cut = true; /* after the prompt the adapter reads no more of it */
+        return;
+    }
+    const adapter_model& m = m_cfg.model;
+    const int64_t chars = (f.can_id > 0x7FFu ? 8 : 3) + 16 + 1;
+    m_line_free = std::max(end, m_line_free) + chars * m.char_us;
+    f.line_at = m_line_free + m.link_us;
+    ++m_cmd.lines;
+    const bool last = f.next == f.frames;
+    if (f.frames > 1 && m.late_prompt_us > 0) {
+        if (last) {
+            prompt_at(end + m.late_prompt_us, 2);
+        }
+    } else if (m_cmd.count > 0 && m_cmd.lines == m_cmd.count) {
+        if (!last) {
+            f.cut = true;
+            m_cmd.cut = true;
+            m_cmd.frames_left = f.frames - f.next;
+            ++m_result.cuts;
+        }
+        prompt_at(m_line_free, 2);
+    } else if (last) {
+        prompt_at(end + m.wait_us, 2);
+    }
+}
+
+// The command's prompt: chars more on the line from from_adapter, at the
+// host one link later
+inline void bench::prompt_at(int64_t from_adapter, uint32_t chars)
+{
+    if (!m_cmd.out || m_cmd.prompted) {
+        return;
+    }
+    m_cmd.prompted = true;
+    m_line_free = std::max(from_adapter, m_line_free) +
+                  static_cast<int64_t>(chars) * m_cfg.model.char_us;
+    at(m_line_free + m_cfg.model.link_us, prompt);
+}
+
+// ask()'s end: a cut reply holds its channel while the ECU sends the
+// rest; a one-DID request whose digit cut it is taken back and its DID
+// asked with none from then on, a Service 01 PID's leaves the digit; then
+// the next pass. The worker's retry of a DID after NO DATA isn't modeled:
+// the simulated car answers it.
+inline void bench::on_prompt(const event& ev)
+{
+    const command q = m_cmd;
+    m_cmd = command{};
+    ecuio_request_engine* e = m_engine.get();
+    if (q.cut) {
+        const int64_t hold = int64_t{q.frames_left} * 10000 + 50000;
+        m_hold_until[q.chan] = ev.at + std::min<int64_t>(hold, 1000000);
+    }
+    if (q.cut && q.count > 0 && q.did_ask &&
+        e->chans[q.chan].outstanding == q.row) {
+        elm327_long_did_set(*m_long_dids, q.did);
+        ecuio_engine_sent(e, q.chan, q.row, false, ev.at);
+    } else if (q.cut && q.count > 0 && !q.pack && !q.did_ask) {
+        elm327_one_frame_set(m_one_frame, q.pid, false);
     }
     look_at(ev.at);
 }

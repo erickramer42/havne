@@ -42,9 +42,22 @@ uint16_t id_of(const char* name)
     return 0;
 }
 
+pacing::adapter_model vx_j2534()
+{
+    return pacing::adapter_model{};
+}
+
+pacing::adapter_model socketcan()
+{
+    pacing::adapter_model m;
+    m.kind = pacing::adapter::socketcan;
+    m.deliver_us = 0;
+    return m;
+}
+
 struct row {
     const char* label;
-    pacing::adapter kind;
+    pacing::adapter_model model;
     int64_t gap_ms; /* -1: the transport's */
     bool pack;
     std::vector<uint16_t> picks;
@@ -53,10 +66,7 @@ struct row {
 void print(const row& r, int64_t seconds)
 {
     pacing::bench_config cfg;
-    cfg.model.kind = r.kind;
-    if (r.kind == pacing::adapter::socketcan) {
-        cfg.model.deliver_us = 0;
-    }
+    cfg.model = r.model;
     cfg.params.gap_us = r.gap_ms < 0 ? -1 : r.gap_ms * 1000;
     cfg.params.pack = r.pack;
     cfg.timing = car_idle();
@@ -84,13 +94,19 @@ int main(int argc, char** argv)
     const int64_t seconds = argc > 1 ? std::atoll(argv[1]) : 70;
     const std::vector<uint16_t> rpm = {id_of("RPM")};
     const std::vector<row> rows = {
-        {"VX J2534, obd2 whole", pacing::adapter::j2534, -1, true, {}},
-        {"VX J2534, obd2 whole, pack=0", pacing::adapter::j2534, -1, false, {}},
-        {"VX J2534, obd2 whole, gap=0", pacing::adapter::j2534, 0, true, {}},
-        {"VX J2534, obd2 whole, gap=20", pacing::adapter::j2534, 20, true, {}},
-        {"VX J2534, RPM, pack=0", pacing::adapter::j2534, -1, false, rpm},
-        {"SocketCAN, obd2 whole", pacing::adapter::socketcan, -1, true, {}},
-        {"SocketCAN, obd2, gap=0", pacing::adapter::socketcan, 0, true, {}},
+        {"VX J2534, obd2 whole", vx_j2534(), -1, true, {}},
+        {"VX J2534, obd2 whole, pack=0", vx_j2534(), -1, false, {}},
+        {"VX J2534, obd2 whole, gap=0", vx_j2534(), 0, true, {}},
+        {"VX J2534, obd2 whole, gap=20", vx_j2534(), 20, true, {}},
+        {"VX J2534, RPM, pack=0", vx_j2534(), -1, false, rpm},
+        {"SocketCAN, obd2 whole", socketcan(), -1, true, {}},
+        {"SocketCAN, obd2, gap=0", socketcan(), 0, true, {}},
+        {"MX+ ELM327, obd2 whole", pacing::elm327_bluetooth(), -1, true, {}},
+        {"MX+ ELM327, obd2, pack=0", pacing::elm327_bluetooth(), -1, false, {}},
+        {"MX+ ELM327, RPM, pack=0", pacing::elm327_bluetooth(), -1, false, rpm},
+        {"VX ELM, obd2 whole", pacing::vx_elm_mode(), -1, true, {}},
+        {"VX ELM, obd2 whole, pack=0", pacing::vx_elm_mode(), -1, false, {}},
+        {"VX ELM, RPM, pack=0", pacing::vx_elm_mode(), -1, false, rpm},
     };
     std::printf("%-30s %8s %8s %8s %4s %9s %9s %6s\n", "run", "req/s",
                 "values/s", "sweeps/s", "sigs", "P50 ms", "worst ms", "t/out");

@@ -192,6 +192,134 @@ TEST(PacingTest, TheSupportSetLimitsWhatTheWalkKeeps)
               (std::vector<uint8_t>{0x41, 0x00, 0x80, 0x00, 0x00, 0x01}));
 }
 
+pacing::bench_config one_pid_elm(const pacing::adapter_model& m)
+{
+    pacing::bench_config cfg = one_pid(pacing::adapter::elm327);
+    cfg.model = m;
+    return cfg;
+}
+
+/* An ELM327 asks one command at a time and the engine's 20 ms floor
+ * counts from the command's write: over USB the exchange (about 8 ms)
+ * is under the floor, so ?gap=0 more than doubles the pace; over
+ * Bluetooth the link's round trip makes the exchange longer than the
+ * floor, so ?gap=0 gains little (the line sets the MX+'s pace) */
+TEST(PacingTest, AnElm327RunsAtTheFloorOrItsExchange)
+{
+    pacing::bench_config usb = one_pid_elm(pacing::vx_elm_mode());
+    const pacing::bench_result floor = run(usb);
+    EXPECT_GT(floor.requests_per_s(), 45.0);
+    EXPECT_LT(floor.requests_per_s(), 50.5);
+    usb.params.gap_us = 0;
+    const pacing::bench_result free = run(usb);
+    EXPECT_GT(free.requests_per_s(), 2.0 * floor.requests_per_s());
+    EXPECT_EQ(free.timeouts, 0u);
+    /* A tenth of the character time (a raised UART) takes about 2 ms of
+     * the command and the reply's line off the exchange */
+    usb.model.char_us /= 10;
+    const pacing::bench_result fast_line = run(usb);
+    EXPECT_GT(fast_line.requests_per_s(), 1.2 * free.requests_per_s());
+
+    pacing::bench_config bt = one_pid_elm(pacing::elm327_bluetooth());
+    const pacing::bench_result line = run(bt);
+    bt.params.gap_us = 0;
+    const pacing::bench_result bt_free = run(bt);
+    EXPECT_LT(line.requests_per_s(), 50.5);
+    EXPECT_NEAR(bt_free.requests_per_s(), line.requests_per_s(),
+                0.1 * line.requests_per_s());
+    EXPECT_EQ(line.headers, 1u); /* one module: AT SH once */
+}
+
+/* With the count digit the prompt follows the reply's last line, so the
+ * adapter's adaptive wait never runs: a longer one moves nothing */
+TEST(PacingTest, TheCountDigitSparesTheAdaptiveWait)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.params.gap_us = 0;
+    cfg.params.identify = false; /* Service 09 and 03 go with no digit */
+    cfg.params.diagnose = false;
+    const pacing::bench_result a = run(cfg);
+    cfg.model.wait_us *= 4;
+    const pacing::bench_result b = run(cfg);
+    ASSERT_GT(a.sent_us.size(), 1000u);
+    EXPECT_EQ(a.sent_us, b.sent_us);
+
+    /* A pack's digit is its frames: the same through six short PIDs'
+     * two-frame pack (the whole set has PIDs asked alone with no digit) */
+    cfg.picks.clear();
+    for (const char* name :
+         {"RPM", "Vehicle Speed", "Throttle Position", "Engine Load",
+          "Intake Air Temp", "Intake Manifold Pressure"}) {
+        cfg.picks.push_back(id_of(name));
+    }
+    cfg.model.late_prompt_us = 0;
+    const pacing::bench_result c = run(cfg);
+    cfg.model.wait_us /= 4;
+    const pacing::bench_result d = run(cfg);
+    EXPECT_EQ(c.sent_us, d.sent_us);
+    EXPECT_EQ(c.cuts, 0u);
+}
+
+/* The VX in ELM mode gives a multi-frame reply's prompt one AT ST after
+ * it: obd2's six-PID packs (three frames) run near 8 a second, where an
+ * adapter keeping the digit runs them at over four times that */
+TEST(PacingTest, TheVxInElmModeHoldsAMultiFramePackToItsLatePrompt)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.picks.clear();
+    const pacing::bench_result late = run(cfg);
+    EXPECT_GT(late.requests_per_s(), 6.0);
+    EXPECT_LT(late.requests_per_s(), 10.0);
+    cfg.model.late_prompt_us = 0;
+    const pacing::bench_result kept = run(cfg);
+    EXPECT_GT(kept.requests_per_s(), 4.0 * late.requests_per_s());
+}
+
+/* The simulated car's second module over an ELM327 that keeps the count
+ * digit (the VX in ELM mode ignores it after a multi-frame reply, so
+ * never cuts one): D102's reply spans frames, so the digit cuts it once;
+ * the DID is taken back, asked again with no digit once the module is
+ * done sending, and answers from then on, beside D101 in one line. AT SH
+ * goes once: nothing is asked of the engine ECU */
+TEST(PacingTest, AnElm327TakesBackALongDid)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.model.late_prompt_us = 0;
+    cfg.profile = "uds-generic&did=7E9:D101:u8,7E9:D102:text";
+    cfg.sim_keys = "modules=2";
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    const pacing::bench_result r = run(cfg);
+    EXPECT_EQ(r.cuts, 1u);
+    EXPECT_EQ(r.headers, 1u);
+    EXPECT_EQ(r.timeouts, 0u);
+    const cli::SummaryFigures f = cli::summary_figures(r.tally, {});
+    EXPECT_EQ(f.signals, 2u);
+    /* D101 at the 20 ms floor; D102, with no digit, its three frames
+     * and the adaptive wait, about 37 ms: two requests in about 58 ms */
+    EXPECT_GT(r.requests_per_s(), 31.0);
+    EXPECT_LT(r.requests_per_s(), 38.0);
+}
+
+/* A module that never answers: each request ends in NO DATA after AT ST's
+ * 100 ms, and the engine's wait times it out */
+TEST(PacingTest, AnElm327WaitsOutASilentModuleToItsNoData)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.profile = "uds-generic&did=7E9:D101:u8"; /* no modules=2 */
+    cfg.sim_keys = "profile=obd2";               /* the engine ECU alone */
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    const pacing::bench_result r = run(cfg);
+    const double asked = static_cast<double>(r.sent_us.size()) / cfg.seconds;
+    EXPECT_GT(asked, 9.0) << asked; /* 100 ms and the command, about 103 */
+    EXPECT_LT(asked, 10.0) << asked;
+    EXPECT_GT(r.timeouts, 0u);
+    EXPECT_EQ(r.tally.window_values(), 0u);
+}
+
 /* The draw's fixed vectors, pinned on both sides (SimTimingTest pins the
  * same five in the simulated car): seed 1, the module on 0x7E8, P50
  * 3,460 us and P99 10,930 us */
