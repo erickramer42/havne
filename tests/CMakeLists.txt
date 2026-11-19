@@ -2520,12 +2520,13 @@ endif()
 # J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
 # session through the surrogate: in this tree the x64 one beside the
 # test, in the cross-arch run the Win32 tree's. test_j2534_talk.cpp's
-# cases (a request longer than a frame, through the test seam) run the
-# same way.
+# cases (a request longer than a frame, through the test seam) and
+# test_j2534_car.cpp's (18 modules on the fake) run the same way.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
         test_j2534_talk.cpp
+        test_j2534_car.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core

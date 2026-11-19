@@ -35,7 +35,7 @@ namespace fake_ecu {
  * ECUIO_FAKE_MODULE_DIDS on each write, the in-process fakes' tests with
  * set_module_dids() before a session starts (a reader may run on a
  * session's worker, so it isn't changed while one runs). */
-constexpr uint32_t kModuleRowsMax = 16;
+constexpr uint32_t kModuleRowsMax = 64;
 constexpr uint32_t kModuleDataMax = 16;
 
 struct ModuleRow {
