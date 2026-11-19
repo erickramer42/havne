@@ -118,6 +118,7 @@ Page {
     property alias importInterface: importPanel.importInterface
     property alias importLabel: importPanel.importLabel
     property alias mapDialog: mapDialog
+    property alias reportDialog: reportDialog
     property alias chart: chartFrame.chart
     property alias pan: chartFrame.pan
     property alias pinch: chartFrame.pinch
@@ -1078,93 +1079,7 @@ Page {
 
         // ---- The viewer: the chart and its signals first, then what
         // applies to the whole recording under "About this recording" ----
-        RowLayout {
-            objectName: "viewerTitleRow"
-            visible: root.viewing && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-            // On a phone a quiet back arrow at the left edge, where a back
-            // control is looked for
-            ThemedButton {
-                objectName: "backToList"
-                flat: Theme.compact
-                text: Theme.compact ? "←" : qsTr("All recordings")   // a left arrow
-                Accessible.name: qsTr("All recordings")
-                Layout.preferredWidth: Theme.compact ? Theme.touchTarget : -1
-                onClicked: openPart.backToList()
-            }
-            Label {
-                objectName: "openedTitle"
-                text: root.openedTitle
-                color: Theme.text
-                font.pixelSize: Theme.fontEmphasis
-                // The folder's date is at the end
-                elide: Text.ElideMiddle
-                Layout.fillWidth: true
-            }
-            // Replay and Save report...: here on the desktop, in About on a
-            // phone, side by side
-            RowLayout {
-                id: titleActions
-                visible: !Theme.compact
-                spacing: Theme.spacing
-                RowLayout {
-                    parent: Theme.compact ? aboutActions : titleActions
-                    visible: recording.state === RecordingView.Open
-                    Layout.fillWidth: Theme.compact
-                    spacing: Theme.spacing
-                    // The part in view replayed as a session in one tap, as
-                    // the list's Replay does; off while a session runs, as
-                    // the list's is
-                    ThemedButton {
-                        objectName: "replayView"
-                        visible: recording.hasFrames
-                        compact: Theme.compact
-                        Layout.fillWidth: Theme.compact
-                        Layout.preferredWidth: Theme.compact ? 1 : -1
-                        enabled: root.sessionIdle
-                        text: root.replayText
-                        Accessible.name: root.replayName(qsTr("Replay the part in view as a session"))
-                        onClicked: root.replayRequested(openPart.stretchUri())
-                    }
-                    ThemedButton {
-                        objectName: "saveReport"
-                        compact: Theme.compact
-                        Layout.fillWidth: Theme.compact
-                        Layout.preferredWidth: Theme.compact ? 1 : -1
-                        enabled: !recording.reporting
-                        text: qsTr("Save report…")
-                        onClicked: reportDialog.open()
-                    }
-                    // Selected while its controls are open above the chart
-                    ThemedButton {
-                        objectName: "compareButton"
-                        compact: Theme.compact
-                        Layout.fillWidth: Theme.compact
-                        Layout.preferredWidth: Theme.compact ? 1 : -1
-                        checkable: true
-                        checked: root.compareOpen
-                        text: qsTr("Compare…")
-                        onClicked: root.compareOpen = !root.compareOpen
-                    }
-                }
-            }
-            ThemedButton {
-                objectName: "exportButton"
-                visible: recording.state === RecordingView.Open
-                compact: Theme.compact
-                text: qsTr("Export…")
-                // Selected while its panel is open: Save as... is the primary there
-                checkable: true
-                checked: root.exportOpen
-                onClicked: {
-                    if (root.exportOpen)
-                        reportPart.closeExport()
-                    else
-                        reportPart.openExport()
-                }
-            }
-        }
+        RecordingViewerTitle { id: recordingViewerTitle; host: root }
 
         ColumnLayout {
             id: topNote
