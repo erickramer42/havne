@@ -301,16 +301,16 @@ TEST(SimAskTest, ARepliesTimingIsItsModules)
               0u);
 }
 
-// The engine ECU's draws are its own generator's: the same whether a
-// second module answers each functional request beside it or not, and
-// the fixed numbers' own
+// Each module draws from its own generator: the engine ECU's draws are
+// the same whether a second module answers beside it or not (the fixed
+// numbers), and the module's, seeded with its own reply ID, are others
 TEST(SimAskTest, AModulesDrawsAreItsOwn)
 {
     Profile alone("sim-timing-alone", {0x7E8});
     Profile beside("sim-timing-beside", {0x7E8, 0x7E9});
     Unbound a("mock://sim?profile=sim-timing-alone&delay=3460:10930");
     Unbound b("mock://sim?profile=sim-timing-beside&delay=3460:10930");
-    std::vector<int64_t> engine_a, engine_b;
+    std::vector<int64_t> engine_a, engine_b, module_b;
     for (int i = 0; i < 5; ++i) {
         const auto ra = a.ask(0x7DF, {0x22, 0x10, 0x00});
         const auto rb = b.ask(0x7DF, {0x22, 0x10, 0x00});
@@ -318,13 +318,21 @@ TEST(SimAskTest, AModulesDrawsAreItsOwn)
         ASSERT_EQ(rb.size(), 2u) << "both modules answer each";
         engine_a.push_back(ra[0].delay_us);
         for (const ecuio_sim_reply_t& r : rb) {
-            if (r.reply_id == 0x7E8) {
-                engine_b.push_back(r.delay_us);
-            }
+            (r.reply_id == 0x7E8 ? engine_b : module_b).push_back(r.delay_us);
         }
     }
     EXPECT_EQ(engine_a, (std::vector<int64_t>{6352, 6622, 2326, 1854, 2248}));
     EXPECT_EQ(engine_a, engine_b);
+    /* The module's own: seeded with its reply ID, not the engine's */
+    EXPECT_EQ(module_b, (std::vector<int64_t>{7344, 1638, 2645, 4478, 2293}));
+}
+
+// seed= seeds every module's generator: another seed, other draws
+TEST(SimAskTest, ASeedChangesTheDraws)
+{
+    Unbound s("mock://sim?delay=3460:10930&seed=7");
+    EXPECT_EQ(s.engine_delays(5),
+              (std::vector<int64_t>{2689, 6248, 4034, 5173, 2489}));
 }
 
 // A fault never moves the draws: a silent reply draws as any other, and
