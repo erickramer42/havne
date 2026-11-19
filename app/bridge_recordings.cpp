@@ -88,6 +88,34 @@ bool readRecordedHeader(const QString& folder, cli::RecordedSignals* recorded)
 
 } // namespace
 
+void SessionBridge::logReplayMadeUnder(const QString& uri)
+{
+    std::string folder8;
+    if (!cli::replay_folder(uri.toStdString(), &folder8)) {
+        return;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    if (!readRecordedHeader(folder, &recorded)) {
+        return;
+    }
+    // A signals.csv is a header row and one row for each value
+    QFile values(folder + QStringLiteral("/signals.csv"));
+    const bool hasValues = values.open(QIODevice::ReadOnly) &&
+                           values.readLine().size() > 0 &&
+                           !values.readLine().trimmed().isEmpty();
+    const QString profile = QString::fromStdString(recorded.profile);
+    emit logMessage(
+        (profile.isEmpty()
+             ? QStringLiteral("Replay: the recording names no profile")
+             : QStringLiteral("Replay: recorded under profile %1")
+                   .arg(profile)) +
+        (hasValues ? QString()
+                   : QStringLiteral("; it holds no signal values, so rows "
+                                    "stay empty unless the frames decode "
+                                    "under the profile played")));
+}
+
 QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 {
     const std::string uri8 = uri.toStdString();
