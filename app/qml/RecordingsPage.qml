@@ -85,7 +85,7 @@ Page {
     readonly property var slotOf: panesPart.slotOf
     property alias scroller: scroller
     property alias exportPanel: exportPanel
-    property alias compare: compare
+    property alias compare: recordingViews.compare
     property alias reportPart: reportPart
     readonly property var noValuesText: reportPart.noValuesText
     readonly property var openExport: reportPart.openExport
@@ -94,7 +94,7 @@ Page {
     property alias frameTestPart: frameTestPart
     readonly property var frameTestSignals: frameTestPart.frameTestSignals
     property alias spanStatsHome: spanStatsHome
-    property alias recording: recording
+    property alias recording: recordingViews.recording
     property alias spanRowDesktop: zoomBlock.spanRowDesktop
     property alias spanRowPhone: zoomBlock.spanRowPhone
     property alias spanStatsPinned: zoomBlock.spanStatsPinned
@@ -740,130 +740,7 @@ Page {
     property string reportNote: ""
     property bool reportFailed: false
 
-    RecordingView {
-        id: recording
-        objectName: "recordingView"
-        unitSystem: Bridge.unitSystem
-        onReportSaved: result => reportPart.reportSaved(result)
-        onColumnMeansReady: (request, means) => seriesPart.differenceAnswered(true, request, means)
-        onStatsReady: (request, stats) => {
-            if (request !== root.statsAsk)
-                return
-            const byIndex = {}
-            for (const s of stats)
-                byIndex[s.index] = s
-            root.spanStats = byIndex
-            chart.repaintMarks()
-        }
-        onStepReady: (request, atMs) => {
-            if (atMs >= 0)
-                cursorsPart.moveKeyed(atMs, root.stepsB)
-        }
-        onStretchesReady: (request, found, ok) => {
-            if (request !== root.stretchAsk)
-                return
-            root.stretchAsk = 0
-            root.stretchFailed = !ok
-            root.stretchList = found
-            root.jumpIndex = -1
-            root.alignPullHere = 0
-            root.pullsHereFailed = !ok
-            root.pullsHere = found.filter(s => s.kind === "pull")
-            if (root.comparing)
-                comparePart.align()
-        }
-        onStateChanged: {
-            seriesPart.forgetDifference()
-            root.reportNote = ""
-            root.reportFailed = false
-            root.pullsHere = null
-            root.pullsHereFailed = false
-            root.stretchAsk = 0
-            root.stretchList = null
-            root.stretchFailed = false
-            root.jumpIndex = -1
-            root.stretchesOpen = false
-            root.conditionsOpen = false
-            root.conditionPick = -1
-            root.alignPullHere = 0
-            if (recording.state !== RecordingView.Open)
-                return
-            const defaults = {}
-            for (const s of recording.signalList)
-                defaults[s.index] = s.plotted
-            root.slots = ({})
-            root.plotted = defaults
-            // A kept arrangement is used again: stamped, so the oldest goes first
-            viewerSettings.views = JSON.stringify(ChartLayout.viewsTouched(
-                root.viewsBook, panesPart.viewNameOf(recording.folder), Date.now()))
-            root.readout = ({})
-            let rows = 0
-            for (const s of recording.signalList)
-                rows += s.samples
-            root.rowsPerSecond = rows / (cursorsPart.durationMs() / 1000)
-            root.cursorMs = NaN
-            root.spanHintUp = false
-            cursorsPart.clearCursorB()
-            // A decode chosen in the pinned form's About reopens into About
-            root.detailView = root.decodeReopen && root.detailView === "about" ? "about" : "values"
-            root.decodeReopen = false
-            root.framesById = false
-            root.framesFilterOpen = false
-            framesFilterPanel.clear()
-            cursorsPart.showAll()
-            comparePart.askStretches()
-        }
-        onSignalListChanged: {
-            root.comparePairs = ComparePairs.made(recording, compare)
-            root.alignSignal = ComparePairs.alignId(recording.signalList, root.alignSignal, root.alignSignalName)
-            // An open, a close or new units: a range set before means nothing
-            root.paneRanges = ({})
-            if (root.hasCursor)
-                cursorsPart.setCursor(root.cursorMs)
-            if (root.hasCursorB)
-                cursorsPart.setCursorB(root.cursorBMs)
-            if (recording.state === RecordingView.Open && root.stretchUnits !== Bridge.unitSystem)
-                comparePart.reaskStretches()
-            chart.requestPaint()
-        }
-    }
-
-    RecordingView {
-        id: compare
-        objectName: "compareView"
-        unitSystem: Bridge.unitSystem
-        onColumnMeansReady: (request, means) => seriesPart.differenceAnswered(false, request, means)
-        onStretchesReady: (request, found, ok) => {
-            if (request !== root.pullsThereAsk)
-                return
-            root.pullsThereAsk = 0
-            root.alignPullThere = 0
-            root.pullsThereFailed = !ok
-            root.pullsThere = found
-            comparePart.align()
-        }
-        onStateChanged: {
-            seriesPart.forgetDifference()
-            root.pullsThere = null
-            root.pullsThereFailed = false
-            root.pullsThereAsk = 0
-            root.alignPullThere = 0
-            root.comparePairs = ComparePairs.made(recording, compare)
-            if (compare.state === RecordingView.Open) {
-                let rows = 0
-                for (const s of compare.signalList)
-                    rows += s.samples
-                root.compareRowsPerSecond = rows / Math.max(1, compare.durationMs / 1000)
-            }
-            if (compare.state !== RecordingView.Opening)
-                comparePart.align()
-        }
-        onSignalListChanged: {
-            root.comparePairs = ComparePairs.made(recording, compare)
-            if (root.hasCursor)
-                cursorsPart.setCursor(root.cursorMs)
-        }
-    }
+    RecordingViews { id: recordingViews; host: root }
 
     Connections {
         target: Bridge.recordingImport
