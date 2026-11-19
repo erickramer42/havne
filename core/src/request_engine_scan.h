@@ -63,6 +63,37 @@ inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
                 r == ecuio_engine_add_result::duplicate) ? 1 : 0;
 }
 
+/* Channel c's scan has asked every entry: the ones whose wait ran out go
+ * once more, since a reply lost on a busy bus or adapter isn't the
+ * module's silence. A channel that answered no entry at all is silent,
+ * and isn't asked again; an entry asked again stands as it settles. */
+inline void ecuio_engine_scan_retry(ecuio_request_engine* e, uint32_t c)
+{
+    bool answered = false;
+    uint32_t lost = 0;
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        const ecuio_scan_entry& s = e->scan[i];
+        if (s.channel != c) {
+            continue;
+        }
+        answered = answered || s.outcome == ECUIO_SCAN_FOUND ||
+                   s.outcome == ECUIO_SCAN_REFUSED;
+        lost += (s.outcome == ECUIO_SCAN_UNANSWERED && s.retried == 0) ? 1 : 0;
+    }
+    if (!answered || lost == 0) {
+        return;
+    }
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        ecuio_scan_entry& s = e->scan[i];
+        if (s.channel == c && s.outcome == ECUIO_SCAN_UNANSWERED &&
+            s.retried == 0) {
+            s.outcome = ECUIO_SCAN_UNASKED;
+            s.retried = 1;
+        }
+    }
+    e->chans[c].scan_pending += lost;
+}
+
 inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
                                      uint8_t outcome, uint8_t nrc)
 {
@@ -76,6 +107,9 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
     }
     if (ch.scan_pending > 0) {
         --ch.scan_pending;
+        if (ch.scan_pending == 0) {
+            ecuio_engine_scan_retry(e, c);
+        }
     }
     ++ch.generation;
 }
@@ -84,7 +118,8 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
  * answers it, however late: a long reply can take longer than the wait
  * (the test car's 263-byte DA9E through the VX), and the
  * adapter hands it over only whole. The DID is found and polled, so the
- * scan completes. Called only for a reply that answers nothing else. */
+ * scan completes; one waiting to be asked again needn't be. Called only
+ * for a reply that answers nothing else. */
 inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
                                    const uint8_t* data, uint16_t len)
 {
@@ -94,8 +129,12 @@ inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
     const uint16_t did = static_cast<uint16_t>((data[1] << 8) | data[2]);
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         ecuio_scan_entry& s = e->scan[i];
+        const bool waiting = s.outcome == ECUIO_SCAN_UNASKED && s.retried;
         if (s.channel == c && s.did == did &&
-            s.outcome == ECUIO_SCAN_UNANSWERED) {
+            (s.outcome == ECUIO_SCAN_UNANSWERED || waiting)) {
+            if (waiting && e->chans[c].scan_pending > 0) {
+                --e->chans[c].scan_pending;
+            }
             s.outcome = ECUIO_SCAN_FOUND;
             ecuio_engine_scan_poll(e, c, s);
             ++e->chans[c].generation;
@@ -113,6 +152,7 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
 {
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         ecuio_scan_entry& s = e->scan[i];
+        s.retried = 0; /* the link's return starts a round of its own */
         if (s.outcome == ECUIO_SCAN_UNANSWERED) {
             s.outcome = ECUIO_SCAN_UNASKED;
             ++e->chans[s.channel].scan_pending;

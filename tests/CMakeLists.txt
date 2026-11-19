@@ -127,7 +127,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp)
+    test_engine_talk.cpp test_request_turns.cpp test_scan_retry.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

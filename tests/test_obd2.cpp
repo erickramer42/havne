@@ -1770,7 +1770,8 @@ TEST(RequestEngineTest, ALateReplyStillAnswersItsScannedDid) {
 
     now += ECUIO_ENGINE_WAIT_US;
     EXPECT_TRUE(ecuio_engine_expire(&e, 0, now));
-    EXPECT_EQ(e.scan[1].outcome, ECUIO_SCAN_UNANSWERED);
+    EXPECT_EQ(e.scan[1].outcome, ECUIO_SCAN_UNASKED)
+        << "the round's last: asked once more, since 1E20 answered";
     EXPECT_EQ(e.chans[0].outstanding, ECUIO_ENGINE_NONE);
     EXPECT_EQ(answer_did(&e, 0, 0x1E21, now + 4 * kMs), ecuio_reply::none);
     EXPECT_EQ(e.scan[1].outcome, ECUIO_SCAN_FOUND);
