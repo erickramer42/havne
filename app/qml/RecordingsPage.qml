@@ -28,6 +28,14 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias scroller: scroller
+    property alias exportPanel: exportPanel
+    property alias compare: compare
+    property alias reportPart: reportPart
+    readonly property var noValuesText: reportPart.noValuesText
+    readonly property var openExport: reportPart.openExport
+    readonly property var closeExport: reportPart.closeExport
+    readonly property var saveReportTo: reportPart.saveReportTo
     property alias frameTestPart: frameTestPart
     readonly property var frameTestSignals: frameTestPart.frameTestSignals
     property alias spanStatsHome: spanStatsHome
@@ -726,6 +734,8 @@ Page {
 
     RecordingFrameTest { id: frameTestPart; host: root }
 
+    RecordingReport { id: reportPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         checkBaseline()
@@ -894,7 +904,7 @@ Page {
 
     function backToList() {
         importNote = ""
-        closeExport()
+        reportPart.closeExport()
         stretchesOpen = false
         recording.close()
         viewFrames.clear()
@@ -1899,7 +1909,7 @@ Page {
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
                      + "/health-report.txt"
-        onAccepted: root.saveReportTo(reportDialog.selectedFile,
+        onAccepted: reportPart.saveReportTo(reportDialog.selectedFile,
                                       reportDialog.selectedNameFilter.index)
         onFailed: words => { root.reportFailed = true; root.reportNote = qsTr("Report not saved: %1").arg(words) }
     }
@@ -1922,68 +1932,18 @@ Page {
     // chart then has nothing to draw and says so
     readonly property var plottedNoValues: {
         const plotted = recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true)
-        return plotted.length > 0 && plotted.every(s => !root.draws(s)) ? plotted.map(s => s.name) : []
+        return plotted.length > 0 && plotted.every(s => !reportPart.draws(s)) ? plotted.map(s => s.name) : []
     }
-    function draws(s) {
-        if (s.samples > 0)
-            return true
-        if (!compareAligned)
-            return false
-        const theirs = compare.signalList[ComparePairs.pairOf(root.comparePairs, s.index)]
-        return theirs !== undefined && !theirs.isText && theirs.samples > 0
-    }
-    function noValuesText(names) {
-        const list = names.length <= 2 ? names.join(qsTr(" and "))
-                   : names.slice(0, -1).join(", ") + qsTr(" and ") + names[names.length - 1]
-        return names.length === 1 ? qsTr("%1 has no values in this recording").arg(list)
-                                  : qsTr("%1 have no values in this recording").arg(list)
-    }
-    // The panel opens under the title row: the page goes to its top first
-    function openExport() {
-        exportOpen = true
-        exportPanel.begin()
-        scroller.contentY = 0
-    }
-    function closeExport() {
-        exportPanel.end()
-        exportOpen = false
-    }
-
     // The last Save report's outcome in words, "" before one on this
     // recording
     property string reportNote: ""
     property bool reportFailed: false
 
-    // The whole recording's health report to url, its format by the
-    // dialog's filter or the file's name (ADR-0054's appendix "the health
-    // report as built"), naming the picked vehicle's baseline; the view's
-    // zoom never narrows it. The result comes back in onReportSaved; false
-    // when none started
-    function saveReportTo(url, filterIndex) {
-        const started = recording.saveHealthReport(url, filterIndex, baselineFolder)
-        if (started) {
-            reportFailed = false
-            reportNote = qsTr("Saving the report…")
-        } else if (!recording.reporting) {
-            // Not a report already under way: the note says this one didn't start
-            reportFailed = true
-            reportNote = qsTr("Report not saved: the report couldn't start")
-        }
-        return started
-    }
-
-    function reportSaved(r) {
-        Bridge.logEvent(r.line)
-        reportFailed = !r.ok
-        reportNote = r.ok ? qsTr("Report saved: %1").arg(r.summary)
-                          : qsTr("Report not saved: %1").arg(r.words)
-    }
-
     RecordingView {
         id: recording
         objectName: "recordingView"
         unitSystem: Bridge.unitSystem
-        onReportSaved: result => root.reportSaved(result)
+        onReportSaved: result => reportPart.reportSaved(result)
         onColumnMeansReady: (request, means) => root.differenceAnswered(true, request, means)
         onStatsReady: (request, stats) => {
             if (request !== root.statsAsk)
@@ -2367,9 +2327,9 @@ Page {
                 checked: root.exportOpen
                 onClicked: {
                     if (root.exportOpen)
-                        root.closeExport()
+                        reportPart.closeExport()
                     else
-                        root.openExport()
+                        reportPart.openExport()
                 }
             }
         }
@@ -2411,7 +2371,7 @@ Page {
             Layout.fillWidth: true
             view: recording
             plottedNames: root.plottedNames
-            onCloseRequested: root.closeExport()
+            onCloseRequested: reportPart.closeExport()
         }
 
         // Compare's controls, over the chart: the recording to overlay, how

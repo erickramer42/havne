@@ -71,7 +71,7 @@ Rectangle {
         y: 4
         shownW: parent.width - 8 - root.stripWidth
         shownH: parent.height - 8 - root.stripHeight
-        emptyText: root.host.plottedNoValues.length > 0 ? root.host.noValuesText(root.host.plottedNoValues)
+        emptyText: root.host.plottedNoValues.length > 0 ? root.host.reportPart.noValuesText(root.host.plottedNoValues)
                                                    : qsTr("No signals plotted; tick a row to plot it")
         fetch: function(widthPx) { return root.host.series(widthPx) }
         layoutOpts: ({
