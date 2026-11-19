@@ -37,6 +37,28 @@ using conversation_test::Plugin;
 using conversation_test::sha_of;
 using wasm_builder::bytes;
 
+/* The ECUs of the plugin Made's defaults describe, read back */
+void expect_the_default_ecus(const ecuio_plugin_t* p)
+{
+    /* the ECUs in the group's order, each by its reply ID */
+    const ecuio_plugin_conversation_ecu_t tcm = ecu_of(p, 0);
+    EXPECT_EQ(tcm.struct_size, sizeof tcm);
+    EXPECT_STREQ(tcm.id, "tcm");
+    for (size_t k = 3; k < sizeof tcm.id; ++k) {
+        EXPECT_EQ(tcm.id[k], '\0') << k;
+    }
+    EXPECT_EQ(tcm.rx_id, 0x7E9u);
+    EXPECT_EQ(tcm.tx_id, 0x7E1u) << "the standard's request ID for 7E9";
+    EXPECT_EQ(tcm.flags, 0u);
+    for (const uint32_t r : tcm.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+    const ecuio_plugin_conversation_ecu_t pcm = ecu_of(p, 1);
+    EXPECT_STREQ(pcm.id, "pcm");
+    EXPECT_EQ(pcm.rx_id, 0x7E8u);
+    EXPECT_EQ(pcm.tx_id, 0x7E0u);
+}
+
 /* What the plugin Made's defaults describe holds, read back */
 void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
 {
@@ -61,23 +83,7 @@ void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
     EXPECT_EQ(c.reserved[0], 0u);
     EXPECT_EQ(c.reserved[1], 0u);
 
-    /* the ECUs in the group's order, each by its reply ID */
-    const ecuio_plugin_conversation_ecu_t tcm = ecu_of(p, 0);
-    EXPECT_EQ(tcm.struct_size, sizeof tcm);
-    EXPECT_STREQ(tcm.id, "tcm");
-    for (size_t k = 3; k < sizeof tcm.id; ++k) {
-        EXPECT_EQ(tcm.id[k], '\0') << k;
-    }
-    EXPECT_EQ(tcm.rx_id, 0x7E9u);
-    EXPECT_EQ(tcm.tx_id, 0x7E1u) << "the standard's request ID for 7E9";
-    EXPECT_EQ(tcm.flags, 0u);
-    for (const uint32_t r : tcm.reserved) {
-        EXPECT_EQ(r, 0u);
-    }
-    const ecuio_plugin_conversation_ecu_t pcm = ecu_of(p, 1);
-    EXPECT_STREQ(pcm.id, "pcm");
-    EXPECT_EQ(pcm.rx_id, 0x7E8u);
-    EXPECT_EQ(pcm.tx_id, 0x7E0u);
+    expect_the_default_ecus(p);
 
     const struct {
         uint8_t sid;
@@ -255,17 +261,23 @@ TEST(PluginConversationTest, Format2WithTheDataTierAloneIsAPluginAsBefore)
     EXPECT_EQ(info.variant_count, 1u);
 }
 
-TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
+/* A format 1 plugin of the data tier alone: what the getters refuse */
+Plugin load_data_only()
 {
-    const Made m;
-    Plugin p = load_packed(m.json());
-    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
     Made plain;
     plain.format = "1";
     plain.tiers = R"(["data"])";
     plain.has_group = false;
     plain.has_binary = false;
-    Plugin data_only = load_packed(plain.json());
+    return load_packed(plain.json());
+}
+
+TEST(PluginConversationTest, TheConversationAndEcuGettersRefuseWhatTheyCantFill)
+{
+    const Made m;
+    Plugin p = load_packed(m.json());
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    Plugin data_only = load_data_only();
     ASSERT_NE(data_only, nullptr) << ecuio_last_error_detail();
 
     ecuio_plugin_conversation_t c;
@@ -313,6 +325,15 @@ TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
     e.struct_size = sizeof e + 8; /* a later caller's larger struct */
     EXPECT_EQ(ecuio_plugin_conversation_ecu(p.get(), 0, &e), ECUIO_OK);
     EXPECT_EQ(e.struct_size, sizeof e);
+}
+
+TEST(PluginConversationTest, TheServiceAndLevelGettersRefuseWhatTheyCantFill)
+{
+    const Made m;
+    Plugin p = load_packed(m.json());
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    Plugin data_only = load_data_only();
+    ASSERT_NE(data_only, nullptr) << ecuio_last_error_detail();
 
     ecuio_plugin_service_t s;
     ecuio_plugin_service_t s_untouched;
@@ -389,6 +410,11 @@ TEST(PluginConversationTest, AFoldersModuleIsReadCountedAndJudged)
         Plugin p = load_folder(f);
         EXPECT_NE(p, nullptr) << ecuio_last_error_detail();
     }
+}
+
+TEST(PluginConversationTest, AFoldersModuleCountsTowardThePackage)
+{
+    const Made m;
     {
         /* the module's bytes count toward the package's 16 MiB: 16 data
          * files that with the manifest and the module come to it exactly,

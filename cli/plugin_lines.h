@@ -125,6 +125,55 @@ inline void conversation_ecu(Line& l, const ecuio_plugin_t* p, uint32_t index)
     l.ch('}');
 }
 
+// One of a conversation's services: {"sid", "sub"}
+inline void conversation_service(Line& l, const ecuio_plugin_t* p, uint32_t i)
+{
+    ecuio_plugin_service_t s{};
+    ecuio_plugin_service(p, i, &s);
+    if (i > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"sid\":");
+    l.hex_bytes(&s.sid, 1);
+    l.key("sub");
+    if (s.sub_count == 0) {
+        l.raw("null");
+    } else {
+        l.ch('[');
+        for (uint8_t k = 0; k < s.sub_count && k < sizeof s.subs; ++k) {
+            if (k > 0) {
+                l.ch(',');
+            }
+            l.hex_bytes(&s.subs[k], 1);
+        }
+        l.ch(']');
+    }
+    l.ch('}');
+}
+
+// One of a conversation's security levels
+inline void conversation_level(Line& l, const ecuio_plugin_t* p, uint32_t i)
+{
+    ecuio_plugin_security_level_t s{};
+    ecuio_plugin_security_level(p, i, &s);
+    if (i > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"ecu\":");
+    l.hex_id(s.rx_id);
+    l.key("level");
+    l.hex_bytes(&s.level, 1);
+    l.key("seed_bytes");
+    l.u64(s.seed_bytes);
+    l.key("key_bytes");
+    l.u64(s.key_bytes);
+    l.key("delay_ms");
+    l.u64(s.delay_ms);
+    l.key("key_window_ms");
+    l.u64(s.key_window_ms);
+    l.ch('}');
+}
+
 // {"type":"conversation", package, code {bytes, sha256}, budget (the most
 // instructions in one call), ecus [{id, rx, tx}], services [{sid, sub (the
 // sub-functions declared; null for a service declared without)}],
@@ -161,50 +210,13 @@ inline void conversation_line(Line& l, uint32_t package,
     l.key("services");
     l.ch('[');
     for (uint32_t i = 0; i < c.service_count; ++i) {
-        ecuio_plugin_service_t s{};
-        ecuio_plugin_service(p, i, &s);
-        if (i > 0) {
-            l.ch(',');
-        }
-        l.raw("{\"sid\":");
-        l.hex_bytes(&s.sid, 1);
-        l.key("sub");
-        if (s.sub_count == 0) {
-            l.raw("null");
-        } else {
-            l.ch('[');
-            for (uint8_t k = 0; k < s.sub_count && k < sizeof s.subs; ++k) {
-                if (k > 0) {
-                    l.ch(',');
-                }
-                l.hex_bytes(&s.subs[k], 1);
-            }
-            l.ch(']');
-        }
-        l.ch('}');
+        conversation_service(l, p, i);
     }
     l.ch(']');
     l.key("security");
     l.ch('[');
     for (uint32_t i = 0; i < c.level_count; ++i) {
-        ecuio_plugin_security_level_t s{};
-        ecuio_plugin_security_level(p, i, &s);
-        if (i > 0) {
-            l.ch(',');
-        }
-        l.raw("{\"ecu\":");
-        l.hex_id(s.rx_id);
-        l.key("level");
-        l.hex_bytes(&s.level, 1);
-        l.key("seed_bytes");
-        l.u64(s.seed_bytes);
-        l.key("key_bytes");
-        l.u64(s.key_bytes);
-        l.key("delay_ms");
-        l.u64(s.delay_ms);
-        l.key("key_window_ms");
-        l.u64(s.key_window_ms);
-        l.ch('}');
+        conversation_level(l, p, i);
     }
     l.raw("]}");
 }
