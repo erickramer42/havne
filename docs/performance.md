@@ -286,6 +286,20 @@ of both hours having samples. A second run on the phone agreed within
 a millisecond. A cold open, which needs root to arrange on the phone,
 isn't measured.
 
+On 2026-11-18, the app's own open of a recording of 640,000 frames under
+obd2 (the replay fixture looped, 131 signals, 25-28 MB of `frames.csv`),
+files in the system's cache, on the laptop:
+
+| Span | Core: open, then the check | The Recordings page: click to the check shown |
+|---|---|---|
+| 12.8 h | 73 ms, 276 ms | 1.6 s |
+| 38 min | 62 ms, 240 ms | 1.8-3.2 s |
+| 1.2 s | 58 ms, 223 ms | 1.5 s |
+
+The open and the check run off the GUI thread, which answered within
+35 ms throughout; with 12,900 findings from the check, within 190 ms. A
+replay of the same files at 100x kept it within 20 ms on the Dashboard.
+
 ### Drawing a recording
 
 Result: charts drawn a second are 141 and 124 on the laptop and 61-62 on the phone, its ceiling.

@@ -1199,6 +1199,10 @@ difference of the lowest and highest, and a difference pane kept apart
 past the pane limit (on a phone's three panes the differences fold into
 the mixed pane, which has no axis).
 
+*Amended 2026-11-18:* "the same name in the same unit" is a pair in the same
+unit: the rule of ADR-0065's appendix "step 3 as built", the same for the
+viewer and `havne-cli view`'s `columns` line's `delta`.
+
 ## Note: the viewer's asks give way, and a newer stretches ask ends an older pass (2026-11-13)
 
 A column means pass gives way to a cursor's statistics or step ask: before

@@ -347,6 +347,27 @@ VariantUses write_variant_lines(Output& out, const ecuio_plugin_t* p,
     return uses;
 }
 
+// A no_gauge note for each number or computed signal of a variant's own
+// that has none, so a plugin's author sets the range the Dashboard would
+// guess
+void write_no_gauge_notes(Output& out, const ecuio_plugin_t* p,
+                          const ecuio_plugin_info_t& info)
+{
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p, v);
+        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
+        const std::string id = variant_of(p, v);
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::lacks_gauge(file, set.defs[i],
+                                 ecuio_signal_file_gauge(file, &set.defs[i]))) {
+                BigLine b(cli::no_gauge_line_bytes());
+                cli::no_gauge_line(b.line, id.c_str(), set.defs[i]);
+                write_line(out, b.line);
+            }
+        }
+    }
+}
+
 // Each fixture file's entries as runs not yet run, or a fixture_refused
 // line for a file that can't be read or that core refused
 std::vector<FixtureRun> read_fixture_runs(Output& out, const char* path,
@@ -465,7 +486,8 @@ void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
 // plugin, a conversation line for a plugin with the tier, for each
 // variant a variant line (its source's license), a
 // share_alike line when that license is share-alike, and its own signals'
-// signal_def lines, a fixture_refused line for each fixture file that
+// signal_def lines, then a no_gauge note for each of its own number or
+// computed signals with no gauge (exit stays 0), a fixture_refused line for each fixture file that
 // can't be read or that core refused, a fixture line for each entry (with
 // --on, run through the simulated ECU on that interface, Linux's vcan;
 // else not run), then checked. A package refused is start and an error
@@ -490,6 +512,7 @@ int run_plugins_check(const char* path, const char* on)
     }
     write_conversation(out, 0, p);
     const VariantUses uses = write_variant_lines(out, p, info);
+    write_no_gauge_notes(out, p, info);
 
     cli::FixtureCounts counts;
     std::vector<FixtureRun> runs =

@@ -38,9 +38,9 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud",     "flags",    "filter",       "txid", "poll", "probe",
-    "identify", "diagnose", "pack",         "scan", "gap",  "profile",
-    "did",      "session",  "keepalive_ms", nullptr};
+    "baud",     "flags",    "filter",       "txid",       "poll", "probe",
+    "identify", "diagnose", "pack",         "scan",       "gap",  "profile",
+    "did",      "session",  "keepalive_ms", "packframes", nullptr};
 
 #ifdef _WIN32
 

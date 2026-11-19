@@ -96,6 +96,16 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/DEBUG>"
                      "$<$<CONFIG:Release>:/OPT:REF>"
                      "$<$<CONFIG:Release>:/OPT:ICF>")
+    # Reproducible binaries (ADR-0035): /Brepro replaces the PE timestamp and
+    # the debug GUID with a content hash; /d1trimfile drops the source
+    # folder from __FILE__ and the debug info, so a build elsewhere matches.
+    option(HAVNE_REPRODUCIBLE "MSVC Release: /Brepro and trimmed source paths" ON)
+    if(HAVNE_REPRODUCIBLE)
+        file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}" _src_native)
+        add_compile_options("$<$<CONFIG:Release>:/Brepro>"
+                            "$<$<CONFIG:Release>:/d1trimfile:${_src_native}\>")
+        add_link_options("$<$<CONFIG:Release>:/Brepro>")
+    endif()
     # The Visual Studio generator hands MSBuild one project at a time and
     # cl one file at a time; /MP compiles a project's files in parallel
     # (it implies /FS, so the shared PDB stays consistent). Ninja trees

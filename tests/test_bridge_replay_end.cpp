@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <QFile>
 #include <QStringList>
 #include <QTemporaryDir>
 
@@ -22,7 +23,8 @@ struct Played {
     bool finished = false;
 };
 
-bool playUnder(SessionBridge& bridge, Played& played, const QString& profile)
+bool playUnder(SessionBridge& bridge, Played& played, const QString& profile,
+               bool dropValues = false)
 {
     if (!played.recorded.isValid()) {
         return false;
@@ -37,6 +39,11 @@ bool playUnder(SessionBridge& bridge, Played& played, const QString& profile)
     bridge.setRecording(false);
     const QStringList folders = recordingFolders(played.recorded.path());
     if (folders.size() != 1) {
+        return false;
+    }
+    if (dropValues &&
+        !QFile::remove(played.recorded.path() + QStringLiteral("/") +
+                       folders.first() + QStringLiteral("/signals.csv"))) {
         return false;
     }
     QObject::connect(&bridge, &SessionBridge::logMessage,
@@ -87,6 +94,34 @@ TEST(BridgeTest, AReplayFinishedWithItsSignalsSaysNothingMore)
                     .filter(QStringLiteral("none of the profile's signals"))
                     .isEmpty())
         << played.log.join(QLatin1Char('\n')).toStdString();
+}
+
+/* The first lines name the profile the recording was made under, never its
+ * folder, and say when it holds no signal values. */
+TEST(BridgeTest, AReplaysFirstLineNamesWhatTheRecordingWasMadeUnder)
+{
+    SessionBridge bridge;
+    Played played;
+    ASSERT_TRUE(playUnder(bridge, played, QStringLiteral("mock")))
+        << played.log.join(QLatin1Char('\n')).toStdString();
+    const QStringList made = played.log.filter(QStringLiteral("recorded under"));
+    ASSERT_EQ(made.size(), 1) << played.log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_EQ(made.first(),
+              QStringLiteral("Replay: recorded under profile mock"));
+    EXPECT_FALSE(made.first().contains(played.recorded.path()));
+}
+
+TEST(BridgeTest, AReplaysFirstLineSaysWhenTheRecordingHoldsNoValues)
+{
+    SessionBridge bridge;
+    Played played;
+    ASSERT_TRUE(playUnder(bridge, played, QStringLiteral("obd2"), true))
+        << played.log.join(QLatin1Char('\n')).toStdString();
+    const QStringList made = played.log.filter(QStringLiteral("recorded under"));
+    ASSERT_EQ(made.size(), 1) << played.log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_TRUE(made.first().contains(QStringLiteral("holds no signal values")))
+        << made.first().toStdString();
+    EXPECT_FALSE(made.first().contains(played.recorded.path()));
 }
 
 /* A looping replay never finishes: its rows keep waiting for data. */
