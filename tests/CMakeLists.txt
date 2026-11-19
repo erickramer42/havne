@@ -305,7 +305,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp test_cli_pairs.cpp)
+        test_cli_expr.cpp test_cli_pairs.cpp test_cli_emulator.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
