@@ -426,7 +426,66 @@ struct TwoModules {
     static constexpr const char* kName = "pacing-two";
 };
 
+// TwoModules with the engine ECU's second DID a 16-byte text, whose reply
+// takes three frames
+struct TwoModulesOneLong {
+    TwoModulesOneLong()
+    {
+        static ecuio_signal_def_t defs[] = {
+            did_word(1, 0x7E8, 0x1E1C, "Engine A"),
+            did_word(2, 0x7E8, 0x1E1D, "Engine name"),
+            did_word(3, 0x7EA, 0xD200, "Module A"),
+            did_word(4, 0x7EA, 0xD201, "Module B"),
+        };
+        defs[1].kind = ECUIO_VALUE_TEXT;
+        defs[1].bit_length = 0;
+        defs[1].byte_length = 16;
+        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
+                                                        {0x7EA, 0x7E2, 0, 0}};
+        static ecuio_signal_set_t set{};
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 4;
+        set.defs = defs;
+        set.channel_count = 2;
+        set.channels = channels;
+        ecuio_validation_t why{};
+        EXPECT_EQ(ecuio_profile_register(kName, &set, &why), ECUIO_OK)
+            << "code " << why.code << " at " << why.index;
+    }
+    ~TwoModulesOneLong()
+    {
+        EXPECT_EQ(ecuio_profile_unregister(kName), ECUIO_OK);
+    }
+    TwoModulesOneLong(const TwoModulesOneLong&) = delete;
+    TwoModulesOneLong& operator=(const TwoModulesOneLong&) = delete;
+    static constexpr const char* kName = "pacing-two-long";
+};
+
 } // namespace
+
+/* The J2534 model's pass is the worker's (j2534_hold_pass), the hold on by
+ * default: while the engine ECU's three-frame reply is out the other
+ * module isn't asked, so two modules ask fewer requests a second than
+ * with ?hold=0, and nothing times out either way */
+TEST(PacingTest, J2534TakesTurnsAroundALongReplyByDefault)
+{
+    const TwoModulesOneLong profile;
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.profile = TwoModulesOneLong::kName;
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    const pacing::bench_result held = run(cfg);
+    cfg.model.hold = false;
+    const pacing::bench_result plain = run(cfg);
+    const cli::SummaryFigures f = cli::summary_figures(held.tally, {});
+    EXPECT_EQ(f.signals, 4u);
+    EXPECT_EQ(held.timeouts + plain.timeouts, 0u);
+    ASSERT_GT(plain.requests_per_s(), 0.0);
+    EXPECT_LT(held.requests_per_s(), 0.75 * plain.requests_per_s())
+        << held.requests_per_s() << " held, " << plain.requests_per_s()
+        << " with ?hold=0";
+}
 
 /* Two modules over an ELM327: a module keeps the turn until it has asked
  * each of its DIDs once (request_turns.h), so AT SH goes once for each
