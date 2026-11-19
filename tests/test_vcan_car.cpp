@@ -4,7 +4,8 @@
 // The simulated car on the bus (ADR-0065 section 10): as many modules as
 // a set holds answering a functional request each on its own reply ID,
 // two segmented replies under way at once, a fault on one module alone,
-// and one session reading the made-up whole car (plugins/example-car).
+// one session reading the made-up whole car (plugins/example-car), and
+// a module's reply timing (delay=, fc=, cf=).
 
 #include "ecuio/core.h"
 #include "ecuio/plugin.h"
@@ -15,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -439,4 +441,115 @@ TEST_F(SimCarBusTest, ASessionReadsTheMadeUpCarWhole)
     }
     EXPECT_EQ(ecuio_profile_unregister("plugin.example-car.whole"), ECUIO_OK);
     EXPECT_EQ(ecuio_plugin_free(plugin), ECUIO_OK);
+}
+
+namespace {
+
+double ms_since(std::chrono::steady_clock::time_point from)
+{
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - from)
+        .count();
+}
+
+double median(std::vector<double> v)
+{
+    std::sort(v.begin(), v.end());
+    return v.empty() ? 0.0 : v[v.size() / 2];
+}
+
+/* One segmented read of DID 4A00 by the case as the tester: the request
+ * to its First Frame, its Flow Control (STmin stmin) to the first
+ * Consecutive Frame, and the gaps between the rest, in ms */
+struct Paced {
+    double first = -1;
+    double after_flow = -1;
+    std::vector<double> gaps;
+};
+
+Paced paced_read(int fd, uint32_t tx, uint32_t rx, uint8_t stmin)
+{
+    Paced out;
+    const auto asked = std::chrono::steady_clock::now();
+    if (!put(fd, tx, {0x03, 0x22, 0x4A, 0x00})) {
+        return out;
+    }
+    std::chrono::steady_clock::time_point flowed;
+    std::chrono::steady_clock::time_point last;
+    size_t left = 0;
+    while (ms_since(asked) < 2000) {
+        can_frame f{};
+        if (vcan_bus::read_for(fd, &f, sizeof f, 100) <= 0 ||
+            (f.can_id & CAN_SFF_MASK) != rx) {
+            continue;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if ((f.data[0] & 0xF0) == 0x10) {
+            out.first = ms_since(asked);
+            left = ((f.data[0] & 0x0Fu) << 8 | f.data[1]) - 6u;
+            put(fd, tx, {0x30, 0x00, stmin});
+            flowed = std::chrono::steady_clock::now();
+        } else if ((f.data[0] & 0xF0) == 0x20 && left > 0) {
+            if (out.after_flow < 0) {
+                out.after_flow = ms_since(flowed);
+            } else {
+                out.gaps.push_back(
+                    std::chrono::duration<double, std::milli>(now - last)
+                        .count());
+            }
+            last = now;
+            left = left > 7 ? left - 7 : 0;
+            if (left == 0) {
+                return out;
+            }
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+// delay=, fc= and cf= on the bus: a module's First Frame waits its
+// delay, its first Consecutive Frame fc after the tester's Flow Control,
+// and the rest cf apart, or the tester's STmin when that is longer; an
+// aimed cf= is that module's alone. Floors judged by medians of the
+// case's own read times, the ceilings loose (a loaded machine).
+TEST_F(SimCarBusTest, AModulesRepliesKeepItsTiming)
+{
+    Modules m("sim-car-bus-timing", 2);
+    Sim sim("mock://sim?profile=sim-car-bus-timing&delay=40000:40000"
+            "&fc=20000&cf=15000,30000@741");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Fd raw = vcan_bus::open_raw();
+    ASSERT_TRUE(raw.ok());
+    const struct {
+        uint32_t tx, rx;
+        uint8_t stmin;
+        double gap; /* the gap's floor: cf or the tester's STmin */
+    } cases[] = {
+        {0x700, 0x740, 0x00, 15.0}, /* cf over STmin 0 */
+        {0x700, 0x740, 0x32, 50.0}, /* the tester's 50 ms over cf */
+        {0x701, 0x741, 0x05, 30.0}, /* the aimed cf over STmin 5 */
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.rx);
+        SCOPED_TRACE(c.stmin);
+        std::vector<double> first, after_flow, gaps;
+        for (int round = 0; round < 5; ++round) {
+            const Paced p = paced_read(raw.get(), c.tx, c.rx, c.stmin);
+            ASSERT_GE(p.first, 0) << "no First Frame, round " << round;
+            ASSERT_GE(p.after_flow, 0) << "no Consecutive Frame";
+            ASSERT_EQ(p.gaps.size(), 2u) << "19 bytes of name: three CFs";
+            first.push_back(p.first);
+            after_flow.push_back(p.after_flow);
+            gaps.insert(gaps.end(), p.gaps.begin(), p.gaps.end());
+        }
+        EXPECT_GE(median(first), 40.0);
+        EXPECT_LT(median(first), 160.0);
+        EXPECT_GE(median(after_flow), 20.0);
+        EXPECT_LT(median(after_flow), 80.0);
+        EXPECT_GE(median(gaps), c.gap);
+        EXPECT_LT(median(gaps), 4 * c.gap);
+    }
+    EXPECT_EQ(sim.stats().unflowed, 0u);
 }

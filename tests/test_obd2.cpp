@@ -6812,8 +6812,10 @@ TEST(SimAskTest, AnUnboundSimAnswersAsTheEngineEcu)
         EXPECT_EQ(got[0].flags, 0u);
         EXPECT_EQ(got[0].delay_us, 0);
         EXPECT_EQ(reply_bytes(got[0]), Bytes(want, want + want_len));
-        for (uint32_t i = 0; i < 5; ++i) {
-            EXPECT_EQ(got[0].reserved[i], 0u);
+        EXPECT_EQ(got[0].fc_us, 0u);
+        EXPECT_EQ(got[0].cf_us, 0u);
+        for (const uint32_t word : got[0].reserved) {
+            EXPECT_EQ(word, 0u);
         }
     }
     const std::vector<ecuio_sim_reply_t> functional =

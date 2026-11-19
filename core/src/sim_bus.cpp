@@ -162,13 +162,15 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
     if (r.len == 0) {
         return true;
     }
+    /* Drawn before the fate, so a fault never moves the next draws */
+    const int64_t drawn = ecuio_sim_timing::sim_timing_draw(n.timing, n.rng);
     r.fate = decide(s, n, m.data, m.len, r.data, r.len);
     switch (r.fate) {
     case ecuio_sim_fate::silent:
         return true;
     case ecuio_sim_fate::late:
         r.waiting = true;
-        r.start_us = now + ECUIO_SIM_LATE_US;
+        r.start_us = now + drawn + ECUIO_SIM_LATE_US;
         return true;
     case ecuio_sim_fate::pending: {
         /* 7F <service> 78 now, a Single Frame; the reply itself later,
@@ -188,6 +190,11 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
     case ecuio_sim_fate::stalled:
     case ecuio_sim_fate::intact:
         break;
+    }
+    if (drawn > 0) {
+        r.waiting = true;
+        r.start_us = now + drawn;
+        return true;
     }
     return start(s, n, now);
 }
@@ -216,6 +223,21 @@ bool feed(ecuio_sim* s, sim_node& n, const isotp_can& f, int64_t now)
         break;
     }
     return true;
+}
+
+/* The tester's Flow Control frame for n's send: the first Consecutive
+ * Frame fc after it, the rest at cf or the tester's STmin, the longer */
+void flow(sim_node& n, const isotp_can& f, int64_t now)
+{
+    const isotp_flow_result fr = isotp_tx_flow(n.tx, f, now);
+    if (fr == isotp_flow_result::overflow ||
+        fr == isotp_flow_result::abandoned) {
+        n.r.active = false;
+    } else if (fr == isotp_flow_result::go) {
+        const int64_t cf = n.timing.cf_us;
+        n.tx.stmin_us = n.tx.stmin_us > cf ? n.tx.stmin_us : cf;
+        n.tx.due_us = now + n.timing.fc_us;
+    }
 }
 
 /* Reads every frame waiting. False when the bus failed. */
@@ -248,11 +270,7 @@ bool drain(ecuio_sim* s)
             sim_node& n = s->nodes[i];
             if (isotp_kind(f) == isotp_pci::flow) {
                 if (f.id == n.request_id) {
-                    const isotp_flow_result fr = isotp_tx_flow(n.tx, f, now);
-                    if (fr == isotp_flow_result::overflow ||
-                        fr == isotp_flow_result::abandoned) {
-                        n.r.active = false;
-                    }
+                    flow(n, f, now);
                 }
             } else if ((f.id == n.request_id ||
                         f.id == ECUIO_SIM_FUNCTIONAL_ID) &&

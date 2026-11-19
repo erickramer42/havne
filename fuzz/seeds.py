@@ -524,11 +524,16 @@ def main(argv):
         "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
     }.items():
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
-    # Its URIs (an odd first byte): faults for every module and aimed at one
+    # Its URIs (an odd first byte): faults and timing for every module and
+    # aimed at one
     for name, uri in {
         "uri-aimed": "mock://sim?modules=2&faults=late:3@7E9,silent:5,pending:2@7e8",
         "uri-aimed-replaced": "mock://sim?faults=late:1,late:2@7E8,stalled:4@7E8",
         "uri-aimed-refused": "mock://sim?faults=late:3@800",
+        "uri-timing": "mock://sim?modules=2&delay=3000:9000,900:30000@7E9&fc=4000"
+                      "&cf=5000,800@7E9&seed=7",
+        "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
+        "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
     return 0

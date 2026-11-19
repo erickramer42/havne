@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <random>
 
 #if ECUIO_HAVE_SOCKETCAN
 #include <thread>
@@ -47,6 +48,10 @@ struct sim_node {
     int module = 0;          /* 0 the engine ECU, 1 another module */
     ecuio_sim_faults faults; /* every module's, with those aimed at it */
     ecuio_sim_counts counts;
+    ecuio_sim_timing::sim_timing timing; /* the same, sim_timing.h */
+    /* Its delays' own generator, seeded again at build from the URI */
+    std::mt19937_64 rng =
+        ecuio_sim_timing::sim_timing_rng(1, ECUIO_SIM_REPLY_ID);
     /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
      * ECU, everything on another module */
     bool from_set = false;

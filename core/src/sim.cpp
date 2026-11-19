@@ -158,7 +158,9 @@ ecuio_status_t plan_sim(const char* uri, sim_plan* p)
     for (uint32_t i = 0; i < p->modules.count; ++i) {
         ids[count++] = p->modules.rx[i];
     }
-    if (!ecuio_sim_aims_land(p->config.aimed, ids, count, why, sizeof why)) {
+    if (!ecuio_sim_aims_land(p->config.aimed, ids, count, why, sizeof why) ||
+        !ecuio_sim_timing::aims_land(p->config.timing, ids, count, why,
+                                     sizeof why)) {
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }
@@ -168,7 +170,7 @@ ecuio_status_t plan_sim(const char* uri, sim_plan* p)
 }
 
 /* s's ECUs as p plans them: the engine ECU, then modules=2's module or
- * the profile's, each with its faults; false out of memory */
+ * the profile's, each with its faults and timing; false out of memory */
 bool build_nodes(ecuio_sim* s, const sim_plan& p)
 {
     const ecuio_sim_config& config = p.config;
@@ -204,6 +206,8 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
         sim_node& n = s->nodes[i];
         n.faults =
             ecuio_sim_faults_for(config.faults, config.aimed, n.reply_id);
+        n.timing = ecuio_sim_timing::for_node(config.timing, n.reply_id);
+        n.rng = ecuio_sim_timing::sim_timing_rng(n.timing.seed, n.reply_id);
     }
     return true;
 }
@@ -266,16 +270,18 @@ ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
 
 /* A reply into the caller's entries, counted whether or not it fits */
 void put_reply(ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n,
-               uint32_t reply_id, uint32_t flags, int64_t delay_us,
+               const sim_node& node, uint32_t flags, int64_t delay_us,
                const uint8_t* data, uint32_t len)
 {
     if (*n < capacity) {
         ecuio_sim_reply_t& r = replies[*n];
         std::memset(&r, 0, sizeof r);
-        r.reply_id = reply_id;
+        r.reply_id = node.reply_id;
         r.flags = flags;
         r.delay_us = delay_us;
         r.length = len;
+        r.fc_us = node.timing.fc_us;
+        r.cf_us = node.timing.cf_us;
         std::memcpy(r.data, data, len);
     }
     ++*n;
@@ -293,22 +299,25 @@ void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
     if (r.len == 0) {
         return;
     }
+    /* Drawn before the fate, so a fault never moves the next draws */
+    const int64_t drawn =
+        ecuio_sim_timing::sim_timing_draw(node.timing, node.rng);
     r.fate = decide(sim, node, request, length, r.data, r.len);
     uint32_t flags = 0;
-    int64_t delay = 0;
+    int64_t delay = drawn;
     switch (r.fate) {
     case ecuio_sim_fate::silent:
         return;
     case ecuio_sim_fate::pending: {
         const uint8_t wait[3] = {0x7F, request[0], 0x78};
-        put_reply(replies, capacity, n, node.reply_id, ECUIO_SIM_REPLY_PENDING,
-                  0, wait, sizeof wait);
-        delay = ECUIO_SIM_PENDING_US;
+        put_reply(replies, capacity, n, node, ECUIO_SIM_REPLY_PENDING, 0, wait,
+                  sizeof wait);
+        delay = ECUIO_SIM_PENDING_US; /* its own timing, the draw unused */
         break;
     }
     case ecuio_sim_fate::late:
         flags = ECUIO_SIM_REPLY_LATE;
-        delay = ECUIO_SIM_LATE_US;
+        delay = drawn + ECUIO_SIM_LATE_US;
         break;
     case ecuio_sim_fate::bad_sequence:
         flags = ECUIO_SIM_REPLY_BAD_SEQUENCE;
@@ -319,7 +328,7 @@ void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
     case ecuio_sim_fate::intact:
         break;
     }
-    put_reply(replies, capacity, n, node.reply_id, flags, delay, r.data, r.len);
+    put_reply(replies, capacity, n, node, flags, delay, r.data, r.len);
     sent(sim, r);
 }
 
