@@ -87,7 +87,7 @@ Item {
     }
     FontMetrics { id: tagMetrics; font.pixelSize: ChartLayout.labelPx; font.family: Theme.valueFamily }
     function timeTextWidth(ms) {
-        return tagMetrics.advanceWidth(part.host.timeText(ms, true))
+        return tagMetrics.advanceWidth(part.host.formatPart.timeText(ms, true))
     }
 
     // A tapped time moved to the nearest sample of the first signal

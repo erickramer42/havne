@@ -28,6 +28,10 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias formatPart: formatPart
+    readonly property var valueText: formatPart.valueText
+    readonly property var timeText: formatPart.timeText
+    readonly property var lengthText: formatPart.lengthText
     property alias textsPart: textsPart
     readonly property var changeText: textsPart.changeText
     property alias seriesPart: seriesPart
@@ -587,6 +591,8 @@ Page {
 
     RecordingTexts { id: textsPart; host: root }
 
+    RecordingFormat { id: formatPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -783,7 +789,7 @@ Page {
         const at = jumpIndex >= 0 ? list[jumpIndex] : undefined
         if (at !== undefined && hasCursor && Math.abs(cursorMs - at.fromMs) < 0.5)
             return qsTr("%1 %2 of %3 · %4").arg(jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
-                       .arg(jumpIndex + 1).arg(list.length).arg(timeText(at.fromMs, true))
+                       .arg(jumpIndex + 1).arg(list.length).arg(formatPart.timeText(at.fromMs, true))
         const pulls = stretchesOf("pull").length
         const cruises = stretchesOf("cruise").length
         return (pulls === 0 ? noPullText
@@ -797,7 +803,7 @@ Page {
     function pullRows(pulls, here) {
         return (pulls || []).map((p, i) =>
             (here ? qsTr("Pull %1 here · %2 · %3") : qsTr("Pull %1 there · %2 · %3"))
-                .arg(i + 1).arg(timeText(p.fromMs, true)).arg(lengthText(p.toMs - p.fromMs)))
+                .arg(i + 1).arg(formatPart.timeText(p.fromMs, true)).arg(formatPart.lengthText(p.toMs - p.fromMs)))
     }
     function setAlignOn(on) {
         if (on === "marker" && alignLabel === "")
@@ -851,7 +857,7 @@ Page {
                 return
             }
             const verb = alignOn === "rise" ? qsTr("rising to %1") : qsTr("falling to %1")
-            what = qsTr("%1 %2").arg(s.name).arg(verb.arg(valueText(alignLevel, s.decimals, s.unit)))
+            what = qsTr("%1 %2").arg(s.name).arg(verb.arg(formatPart.valueText(alignLevel, s.decimals, s.unit)))
             const j = ComparePairs.pairOf(comparePairs, s.index)
             here = recording.findThreshold(s.index, alignLevel, alignHysteresis, alignOn === "rise")
             there = j !== undefined ? compare.findThreshold(j, alignLevel, alignHysteresis, alignOn === "rise") : -1
@@ -902,59 +908,11 @@ Page {
         compareAligned = true
         compareStatus = alignOn === "start" ? qsTr("Dashed: %1, aligned on %2").arg(compareTitle).arg(what)
             : alignOn === "utc" ? qsTr("Dashed: %1, aligned on %2, %3 apart").arg(compareTitle).arg(what)
-                                    .arg(timeText(Math.abs(compareOffsetMs), true))
+                                    .arg(formatPart.timeText(Math.abs(compareOffsetMs), true))
             : qsTr("Dashed: %1, aligned on %2, at %3 here and %4 there").arg(compareTitle).arg(what)
-                  .arg(timeText(here, true)).arg(timeText(there, true))
+                  .arg(formatPart.timeText(here, true)).arg(formatPart.timeText(there, true))
     }
 
-    function valueText(v, decimals, unit) {
-        const n = Number(v).toLocaleString(Qt.locale(), 'f', decimals)
-        return unit !== "" ? n + " " + unit : n
-    }
-
-    // 12.3 s, 1:02.3, 1:02:03; before the start (an aligned axis), -12.3 s
-    function timeText(ms, tenths) {
-        if (ms < 0)
-            return "-" + timeText(-ms, tenths)
-        // Tenths are rounded as a whole first: 119.96 s is 2:00.0, never 1:60.0
-        const s = tenths ? Math.round(ms / 100) / 10 : ms / 1000
-        if (s < 60)
-            return tenths ? qsTr("%1 s").arg(s.toFixed(1)) : qsTr("%1 s").arg(Math.round(s))
-        const whole = Math.floor(s)
-        const sec = tenths ? (s % 60).toFixed(1).padStart(4, "0") : String(whole % 60).padStart(2, "0")
-        if (s < 3600)
-            return Math.floor(s / 60) + ":" + sec
-        return Math.floor(s / 3600) + ":" + String(Math.floor(s / 60) % 60).padStart(2, "0") + ":" + sec
-    }
-    function captionOf(seconds) {
-        return timeText(seconds * 1000, false)
-    }
-    function lengthText(ms) {
-        const s = Math.round(ms / 1000)
-        if (s < 60) return ms < 10000 ? qsTr("%1 s").arg((ms / 1000).toFixed(1)) : qsTr("%1 s").arg(s)
-        if (s < 3600) return qsTr("%1 min %2 s").arg(Math.floor(s / 60)).arg(s % 60)
-        return qsTr("%1 h %2 min").arg(Math.floor(s / 3600)).arg(Math.floor(s / 60) % 60)
-    }
-
-    function idText(f) {
-        return "0x" + f.id.toString(16).toUpperCase().padStart(f.extended ? 8 : 3, "0")
-    }
-    // A finding in a few words (ECUIO_CHECK_* kinds)
-    function findingText(f) {
-        switch (f.kind) {
-        case 1: return qsTr("No frames for %1").arg(lengthText(f.lengthMs))
-        case 2: return qsTr("%1 slowed for %2").arg(idText(f)).arg(lengthText(f.lengthMs))
-        case 3: return qsTr("%1 first heard late").arg(idText(f))
-        case 4: return qsTr("Adapter overflow: frames lost")
-        case 5: return qsTr("%1: a message broken off").arg(idText(f))
-        case 6: return qsTr("Link: %1").arg(Bridge.statusString(f.code))
-        case 7: return qsTr("Asleep for %1").arg(lengthText(f.lengthMs))
-        default: return qsTr("Finding of kind %1").arg(f.kind)
-        }
-    }
-    function findingColor(kind) {
-        return kind === 7 ? Theme.textDim : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
-    }
     // RecordingView.findings and markers copied once at each change, with
     // the fields the chart's paint reads: the bridge map rule
     property var chartFindings: recording.findings.map(f => ({ kind: f.kind, atMs: f.atMs,
@@ -1038,7 +996,7 @@ Page {
     function rowFacts(row) {
         const parts = []
         if (row.durationMs >= 0)
-            parts.push(lengthText(row.durationMs))
+            parts.push(formatPart.lengthText(row.durationMs))
         if (row.log)
             parts.push(row.signals === 1 ? qsTr("log, 1 signal") : qsTr("log, %1 signals").arg(row.signals))
         else if (row.frames !== false)
@@ -1070,7 +1028,7 @@ Page {
 
     function infoText() {
         const info = recording.info
-        let text = qsTr("%1 long").arg(lengthText(recording.durationMs))
+        let text = qsTr("%1 long").arg(formatPart.lengthText(recording.durationMs))
         if (recording.decodedWith === "signals.json")
             text += qsTr(" · values decoded from its frames through its own signal file")
         else if (recording.decodedWith !== "")
@@ -1629,8 +1587,8 @@ Page {
             Layout.fillHeight: Theme.compact
             spans: root.conditionList
             info: recording.info
-            timeText: ms => root.timeText(ms, true)
-            lengthText: ms => root.lengthText(ms)
+            timeText: ms => formatPart.timeText(ms, true)
+            lengthText: ms => formatPart.lengthText(ms)
             picked: root.conditionPick
             onShowRequested: i => cursorsPart.showCondition(i)
             onCloseRequested: root.conditionsOpen = false
@@ -1766,12 +1724,12 @@ Page {
                 elide: Text.ElideRight
                 font.pixelSize: root.phoneShape ? Theme.fontCaption : Theme.fontBody
                 color: Theme.textDim
-                text: root.hasSpan ? qsTr("A %1 to B %2 · %3").arg(root.timeText(root.spanFromMs, true))
-                                       .arg(root.timeText(root.spanToMs, true))
-                                       .arg(root.timeText(root.spanToMs - root.spanFromMs, true))
+                text: root.hasSpan ? qsTr("A %1 to B %2 · %3").arg(formatPart.timeText(root.spanFromMs, true))
+                                       .arg(formatPart.timeText(root.spanToMs, true))
+                                       .arg(formatPart.timeText(root.spanToMs - root.spanFromMs, true))
                       : root.phoneShape ? qsTr("Hold to place the second cursor")
                       : qsTr("At %1. Shift+click to place the second cursor")
-                            .arg(root.timeText(root.cursorMs, true))
+                            .arg(formatPart.timeText(root.cursorMs, true))
             }
             ThemedButton {
                 objectName: "zoomToSpan"

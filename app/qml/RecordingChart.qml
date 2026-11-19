@@ -75,9 +75,9 @@ Rectangle {
                                                    : qsTr("No signals plotted; tick a row to plot it")
         fetch: function(widthPx) { return root.host.seriesPart.series(widthPx) }
         layoutOpts: ({
-            gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.valueText,
+            gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.formatPart.valueText,
             span: { t0: root.host.viewT0, t1: root.host.viewT1 }, absolute: true,
-            caption: root.host.captionOf,
+            caption: root.host.formatPart.captionOf,
             tags: root.host.cursorsPart.cursorTags(),
             axisH: root.host.phoneShape && root.host.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
             panes: { max: root.host.paneLimit, minH: ChartLayout.paneMinH,
@@ -130,7 +130,7 @@ Rectangle {
             for (const f of root.host.chartFindings) {
                 const x0 = xOf(f.atMs), x1 = xOf(f.atMs + f.lengthMs)
                 if (x1 < l.left || x0 > plotEnd) continue
-                ctx.fillStyle = root.host.findingColor(f.kind)
+                ctx.fillStyle = root.host.formatPart.findingColor(f.kind)
                 const left = Math.max(l.left, x0)
                 ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(plotEnd, x1) - left), 4)
             }
@@ -462,7 +462,7 @@ Rectangle {
                 id: handleText
                 objectName: "handleTime"
                 anchors.centerIn: parent
-                text: root.host.timeText(handle.at, true)
+                text: root.host.formatPart.timeText(handle.at, true)
                 color: parent.moved ? Theme.bg : Theme.text
                 font.pixelSize: ChartLayout.labelPx
                 font.family: Theme.valueFamily
@@ -563,7 +563,7 @@ Rectangle {
                 text: !stripRow.at || stripRow.at.atMs < 0 ? qsTr("—")
                       : stripRow.modelData.isText ? stripRow.at.text
                       : stripRow.at.label ? stripRow.at.label
-                      : root.host.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
+                      : root.host.formatPart.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                        stripRow.at.unit)
                 color: Theme.text
                 font.family: Theme.valueFamily

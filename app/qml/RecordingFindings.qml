@@ -48,7 +48,7 @@ ListView {
             objectName: "findingRowArea"
             anchors.fill: parent
             hoverEnabled: true
-            Accessible.name: qsTr("Show %1").arg(root.host.findingText(findingRow.modelData))
+            Accessible.name: qsTr("Show %1").arg(root.host.formatPart.findingText(findingRow.modelData))
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             onClicked: {
                 const f = findingRow.modelData
@@ -62,16 +62,16 @@ ListView {
             anchors.rightMargin: 8
             Rectangle {
                 implicitWidth: 10; implicitHeight: 4
-                color: root.host.findingColor(findingRow.modelData.kind)
+                color: root.host.formatPart.findingColor(findingRow.modelData.kind)
             }
             Label {
-                text: root.host.timeText(findingRow.modelData.atMs, true)
+                text: root.host.formatPart.timeText(findingRow.modelData.atMs, true)
                 color: Theme.textDim
                 font.family: Theme.monoFamily
             }
             Label {
                 objectName: "findingText"
-                text: root.host.findingText(findingRow.modelData)
+                text: root.host.formatPart.findingText(findingRow.modelData)
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true

@@ -164,7 +164,7 @@ ListView {
                 text: !at || at.atMs < 0 ? qsTr("—")
                       : signalRow.modelData.isText ? at.text
                       : at.label ? at.label
-                      : root.host.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
+                      : root.host.formatPart.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
                 Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                 elide: Text.ElideRight
                 color: Theme.textDim

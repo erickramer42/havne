@@ -89,7 +89,7 @@ ColumnLayout {
             color: Theme.textDim
             text: !root.host.hasCursor ? (Theme.compact ? qsTr("Tap for values")
                                                    : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
-                                  : qsTr("At %1").arg(root.host.timeText(root.host.cursorMs, true))
+                                  : qsTr("At %1").arg(root.host.formatPart.timeText(root.host.cursorMs, true))
         }
         RowLayout {
             id: spanRowDesktop

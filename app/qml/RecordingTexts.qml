@@ -20,11 +20,11 @@ Item {
 
     // A change, signed, in a signal's decimals
     function changeText(v, decimals, unit) {
-        return v > 0 ? "+" + part.host.valueText(v, decimals, unit) : part.host.valueText(v, decimals, unit)
+        return v > 0 ? "+" + part.host.formatPart.valueText(v, decimals, unit) : part.host.formatPart.valueText(v, decimals, unit)
     }
     // A statistic of a row, or a dash with none
     function statText(v, s) {
-        return isFinite(v) ? part.host.valueText(v, s.decimals, s.unit) : qsTr("—")
+        return isFinite(v) ? part.host.formatPart.valueText(v, s.decimals, s.unit) : qsTr("—")
     }
     function statChange(s) {
         return s && isFinite(s.change) ? part.changeText(s.change, s.decimals, s.unit) : qsTr("—")
@@ -38,7 +38,7 @@ Item {
         return !at || at.atMs < 0 ? qsTr("—")
                : s.isText ? at.text
                : at.label ? at.label
-               : part.host.valueText(Number(at.text), s.decimals, at.unit)
+               : part.host.formatPart.valueText(Number(at.text), s.decimals, at.unit)
     }
     // The second line a row and a strip's cell show with a span
     function spanCaption(s) {
