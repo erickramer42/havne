@@ -50,8 +50,6 @@ inline int32_t ecuio_engine_scan_next(ecuio_request_engine* e, uint32_t c)
     return -1;
 }
 
-/* Settles the scan entry channel c has out: found (and in the rotation
- * while the table has room), refused with its code, or unanswered. */
 /* A found DID joins channel c's rotation, room permitting */
 inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
                                    ecuio_scan_entry& s)
@@ -94,6 +92,8 @@ inline void ecuio_engine_scan_retry(ecuio_request_engine* e, uint32_t c)
     e->chans[c].scan_pending += lost;
 }
 
+/* Settles the scan entry channel c has out: found (and in the rotation
+ * while the table has room), refused with its code, or unanswered. */
 inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
                                      uint8_t outcome, uint8_t nrc)
 {
@@ -118,8 +118,9 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
  * answers it, however late: a long reply can take longer than the wait
  * (the test car's 263-byte DA9E through the VX), and the
  * adapter hands it over only whole. The DID is found and polled, so the
- * scan completes; one waiting to be asked again needn't be. Called only
- * for a reply that answers nothing else. */
+ * scan completes; one waiting to be asked again needn't be, unless the
+ * one-shot holds it (a send that failed), which its own ask settles.
+ * Called only for a reply that answers nothing else. */
 inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
                                    const uint8_t* data, uint16_t len)
 {
@@ -127,17 +128,23 @@ inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
         return false;
     }
     const uint16_t did = static_cast<uint16_t>((data[1] << 8) | data[2]);
+    ecuio_engine_channel& ch = e->chans[c];
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         ecuio_scan_entry& s = e->scan[i];
-        const bool waiting = s.outcome == ECUIO_SCAN_UNASKED && s.retried;
+        const bool held = ch.scanning && ch.scan_index == i;
+        const bool waiting =
+            s.outcome == ECUIO_SCAN_UNASKED && s.retried && !held;
         if (s.channel == c && s.did == did &&
             (s.outcome == ECUIO_SCAN_UNANSWERED || waiting)) {
-            if (waiting && e->chans[c].scan_pending > 0) {
-                --e->chans[c].scan_pending;
-            }
             s.outcome = ECUIO_SCAN_FOUND;
             ecuio_engine_scan_poll(e, c, s);
-            ++e->chans[c].generation;
+            if (waiting && ch.scan_pending > 0) {
+                --ch.scan_pending;
+                if (ch.scan_pending == 0) {
+                    ecuio_engine_scan_retry(e, c);
+                }
+            }
+            ++ch.generation;
             return true;
         }
     }
