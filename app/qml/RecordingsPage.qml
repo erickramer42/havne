@@ -95,6 +95,8 @@ Page {
     readonly property var frameTestSignals: frameTestPart.frameTestSignals
     property alias spanStatsHome: spanStatsHome
     property alias recording: recordingViews.recording
+    property alias chartFrame: chartFrame
+    property alias switchRowSlot: switchRowSlot
     property alias spanRowDesktop: zoomBlock.spanRowDesktop
     property alias spanRowPhone: zoomBlock.spanRowPhone
     property alias spanStatsPinned: zoomBlock.spanStatsPinned
@@ -1003,35 +1005,7 @@ Page {
 
         // The splitter: drag it to make the chart taller or shorter, kept
         // between runs; a double-tap gives the chart the page's own height
-        Item {
-            objectName: "chartSplitter"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-                     && !root.exportShown
-            Layout.fillWidth: true
-            implicitHeight: 12
-            Rectangle {
-                anchors.centerIn: parent
-                width: 40
-                height: 4
-                radius: 2
-                color: chartDrag.active || chartSplitHover.hovered ? Theme.textDim : Theme.outline
-            }
-            HoverHandler { id: chartSplitHover; cursorShape: Qt.SizeVerCursor }
-            DragHandler {
-                id: chartDrag
-                target: null
-                margin: root.phoneShape ? Math.max(0, (Theme.touchTarget - parent.height) / 2) : 0
-                xAxis.enabled: false
-                property real startHeight: 0
-                onActiveChanged: if (active) startHeight = chartFrame.height
-                onActiveTranslationChanged: {
-                    if (active)
-                        viewerSettings.chartHeight = Math.max(200, startHeight + activeTranslation.y)
-                }
-            }
-            DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
-        }
-
+        RecordingSplitter { id: recordingSplitter; host: root }
         ColumnLayout {
             id: jumpBelow
             visible: chartFrame.visible && Theme.compact
@@ -1051,47 +1025,7 @@ Page {
         // The span line: where the two cursors are and how far apart, or
         // once, the first cursor's hint for the second. Under the zoom row
         // on a phone, at its right on the desktop
-        RowLayout {
-            id: spanLine
-            objectName: "spanLine"
-            parent: root.phoneShape ? spanRowPhone : spanRowDesktop
-            visible: root.spanLineUp
-            Layout.fillWidth: true
-            spacing: 6
-            Label {
-                objectName: "spanText"
-                Layout.fillWidth: true
-                horizontalAlignment: root.phoneShape ? Text.AlignLeft : Text.AlignRight
-                verticalAlignment: Text.AlignVCenter
-                wrapMode: root.phoneShape ? Text.WordWrap : Text.NoWrap
-                maximumLineCount: root.phoneShape ? 2 : 1
-                elide: Text.ElideRight
-                font.pixelSize: root.phoneShape ? Theme.fontCaption : Theme.fontBody
-                color: Theme.textDim
-                text: root.hasSpan ? qsTr("A %1 to B %2 · %3").arg(formatPart.timeText(root.spanFromMs, true))
-                                       .arg(formatPart.timeText(root.spanToMs, true))
-                                       .arg(formatPart.timeText(root.spanToMs - root.spanFromMs, true))
-                      : root.phoneShape ? qsTr("Hold to place the second cursor")
-                      : qsTr("At %1. Shift+click to place the second cursor")
-                            .arg(formatPart.timeText(root.cursorMs, true))
-            }
-            ThemedButton {
-                objectName: "zoomToSpan"
-                visible: root.hasSpan
-                compact: true
-                text: root.phoneShape ? qsTr("Zoom") : qsTr("Zoom to span")
-                Accessible.name: qsTr("Zoom to the span")
-                onClicked: cursorsPart.zoomToSpan()
-            }
-            ThemedButton {
-                objectName: "clearSpan"
-                visible: root.hasSpan
-                flat: true
-                text: qsTr("Clear")
-                Accessible.name: qsTr("Remove the second cursor")
-                onClicked: cursorsPart.clearCursorB()
-            }
-        }
+        RecordingSpanLine { id: recordingSpanLine; host: root }
 
         // The zoom row's place on the page; on the pinned form it leads the
         // shown view's list
@@ -1111,60 +1045,7 @@ Page {
         // The signal area's two views, the values at the cursor or the frames
         // in view (hidden for a recording with no frames.csv), then the
         // filter: one row on the desktop, a row each on a phone
-        GridLayout {
-            id: detailGrid
-            objectName: "detailRow"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.pinnedViewer
-            Layout.fillWidth: true
-            columns: root.phoneShape ? 1 : 2
-            columnSpacing: Theme.spacing
-            rowSpacing: 10
-            RowLayout {
-                id: detailSwitchSlot
-                visible: recording.hasFrames
-                // Maximized, it leads the zoom row where the row has room
-                SegmentRow {
-                    parent: root.currentHead ? root.currentHead.switchSlot
-                          : !root.chartMaximized ? detailSwitchSlot
-                          : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
-
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_values"
-                        text: qsTr("Values")
-                        selected: !root.framesShown && !root.aboutShown
-                        onClicked: root.detailView = "values"
-                    }
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_frames"
-                        visible: recording.hasFrames
-                        text: qsTr("Frames")
-                        selected: root.framesShown
-                        onClicked: root.detailView = "frames"
-                    }
-                    // On the pinned form About is a view of its own
-                    SegmentButton {
-                        tapHeight: root.segmentHeight
-                        objectName: "detailView_about"
-                        visible: root.pinnedViewer
-                        text: qsTr("About")
-                        selected: root.aboutShown
-                        onClicked: root.detailView = "about"
-                    }
-                }
-            }
-            SignalFilterBar {
-                objectName: "recordingFilter"
-                parent: root.currentHead && root.currentHead === root.valuesHead
-                        ? root.valuesHead.toolsSlot : detailGrid
-                visible: !root.framesShown
-                Layout.fillWidth: true
-                filter: signalFilter
-                codes: recording.signalList.map(s => s.group)
-            }
-        }
-
+        RecordingDetailRow { id: recordingDetailRow; host: root }
         RecordingFramesView {
             id: viewerFrames
             host: root
