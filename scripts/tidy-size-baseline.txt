@@ -112,8 +112,8 @@ core/src/signal_expr.cpp	call
 core/src/signal_expr.cpp	emit
 core/src/signal_expr.cpp	factor
 core/src/signal_file.cpp	build
-core/src/signal_file.cpp	read_ecus
-core/src/signal_file.cpp	read_field
+core/src/signal_file_parts.cpp	read_ecus
+core/src/signal_file_parts.cpp	read_field
 core/src/signals.cpp	ecuio_decode_signal
 core/src/signals.cpp	ecuio_validate_signal
 core/src/sim_ecu.h	ecuio_sim_answer
