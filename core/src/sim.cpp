@@ -281,6 +281,48 @@ void put_reply(ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n,
     ++*n;
 }
 
+/* node's answer to an ask's request, its fate decided, into replies
+ * at *n (counted past capacity) */
+void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
+              uint32_t length, bool functional, ecuio_sim_reply_t* replies,
+              uint32_t capacity, uint32_t* n)
+{
+    sim->requests.fetch_add(1, std::memory_order_relaxed);
+    sim_sending& r = node.r;
+    r.len = answer(sim, node, request, length, functional, r.data);
+    if (r.len == 0) {
+        return;
+    }
+    r.fate = decide(sim, node, request, length, r.data, r.len);
+    uint32_t flags = 0;
+    int64_t delay = 0;
+    switch (r.fate) {
+    case ecuio_sim_fate::silent:
+        return;
+    case ecuio_sim_fate::pending: {
+        const uint8_t wait[3] = {0x7F, request[0], 0x78};
+        put_reply(replies, capacity, n, node.reply_id, ECUIO_SIM_REPLY_PENDING,
+                  0, wait, sizeof wait);
+        delay = ECUIO_SIM_PENDING_US;
+        break;
+    }
+    case ecuio_sim_fate::late:
+        flags = ECUIO_SIM_REPLY_LATE;
+        delay = ECUIO_SIM_LATE_US;
+        break;
+    case ecuio_sim_fate::bad_sequence:
+        flags = ECUIO_SIM_REPLY_BAD_SEQUENCE;
+        break;
+    case ecuio_sim_fate::stalled:
+        flags = ECUIO_SIM_REPLY_STALLED;
+        break;
+    case ecuio_sim_fate::intact:
+        break;
+    }
+    put_reply(replies, capacity, n, node.reply_id, flags, delay, r.data, r.len);
+    sent(sim, r);
+}
+
 /* An ask's clock catches up at most this much a call, tick by tick; a
  * longer step moves the ECU's time without stepping the drive cycle
  * through it */
@@ -493,41 +535,7 @@ ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
         if (!functional && request_id != node.request_id) {
             continue;
         }
-        sim->requests.fetch_add(1, std::memory_order_relaxed);
-        sim_sending& r = node.r;
-        r.len = answer(sim, node, request, length, functional, r.data);
-        if (r.len == 0) {
-            continue;
-        }
-        r.fate = decide(sim, node, request, length, r.data, r.len);
-        uint32_t flags = 0;
-        int64_t delay = 0;
-        switch (r.fate) {
-        case ecuio_sim_fate::silent:
-            continue;
-        case ecuio_sim_fate::pending: {
-            const uint8_t wait[3] = {0x7F, request[0], 0x78};
-            put_reply(replies, capacity, &n, node.reply_id,
-                      ECUIO_SIM_REPLY_PENDING, 0, wait, sizeof wait);
-            delay = ECUIO_SIM_PENDING_US;
-            break;
-        }
-        case ecuio_sim_fate::late:
-            flags = ECUIO_SIM_REPLY_LATE;
-            delay = ECUIO_SIM_LATE_US;
-            break;
-        case ecuio_sim_fate::bad_sequence:
-            flags = ECUIO_SIM_REPLY_BAD_SEQUENCE;
-            break;
-        case ecuio_sim_fate::stalled:
-            flags = ECUIO_SIM_REPLY_STALLED;
-            break;
-        case ecuio_sim_fate::intact:
-            break;
-        }
-        put_reply(replies, capacity, &n, node.reply_id, flags, delay, r.data,
-                  r.len);
-        sent(sim, r);
+        ask_node(sim, node, request, length, functional, replies, capacity, &n);
     }
     *count = n;
     return ECUIO_OK;
