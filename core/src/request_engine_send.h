@@ -290,13 +290,17 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 /* Microseconds until the engine next has something to do: a wait
  * ending, or a channel's floor passing while it has something to send
  * (with only its rotation left, a focus's next sweep, when that is
- * later); 0 when something is due now, INT64_MAX when nothing is. */
+ * later); 0 when something is due now, INT64_MAX when nothing is. The
+ * channels with a bit in skip are left out. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
-                                          int64_t now_us)
+                                          int64_t now_us, uint32_t skip = 0)
 {
     int64_t next = INT64_MAX;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
+        if (((skip >> c) & 1u) != 0) {
+            continue;
+        }
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
             ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&

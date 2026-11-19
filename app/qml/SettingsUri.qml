@@ -211,7 +211,7 @@ Item {
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
                   "pack", "packframes", "scan", "gap", "session", "keepalive_ms", "profile",
-                  "did"],
+                  "did", "hold"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
                    "pack", "packframes", "scan", "gap", "session", "keepalive_ms", "profile",
                    "did"],

@@ -154,6 +154,9 @@ struct ecuio_request {
                              it, which a focus's end restores */
     uint8_t swept;        /* 1: counted in its channel's sweep under way (a
                              focus's minimum time, ecuio_engine_count_sweep) */
+    uint8_t reply_frames; /* a table row's last answer in CAN frames (a
+                             negative one is one), 0 before any
+                             (reply_segmented) */
 };
 
 struct ecuio_scan_entry {
@@ -165,12 +168,13 @@ struct ecuio_scan_entry {
 };
 
 struct ecuio_engine_channel {
-    int32_t outstanding = ECUIO_ENGINE_NONE;   /* a table index, the
-                                                * one-shot, or none */
-    int64_t deadline_us = 0;    /* when that request's wait ends */
+    int64_t deadline_us = 0;    /* when the outstanding request's wait ends */
     int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
     int64_t walk_until_us = 0;  /* the walk's budget ends (walk_timed) */
+    int32_t outstanding = ECUIO_ENGINE_NONE; /* a table index, the one-shot,
+                                              * or none (after the int64s:
+                                              * the padding check) */
     uint32_t cursor = 0;        /* where the fast class resumes */
     uint32_t slow_cursor = 0;   /* where the slow class resumes */
     uint32_t fast_run = 0;      /* fast requests since the last slow one,

@@ -128,6 +128,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp
+    test_reply_segmented.cpp test_j2534_hold.cpp test_j2534_hold_session.cpp
     test_sim_car.cpp test_sim_timing.cpp)
 
 target_include_directories(test_obd2 PRIVATE
@@ -2556,6 +2557,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
     )
