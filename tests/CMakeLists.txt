@@ -2035,6 +2035,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_store_migration.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
+        ../app/recordingview_queries.cpp
         ../app/recordingview_stretches.cpp
         ../app/recordingview_conditions.cpp
         ../app/recordingview_internal.h
