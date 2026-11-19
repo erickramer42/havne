@@ -134,9 +134,11 @@ void check_values(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
 void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
 {
     ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
     bool sid_seen[256] = {};
     for (uint32_t i = 0; i < count; ++i) {
         check(ecuio_plugin_service(a, i, &sv) == ECUIO_OK);
+        check(sv.struct_size == sizeof sv && sv.flags == 0);
         check(!sid_seen[sv.sid]);
         sid_seen[sv.sid] = true;
         check(sv.sub_count <= ECUIO_PLUGIN_MAX_SUBS);
@@ -158,6 +160,8 @@ void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
         check(sv.reserved[0] == 0 && sv.reserved[1] == 0);
     }
     check(ecuio_plugin_service(a, count, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+    sv.struct_size = sizeof sv - 1;
+    check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
 }
 
 /* Each security level on one of the group's ECUs, once, inside its
@@ -166,9 +170,11 @@ void check_levels(const ecuio_plugin_t* a, uint32_t count,
                   const std::vector<uint32_t>& ecus, const bool* sub_27)
 {
     ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
     std::vector<ecuio_plugin_security_level_t> levels;
     for (uint32_t i = 0; i < count; ++i) {
         check(ecuio_plugin_security_level(a, i, &lv) == ECUIO_OK);
+        check(lv.struct_size == sizeof lv && lv.flags == 0);
         bool listed = false;
         for (const uint32_t known : ecus) {
             listed = listed || known == lv.rx_id;
@@ -191,6 +197,8 @@ void check_levels(const ecuio_plugin_t* a, uint32_t count,
     }
     check(ecuio_plugin_security_level(a, count, &lv) ==
           ECUIO_ERR_INVALID_ARGUMENT);
+    lv.struct_size = sizeof lv - 1;
+    check(ecuio_plugin_security_level(a, 0, &lv) == ECUIO_ERR_INVALID_ARGUMENT);
 }
 
 /* Each ECU the module talks to, once: one of the plugin's, so a channel
@@ -250,7 +258,9 @@ void check_conversation(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     ecuio_plugin_conversation_ecu_t ecu{};
     ecu.struct_size = sizeof ecu;
     ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
     ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
     if ((tiers & ECUIO_PLUGIN_TIER_CONVERSATION) == 0) {
         check(s == ECUIO_ERR_INVALID_ARGUMENT);
         check(ecuio_plugin_conversation_ecu(a, 0, &ecu) ==

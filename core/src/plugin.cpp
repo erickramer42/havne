@@ -333,10 +333,13 @@ ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (plugin->conversation == nullptr ||
-        index >= plugin->conversation->services.size()) {
+        index >= plugin->conversation->services.size() ||
+        out->struct_size < sizeof(ecuio_plugin_service_t)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    *out = plugin->conversation->services[index];
+    ecuio_plugin_service_t service = plugin->conversation->services[index];
+    service.struct_size = sizeof(ecuio_plugin_service_t);
+    *out = service;
     return ECUIO_OK;
 }
 
@@ -348,10 +351,13 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (plugin->conversation == nullptr ||
-        index >= plugin->conversation->levels.size()) {
+        index >= plugin->conversation->levels.size() ||
+        out->struct_size < sizeof(ecuio_plugin_security_level_t)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    *out = plugin->conversation->levels[index];
+    ecuio_plugin_security_level_t level = plugin->conversation->levels[index];
+    level.struct_size = sizeof(ecuio_plugin_security_level_t);
+    *out = level;
     return ECUIO_OK;
 }
 
