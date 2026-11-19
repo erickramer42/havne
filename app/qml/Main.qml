@@ -550,7 +550,7 @@ ApplicationWindow {
                         onAlertRequested: condition => root.openAlertDraft(condition)
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
-                        driveTabBarHeight: tabBar.height
+                        driveTabBarHeight: tabSlot.bar.height
                         driveInsetTop: zoomRoot.insetTop
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)
@@ -595,89 +595,9 @@ ApplicationWindow {
             // keeps its own height), then a gap and the system's bottom
             // inset, all in the bar's color, so a tap low on a tab never
             // reaches Back or Home beside it
-            Item {
-                visible: root.isCompact
-                Layout.fillWidth: true
-                Layout.preferredHeight: root.driving ? 0 : tabBar.height
-                z: 1
-                TabBar {
-                    id: tabBar
-                    objectName: "tabBar"
-                    visible: !root.driving || root.barsShown > 0
-                    width: parent.width
-                    height: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
-                    y: root.driving ? -height * root.barsShown : 0
-                    spacing: 0
-                    // The bar's height already holds the bottom inset, painted in
-                    // its color: the style pads none of it again
-                    topPadding: 0
-                    bottomPadding: 0
-                    leftPadding: 0
-                    rightPadding: 0
-
-                    background: Rectangle {
-                        objectName: "tabBarBackground"
-                        color: Theme.surface
-                        Rectangle {
-                            objectName: "tabBarHairline"
-                            anchors { left: parent.left; right: parent.right; top: parent.top }
-                            height: 1
-                            color: Theme.hairline
-                        }
-                    }
-
-                    // The page decides the mark: on the Log no tab is marked, and
-                    // TabBar's index at -1 leaves the last checked and deaf to a tap
-                    Repeater {
-                        model: root.tabs
-                        delegate: TabButton {
-                            id: btn
-                            required property var modelData
-                            objectName: "tab_" + modelData.page
-                            text: modelData.label
-                            implicitHeight: Theme.touchTarget
-                            checked: stack.currentIndex === modelData.page
-                            onClicked: {
-                                // A tab in the drive view's revealed bar is Exit drive
-                                if (root.driving)
-                                    dashboardView.drivePart.leaveDrive(true)
-                                root.gotoPage(modelData.page)
-                            }
-                            // A narrow bar (a small window, or a phone zoomed far
-                            // in) gets smaller labels, and one that still doesn't
-                            // fit elides inside its tab: labels never run together
-                            leftPadding: 4
-                            rightPadding: 4
-                            contentItem: Label {
-                                objectName: "tabLabel_" + btn.modelData.page
-                                text: btn.text
-                                font.pixelSize: btn.width < 64 ? Theme.fontCaption : Theme.fontBody
-                                font.weight: btn.checked ? Font.DemiBold : Font.Normal
-                                color: btn.checked ? Theme.text : Theme.textDim
-                                elide: Text.ElideRight
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            // The active tab is marked, so selection doesn't rest
-                            // on color alone
-                            background: Rectangle {
-                                color: "transparent"
-                                border.width: btn.visualFocus ? 2 : 0
-                                border.color: Theme.text
-                                Rectangle {
-                                    objectName: "tabMark_" + btn.modelData.page
-                                    visible: btn.checked
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.top: parent.top
-                                    width: 32
-                                    height: 3
-                                    color: Theme.nightActive ? Theme.text : Theme.primary
-                                }
-                            }
-                        }
-                    }
-                }
-                BarTouch { y: tabBar.y; width: tabBar.width; height: tabBar.height; visible: tabBar.visible }
+            MainTabBar {
+                id: tabSlot
+                host: root
             }
             // With no tab bar (the sidebar's width), the pages keep off
             // the bottom inset
