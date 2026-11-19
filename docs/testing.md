@@ -31,7 +31,7 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 **Hardware and vehicles**
 - Real hardware has met the adapters on hand and one car: no other vendor's J2534 driver, no second car, no 29-bit addressing, no BLE adapter. They aren't on hand.
 - The x64 surrogate has run only against the x64 fake: the one J2534 adapter on hand ships an x86 DLL.
-- Each diagnostic feature has met one ECU, or two in one session: identification, trouble codes (none stored), clearing (none stored), the probe, `uds-generic` (default session), the extended session (Known Issue #44), listening beside another tester (Known Issue #41). The car is one.
+- Each diagnostic feature has met one ECU, or two in one session: identification, trouble codes (none stored), clearing (none stored), the probe, `uds-generic` (default session), the extended session, listening beside another tester (Known Issue #41). The car is one.
 - "Response pending" and other refusal codes are tested against the fakes only: the car never sent them.
 - A plugin hasn't met a car, and the analysis log has run on a car over ELM327 only, not J2534 or SocketCAN.
 - Another vendor's J2534 read and write statuses, and a hard read failure mid-session with the adapter still enumerated, haven't been seen: only the VX is on hand.

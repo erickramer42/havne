@@ -671,8 +671,9 @@ One row per pinned behavior, with the test that pins it and the evidence, groupe
   Tester present held it through quiet gaps
   ([2026-11-11-quiet-session-car](bench-sessions/2026-11-11-quiet-session-car.md)),
   but no module's session has been read back and no DID that exists
-  only in the extended session has been read, and the closes are
-  tested against the fakes but not yet on a car (Known Issue #44;
+  only in the extended session has been read. The closes, through both
+  adapters, left one `10 01` and one `50 01` each
+  ([2026-11-18-session-close-car](bench-sessions/2026-11-18-session-close-car.md);
   BENCH prep #36 in
   [bench-prep.md](bench-sessions/bench-prep.md)).
 - **Listening to another tester has met two adapters.** The MX+'s
