@@ -71,7 +71,9 @@ extern "C" {
  * Flow Control to the first Consecutive Frame, cf the module's least gap
  * between Consecutive Frames, the tester's STmin when that is longer
  * (each 0 to 1000000). @<reply ID> aims an item at one module, in place
- * of the key's item for every module; at most 32 aims for each key.
+ * of the key's item for every module; at most 32 aims for each key. A
+ * key may come again: its later items replace earlier ones, and its aims
+ * count together.
  * With none of them, a reply starts at once and its frames go at the
  * tester's pace.
  *

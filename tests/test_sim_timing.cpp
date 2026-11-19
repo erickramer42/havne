@@ -255,8 +255,8 @@ TEST(SimTimingTest, TheKeysBadFormsAreRefused)
               "reply ID 11-bit hex");
 }
 
-// At most 32 aims for each key, and the three keys' together however
-// often a key comes
+// At most 32 aims for each key, counted across every time the key comes,
+// so a repeated key holds no more
 TEST(SimTimingTest, TheAimsAreBounded)
 {
     std::string items;
@@ -266,9 +266,11 @@ TEST(SimTimingTest, TheAimsAreBounded)
     parsed("mock://sim?fc=" + items);
     EXPECT_EQ(refusal("mock://sim?fc=" + items + ",1@7E8"),
               "fc: more than 32 items aimed at a module");
-    const std::string four = "mock://sim?fc=" + items + "&cf=" + items +
-                             "&fc=" + items + "&cf=0@7E8";
-    EXPECT_EQ(refusal(four), "cf: more than 32 items aimed at a module");
+    parsed("mock://sim?fc=" + items + "&cf=" + items + "&delay=1:2@7E8");
+    EXPECT_EQ(refusal("mock://sim?fc=" + items + "&fc=1@7E8"),
+              "fc: more than 32 items aimed at a module");
+    EXPECT_EQ(refusal("mock://sim?cf=" + items + "&fc=" + items + "&cf=0@7E8"),
+              "cf: more than 32 items aimed at a module");
 }
 
 // The unbound ask's replies carry each module's timing: the draw, fc and

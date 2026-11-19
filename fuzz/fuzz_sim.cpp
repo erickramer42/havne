@@ -33,7 +33,16 @@ void check_one(const ecuio_sim_timing::sim_timing& t)
 
 void check_timing(const ecuio_sim_timing::timings& t)
 {
-    if (t.count > 3 * ecuio_sim_timing::AIMED_MAX) {
+    using ecuio_sim_timing::AIMED_KEYS;
+    using ecuio_sim_timing::AIMED_MAX;
+    uint32_t aimed = 0;
+    for (uint32_t k = 0; k < AIMED_KEYS; ++k) {
+        if (t.aimed[k] > AIMED_MAX) {
+            abort();
+        }
+        aimed += t.aimed[k];
+    }
+    if (t.count != aimed) {
         abort();
     }
     check_one(t.all);

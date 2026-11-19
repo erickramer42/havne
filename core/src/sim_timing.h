@@ -60,12 +60,15 @@ struct aim {
     int64_t b = 0; /* delay's p99 */
 };
 
-constexpr uint32_t AIMED_MAX = 32; /* for each of the three keys */
+/* Aims for each key, counted across every time the key comes */
+constexpr uint32_t AIMED_MAX = 32;
+constexpr uint32_t AIMED_KEYS = 3;
 
 struct timings {
     sim_timing all;
     uint32_t count = 0;
-    aim items[3 * AIMED_MAX];
+    uint32_t aimed[AIMED_KEYS] = {}; /* each key's aims among items */
+    aim items[AIMED_KEYS * AIMED_MAX];
 };
 
 /* The timing of the module answering on reply_id: every module's, each
@@ -340,11 +343,13 @@ inline void refuse_item(knob what, const char* item, size_t len, char* why,
 } // namespace detail
 
 /* One of delay=, fc= or cf= (what) into *t: its untargeted item sets
- * every module's, each aimed one joins t's aims; false with why */
+ * every module's (a later one in place of an earlier), each aimed one
+ * joins t's aims, at most AIMED_MAX for the key however often it comes;
+ * false with why */
 inline bool parse_key(knob what, const char* text, size_t len, timings* t,
                       char* why, size_t why_cap)
 {
-    uint32_t aimed_here = 0;
+    uint32_t& aimed_here = t->aimed[static_cast<uint8_t>(what)];
     size_t at = 0;
     while (at < len) {
         size_t end = at;
@@ -366,8 +371,7 @@ inline bool parse_key(knob what, const char* text, size_t len, timings* t,
             } else {
                 t->all.cf_us = static_cast<uint32_t>(a.a);
             }
-        } else if (aimed_here == AIMED_MAX || t->count == 3 * AIMED_MAX) {
-            /* a key may come again: the total holds the array */
+        } else if (aimed_here == AIMED_MAX) {
             std::snprintf(why, why_cap,
                           "%s: more than %u items aimed at a module",
                           detail::name_of(what), AIMED_MAX);
