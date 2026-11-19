@@ -256,11 +256,37 @@ $listing = [ordered]@{ download = "$name.zip"; purpose = 'APPLICATION'; componen
 Write-Host "components: $(@($components).Count) listed for the SBOM"
 
 # ---- Zip and checksum
+# Entries in ordinal order, every one dated SOURCE_DATE_EPOCH (the
+# commit's time; 1980 when unset, the zip format's earliest), at a fixed
+# compression level, so two builds of one commit zip to the same bytes
+# (ADR-0035). Compress-Archive writes the file system's times and order.
+function New-ReproducibleZip([string] $Folder, [string] $Zip) {
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $epoch = if ($env:SOURCE_DATE_EPOCH) { [long] $env:SOURCE_DATE_EPOCH } else { 315532800 }
+    $stamp = [DateTimeOffset]::FromUnixTimeSeconds([Math]::Max($epoch, 315532800))
+    $base = Split-Path -Parent $Folder
+    $files = Get-ChildItem -LiteralPath $Folder -Recurse -File |
+        ForEach-Object { [pscustomobject]@{ Full = $_.FullName; Entry = $_.FullName.Substring($base.Length + 1).Replace([string][char]92, '/') } } |
+        Sort-Object -Property Entry -CaseSensitive
+    $fs = [IO.File]::Open($Zip, 'CreateNew')
+    try {
+        $za = New-Object IO.Compression.ZipArchive($fs, [IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($f in $files) {
+                $e = $za.CreateEntry($f.Entry, [IO.Compression.CompressionLevel]::Optimal)
+                $e.LastWriteTime = $stamp
+                $in = [IO.File]::OpenRead($f.Full)
+                try { $o = $e.Open(); try { $in.CopyTo($o) } finally { $o.Dispose() } } finally { $in.Dispose() }
+            }
+        } finally { $za.Dispose() }
+    } finally { $fs.Dispose() }
+}
+
 $sums = ''
 foreach ($folder in $name, $symName) {
     $zip = Join-Path $out "$folder.zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
-    Compress-Archive -Path (Join-Path $out $folder) -DestinationPath $zip
+    New-ReproducibleZip -Folder (Join-Path $out $folder) -Zip $zip
     $hash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
     $sums += "$hash  $folder.zip`n"
     Write-Host "$folder.zip $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB, sha256 $hash"
