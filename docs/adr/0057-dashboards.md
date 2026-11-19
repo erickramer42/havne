@@ -1627,3 +1627,12 @@ The appendix "the bridge and the hub as built" says
 the plugin store, then the replay's own files. The signal store is gone
 ([ADR-0064](0064-one-store.md), step 6): it asks the plugin store, then
 the replay's own files.
+
+## Note: pages a plugin carries (2026-11-18)
+
+A plugin may carry pages of this record's layout file, one page for one
+form each ([ADR-0052](0052-plugin-framework.md)'s appendix "pages a
+plugin carries"). Core checks only a page's envelope; its cells are the
+reading rules of "the layout file" above, in the app and in `havne-cli
+layout check`. A page added from a plugin is the user's copy, and its
+gauges bind by their references as any cell's do.

@@ -451,6 +451,27 @@ and ELM327.
 > ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
 > Through an ELM327 it has met only the fake.
 
+> **Amended 2026-11-18 (a pack sized by its reply's frames):** a URI key,
+> `?packframes=<n>` (1 to 15, decimal), caps the CAN frames a pack's
+> reply may take; without it a pack carries up to six PIDs, as before.
+> The engine knows a pack's reply length from its PIDs' own lengths, so
+> the gather stops before the PID that would pass the limit, which heads
+> the next pack: set order and the classes' rounds stay, and a PID whose
+> own reply passes the limit goes alone. `packframes=1` packs only what
+> fits one Single Frame: six bytes of records, three one-byte PIDs or a
+> two-byte and a one-byte. The transports send what they did; ELM327's
+> count digit follows the reply's frames, so a one-frame pack is typed
+> with `1`. Two places want it: the VX in ELM mode, which prints its
+> prompt one `AT ST` timeout after any reply of more than one frame
+> ([ADR-0056](0056-analysis-log.md)'s appendix of 2026-11-08: a pack
+> 100-113 ms against 21 ms for one PID), and a two-module VX session,
+> whose second module's replies Known Issue #42 loses while the first's
+> segmented reply comes in. `?packframes=` is refused where nothing
+> packs: with `?pack=0`, `?probe=0` or `?poll=`. There is no default
+> limit: whether `packframes=1` becomes the VX's default in ELM mode, or
+> a two-module J2534 session's, waits for a car run's figures.
+> `RequestPackTest`, `Elm327PackTest`, `J2534PackTest`.
+
 **The adapters.** J2534 adapters do the ISO-TP framing of a longer
 reply; ELM327's response-count digit (`elm327_response_count`) counts
 frames, so the engine passes the expected reply length (from the

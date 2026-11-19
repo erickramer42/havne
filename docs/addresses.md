@@ -55,7 +55,7 @@ adapter that doesn't answer, an interface that is down.
 | `serial` | no | no | yes | no | no |
 | `flags` | no | no | no | no | yes |
 | `filter` | no | no | yes | yes | yes |
-| `txid`, `poll`, `probe`, `identify`, `pack`, `scan`, `session`, `keepalive_ms` | no | no | yes | requesting only | yes |
+| `txid`, `poll`, `probe`, `identify`, `pack`, `packframes`, `scan`, `session`, `keepalive_ms` | no | no | yes | requesting only | yes |
 
 "Requesting only" on `socketcan://` means a profile that asks an ECU
 (`obd2`, `uds-generic`, or a signal file's or a plugin's that declares
@@ -293,6 +293,7 @@ They shape what Havne asks the car.
 | `identify` | `0` or `1` | 1 | Read the VIN, calibration IDs and other identification at the start. Off with `poll`, and only in a session that asks something. |
 | `diagnose` | `0` or `1` | 1 | Read trouble codes, readiness and the freeze frame at the start. Off with `poll`, and only in a session that asks something. |
 | `pack` | `0` or `1` | 1 | Ask several Service 01 PIDs in one request, when the car answers that way. Only with the probe on. `0` asks one PID per request. |
+| `packframes` | 1 to 15 | no limit | The most CAN frames a packed request's reply may take: `1` packs only what fits one frame. For an adapter that is slow after a reply of several frames. Refused with `pack=0`, `probe=0` or `poll=`. |
 | `scan` | `turns` or `first` | `turns` | With `uds-generic` ranges: `turns` alternates the scan with the polled DIDs, `first` asks the whole scan before polling. `first` is refused with any other profile. |
 | `session` | `01` or `03` | `01` | With `uds-generic`: `03` enters the extended diagnostic session before the reads, keeps it alive, and returns to the default session at the end. A module that refuses it is read in the default session, with the refusal named. `01` sends no session request. `03` is refused with any other profile. The value is a number, so `3` and `0x03` are `03`. |
 | `keepalive_ms` | 500 to 4500 | 2000 | How long with nothing sent before a tester-present goes out. Needs `session=03`. |
@@ -325,6 +326,17 @@ plays, not a session to read one with.
   reply), `late`, `pending` (a "response pending" first, then the
   reply), `bad_sequence` and `stalled`. The last two touch only replies
   of more than one frame. It isn't the replay session's `faults`.
+  A fault can be aimed at one module by its reply ID,
+  `faults=late:3@7EA` (at most 32 aims for the key), and each module
+  counts its own.
+- `delay=<p50 us>:<p99 us>`, `fc=<us>` and `cf=<us>` make the simulated
+  car answer at a car's pace: `delay=` draws each reply's time to its
+  first frame from a log-normal through the median and the 99th
+  percentile (the 99th at most 10 s), `fc=` is the time from the
+  tester's Flow Control to the first Consecutive Frame, and `cf=` a
+  module's least gap between Consecutive Frames (each at most 1 s).
+  `seed=<n>` repeats a run. Each takes `@<reply ID>` to aim at one
+  module. With none of them the car answers as before.
 
 `havne-cli --help` gives the command's own flags (`--on`, `--elm327`,
 `--desk-bus` and the rest).
