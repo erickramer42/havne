@@ -112,7 +112,8 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   pack     0 or 1: several Service 01 PIDs per request (ADR-0039
  *            Appendix A), on by default with the probe
  *   packframes 1..15, decimal: the most CAN frames a pack's reply may
- *            take; absent, no limit; never with ?pack=0
+ *            take; absent, no limit; never with ?pack=0, ?probe=0 or
+ *            ?poll=, which pack nothing
  *   scan     turns or first: uds-generic's DID scan taking turns with
  *            the rotation (the default), or asked back to back with the
  *            rotation waiting until it ends (ADR-0020)

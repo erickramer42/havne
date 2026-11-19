@@ -3252,6 +3252,10 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?packframes= needs a frame count from 1 to 15, not '0'"},
         {uri("?pack=0&packframes=1"), ECUIO_ERR_BAD_URI,
          "?packframes= sizes Service 01 packs: it can't go with ?pack=0"},
+        {uri("?probe=0&packframes=2"), ECUIO_ERR_BAD_URI,
+         "?packframes= sizes Service 01 packs: it can't go with ?probe=0"},
+        {uri("?poll=0x0C&packframes=1"), ECUIO_ERR_BAD_URI,
+         "?packframes= sizes Service 01 packs: it can't go with ?poll="},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "

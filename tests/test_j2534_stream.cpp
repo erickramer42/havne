@@ -455,6 +455,19 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "?packframes= sizes Service 01 packs: it can't go with "
                  "?pack=0");
+    /* ?probe=0 and ?poll= pack nothing either */
+    snprintf(uri, sizeof(uri), "j2534://%s?probe=0&packframes=2",
+             FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?packframes= sizes Service 01 packs: it can't go with "
+                 "?probe=0");
+    snprintf(uri, sizeof(uri), "j2534://%s?poll=0x0C&packframes=1",
+             FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?packframes= sizes Service 01 packs: it can't go with "
+                 "?poll=");
 
     /* Both values are taken, with any profile, and every gap from 0 to
      * the most. */
@@ -463,7 +476,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
           "?profile=raw&identify=0", "?identify=1&probe=0",
           "?profile=raw&diagnose=0", "?diagnose=1", "?gap=0", "?gap=1000",
           "?profile=raw&gap=20", "?packframes=1", "?packframes=15",
-          "?probe=0&packframes=2"}) {
+          "?probe=1&pack=1&packframes=2"}) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
         EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
     }

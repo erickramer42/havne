@@ -911,7 +911,7 @@ ecuio_status_t ecuio_session_create(
             break;
     }
     if (const ecuio_uri::param* bad = ecuio_uri::first_unknown(query, keys)) {
-        char known[256]; /* the longest list (ELM327's), with room to grow */
+        char known[ECUIO_QUERY_KEYS_TEXT_MAX];
         join_keys(keys, known, sizeof(known));
         ecuio_detail_set("%s takes no query key '%.*s', only %s", scheme,
                          static_cast<int>(bad->key_len), bad->key, known);

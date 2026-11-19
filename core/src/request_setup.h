@@ -199,6 +199,21 @@ inline void ecuio_focus_unasked(const ecuio_signal_set_t* set,
     }
 }
 
+/* ?packframes= sizes Service 01 packs, so it is refused (the detail set)
+ * where nothing packs: e->pack's rule below, ?pack=0, ?probe=0 or ?poll= */
+inline bool ecuio_pack_frames_fit(const request_params& params)
+{
+    if (params.pack_frames == 0 ||
+        (params.pack && params.probe && !params.has_poll)) {
+        return true;
+    }
+    ecuio_detail_set("?packframes= sizes Service 01 packs: it can't go with %s",
+                     !params.pack    ? "?pack=0"
+                     : !params.probe ? "?probe=0"
+                                     : "?poll=");
+    return false;
+}
+
 /* The requests, into e (initialized here for chan_count channels):
  *   ?poll=        -> that one Service 01 request; the set's rotation
  *                    isn't built, so the PID in the URI is the only one
@@ -298,9 +313,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                          "it needs ?session=03");
         return ECUIO_ERR_BAD_URI;
     }
-    if (params.pack_frames != 0 && !params.pack) {
-        ecuio_detail_set("?packframes= sizes Service 01 packs: it can't go "
-                         "with ?pack=0");
+    if (!ecuio_pack_frames_fit(params)) {
         return ECUIO_ERR_BAD_URI;
     }
     if (params.session == ECUIO_SESSION_EXTENDED) {
