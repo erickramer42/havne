@@ -29,7 +29,6 @@ app/storemigration.cpp	moveFiles
 cli/clear_run.h	run_clear
 cli/cmd_check.cpp	run_conditions_check
 cli/cmd_health.cpp	run_health_session
-cli/cmd_log.cpp	run_log
 cli/cmd_sim.cpp	run_sim_elm327
 cli/cmd_stream.cpp	run_stream
 cli/cmd_view.cpp	run_view
