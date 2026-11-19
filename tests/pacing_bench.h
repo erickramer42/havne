@@ -6,7 +6,7 @@
 // The request engine driven on a simulated clock: a model of a
 // transport's worker asks the engine as that worker does, each request
 // crosses one simulated bus, the simulated ECU answers it
-// (ecuio_sim_ask) with each module's reply timing (pacing_timing.h), and
+// (ecuio_sim_ask) with each module's reply timing (sim_timing.h's draw), and
 // each reply's frames cross the bus in their airtime, first come first
 // served. The replies go through the session's own decoder into
 // havne-cli log's tally (cli/summary_lines.h), so a run gives the log's
@@ -21,7 +21,6 @@
 #ifndef ECUIO_TESTS_PACING_BENCH_H
 #define ECUIO_TESTS_PACING_BENCH_H
 
-#include "pacing_timing.h"
 #include "summary_lines.h"
 
 #include "elm327_protocol.h"
@@ -31,6 +30,7 @@
 #include "request_setup.h"
 #include "request_turns.h"
 #include "session.h"
+#include "sim_timing.h"
 
 #include "ecuio/core.h"
 #include "ecuio/sim.h"
@@ -43,6 +43,11 @@
 #include <vector>
 
 namespace pacing {
+
+using ecuio_sim_timing::inverse_normal;
+using ecuio_sim_timing::sim_timing;
+using ecuio_sim_timing::sim_timing_draw;
+using ecuio_sim_timing::sim_timing_rng;
 
 enum class adapter { j2534, socketcan, elm327 };
 

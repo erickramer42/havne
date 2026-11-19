@@ -2,9 +2,10 @@
 // Testing: UNIT: PacingTest (test_pacing)
 //
 // tests/pacing_bench.h: the request engine on a simulated clock against
-// the simulated car, and tests/pacing_timing.h's draw. The figures are the
-// model's, uncalibrated: the bounds pin the engine's pacing against the
-// model's timing, so a change to the floor or the rotation moves them.
+// the simulated car, and the draw it takes from core/src/sim_timing.h.
+// The figures are the model's, uncalibrated: the bounds pin the engine's
+// pacing against the model's timing, so a change to the floor or the
+// rotation moves them.
 
 #include "pacing_bench.h"
 
