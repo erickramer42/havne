@@ -715,28 +715,7 @@ Page {
 
         // A baseline whose folder was moved or deleted says so, on the list
         // and in the viewer, with the way to clear it
-        RowLayout {
-            objectName: "baselineGoneRow"
-            visible: root.baselineGone && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-            Label {
-                objectName: "baselineGone"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.warning
-                text: qsTr("%1's baseline recording is gone: its folder was moved or deleted.")
-                          .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
-            }
-            ThemedButton {
-                objectName: "clearBaseline"
-                compact: true
-                text: qsTr("Clear it")
-                Accessible.name: qsTr("Clear %1's baseline").arg(root.pickedVehicle !== null
-                                                                 ? root.pickedVehicle.label : "")
-                onClicked: openPart.clearBaseline()
-            }
-        }
+        RecordingBaselineGone { id: recordingBaselineGone; host: root }
 
         RecordingList {
             id: recordingList
