@@ -107,6 +107,27 @@ TEST(RequestEngineTest, ARowsLastAnswerSetsItsFrames)
     EXPECT_TRUE(segmented(e, 0));
 }
 
+/* Out of step (after a timeout) a negative reply may be the late answer
+ * to the row that timed out, of the same service: it teaches the row now
+ * out nothing */
+TEST(RequestEngineTest, ALateNegativeReplyOutOfStepTeachesNothing)
+{
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    const uint8_t a[3] = {0x22, 0x1E, 0x00};
+    const uint8_t b[3] = {0x22, 0x1E, 0x01};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, a, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 0, b, 3), ecuio_engine_add_result::added);
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += 200 * kMs;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_FALSE(e.chans[0].in_step);
+    e.requests[1].reply_frames = 3;
+    ASSERT_EQ(ask(&e, 0, now, {0x7F, 0x22, 0x31}), 1);
+    EXPECT_EQ(e.requests[1].reply_frames, 3u) << "the refusal may be row 0's";
+}
+
 /* A pack's reply is its records' lengths added: 7 bytes one frame, 8
  * two, 20 three */
 TEST(RequestEngineTest, APacksFramesAreItsRecordsLengths)

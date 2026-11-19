@@ -253,7 +253,8 @@ inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
                                               uint8_t code, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (out >= 0) {
+    /* Out of step a negative reply may be another row's */
+    if (out >= 0 && ch.in_step) {
         e->requests[out].reply_frames = 1; /* 7F <sid> <code> */
     }
     if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
