@@ -82,9 +82,9 @@ Rectangle {
             axisH: root.host.phoneShape && root.host.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
             panes: { max: root.host.paneLimit, minH: ChartLayout.paneMinH,
                      shares: root.host.paneShares, ranges: root.host.paneRanges,
-                     assign: root.host.assignRows(),
+                     assign: root.host.panesPart.assignRows(),
                      mixedLabel: qsTr("mixed") } })
-        onDrawnChanged: root.host.notePanes(drawn)
+        onDrawnChanged: root.host.panesPart.notePanes(drawn)
         // Findings as bars along the plot's foot and the conditions in two
         // rows over them, the picked condition tinted, markers as dashed
         // lines with their labels, the cursors as solid lines over
@@ -278,7 +278,7 @@ Rectangle {
         onActiveScaleChanged: {
             if (!active || activeScale <= 0) return
             if (pane >= 0) {
-                root.host.setPaneRange(startPane.key,
+                root.host.panesPart.setPaneRange(startPane.key,
                                   ChartLayout.scaledRange(startPane, startY, 1 / activeScale))
                 return
             }
@@ -311,7 +311,7 @@ Rectangle {
                 const l = chart.drawn
                 const i = l ? ChartLayout.paneAt(l, event.y - chart.y) : -1
                 if (i >= 0 && l.panes[i].axis)
-                    root.host.setPaneRange(l.panes[i].key,
+                    root.host.panesPart.setPaneRange(l.panes[i].key,
                                       ChartLayout.scaledRange(l.panes[i], event.y - chart.y, factor))
                 return
             }
@@ -333,10 +333,10 @@ Rectangle {
         onLongPressed: {
             const at = chartTap.point.position
             // A press on a value label offers its signal's pane, on any form
-            const labeled = root.host.labelRowAt(at.x - chart.x, at.y - chart.y)
+            const labeled = root.host.panesPart.labelRowAt(at.x - chart.x, at.y - chart.y)
             if (labeled >= 0) {
                 held = true
-                root.host.openPaneMenu(labeled, chart)
+                root.host.panesPart.openPaneMenu(labeled, chart)
                 return
             }
             if (!root.host.phoneShape || at.x - chart.x < root.host.plotLeft())
@@ -358,7 +358,7 @@ Rectangle {
         // A double-click or double-tap maximizes it, or gives the
         // signals back (on an axis or a seam, root.doubleTapAt);
         // the two taps of a thumb may land a little apart
-        onDoubleTap: root.host.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
+        onDoubleTap: root.host.panesPart.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
     }
 
     // On the desktop a drag on a pane's axis pans its range (a
@@ -386,7 +386,7 @@ Rectangle {
                 }
                 onActiveTranslationChanged: {
                     if (active && startRange)
-                        root.host.setPaneRange(startRange.key, ChartLayout.pannedRange(
+                        root.host.panesPart.setPaneRange(startRange.key, ChartLayout.pannedRange(
                             startRange, startRange.h, activeTranslation.y))
                 }
             }
@@ -425,7 +425,7 @@ Rectangle {
                 onActiveChanged: if (active) startHeights = root.host.paneBoxes.map(b => b.h)
                 onActiveTranslationChanged: {
                     if (active && startHeights.length > seam.index + 1)
-                        root.host.setPaneShares(startHeights.length, ChartLayout.seamShares(
+                        root.host.panesPart.setPaneShares(startHeights.length, ChartLayout.seamShares(
                             startHeights, seam.index, activeTranslation.y, ChartLayout.paneMinH))
                 }
             }
@@ -544,7 +544,7 @@ Rectangle {
                 width: 8
                 height: 8
                 radius: 2
-                color: Theme.seriesColor(root.host.slotOf(stripRow.modelData.index))
+                color: Theme.seriesColor(root.host.panesPart.slotOf(stripRow.modelData.index))
             }
             Label {
                 objectName: "stripName"

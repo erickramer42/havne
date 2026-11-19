@@ -77,9 +77,9 @@ ListView {
                 readonly property bool shown: root.host.plotted[signalRow.signalIndex] === true
                 implicitWidth: 10; implicitHeight: 10
                 radius: 2
-                color: shown ? Theme.seriesColor(root.host.slotOf(signalRow.signalIndex)) : "transparent"
+                color: shown ? Theme.seriesColor(root.host.panesPart.slotOf(signalRow.signalIndex)) : "transparent"
                 border.width: 1
-                border.color: shown ? Theme.seriesColor(root.host.slotOf(signalRow.signalIndex))
+                border.color: shown ? Theme.seriesColor(root.host.panesPart.slotOf(signalRow.signalIndex))
                                     : Theme.textDim
                 opacity: shown ? 1.0 : 0.5
             }
@@ -153,8 +153,8 @@ ListView {
                 Layout.preferredHeight: Theme.touchTarget
                 Layout.alignment: Qt.AlignVCenter
                 Accessible.name: qsTr("Pane of %1: %2").arg(signalRow.modelData.name)
-                                     .arg(root.host.paneLabelOf(signalRow.signalIndex))
-                onClicked: root.host.openPaneMenu(signalRow.signalIndex, paneButton)
+                                     .arg(root.host.panesPart.paneLabelOf(signalRow.signalIndex))
+                onClicked: root.host.panesPart.openPaneMenu(signalRow.signalIndex, paneButton)
             }
             // The compared recording's, at the cursor
             Label {

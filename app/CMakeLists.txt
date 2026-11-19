@@ -116,6 +116,7 @@ qt_add_qml_module(app_ui
         qml/RecordingZoomRow.qml
         qml/RecordingSignalRows.qml
         qml/RecordingFramesView.qml
+        qml/RecordingPanes.qml
         qml/RecordingReport.qml
         qml/RecordingFrameTest.qml
         qml/RecordingAbout.qml
