@@ -520,4 +520,18 @@ TEST(PacingTest, TheDrawsFixedVectors)
         got.push_back(pacing::sim_timing_draw(t, rng));
     }
     EXPECT_EQ(got, (std::vector<int64_t>{6352, 6622, 2326, 1854, 2248}));
+
+    /* another module's generator, and another seed */
+    const auto five = [&t](uint64_t seed, uint32_t reply_id) {
+        auto g = pacing::sim_timing_rng(seed, reply_id);
+        std::vector<int64_t> v;
+        for (int i = 0; i < 5; ++i) {
+            v.push_back(pacing::sim_timing_draw(t, g));
+        }
+        return v;
+    };
+    EXPECT_EQ(five(1, 0x7E9),
+              (std::vector<int64_t>{7344, 1638, 2645, 4478, 2293}));
+    EXPECT_EQ(five(7, 0x7E8),
+              (std::vector<int64_t>{2689, 6248, 4034, 5173, 2489}));
 }

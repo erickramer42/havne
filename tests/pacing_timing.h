@@ -126,7 +126,8 @@ inline int64_t sim_timing_draw(const sim_timing& t, std::mt19937_64& rng)
         return 0;
     }
     const uint64_t x = rng();
-    const double u = (static_cast<double>(x >> 11) + 0.5) * 0x1.0p-53;
+    /* 52 bits, so u + its half never rounds to 1.0 (an infinite z) */
+    const double u = (static_cast<double>(x >> 12) + 0.5) * 0x1.0p-52;
     const double mu = std::log(static_cast<double>(t.p50_us));
     const double sigma = t.p99_us > t.p50_us
                              ? std::log(static_cast<double>(t.p99_us) /
