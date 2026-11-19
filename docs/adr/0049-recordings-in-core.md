@@ -1288,6 +1288,10 @@ chart shared as `app/qml/StripChart.qml`.
   own, ended at its last whole second when columns are a second or
   wider, so no sample is lost or counted twice
   (`RecordingViewTest.AWindowFromBeforeTheStartCountsEverySampleOnce`).
+
+  *Amended 2026-11-18:* the compared recording's signal drawn beside one
+  is its pair (ADR-0065's appendix "step 3 as built"): the signal of its
+  key, else of its name when each recording has that name once.
   The two pulls of `tests/fixtures/recording/` align at the times the
   CLI's goldens give.
 - **Marks.** While a session records, the header's Mark writes
