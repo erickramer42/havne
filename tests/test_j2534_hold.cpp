@@ -826,9 +826,9 @@ TEST(J2534HoldTest, OffThePassIsThePlainOneToTheLinksCounts)
         ecuio_engine_sent(&run.e, 1, 1, true, 0); /* its wait ends at 100 */
     };
     const int64_t now = ECUIO_ENGINE_WAIT_US;
-    const auto fail = [now](Run& run, uint32_t c, int32_t r) {
+    const auto fail = [](Run& run, uint32_t c, int32_t r) {
         link_on_write(run.h, false);
-        ecuio_engine_sent(&run.e, c, r, false, now);
+        ecuio_engine_sent(&run.e, c, r, false, ECUIO_ENGINE_WAIT_US);
     };
     Run plain;
     ASSERT_NO_FATAL_FAILURE(make(plain));
