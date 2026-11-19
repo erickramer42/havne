@@ -125,6 +125,28 @@ qt_add_qml_module(app_ui
         qml/RecordingZoomRow.qml
         qml/RecordingSignalRows.qml
         qml/RecordingFramesView.qml
+        qml/RecordingBaselineGone.qml
+        qml/RecordingRefresh.qml
+        qml/RecordingKeys.qml
+        qml/RecordingSplitter.qml
+        qml/RecordingSpanLine.qml
+        qml/RecordingDetailRow.qml
+        qml/RecordingEvents.qml
+        qml/RecordingWatchers.qml
+        qml/RecordingViews.qml
+        qml/RecordingDialogs.qml
+        qml/RecordingViewerTitle.qml
+        qml/RecordingCompare.qml
+        qml/RecordingDecode.qml
+        qml/RecordingRowInfo.qml
+        qml/RecordingFormat.qml
+        qml/RecordingTexts.qml
+        qml/RecordingSeries.qml
+        qml/RecordingCursors.qml
+        qml/RecordingOpen.qml
+        qml/RecordingPanes.qml
+        qml/RecordingReport.qml
+        qml/RecordingFrameTest.qml
         qml/RecordingAbout.qml
         qml/RecordingList.qml
         qml/RecordingImportPanel.qml

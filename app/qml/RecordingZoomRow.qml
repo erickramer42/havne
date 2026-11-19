@@ -47,7 +47,7 @@ ColumnLayout {
             compact: Theme.dense
             text: qsTr("All")
             Layout.maximumWidth: 72
-            onClicked: root.host.showAll()
+            onClicked: root.host.cursorsPart.showAll()
         }
         ThemedButton {
             objectName: "zoomOut"
@@ -55,7 +55,7 @@ ColumnLayout {
             text: "−"
             Layout.maximumWidth: 48
             Accessible.name: qsTr("Zoom out")
-            onClicked: root.host.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 2)
+            onClicked: root.host.cursorsPart.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 2)
         }
         ThemedButton {
             objectName: "zoomIn"
@@ -63,7 +63,7 @@ ColumnLayout {
             text: "+"
             Layout.maximumWidth: 48
             Accessible.name: qsTr("Zoom in")
-            onClicked: root.host.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 0.5)
+            onClicked: root.host.cursorsPart.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 0.5)
         }
         ThemedButton {
             objectName: "frameTest"
@@ -72,7 +72,7 @@ ColumnLayout {
             enabled: !root.host.frameTesting
             text: qsTr("Frame test")
             Layout.maximumWidth: 120
-            onClicked: root.host.startFrameTest()
+            onClicked: root.host.frameTestPart.startFrameTest()
         }
         // On a phone the hint wraps onto two caption lines where the
         // row leaves it little width, instead of eliding to "Tap for …"
@@ -89,7 +89,7 @@ ColumnLayout {
             color: Theme.textDim
             text: !root.host.hasCursor ? (Theme.compact ? qsTr("Tap for values")
                                                    : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
-                                  : qsTr("At %1").arg(root.host.timeText(root.host.cursorMs, true))
+                                  : qsTr("At %1").arg(root.host.formatPart.timeText(root.host.cursorMs, true))
         }
         RowLayout {
             id: spanRowDesktop
@@ -104,7 +104,7 @@ ColumnLayout {
             Layout.maximumWidth: 84
             Accessible.name: root.host.chartMaximized ? qsTr("Show the signals again")
                                                  : qsTr("Give the chart the page")
-            onClicked: root.host.toggleMaximized()
+            onClicked: root.host.refreshPart.toggleMaximized()
         }
     }
 

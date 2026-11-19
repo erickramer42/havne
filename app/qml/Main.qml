@@ -167,7 +167,7 @@ ApplicationWindow {
             return true
         }
         if (currentPage === recordingsPage && recordingsView.viewing) {
-            recordingsView.backToList()
+            recordingsView.openPart.backToList()
             return true
         }
         return false
@@ -294,7 +294,7 @@ ApplicationWindow {
             if (!byUser || root.driving)
                 return
             root.gotoPage(root.recordingsPage)
-            recordingsView.openFolder(folder)
+            recordingsView.openPart.openFolder(folder)
         }
     }
 

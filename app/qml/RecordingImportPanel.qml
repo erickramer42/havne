@@ -37,7 +37,7 @@ ColumnLayout {
             text: qsTr("Import")
             highlighted: true
             enabled: !Bridge.recordingImport.busy && root.host.importReady
-            onClicked: root.host.startImport()
+            onClicked: root.host.openPart.startImport()
         }
         ThemedButton {
             objectName: "importCancel"
@@ -94,7 +94,7 @@ ColumnLayout {
                 onClicked: {
                     root.host.importKind = RecordingImport.Csv
                     if (guessPreview.guess === null && !root.host.importGuessing)
-                        root.host.guessImportFile()
+                        root.host.openPart.guessImportFile()
                 }
             }
             SegmentButton {
@@ -159,7 +159,7 @@ ColumnLayout {
             currentIndex: 0
             onActivated: index => {
                 if (index > 0)
-                    root.host.chooseImportMap(root.host.savedMaps[index - 1].url)
+                    root.host.openPart.chooseImportMap(root.host.savedMaps[index - 1].url)
                 currentIndex = 0
             }
         }
@@ -170,7 +170,7 @@ ColumnLayout {
             Layout.preferredHeight: Theme.touchTarget
             text: qsTr("Use the guess")
             enabled: !Bridge.recordingImport.busy
-            onClicked: root.host.useTheGuess()
+            onClicked: root.host.openPart.useTheGuess()
         }
     }
     Label {
