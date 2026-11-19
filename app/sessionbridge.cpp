@@ -344,6 +344,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_channelCount = 0;
     if (haveInfo) {
         emit logMessage(sessionInfoText(info));
+        if (info.backend == ECUIO_BACKEND_REPLAY) {
+            logReplayMadeUnder(uri);
+        }
         m_channelCount =
             std::min<uint32_t>(info.module_count, ECUIO_MAX_CHANNELS);
     }
