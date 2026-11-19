@@ -418,6 +418,14 @@ def main(argv):
     signals = b"\xef\xbb\xbfhost_us,signal,value,unit\n1500000,RPM,1726,RPM\n"
     write(out, "fuzz_export", "engine-ecu",
           b"F" + events + SEP + signals + SEP + SEP + ecu)
+    # A focus key named twice, holding the harness's scratch folder's
+    # name: the wide CSV's refusal quotes it, which names no folder
+    write(out, "fuzz_export", "focus-twice-folder-word",
+          b"4profile  obd2\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"signal  7E8:410C:2.0:16,RPM,number,RPM,0,1,1\n\n" + SEP +
+          b"host_us,signal,value,unit\n1000000,7E8:410C:2.0:16,900,RPM\n")
 
     # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
     # faults), then what a host sends, CR-ended: python-OBD's opening,
