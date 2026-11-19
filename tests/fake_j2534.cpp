@@ -121,6 +121,7 @@
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
 #include "fake_ecus.h"
+#include "fake_j2534_queue.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -130,21 +131,12 @@
 #include <mutex>
 #include <cstdlib>
 
-#define FAKE_QUEUE_DEPTH 32   /* a read's indication cap and more */
 #define FAKE_FILTER_DEPTH 8
 #define FAKE_CONFIG_DEPTH 16
 #define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
 #define STATUS_FAILED  ECUIO_PT_STATUS_FAILED
 
 namespace fake_j2534 {
-
-struct FrameSlot {
-    unsigned char data[ECUIO_PT_MSG_DATA_SIZE];
-    unsigned long size;
-    unsigned long timestamp_us;
-    unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
-    long long arrives_us;      /* steady clock; reads skip it until then */
-};
 
 struct FilterRecord {
     unsigned long filter_id;
@@ -155,11 +147,7 @@ struct FilterRecord {
     unsigned long mask_len;
 };
 
-std::mutex g_lock;
-std::condition_variable g_arrived;      /* a message was queued */
 int g_handle = 0;                       /* 1 between Open and Close */
-FrameSlot g_queue[FAKE_QUEUE_DEPTH];    /* in arrival order */
-unsigned long g_queue_len = 0;
 
 /* The VX as measured (docs/bench-sessions/2026-10-22.md): its reply
  * latency is the engine ECU's median from indication to reply; with
@@ -270,12 +258,6 @@ unsigned long knob_ms(const char* name, unsigned long fallback)
     return (ms <= 60000) ? ms : fallback;
 }
 
-long long now_us()
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
 /* Whether this process is a surrogate (its exe is
  * ecuio-j2534-surrogate*.exe), the only host ECUIO_FAKE_EXIT_ON_READ
  * may end. */
@@ -295,53 +277,6 @@ bool in_a_surrogate()
 unsigned long vendor_stamp(long long steady_us)
 {
     return static_cast<unsigned long>(steady_us & 0xFFFFFFFFLL);
-}
-
-/* Enqueue into the shared RX FIFO (mutex held by caller), arriving at
- * arrives_us (0: now). The queue stays in arrival order, so a message
- * injected now goes ahead of a reply still on its way. Drops on full
- * exactly like InjectFrame: documented, keeps counts honest. */
-void enqueue_rx_locked(const unsigned char* data, unsigned long size,
-                       unsigned long timestamp_us, unsigned long rx_status,
-                       long long arrives_us = 0)
-{
-    if (g_queue_len >= FAKE_QUEUE_DEPTH) {
-        return;
-    }
-    if (arrives_us == 0) {
-        arrives_us = now_us();
-    }
-    unsigned long i = g_queue_len;
-    while (i > 0 && g_queue[i - 1].arrives_us > arrives_us) {
-        g_queue[i] = g_queue[i - 1];
-        --i;
-    }
-    FrameSlot& slot = g_queue[i];
-    memcpy(slot.data, data, size);
-    slot.size = size;
-    slot.timestamp_us = timestamp_us;
-    slot.rx_status = rx_status;
-    slot.arrives_us = arrives_us;
-    ++g_queue_len;
-    g_arrived.notify_all();
-}
-
-/* How many queued messages have arrived by now: a prefix of the queue. */
-unsigned long arrived_locked(long long now)
-{
-    unsigned long n = 0;
-    while (n < g_queue_len && g_queue[n].arrives_us <= now) {
-        ++n;
-    }
-    return n;
-}
-
-void pop_front_locked(unsigned long n)
-{
-    for (unsigned long i = n; i < g_queue_len; ++i) {
-        g_queue[i - n] = g_queue[i];
-    }
-    g_queue_len -= n;
 }
 
 /* Moves the messages a test queued on the control page into the RX
