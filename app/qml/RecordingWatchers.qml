@@ -46,5 +46,4 @@ Item {
             root.host.frameTest.frames[zooming ? 1 : 0] += 1
         }
     }
-
 }

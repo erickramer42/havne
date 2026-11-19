@@ -222,7 +222,7 @@ TestCase {
         if (data.tag === "recordingsImportGuess") {
             // The guessed map's preview: long header names, a unit to
             // choose, a left-out column, and the notes open
-            page.chooseImportFile(Harness.writeScratchFile(
+            page.openPart.chooseImportFile(Harness.writeScratchFile(
                 "a-logger-export-with-a-long-file-name-2026-11-07.csv", guessFile))
             tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
                       "the guess ends")
@@ -231,7 +231,7 @@ TestCase {
             preview.notesOpen = true
         } else if (importing) {
             const candump = data.tag === "recordingsImportCandump"
-            page.chooseImportFile(Harness.writeScratchFile(
+            page.openPart.chooseImportFile(Harness.writeScratchFile(
                 "a-logger-export-with-a-long-file-name-2026-11-07.csv",
                 candump ? "(1.0) can0 7E8#01
 " : "time,rpm
@@ -245,24 +245,24 @@ TestCase {
                 : "the column map: line 1, column 2: the key 'signal' isn't one a column map takes"
         }
         if (viewer) {
-            page.open(row)
+            page.openPart.open(row)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
             if (data.tag !== "recordingsOpened")
-                page.setCursor(5000)
+                page.cursorsPart.setCursor(5000)
         }
         // Compared with itself, aligned on a rise: every field shown
         if (data.tag === "recordingsCompare") {
-            page.compareWith(row)
+            page.comparePart.compareWith(row)
             tryVerify(() => page.compareAligned, 10000, "the compared one opens")
-            page.setAlignOn("rise")
-            page.setCursor(5000)
+            page.comparePart.setAlignOn("rise")
+            page.cursorsPart.setCursor(5000)
         }
         // Compared with itself, aligned on a pull: both pull choices
         // shown, in the phone viewer's About, where Compare lives
         if (data.tag === "recordingsComparePull") {
-            page.compareWith(row)
+            page.comparePart.compareWith(row)
             tryVerify(() => page.compareAligned, 10000, "the compared one opens")
-            page.setAlignOn("pull")
+            page.comparePart.setAlignOn("pull")
             tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
             if (page.pinnedViewer)
                 page.detailView = "about"
@@ -560,8 +560,8 @@ TestCase {
         const page = v.page
         main.width = data.w
         verify(waitForPolish(main), "laid out")
-        page.setCursor(1000)
-        page.setCursorB(3000)
+        page.cursorsPart.setCursor(1000)
+        page.cursorsPart.setCursorB(3000)
         tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
         verify(waitForPolish(main), "laid out with the span")
         verify(page.pinnedViewer, "pinned")
@@ -655,7 +655,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -706,7 +706,7 @@ TestCase {
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -748,7 +748,7 @@ TestCase {
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -773,7 +773,7 @@ TestCase {
         const right = button.mapToItem(row, button.width, 0).x
         verify(right <= row.width + 0.5, "inside its row: " + right + " of " + row.width)
         verify(button.Accessible.name.indexOf("Pane of ") === 0, button.Accessible.name)
-        page.openPaneMenu(row.signalIndex, button)
+        page.panesPart.openPaneMenu(row.signalIndex, button)
         verify(page.paneMenuItems.length >= 3, "by unit, a pane, a new one")
         compare(page.paneMenuItems[page.paneMenuItems.length - 1].text, "New pane")
     }
@@ -790,7 +790,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -801,9 +801,9 @@ TestCase {
             verify(!find(page, "signalRows").visible, "the rows give way")
             const strip = find(page, "cursorStrip")
             verify(!strip.visible, "no cursor yet: the chart has the width")
-            page.setCursor(5000)
+            page.cursorsPart.setCursor(5000)
             tryVerify(() => strip.visible, 2000, "a cursor: its values beside the chart")
-            page.setCursor(NaN)
+            page.cursorsPart.setCursor(NaN)
             find(page, "maximizeChart").clicked()
         }
         tryVerify(() => find(page, "signalRows").visible, 2000, "the rows are back")
@@ -872,7 +872,7 @@ TestCase {
         main.gotoPage(stackIndex(page))
         const kept = page.chartHeight
         page.chartHeight = -1
-        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.itemAtIndex(0) !== null, 10000, "the recording opens")
@@ -921,7 +921,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -957,7 +957,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -993,7 +993,7 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
+        page.openPart.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/conditions", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -1042,7 +1042,7 @@ TestCase {
             }
         }
         panel.spans = Qt.binding(() => page.conditionList)
-        page.setView(0, 2000)
+        page.cursorsPart.setView(0, 2000)
         mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
         verify(!page.conditionsOpen, "the panel gives the chart back")
         verify(waitForPolish(main), "laid out")
@@ -1086,7 +1086,7 @@ TestCase {
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
         page.chartHeight = -1
-        page.open(row)
+        page.openPart.open(row)
         tryVerify(() => find(page, "signalRows").visible && find(page, "signalRows").itemAtIndex(0) !== null,
                   10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
@@ -1365,8 +1365,8 @@ TestCase {
         verify(!choice.visible, "Values: no choice")
         find(page, "detailView_about").clicked()
         tryCompare(choice, "currentIndex", obd2, 2000, "the choice as decoded when About shows again")
-        page.backToList()
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.backToList()
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "signalRows").visible, 10000, "a recording opened from the list")
         compare(page.detailView, "values", "opens at Values")
@@ -1382,7 +1382,7 @@ TestCase {
         main.height = 384
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
         tryVerify(() => chart.visible, 10000, "the recording opens")
@@ -1424,12 +1424,12 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
         tryVerify(() => chart.visible, 10000, "the recording opens")
         if (!page.chartMaximized)
-            page.toggleMaximized()
+            page.refreshPart.toggleMaximized()
         try {
             verify(waitForPolish(main), "laid out")
             const frames = find(page, "detailView_frames")
@@ -1450,7 +1450,7 @@ TestCase {
         } finally {
             page.detailView = "values"
             if (page.chartMaximized)
-                page.toggleMaximized()
+                page.refreshPart.toggleMaximized()
         }
     }
 
@@ -1465,7 +1465,7 @@ TestCase {
         tryCompare(Theme, "compact", true)
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.chooseImportFile(Harness.writeScratchFile("targets.csv", guessFile))
+        page.openPart.chooseImportFile(Harness.writeScratchFile("targets.csv", guessFile))
         tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
                   "the guess ends")
         const preview = find(page, "guessPreview")
@@ -1879,7 +1879,7 @@ TestCase {
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
         tryVerify(() => chart.visible && chart.width > 300, 10000, "the recording opens")
@@ -1929,12 +1929,12 @@ TestCase {
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(stackIndex(page))
-        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+        page.openPart.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
         tryVerify(() => chart.visible && chart.width > 300, 10000, "the recording opens")
         if (!page.chartMaximized)
-            page.toggleMaximized()
+            page.refreshPart.toggleMaximized()
         verify(page.chartMaximized, "the chart has the page")
         verify(waitForPolish(main), "laid out")
         const y = chart.height / 2
