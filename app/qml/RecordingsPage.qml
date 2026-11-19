@@ -28,6 +28,8 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias rowInfoPart: rowInfoPart
+    readonly property var rowFacts: rowInfoPart.rowFacts
     property alias formatPart: formatPart
     readonly property var valueText: formatPart.valueText
     readonly property var timeText: formatPart.timeText
@@ -593,6 +595,8 @@ Page {
 
     RecordingFormat { id: formatPart; host: root }
 
+    RecordingRowInfo { id: rowInfoPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -989,41 +993,6 @@ Page {
             recording.open(recording.folder)
         else
             recording.openFrames(recording.folder, value)
-    }
-
-    // A row's length, whether it is a log of chosen signals or a whole
-    // session, its signal count and its marks
-    function rowFacts(row) {
-        const parts = []
-        if (row.durationMs >= 0)
-            parts.push(formatPart.lengthText(row.durationMs))
-        if (row.log)
-            parts.push(row.signals === 1 ? qsTr("log, 1 signal") : qsTr("log, %1 signals").arg(row.signals))
-        else if (row.frames !== false)
-            parts.push(qsTr("session"))
-        else if (row.signals > 0)
-            parts.push(row.signals === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(row.signals))
-        if (row.marks > 0)
-            parts.push(row.marks === 1 ? qsTr("1 mark") : qsTr("%1 marks").arg(row.marks))
-        return parts.join(" · ")
-    }
-
-    // A row's second line: the address it was recorded from and the
-    // profile it replays under, the profile only where the address
-    // doesn't name it already. A row without frames (a CSV import's
-    // values) has nothing to replay; a row that doesn't say has
-    function rowDetail(row) {
-        if (row.frames === false)
-            return qsTr("values alone: the recording has no frames to replay")
-        if (row.source === "")
-            return qsTr("replays as %1").arg(row.profile)
-        // The address's own profile, or its scheme's default (mock:// is mock)
-        const m = /[?&]profile=([^&]*)/.exec(row.source)
-        const own = m !== null ? decodeURIComponent(m[1])
-                  : row.source.toLowerCase().startsWith("mock://") ? "mock" : ""
-        if (own === row.profile)
-            return row.source
-        return qsTr("%1 · replays as %2").arg(row.source).arg(row.profile)
     }
 
     function infoText() {

@@ -63,7 +63,7 @@ ListView {
                 Label {
                     objectName: "recordingFacts"
                     visible: text !== ""
-                    text: root.host.rowFacts(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowFacts(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideRight
@@ -71,7 +71,7 @@ ListView {
                 }
                 Label {
                     objectName: "recordingDetail"
-                    text: root.host.rowDetail(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowDetail(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideMiddle
