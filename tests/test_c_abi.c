@@ -251,14 +251,20 @@ typedef char abi_plugin_conversation_ecu_id_check
 typedef char abi_plugin_conversation_ecu_flags_check
     [(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44) ? 1 : -1];
 typedef char
-    abi_plugin_service_size_check[(sizeof(ecuio_plugin_service_t) == 24) ? 1
+    abi_plugin_service_size_check[(sizeof(ecuio_plugin_service_t) == 32) ? 1
                                                                          : -1];
 typedef char abi_plugin_service_subs_check
-    [(offsetof(ecuio_plugin_service_t, subs) == 2) ? 1 : -1];
+    [(offsetof(ecuio_plugin_service_t, subs) == 6) ? 1 : -1];
+typedef char abi_plugin_service_flags_check
+    [(offsetof(ecuio_plugin_service_t, flags) == 20) ? 1 : -1];
 typedef char abi_plugin_level_size_check
-    [(sizeof(ecuio_plugin_security_level_t) == 32) ? 1 : -1];
+    [(sizeof(ecuio_plugin_security_level_t) == 40) ? 1 : -1];
+typedef char abi_plugin_level_level_check
+    [(offsetof(ecuio_plugin_security_level_t, level) == 8) ? 1 : -1];
 typedef char abi_plugin_level_delay_check
-    [(offsetof(ecuio_plugin_security_level_t, delay_ms) == 8) ? 1 : -1];
+    [(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12) ? 1 : -1];
+typedef char abi_plugin_level_flags_check
+    [(offsetof(ecuio_plugin_security_level_t, flags) == 20) ? 1 : -1];
 typedef char abi_plugin_value_line_check[(offsetof(ecuio_plugin_value_t, line) == 12) ? 1 : -1];
 typedef char abi_plugin_value_signal_check[(offsetof(ecuio_plugin_value_t, signal) == 16) ? 1 : -1];
 typedef char abi_plugin_value_def_check[(offsetof(ecuio_plugin_value_t, def) == 64) ? 1 : -1];
@@ -876,6 +882,10 @@ int main(void)
         about.struct_size = sizeof about;
         memset(&talk, 0, sizeof talk);
         talk.struct_size = sizeof talk;
+        memset(&service, 0, sizeof service);
+        service.struct_size = sizeof service;
+        memset(&level, 0, sizeof level);
+        level.struct_size = sizeof level;
         if (ecuio_plugin_load(kTalker, sizeof kTalker - 1, NULL, NULL,
                               &plugin) != ECUIO_OK) {
             return 1;
@@ -893,14 +903,16 @@ int main(void)
              ecuio_plugin_conversation_ecu(plugin, 1, &ecu) ==
                  ECUIO_ERR_INVALID_ARGUMENT &&
              ecuio_plugin_service(plugin, 1, &service) == ECUIO_OK &&
-             service.sid == 0x27u && service.sub_count == 2u &&
-             service.subs[0] == 0x03u && service.subs[1] == 0x04u &&
+             service.struct_size == sizeof service && service.sid == 0x27u &&
+             service.sub_count == 2u && service.subs[0] == 0x03u &&
+             service.subs[1] == 0x04u &&
              ecuio_plugin_service(plugin, 2, &service) ==
                  ECUIO_ERR_INVALID_ARGUMENT &&
              ecuio_plugin_security_level(plugin, 0, &level) == ECUIO_OK &&
-             level.rx_id == 0x7E8u && level.level == 0x03u &&
-             level.seed_bytes == 4u && level.key_bytes == 8u &&
-             level.delay_ms == 10000u && level.key_window_ms == 500u &&
+             level.struct_size == sizeof level && level.rx_id == 0x7E8u &&
+             level.level == 0x03u && level.seed_bytes == 4u &&
+             level.key_bytes == 8u && level.delay_ms == 10000u &&
+             level.key_window_ms == 500u &&
              ecuio_plugin_security_level(plugin, 1, &level) ==
                  ECUIO_ERR_INVALID_ARGUMENT;
         if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {

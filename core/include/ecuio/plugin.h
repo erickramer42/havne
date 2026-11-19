@@ -298,24 +298,28 @@ typedef struct ecuio_plugin_conversation_ecu {
 
 /* A service the module may cause core to send */
 typedef struct ecuio_plugin_service {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
     uint8_t sid;
     uint8_t sub_count; /* 0: the service isn't declared by sub-function */
-    uint8_t subs[ECUIO_PLUGIN_MAX_SUBS]; /* those declared, in the manifest's
-                                            order */
-    uint32_t reserved[2];                /* zero */
+    /* the sub-functions declared, in the manifest's order */
+    uint8_t subs[ECUIO_PLUGIN_MAX_SUBS];
+    uint32_t flags;       /* zero */
+    uint32_t reserved[2]; /* zero; ABI growth space */
 } ecuio_plugin_service_t;
 
-/* A security-access level the module computes a key for */
+/* A security-access level the module computes a key for: level is the
+ * seed request's sub-function and the key's is the next */
 typedef struct ecuio_plugin_security_level {
+    uint32_t struct_size;   /* the caller's sizeof, at least this one's */
     uint32_t rx_id;         /* the ECU's response ID */
-    uint8_t level;          /* the seed request's sub-function, odd; the key's
-                           is the next */
+    uint8_t level;          /* the seed request's sub-function, odd */
     uint8_t seed_bytes;     /* the seed's length */
     uint8_t key_bytes;      /* the key's, 1 to ECUIO_PLUGIN_KEY_MAX */
     uint8_t reserved0;      /* zero */
     uint32_t delay_ms;      /* the least wait after a refused key */
     uint32_t key_window_ms; /* how long the module has to give the key */
-    uint32_t reserved[4];   /* zero */
+    uint32_t flags;         /* zero */
+    uint32_t reserved[4];   /* zero; ABI growth space */
 } ecuio_plugin_security_level_t;
 
 #if defined(__cplusplus)
@@ -329,12 +333,20 @@ static_assert(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12,
               "plugin conversation ecu id offset is ABI");
 static_assert(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44,
               "plugin conversation ecu flags offset is ABI");
-static_assert(sizeof(ecuio_plugin_service_t) == 24,
+static_assert(sizeof(ecuio_plugin_service_t) == 32,
               "ecuio_plugin_service_t size is ABI");
-static_assert(sizeof(ecuio_plugin_security_level_t) == 32,
+static_assert(offsetof(ecuio_plugin_service_t, subs) == 6,
+              "plugin service subs offset is ABI");
+static_assert(offsetof(ecuio_plugin_service_t, flags) == 20,
+              "plugin service flags offset is ABI");
+static_assert(sizeof(ecuio_plugin_security_level_t) == 40,
               "ecuio_plugin_security_level_t size is ABI");
-static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 8,
+static_assert(offsetof(ecuio_plugin_security_level_t, level) == 8,
+              "plugin security level level offset is ABI");
+static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
               "plugin security level delay_ms offset is ABI");
+static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
+              "plugin security level flags offset is ABI");
 #endif
 
 /* The conversation tier's part of plugin. ECUIO_ERR_NULL_ARGUMENT for a
@@ -353,7 +365,8 @@ ecuio_plugin_conversation_ecu(const ecuio_plugin_t* plugin, uint32_t index,
                               ecuio_plugin_conversation_ecu_t* out);
 
 /* The index-th declared service, and the index-th security level: getters
- * by index against service_count and level_count, as above. */
+ * by index against service_count and level_count, with the ECU getter's
+ * refusals, a struct_size smaller than the struct among them. */
 ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
                                     uint32_t index,
                                     ecuio_plugin_service_t* out);

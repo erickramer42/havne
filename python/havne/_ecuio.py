@@ -1218,6 +1218,7 @@ ecuio_plugin_page_t._fields_ = [
     ('path', (c_char * 128)),
 ]
 ecuio_plugin_security_level_t._fields_ = [
+    ('struct_size', c_uint32),
     ('rx_id', c_uint32),
     ('level', c_uint8),
     ('seed_bytes', c_uint8),
@@ -1225,12 +1226,15 @@ ecuio_plugin_security_level_t._fields_ = [
     ('reserved0', c_uint8),
     ('delay_ms', c_uint32),
     ('key_window_ms', c_uint32),
+    ('flags', c_uint32),
     ('reserved', (c_uint32 * 4)),
 ]
 ecuio_plugin_service_t._fields_ = [
+    ('struct_size', c_uint32),
     ('sid', c_uint8),
     ('sub_count', c_uint8),
     ('subs', (c_uint8 * 14)),
+    ('flags', c_uint32),
     ('reserved', (c_uint32 * 2)),
 ]
 ecuio_plugin_value_t._fields_ = [
