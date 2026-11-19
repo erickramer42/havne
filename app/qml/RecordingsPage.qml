@@ -219,43 +219,12 @@ Page {
     // press in the plot takes the focus back from it (chartTap)
     readonly property bool boxFocused: root.Window.activeFocusItem !== null
                                        && root.Window.activeFocusItem.popup !== undefined
-    // F on a keyboard; a text field takes its own letters first
-    Shortcut {
-        sequence: "F"
-        enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
-                 && !root.boxFocused
-        onActivated: root.toggleMaximized()
-    }
     // The arrows step a cursor a sample of the snap's signal, B says which
     // cursor they move, Home and End go to the recording's ends
     readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
                                        && !Theme.mobile
     readonly property bool editKeys: cursorKeys && !root.boxFocused
-    Shortcut {
-        sequence: "Left"
-        enabled: root.cursorKeys
-        onActivated: cursorsPart.stepCursor(false)
-    }
-    Shortcut {
-        sequence: "Right"
-        enabled: root.cursorKeys
-        onActivated: cursorsPart.stepCursor(true)
-    }
-    Shortcut {
-        sequence: "Home"
-        enabled: root.editKeys
-        onActivated: cursorsPart.cursorToEnd(false)
-    }
-    Shortcut {
-        sequence: "End"
-        enabled: root.editKeys
-        onActivated: cursorsPart.cursorToEnd(true)
-    }
-    Shortcut {
-        sequence: "B"
-        enabled: root.editKeys
-        onActivated: root.arrowsMoveB = root.hasCursorB && !root.arrowsMoveB
-    }
+    RecordingKeys { id: recordingKeys; host: root }
     // The splitter below the chart: its height once dragged, -1 for the
     // page's own (the default), kept between runs
     Settings {
