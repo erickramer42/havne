@@ -25,6 +25,7 @@
 #include "summary_lines.h"
 
 #include "elm327_protocol.h"
+#include "isotp.h"
 #include "request_engine.h"
 #include "request_setup.h"
 #include "request_turns.h"
@@ -134,12 +135,6 @@ struct bench_result {
 // stuffing: about 120 bits
 inline constexpr int64_t kFrameUs = 240;
 
-// The frames an ISO-TP message of len bytes takes (classic CAN)
-inline uint32_t isotp_frames_of(uint32_t len)
-{
-    return len <= 7 ? 1u : 1u + (len - 6u + 6u) / 7u;
-}
-
 // A Service 01 bitmap reply (41 <base> b1..b4) rewritten to list only the
 // supported PIDs, its last bit set while one past its range is listed
 inline void filter_bitmap(uint8_t* data, uint32_t len,
@@ -162,6 +157,24 @@ inline void filter_bitmap(uint8_t* data, uint32_t len,
         bits[3] |= 0x01;
     }
     std::memcpy(data + 2, bits, 4);
+}
+
+// The test car's engine ECU: the Service 01 PIDs its bitmaps list to 0x60
+// (docs/bench-sessions/2026-10-22-vehicle.md), 0x60 the last read
+inline std::vector<uint8_t> test_car_pids()
+{
+    std::vector<uint8_t> pids;
+    const uint8_t bitmaps[3][4] = {{0xFE, 0x7F, 0xA8, 0x13},
+                                   {0xA0, 0x17, 0xF0, 0x11},
+                                   {0xFE, 0xD0, 0x8C, 0x81}};
+    for (uint32_t b = 0; b < 3; ++b) {
+        for (uint32_t k = 0; k < 32; ++k) {
+            if (bitmaps[b][k / 8] & (0x80u >> (k % 8))) {
+                pids.push_back(static_cast<uint8_t>(b * 0x20 + k + 1));
+            }
+        }
+    }
+    return pids;
 }
 
 class bench
@@ -490,7 +503,7 @@ inline void bench::on_request(const event& ev)
             filter_bitmap(f.data.data(), static_cast<uint32_t>(f.data.size()),
                           m_cfg.supported);
         }
-        f.frames = isotp_frames_of(replies[i].length);
+        f.frames = isotp_frames(replies[i].length);
         const int64_t delay = sim_timing_draw(m_cfg.timing, m_rng[req.chan]);
         m_flights.push_back(std::move(f));
         at(end + delay + replies[i].delay_us, reply_frame,
