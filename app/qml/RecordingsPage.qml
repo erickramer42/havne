@@ -28,6 +28,9 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias seriesPart: seriesPart
+    readonly property var differencePairs: seriesPart.differencePairs
+    readonly property var series: seriesPart.series
     property alias settle: settle
     property alias framesRefill: framesRefill
     property alias cursorsPart: cursorsPart
@@ -578,6 +581,8 @@ Page {
 
     RecordingCursors { id: cursorsPart; host: root }
 
+    RecordingSeries { id: seriesPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -627,197 +632,6 @@ Page {
                         : qsTr("B %1 · Δ %2").arg(atText(readoutTo[s.index], s)).arg(statChange(stat))
     }
 
-    // What a difference is taken between: a plotted number here and its
-    // pair there in the same unit (the unit's case aside), each with samples
-    function differencePairs() {
-        if (!compareAligned || recording.state !== RecordingView.Open)
-            return []
-        const sigs = recording.signalList
-        const theirs = compare.signalList
-        return sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
-                   .map(s => ({ mine: s.index, theirs: ComparePairs.pairOf(root.comparePairs, s.index) }))
-                   .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
-                                && theirs[p.theirs].samples > 0
-                                && theirs[p.theirs].unit.toLowerCase() === sigs[p.mine].unit.toLowerCase())
-    }
-    // What an answer holds for: the pairs, the offset and the units
-    function differencePairsKey(pairs) {
-        return pairs.map(p => p.mine + ":" + p.theirs).join(",") + "|" + compareOffsetMs
-               + "|" + Bridge.unitSystem
-    }
-    // Asks both recordings for the wanted grid's means, unless it is
-    // answered or asked already
-    function askDifference() {
-        const w = differenceWanted
-        if (!differenceShown || !compareAligned || w === null || w.pairs.length === 0)
-            return
-        if ((difference !== null && difference.key === w.key)
-                || (differenceAsk !== null && differenceAsk.key === w.key))
-            return
-        const refused = differenceRefused !== null && differenceRefused.key === w.key
-                        ? differenceRefused.count : 0
-        if (refused >= 2)
-            return
-        // The grid's ends at whole microseconds, so each column's two spans
-        // lie exactly the offset apart and hold the same samples
-        const t0 = Math.round(w.g0 * 1000) / 1000
-        const t1 = Math.round(w.g1 * 1000) / 1000
-        // A view that refuses (0) answers nothing: the other isn't asked
-        const mine = recording.columnMeans(w.pairs.map(p => p.mine), t0, t1, w.gn)
-        const theirs = mine > 0 ? compare.columnMeans(w.pairs.map(p => p.theirs), t0 - compareOffsetMs,
-                                                      t1 - compareOffsetMs, w.gn) : 0
-        if (mine > 0 && theirs > 0) {
-            differenceRefused = null
-            differenceAsk = { key: w.key, pairsKey: w.pairsKey, pairs: w.pairs, t0: t0, t1: t1,
-                              mine: mine, theirs: theirs, mineMeans: null, theirMeans: null }
-        } else {
-            differenceAsk = null
-            differenceRefused = { key: w.key, count: refused + 1 }
-        }
-    }
-    // One recording's means for the ask under way; with both, the difference
-    function differenceAnswered(here, request, means) {
-        const a = differenceAsk
-        if (a === null || request !== (here ? a.mine : a.theirs))
-            return
-        if (here)
-            a.mineMeans = means
-        else
-            a.theirMeans = means
-        if (a.mineMeans === null || a.theirMeans === null)
-            return
-        differenceAsk = null
-        // A read that failed answers with no rows: no difference to draw
-        const rows = {}
-        if (a.mineMeans.length === a.pairs.length && a.theirMeans.length === a.pairs.length) {
-            for (let k = 0; k < a.pairs.length; ++k) {
-                const m = a.mineMeans[k].means
-                const t = a.theirMeans[k].means
-                const d = []
-                for (let c = 0; c < m.length; ++c)
-                    d.push(t[c] - m[c])
-                rows[a.pairs[k].mine] = d
-            }
-        }
-        difference = { key: a.key, pairsKey: a.pairsKey, t0: a.t0, t1: a.t1, rows: rows }
-        chart.requestPaint()
-    }
-    function setDifferenceShown(on) {
-        differenceShown = on
-        chart.requestPaint()
-    }
-    // Another recording on either side: an answer for the one before
-    // holds for nothing
-    function forgetDifference() {
-        difference = null
-        differenceWanted = null
-        differenceAsk = null
-        differenceRefused = null
-    }
-
-    // The rows a second of a recording's signals at those indexes
-    function rowsEachSecond(list, indexes, lengthMs) {
-        let rows = 0
-        for (const i of indexes)
-            rows += list[i].samples
-        return rows / Math.max(1, lengthMs / 1000)
-    }
-
-    // The chart's series: each plotted number's columns over the view, its
-    // label the cursor's value while that's in view, then the compared
-    // recording's of the same names, dashed. Two pixels a column, or a
-    // second when that would draw more than rawRowsPerFrame rows or hold
-    // more than rawRowsCached
-    function series(widthPx) {
-        if (recording.state !== RecordingView.Open)
-            return []
-        // A plotted signal with no samples in this recording has nothing to
-        // draw here, so its columns aren't read; its pair in the compared
-        // recording still draws. With nothing drawn the chart says so
-        const sigs = recording.signalList
-        const plotted = sigs.filter(s => !s.isText && root.plotted[s.index]).map(s => s.index)
-        if (plotted.length === 0)
-            return []
-        const indexes = plotted.filter(i => sigs[i].samples > 0)
-        const theirs = compareAligned ? compare.signalList : []
-        const pairs = !compareAligned ? []
-            : plotted.map(i => ({ mine: i, theirs: ComparePairs.pairOf(root.comparePairs, i) }))
-                     .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
-                                  && theirs[p.theirs].samples > 0)
-        const spanS = (viewT1 - viewT0) / 1000
-        let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
-        const drawn = rowsEachSecond(sigs, indexes, cursorsPart.durationMs())
-                      + rowsEachSecond(theirs, pairs.map(p => p.theirs), compare.durationMs)
-        const held = Math.max(rowsPerSecond, compareAligned ? compareRowsPerSecond : 0)
-        if (spanS * drawn > rawRowsPerFrame || spanS * held > rawRowsCached)
-            n = Math.max(1, Math.min(n, Math.floor(spanS)))
-        // The labels follow the readout's A, the earlier of the two cursors,
-        // the compared recording's too
-        const fromMs = hasSpan ? spanFromMs : cursorMs
-        const fromInView = fromMs >= viewT0 && fromMs <= viewT1
-        const labelOf = (at, shown) => shown && at && at.text !== "" ? Number(at.text) : NaN
-        // Where that value's sample lies on the axis: a dot marks it
-        const labelMsOf = (at, offset, shown) => shown && at && at.text !== "" && at.atMs >= 0
-                                                 ? at.atMs + offset : NaN
-        // The columns lie on a grid from time 0, not from the view's
-        // start, so a pan carries each column's samples along with it
-        // rather than regrouping them, and a noisy trace's peaks hold
-        // still (Live's slices do the same). One more column covers the
-        // view's ends; the chart cuts it to the view
-        const colMs = (viewT1 - viewT0) / n
-        const g0 = Math.floor(viewT0 / colMs) * colMs
-        const gn = Math.max(1, Math.ceil((viewT1 - g0) / colMs - 1e-9))
-        const g1 = g0 + gn * colMs
-        const out = indexes.length === 0 ? [] : recording.columns(indexes, g0, g1, gn).map(c => {
-            const s = sigs[c.index]
-            return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
-                     slot: panesPart.slotOf(c.index),
-                     scaleKey: c.index, decimals: s.decimals, unit: s.unit,
-                     labelValue: labelOf(root.readoutFrom[c.index], fromInView),
-                     labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
-        })
-        if (pairs.length === 0)
-            return out
-        const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
-                                     g1 - compareOffsetMs, gn)
-        for (let k = 0; k < cols.length; ++k) {
-            const mine = pairs[k].mine
-            const s = theirs[pairs[k].theirs]
-            out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
-                       row: mine, slot: panesPart.slotOf(mine),
-                       scaleKey: mine, dash: Theme.seriesCompareDash(panesPart.slotOf(mine)), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
-                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
-        }
-        if (!differenceShown)
-            return out
-        // Each difference in a pane of its own quantity, under the signals'.
-        // The last answer draws where its own columns lie while a newer
-        // grid's is read, which waits for the view to rest
-        const apart = differencePairs()
-        const pairsKey = differencePairsKey(apart)
-        const key = [g0, g1, gn, pairsKey].join("|")
-        if (difference !== null && difference.pairsKey === pairsKey) {
-            for (const p of apart) {
-                const d = difference.rows[p.mine]
-                if (d === undefined)
-                    continue
-                const s = sigs[p.mine]
-                const here = labelOf(root.readoutFrom[p.mine], fromInView)
-                const there = labelOf(root.compareReadout[p.mine], fromInView)
-                out.push({ columns: { lows: d, highs: d, t0: difference.t0, t1: difference.t1 },
-                           row: p.mine, slot: panesPart.slotOf(p.mine), decimals: s.decimals, unit: s.unit,
-                           pane: "difference " + ChartLayout.paneKey(s.unit), pinned: true,
-                           paneLabel: qsTr("Δ %1").arg(s.unit), labelValue: there - here })
-            }
-        }
-        if (differenceWanted === null || differenceWanted.key !== key)
-            differenceWanted = { key: key, pairsKey: pairsKey, pairs: apart, g0: g0, g1: g1, gn: gn }
-        if (!chart.moving)
-            Qt.callLater(root.askDifference)
-        return out
-    }
-
     // The compared recording's values at axis time t, by the first's
     // signal index, each signal's pair
     function compareValuesAt(t) {
@@ -846,7 +660,7 @@ Page {
         compareAligned = false
         compareReadout = ({})
         differenceShown = false
-        forgetDifference()
+        seriesPart.forgetDifference()
         if (recording.state === RecordingView.Open)
             cursorsPart.showAll()
     }
@@ -1379,7 +1193,7 @@ Page {
         objectName: "recordingView"
         unitSystem: Bridge.unitSystem
         onReportSaved: result => reportPart.reportSaved(result)
-        onColumnMeansReady: (request, means) => root.differenceAnswered(true, request, means)
+        onColumnMeansReady: (request, means) => seriesPart.differenceAnswered(true, request, means)
         onStatsReady: (request, stats) => {
             if (request !== root.statsAsk)
                 return
@@ -1407,7 +1221,7 @@ Page {
                 root.align()
         }
         onStateChanged: {
-            root.forgetDifference()
+            seriesPart.forgetDifference()
             root.reportNote = ""
             root.reportFailed = false
             root.pullsHere = null
@@ -1466,7 +1280,7 @@ Page {
         id: compare
         objectName: "compareView"
         unitSystem: Bridge.unitSystem
-        onColumnMeansReady: (request, means) => root.differenceAnswered(false, request, means)
+        onColumnMeansReady: (request, means) => seriesPart.differenceAnswered(false, request, means)
         onStretchesReady: (request, found, ok) => {
             if (request !== root.pullsThereAsk)
                 return
@@ -1477,7 +1291,7 @@ Page {
             root.align()
         }
         onStateChanged: {
-            root.forgetDifference()
+            seriesPart.forgetDifference()
             root.pullsThere = null
             root.pullsThereFailed = false
             root.pullsThereAsk = 0

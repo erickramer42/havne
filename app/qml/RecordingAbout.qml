@@ -254,7 +254,7 @@ ColumnLayout {
             checked: root.host.differenceShown
             Accessible.name: qsTr("Plot the compared recording's difference from this one")
             onToggled: {
-                root.host.setDifferenceShown(!root.host.differenceShown)
+                root.host.seriesPart.setDifferenceShown(!root.host.differenceShown)
                 checked = Qt.binding(() => root.host.differenceShown)
             }
         }

@@ -73,7 +73,7 @@ Rectangle {
         shownH: parent.height - 8 - root.stripHeight
         emptyText: root.host.plottedNoValues.length > 0 ? root.host.reportPart.noValuesText(root.host.plottedNoValues)
                                                    : qsTr("No signals plotted; tick a row to plot it")
-        fetch: function(widthPx) { return root.host.series(widthPx) }
+        fetch: function(widthPx) { return root.host.seriesPart.series(widthPx) }
         layoutOpts: ({
             gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.valueText,
             span: { t0: root.host.viewT0, t1: root.host.viewT1 }, absolute: true,
