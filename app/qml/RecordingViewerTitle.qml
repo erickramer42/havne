@@ -57,7 +57,7 @@ RowLayout {
                 Layout.preferredWidth: Theme.compact ? 1 : -1
                 enabled: root.host.sessionIdle
                 text: root.host.replayText
-                Accessible.name: root.host.replayName(qsTr("Replay the part in view as a session"))
+                Accessible.name: root.host.refreshPart.replayName(qsTr("Replay the part in view as a session"))
                 onClicked: root.host.replayRequested(root.host.openPart.stretchUri())
             }
             ThemedButton {

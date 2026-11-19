@@ -108,7 +108,7 @@ ListView {
                 baseColor: Theme.surface
                 enabled: root.host.sessionIdle
                 Layout.maximumWidth: enabled ? 96 : 160
-                Accessible.name: root.host.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
+                Accessible.name: root.host.refreshPart.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
                 onClicked: root.host.replayRequested(recordingRow.modelData.uri)
             }
         }

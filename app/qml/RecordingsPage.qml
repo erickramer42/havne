@@ -28,6 +28,11 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias refreshPart: refreshPart
+    readonly property var noteHead: refreshPart.noteHead
+    readonly property var readRules: refreshPart.readRules
+    readonly property var refresh: refreshPart.refresh
+    readonly property var toggleMaximized: refreshPart.toggleMaximized
     property alias comparePart: comparePart
     readonly property var compareValuesAt: comparePart.compareValuesAt
     readonly property var compareWith: comparePart.compareWith
@@ -191,11 +196,6 @@ Page {
     readonly property string replayWhy: Relay.running ? qsTr("Stop the relay to replay")
                                       : Bridge.connected ? qsTr("Disconnect to replay") : ""
     readonly property string replayText: replayWhy !== "" ? replayWhy : qsTr("Replay")
-    // A Replay button's spoken name: its own, then the reason it is off
-    function replayName(name) {
-        return replayWhy !== "" ? qsTr("%1: %2").arg(name).arg(replayWhy) : name
-    }
-
     // The chart maximized: it takes the page but for the zoom row, and the
     // cursor's values move to a strip beside it. Kept apart for a short
     // layout (a phone on its side, where it starts maximized) and a tall
@@ -207,12 +207,6 @@ Page {
     // The zoom row's room for the views' switch while maximized: a phone on
     // its side or the desktop; under it the buttons would push the page wide
     readonly property bool switchInZoomRow: column.width >= 480
-    function toggleMaximized() {
-        if (Theme.shortLayout)
-            maximizedShort = !maximizedShort
-        else
-            maximizedTall = !maximizedTall
-    }
     // A focused box (a ComboBox, which keeps Home, End and its letters for its
     // own choice) keeps those keys: told by its `popup`, since a style's box
     // isn't a ComboBox to `instanceof`. Left and Right it doesn't use, and a
@@ -413,12 +407,6 @@ Page {
                                       : aboutShown ? aboutHead
                                       : framesShown ? (framesById ? idsHead : framesHead)
                                       : valuesHead
-    function noteHead(role, head) {
-        if (role === "values") valuesHead = head
-        else if (role === "frames") framesHead = head
-        else if (role === "ids") idsHead = head
-        else aboutHead = head
-    }
     Component {
         id: framesHeadComponent
         ViewHead { role: "frames"; list: viewerFrameTable.list; host: root }
@@ -502,7 +490,7 @@ Page {
     property bool bandsShown: true
     // The Stretches panel's levels: what is in force, the panel above the
     // chart (in its place on a phone), and the words of the last refusal
-    readonly property var stretchRules: readRules(viewerSettings.stretchRules)
+    readonly property var stretchRules: refreshPart.readRules(viewerSettings.stretchRules)
     property bool stretchesOpen: false
     property string rulesProblem: ""
     // The levels the last accepted ask went out with (the stored ones, or
@@ -510,19 +498,6 @@ Page {
     // read in: Compare's ask takes the same, and a change of units asks again
     property var askedRules: ({})
     property int stretchUnits: 0
-    function readRules(text) {
-        try {
-            const v = JSON.parse(text)
-            if (v === null || typeof v !== "object" || Array.isArray(v))
-                return ({})
-            // A stored end that isn't top speed reads as the lift
-            if (v.pullEnd !== undefined && v.pullEnd !== "top-speed")
-                delete v.pullEnd
-            return v
-        } catch (e) {
-            return ({})
-        }
-    }
     // The stretch last jumped to: its kind and its place in that kind's
     // list, -1 for none
     property string jumpKind: ""
@@ -583,11 +558,6 @@ Page {
     RecordingDecode { id: decodePart; host: root }
 
     RecordingCompare { id: comparePart; host: root }
-
-    function refresh() {
-        recordings = Bridge.recentRecordings(recordingsListed)
-        openPart.checkBaseline()
-    }
 
     readonly property bool importReady: importKind === RecordingImport.Candump
                                         || importMap.toString() !== ""
@@ -711,12 +681,14 @@ Page {
     property string reportNote: ""
     property bool reportFailed: false
 
+    RecordingRefresh { id: refreshPart; host: root }
+
     RecordingViews { id: recordingViews; host: root }
 
     RecordingEvents { id: recordingEvents; host: root }
 
-    onVisibleChanged: if (visible && !viewing) refresh()
-    Component.onCompleted: refresh()
+    onVisibleChanged: if (visible && !viewing) refreshPart.refresh()
+    Component.onCompleted: refreshPart.refresh()
 
     RecordingWatchers { id: recordingWatchers; host: root }
 

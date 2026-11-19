@@ -50,7 +50,7 @@ Item {
         // A recording that ended joins the list
         function onRecordingStateChanged() {
             if (!Bridge.recordingActive)
-                root.host.refresh()
+                root.host.refreshPart.refresh()
         }
     }
 }

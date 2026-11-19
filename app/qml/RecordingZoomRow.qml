@@ -104,7 +104,7 @@ ColumnLayout {
             Layout.maximumWidth: 84
             Accessible.name: root.host.chartMaximized ? qsTr("Show the signals again")
                                                  : qsTr("Give the chart the page")
-            onClicked: root.host.toggleMaximized()
+            onClicked: root.host.refreshPart.toggleMaximized()
         }
     }
 

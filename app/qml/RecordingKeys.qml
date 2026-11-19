@@ -16,7 +16,7 @@ Item {
         sequence: "F"
         enabled: root.host.visible && root.host.recording.state === RecordingView.Open && !Theme.mobile
                  && !root.host.boxFocused
-        onActivated: root.host.toggleMaximized()
+        onActivated: root.host.refreshPart.toggleMaximized()
     }
     Shortcut {
         sequence: "Left"

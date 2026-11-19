@@ -147,7 +147,7 @@ Item {
         if (part.host.viewing)
             part.backToList()
         else
-            part.host.refresh()
+            part.host.refreshPart.refresh()
         const row = Bridge.recordingRow(folder)
         if (row.folder !== undefined)
             part.open(row)
@@ -172,7 +172,7 @@ Item {
         part.host.openedTitle = ""
         part.host.openedUri = ""
         part.host.signalFilter.clear()
-        part.host.refresh()
+        part.host.refreshPart.refresh()
     }
 
     // The opened recording's replay:// URI for the part in view

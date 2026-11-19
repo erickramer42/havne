@@ -181,7 +181,7 @@ Item {
                 return "axis"
             }
         }
-        part.host.toggleMaximized()
+        part.host.refreshPart.toggleMaximized()
         return "maximize"
     }
 
