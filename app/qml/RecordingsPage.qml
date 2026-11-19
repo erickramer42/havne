@@ -29,75 +29,24 @@ Page {
 
     // The parts' ids the page reads, and the page's ids the parts read
     property alias refreshPart: refreshPart
-    readonly property var noteHead: refreshPart.noteHead
-    readonly property var readRules: refreshPart.readRules
-    readonly property var refresh: refreshPart.refresh
-    readonly property var toggleMaximized: refreshPart.toggleMaximized
     property alias comparePart: comparePart
-    readonly property var compareValuesAt: comparePart.compareValuesAt
-    readonly property var compareWith: comparePart.compareWith
-    readonly property var stopComparing: comparePart.stopComparing
-    readonly property var applyStretchRules: comparePart.applyStretchRules
-    readonly property var stretchesOf: comparePart.stretchesOf
-    readonly property var setAlignOn: comparePart.setAlignOn
-    readonly property var align: comparePart.align
     property alias decodePart: decodePart
-    readonly property var decodeWith: decodePart.decodeWith
     property alias rowInfoPart: rowInfoPart
-    readonly property var rowFacts: rowInfoPart.rowFacts
     property alias formatPart: formatPart
-    readonly property var valueText: formatPart.valueText
-    readonly property var timeText: formatPart.timeText
-    readonly property var lengthText: formatPart.lengthText
     property alias textsPart: textsPart
-    readonly property var changeText: textsPart.changeText
     property alias seriesPart: seriesPart
-    readonly property var differencePairs: seriesPart.differencePairs
-    readonly property var series: seriesPart.series
     property alias settle: recordingWatchers.settle
     property alias framesRefill: recordingWatchers.framesRefill
     property alias cursorsPart: cursorsPart
-    readonly property var setView: cursorsPart.setView
-    readonly property var zoomAt: cursorsPart.zoomAt
-    readonly property var showAll: cursorsPart.showAll
-    readonly property var snapped: cursorsPart.snapped
-    readonly property var setCursor: cursorsPart.setCursor
-    readonly property var setCursorB: cursorsPart.setCursorB
-    readonly property var clearCursorB: cursorsPart.clearCursorB
-    readonly property var askSpanStats: cursorsPart.askSpanStats
-    readonly property var togglePlotted: cursorsPart.togglePlotted
-    readonly property var plotWidth: cursorsPart.plotWidth
-    readonly property var timeAt: cursorsPart.timeAt
     property alias signalFilter: signalFilter
     property alias openPart: openPart
-    readonly property var chooseImportFile: openPart.chooseImportFile
-    readonly property var chooseImportMap: openPart.chooseImportMap
-    readonly property var clearBaseline: openPart.clearBaseline
-    readonly property var open: openPart.open
-    readonly property var openFolder: openPart.openFolder
-    readonly property var backToList: openPart.backToList
     property alias paneMenu: paneMenu
     property alias panesPart: panesPart
-    readonly property var paneOf: panesPart.paneOf
-    readonly property var assignRows: panesPart.assignRows
-    readonly property var setPaneOf: panesPart.setPaneOf
-    readonly property var openPaneMenu: panesPart.openPaneMenu
-    readonly property var choosePane: panesPart.choosePane
-    readonly property var labelRowAt: panesPart.labelRowAt
-    readonly property var setPaneRange: panesPart.setPaneRange
-    readonly property var setPaneShares: panesPart.setPaneShares
-    readonly property var doubleTapAt: panesPart.doubleTapAt
-    readonly property var slotOf: panesPart.slotOf
     property alias scroller: scroller
     property alias exportPanel: exportPanel
     property alias compare: recordingViews.compare
     property alias reportPart: reportPart
-    readonly property var noValuesText: reportPart.noValuesText
-    readonly property var openExport: reportPart.openExport
-    readonly property var closeExport: reportPart.closeExport
-    readonly property var saveReportTo: reportPart.saveReportTo
     property alias frameTestPart: frameTestPart
-    readonly property var frameTestSignals: frameTestPart.frameTestSignals
     property alias spanStatsHome: spanStatsHome
     property alias recording: recordingViews.recording
     property alias chartFrame: chartFrame
