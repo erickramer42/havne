@@ -65,12 +65,12 @@ Item {
             if (target !== null)
                 return keepPending(target.sha256, target.variant, true)
             importInto = ""
-            host.importVariantField.text = r.variant
+            host.signalsPart.importVariantField.text = r.variant
             return true
         }
         // The field first: its change converts a set that is waiting
         const y = obdbVinYear()
-        host.obdbYearField.text = y > 0 ? String(y) : ""
+        host.signalsPart.obdbYearField.text = y > 0 ? String(y) : ""
         obdbYearFromVin = y > 0
         pendingImport = { kind: "obdb" }
         obdbVehicle = host.ownPart.pickedId
@@ -144,7 +144,7 @@ Item {
         importInto = ""
         replaceTarget = null
         obdbReport = null
-        host.obdbYearField.text = ""   // the set's year, and with it the VIN's mark
+        host.signalsPart.obdbYearField.text = ""   // the set's year, and with it the VIN's mark
         host.picksPart.signalProblem = ""
         host.picksPart.signalNote = ""
     }
@@ -206,14 +206,14 @@ Item {
     // The model year a VIN gives: the lookup's typed one, else the
     // connected car's when it was the picked vehicle, else 0
     function obdbVinYear() {
-        if (host.vinLookupField.text.trim() !== "")
-            return Bridge.vinModelYear(host.vinLookupField.text)
+        if (host.vinLookupPart.vinLookupField.text.trim() !== "")
+            return Bridge.vinModelYear(host.vinLookupPart.vinLookupField.text)
         return host.pickedVehicle !== null && host.pickedVehicle.id === obdbCarVehicle ? obdbCarYear : 0
     }
 
     // The year field as a number: 0 when empty, -1 when it isn't a year
     function obdbYear() {
-        const t = host.obdbYearField.text.trim()
+        const t = host.signalsPart.obdbYearField.text.trim()
         if (t === "")
             return 0
         const y = Number(t)
@@ -230,7 +230,7 @@ Item {
             return false
         const year = obdbYear()
         if (year < 0) {
-            host.picksPart.signalProblem = typing === true && /^[0-9]{1,3}$/.test(host.obdbYearField.text.trim())
+            host.picksPart.signalProblem = typing === true && /^[0-9]{1,3}$/.test(host.signalsPart.obdbYearField.text.trim())
                 ? "" : qsTr("A model year is 1980 to 2039, or empty for none")
             return false
         }
@@ -269,7 +269,7 @@ Item {
         host.picksPart.signalNote = ""
         if (!obdbShown)
             return false
-        const typed = host.obdbYearField.text.trim() !== "" && !obdbYearFromVin
+        const typed = host.signalsPart.obdbYearField.text.trim() !== "" && !obdbYearFromVin
         const r = Bridge.keepObdbPlugin(obdbVehicle, typed)
         if (!r.ok) {
             host.picksPart.signalProblem = r.words

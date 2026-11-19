@@ -131,7 +131,7 @@ TestCase {
 
     function enterOn(s) {
         s.dash.drivePart.enterDrive()
-        verify(s.dash.driving, "the view is on")
+        verify(s.dash.drivePart.driving, "the view is on")
         verify(waitForPolish(s.main), "laid out")
     }
 
@@ -144,7 +144,7 @@ TestCase {
     function revealedOn(s) {
         s.dash.drivePart.driveTap()
         verify(s.dash.drivePart.barsUp, "revealed")
-        tryCompare(s.dash, "barsShown", 1, 2000, "slid in")
+        tryCompare(s.dash.drivePart, "barsShown", 1, 2000, "slid in")
     }
 
     function hideTimer(s) { return find(s.dash, "driveHideTimer") }
@@ -178,7 +178,7 @@ TestCase {
         compare(drive.text, "Connect first", "and it says what it waits for")
         compare(drive.Accessible.name, "Connect first: a session shows the gauges full screen")
         s.dash.drivePart.enterDrive()
-        compare(s.dash.driving, false, "and nothing else enters it")
+        compare(s.dash.drivePart.driving, false, "and nothing else enters it")
     }
 
     function test_theDesktopFormHasNoDriveButton() {
@@ -194,9 +194,9 @@ TestCase {
         s.dash.form = "desktop"
         connect("mock://demo")
         wait(50)
-        compare(s.dash.driving, false, "a remembered view stays on the phone")
+        compare(s.dash.drivePart.driving, false, "a remembered view stays on the phone")
         s.dash.drivePart.enterDrive()
-        compare(s.dash.driving, false, "and nothing else enters it")
+        compare(s.dash.drivePart.driving, false, "and nothing else enters it")
     }
 
     function test_driveIsATouchsSize() {
@@ -218,7 +218,7 @@ TestCase {
         verify(indicator.visible, "two pages show it")
         enterOn(s)
         verify(!indicator.visible, "the view has none")
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         verify(indicator.visible, "and it comes back")
     }
 
@@ -228,7 +228,7 @@ TestCase {
         verify(b.head.visible && b.tab.visible, "both show before")
         verify(!find(s.dash, "driveStatusLine").visible, "no line outside the view")
         mouseClick(find(s.dash, "dashDrive"))
-        verify(s.dash.driving, "Drive enters")
+        verify(s.dash.drivePart.driving, "Drive enters")
         tryCompare(b.head, "visible", false, 2000, "the top bar goes")
         tryCompare(b.tab, "visible", false, 2000, "the tab bar goes")
         verify(!find(s.dash, "resetPeaks").visible, "the tool row goes")
@@ -304,7 +304,7 @@ TestCase {
         const cell = find(s.dash, "dashCell_0_11")
         verify(!note.visible || note.mapToItem(cell, note.width, 0).x <= cell.width + 0.5,
                "the Digits note stays in its cell: " + note.text)
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         tryCompare(view, "pitch", view.squarePitch, 2000, "the square pitch again")
     }
 
@@ -343,7 +343,7 @@ TestCase {
         revealedOn(s)
         verify(!find(s.dash, "dashEdit").visible, "Edit isn't offered")
         s.dash.drivePart.driveTap()    // back to the gauges alone
-        tryCompare(s.dash, "barsShown", 0, 2000)
+        tryCompare(s.dash.drivePart, "barsShown", 0, 2000)
         const cell = find(s.dash, "dashCell_0_0")
         verify(waitForPolish(s.main))
         mousePress(cell)
@@ -401,7 +401,7 @@ TestCase {
         tryCompare(Bridge, "logActive", false, 5000)
         wait(50)
         compare(s.main.currentPage, s.main.dashboardPage, "no jump to the viewer mid-drive")
-        verify(s.dash.driving, "the view stays on")
+        verify(s.dash.drivePart.driving, "the view stays on")
     }
 
     // The stop isn't silent, and the driver who asked for it isn't interrupted
@@ -456,14 +456,14 @@ TestCase {
         verify(s.dash.drivePart.barsHeld, "and holds them")
         verify(!s.dash.drivePart.driveLogEnded, "the status line's words are for Stop log")
         compare(s.main.currentPage, s.main.dashboardPage)
-        verify(s.dash.driving, "the view stays on")
+        verify(s.dash.drivePart.driving, "the view stays on")
     }
 
     function test_leavingClearsTheWords() {
         const s = driven()
         enterOn(s)
         s.dash.drivePart.driveLogEnded = true
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         compare(s.dash.drivePart.driveLogEnded, false)
     }
 
@@ -505,7 +505,7 @@ TestCase {
         const b = bars(s)
         mouseClick(find(s.dash, "dashCell_0_0"))
         verify(s.dash.drivePart.barsUp, "a tap on a gauge reveals")
-        tryCompare(s.dash, "barsShown", 1, 2000)
+        tryCompare(s.dash.drivePart, "barsShown", 1, 2000)
         verify(b.tab.visible && b.tools.visible, "the tab bar and the sheet show")
         verify(!b.head.visible, "the header stays hidden")
         compare(swipe.height, height, "the gauges don't reflow")
@@ -532,7 +532,7 @@ TestCase {
         compare(timer.interval, 4000, "the default")
         timer.triggered()
         verify(!s.dash.drivePart.barsUp, "they slide out")
-        tryCompare(s.dash, "barsShown", 0, 2000)
+        tryCompare(s.dash.drivePart, "barsShown", 0, 2000)
     }
 
     // Pressed over the delay's first part, the delay starts over: the bars
@@ -549,7 +549,7 @@ TestCase {
                                           { target: timer, signalName: "runningChanged" })
         mouseClick(reset)
         compare(resets, 1, "the press went on to Reset peaks")
-        verify(s.dash.driving, "which is no exit")
+        verify(s.dash.drivePart.driving, "which is no exit")
         compare(s.dash.drivePart.barTouches, 1, "a touch on the bars")
         compare(spy.count, 2, "the delay stopped and started again at the touch")
         verify(timer.running)
@@ -586,7 +586,7 @@ TestCase {
         compare(s.dash.drivePart.barTouches, before + 1, "the sheet")
         mouseClick(b.tab, b.tab.width / 2, b.tab.height - 3)
         compare(s.dash.drivePart.barTouches, before + 2, "the tab bar")
-        verify(s.dash.driving, "neither is an exit")
+        verify(s.dash.drivePart.driving, "neither is an exit")
     }
 
     function test_neverKeepsTheBarsUp() {
@@ -633,7 +633,7 @@ TestCase {
         raiseANotice()
         tryCompare(s.dash.drivePart, "barsUp", true, 2000, "a notice raises them")
         verify(!hideTimer(s).running, "held")
-        tryCompare(s.dash, "barsShown", 1, 2000)
+        tryCompare(s.dash.drivePart, "barsShown", 1, 2000)
         verify(find(s.dash, "driveLogNotice").visible, "with its row and Dismiss, in the sheet")
         verify(find(s.dash, "driveLogNoticeDismiss").visible)
         Bridge.clearLogNotice()
@@ -675,7 +675,7 @@ TestCase {
         tryCompare(Bridge, "linkState", "quiet", 5000)
         wait(20)
         verify(!s.dash.drivePart.barsUp, "the status line says it")
-        verify(s.dash.driving)
+        verify(s.dash.drivePart.driving)
     }
 
     // ---- The sheet (ADR-0059's appendix "the fill and the reveal from the bottom")
@@ -744,7 +744,7 @@ TestCase {
         compare(find(s.dash, "driveLogReadout").text.indexOf(s.dash.driveLogTime), 0, "the log's time")
         verify(!find(s.dash, "driveStartLog").visible, "Stop log in its place")
         verify(!find(s.dash, "driveDisconnect").visible, "and in Disconnect's, as in the header")
-        verify(s.dash.driving, "Start log is no exit")
+        verify(s.dash.drivePart.driving, "Start log is no exit")
         // Mark offers itself during a log, and the row holds the readout, Stop log and
         // Mark inside the window, a touch's size and apart
         const mark = find(s.dash, "driveMark")
@@ -790,7 +790,7 @@ TestCase {
         verify(waitForPolish(s.main), "laid out")
         const d = find(s.dash, "driveDisconnect")
         mouseClick(d)
-        tryCompare(s.dash, "driving", false, 5000, "Disconnect ends the session and the view")
+        tryCompare(s.dash.drivePart, "driving", false, 5000, "Disconnect ends the session and the view")
     }
 
     function test_theSheetMarksARecording() {
@@ -930,7 +930,7 @@ TestCase {
         enterOn(s)
         verify(dashSaved(s), "remembered on entering")
         Bridge.disconnectSession()
-        tryCompare(s.dash, "driving", false, 5000)
+        tryCompare(s.dash.drivePart, "driving", false, 5000)
         compare(s.stand.visibility, Window.Maximized, "the system bars return")
         verify(dashSaved(s), "the session's end doesn't clear it")
     }
@@ -946,7 +946,7 @@ TestCase {
         tryVerify(() => finished, 10000, "the replay plays to its end")
         Bridge.logMessage.disconnect(heard)
         verify(Bridge.connected, "still connected at the recording's end")
-        verify(s.dash.driving, "a replay user may rewind")
+        verify(s.dash.drivePart.driving, "a replay user may rewind")
     }
 
     function dashSaved(s) { return find(s.dash, "dashStore").phoneDrive }
@@ -956,7 +956,7 @@ TestCase {
         enterOn(s)
         revealedOn(s)
         mouseClick(find(s.dash, "driveExit"))
-        compare(s.dash.driving, false)
+        compare(s.dash.drivePart.driving, false)
         compare(s.stand.visibility, Window.Maximized)
         verify(!dashSaved(s), "Exit drive clears it")
         const b = bars(s)
@@ -974,7 +974,7 @@ TestCase {
         revealedOn(s)
         const bar = find(s.main.contentItem, "tabBar")
         mouseClick(bar.itemAt(data.index))
-        compare(s.dash.driving, false, "a tab is Exit drive")
+        compare(s.dash.drivePart.driving, false, "a tab is Exit drive")
         compare(s.main.currentPage, data.page)
         verify(!dashSaved(s))
     }
@@ -984,9 +984,9 @@ TestCase {
         enterOn(s)
         compare(back(s), true, "taken, never the launcher")
         verify(s.dash.drivePart.barsUp, "hidden bars: back reveals")
-        verify(s.dash.driving)
+        verify(s.dash.drivePart.driving)
         compare(back(s), true)
-        compare(s.dash.driving, false, "revealed bars: back leaves")
+        compare(s.dash.drivePart.driving, false, "revealed bars: back leaves")
         verify(!dashSaved(s))
     }
 
@@ -1024,9 +1024,9 @@ TestCase {
         dashStore.setValue("phoneDrive", true)
         dashStore.sync()
         const s = phoneMain()
-        compare(s.dash.driving, false, "never opens in the view")
+        compare(s.dash.drivePart.driving, false, "never opens in the view")
         connect("mock://demo")
-        tryVerify(() => s.dash.driving, 3000, "it comes back with the session")
+        tryVerify(() => s.dash.drivePart.driving, 3000, "it comes back with the session")
     }
 
     function test_aConnectFromAnotherPageStaysThere() {
@@ -1037,7 +1037,7 @@ TestCase {
         connect("mock://demo")
         wait(50)
         compare(s.main.currentPage, 2)
-        compare(s.dash.driving, false)
+        compare(s.dash.drivePart.driving, false)
     }
 
     function test_aReplayNeverEntersByItself() {
@@ -1048,7 +1048,7 @@ TestCase {
         verify(!s.dash.drivePart.isReplay("mock://demo"))
         connect(replayUri())
         wait(50)
-        compare(s.dash.driving, false)
+        compare(s.dash.drivePart.driving, false)
     }
 
     function test_aConnectLeavesEditModeAlone() {
@@ -1058,7 +1058,7 @@ TestCase {
         s.dash.startEditing()
         connect("mock://demo")
         wait(50)
-        compare(s.dash.driving, false, "edit mode is never interrupted")
+        compare(s.dash.drivePart.driving, false, "edit mode is never interrupted")
         s.dash.stopEditing()
     }
 
@@ -1066,7 +1066,7 @@ TestCase {
         const s = phoneMain()
         connect("mock://demo")
         wait(50)
-        compare(s.dash.driving, false)
+        compare(s.dash.drivePart.driving, false)
     }
 
     // ---- The hint (section 3)
@@ -1079,7 +1079,7 @@ TestCase {
         for (let i = 1; i <= 3; ++i) {
             s.dash.drivePart.enterDrive()
             verify(hint.visible, "entry " + i)
-            s.dash.leaveDrive(true)
+            s.dash.drivePart.leaveDrive(true)
         }
         s.dash.drivePart.enterDrive()
         verify(!hint.visible, "not on the fourth")
@@ -1106,7 +1106,7 @@ TestCase {
         const hint = find(s.dash, "driveHint")
         find(s.dash, "driveHintTimer").triggered()
         verify(!hint.visible, "its time")
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         dashStore.setValue("driveHints", 0)
         s.dash.drivePart.enterDrive()
         s.dash.drivePart.driveTap()
@@ -1122,7 +1122,7 @@ TestCase {
         compare(PhoneWindow.orientation, "follow", "before")
         s.dash.drivePart.enterDrive()
         compare(PhoneWindow.orientation, "side", "held while the view is on")
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         compare(PhoneWindow.orientation, "follow", "released on leaving")
     }
 
@@ -1145,7 +1145,7 @@ TestCase {
         tryCompare(PhoneWindow, "keepScreenOn", false, 2000, "not the phone form")
         enterOn(s)
         tryCompare(PhoneWindow, "keepScreenOn", true, 2000, "the view holds it")
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         tryCompare(PhoneWindow, "keepScreenOn", false, 2000)
     }
 
@@ -1189,7 +1189,7 @@ TestCase {
         s.main.width = 832
         s.main.height = 384
         verify(waitForPolish(s.main), "laid out")
-        verify(s.dash.driving, "the view stays")
+        verify(s.dash.drivePart.driving, "the view stays")
         tryVerify(() => find(s.dash, "dashPage_0").columns === 12, 2000, "twelve columns on its side")
         compare(find(s.dash, "driveStatusLine").y, 0, "the line stays at the top")
     }
@@ -1248,7 +1248,7 @@ TestCase {
         compare(Harness.pressBack(s.main), true)
         verify(s.dash.drivePart.barsUp, "the press reveals")
         compare(Harness.pressBack(s.main, true), true, "the repeat is taken, or the system would act on it")
-        verify(s.dash.driving, "and doesn't go on to leave")
+        verify(s.dash.drivePart.driving, "and doesn't go on to leave")
         verify(s.dash.drivePart.barsUp)
     }
 
@@ -1363,7 +1363,7 @@ TestCase {
         verify(band.z > pages.z, "over the gauges")
         compare(pages.mapToItem(s.main.contentItem, 0, 0).y, before, "the gauges didn't move")
         verify(!s.dash.drivePart.barsUp && !s.dash.drivePart.barsHeld, "an alert raises no bars")
-        s.dash.leaveDrive(true)
+        s.dash.drivePart.leaveDrive(true)
         verify(waitForPolish(s.main), "laid out")
         verify(!band.visible, "the view's band goes with it")
         verify(mainBand.visible, "and Main's shows")

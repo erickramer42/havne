@@ -30,7 +30,7 @@ Item {
     // place there (ADR-0064 Q5): null for none or on another scheme,
     // where Default isn't obd2. Default's button stays only while the
     // field reads it, so the row always shows the URI's
-    readonly property bool adapterUri: VehicleBook.isAdapterUri(host.uriField.text)
+    readonly property bool adapterUri: VehicleBook.isAdapterUri(host.connectPart.uriField.text)
     readonly property var standIn: host.picksPart.pickRows.find(r => r.standIn) || null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
@@ -94,7 +94,7 @@ Item {
     // picked vehicle's first set, which a restart doesn't forget as it
     // does the choice
     readonly property string offlineUri: {
-        const typed = host.uriField.text.trim()
+        const typed = host.connectPart.uriField.text.trim()
         if (typed !== "") {
             return profileChoice === "default" && VehicleBook.isAdapterUri(typed) && obd2PickedSet !== null
                    ? "mock://?profile=" + obd2PickedSet.profile : typed
@@ -113,7 +113,7 @@ Item {
 
     function setUri(text) {
         composing = true
-        host.uriField.text = text
+        host.connectPart.uriField.text = text
         composing = false
     }
 
@@ -173,7 +173,7 @@ Item {
 
     // The field's text before its query
     function uriBase() {
-        return splitUri(host.uriField.text).base
+        return splitUri(host.connectPart.uriField.text).base
     }
 
     // base plus the query, with profile= and did= following the choices
@@ -185,7 +185,7 @@ Item {
             return ""
         const out = pairs.slice()
         setQuery(out, "profile", profileChoice === "default" ? null : profileChoice)
-        const dids = profileChoice === "uds-generic" ? host.didField.text.replace(/\s+/g, "") : ""
+        const dids = profileChoice === "uds-generic" ? host.profilePart.didField.text.replace(/\s+/g, "") : ""
         setQuery(out, "did", dids === "" ? null : dids)
         // Core refuses session= under any other profile; extSession keeps the
         // choice for the way back to uds-generic
@@ -237,10 +237,10 @@ Item {
     // (docs/bench-sessions/2026-10-28-android-5.md); the profile row
     // shows Default then
     function fillUri(base) {
-        let pairs = splitUri(host.uriField.text).pairs
+        let pairs = splitUri(host.connectPart.uriField.text).pairs
         const scheme = schemeOf(base)
         const keys = schemeKeys[scheme]
-        if (keys !== undefined && scheme !== schemeOf(host.uriField.text)) {
+        if (keys !== undefined && scheme !== schemeOf(host.connectPart.uriField.text)) {
             pairs = pairs.filter(p => keys.indexOf(p[0]) >= 0)
             if (profileChoice === "mock" && (scheme === "j2534" || scheme === "elm327"))
                 profileChoice = "default"
@@ -254,13 +254,13 @@ Item {
     }
 
     function chooseProfile(name) {
-        const uri = splitUri(host.uriField.text)
+        const uri = splitUri(host.connectPart.uriField.text)
         profileChoice = name
         setUri(composeUri(uri.base, uri.pairs))
     }
 
     function recompose() {
-        const uri = splitUri(host.uriField.text)
+        const uri = splitUri(host.connectPart.uriField.text)
         setUri(composeUri(uri.base, uri.pairs))
     }
 
@@ -270,19 +270,19 @@ Item {
     // it's shown (uds-generic), so it never shows DIDs the URI lacks;
     // under another profile it keeps what was typed for later.
     function readChoices() {
-        const pairs = splitUri(host.uriField.text).pairs
+        const pairs = splitUri(host.connectPart.uriField.text).pairs
         const profile = queryValue(pairs, "profile")
         const did = queryValue(pairs, "did")
         syncing = true
         profileChoice = (profile === undefined || profile === null || profile === "")
                         ? "default" : profile
         if (profileChoice === "uds-generic") {
-            host.didField.text = did === undefined || did === null ? "" : did
+            host.profilePart.didField.text = did === undefined || did === null ? "" : did
             const session = queryValue(pairs, "session")
             extSession = session !== undefined && session !== null && Number(session) === 3
         }
         else if (did !== undefined && did !== null)
-            host.didField.text = did
+            host.profilePart.didField.text = did
         syncing = false
     }
 }

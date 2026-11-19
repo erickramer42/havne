@@ -59,34 +59,34 @@ Item {
     }
 
     function readForm() {
-        return { name: host.formName.text, rx: host.formRx.text, tx: host.formTx.text, service: formService,
-                 number: host.formNumber.text, byte: host.formByte.text, bits: host.formBits.text,
-                 bit: host.formBit.text, order: formOrder, signed: host.formSigned.checked,
-                 bytes: host.formBytes.text, scale: host.formScale.text, offset: host.formOffset.text,
-                 unit: host.formUnit.text, decimals: host.formDecimals.text, group: formGroup,
-                 kind: formKind, values: host.formValues.text, expr: host.exprEditor.formExpr.text }
+        return { name: host.ownFormPart.formName.text, rx: host.ownFormPart.formRx.text, tx: host.ownFormPart.formTx.text, service: formService,
+                 number: host.ownFormPart.formNumber.text, byte: host.ownFormPart.formByte.text, bits: host.ownFormPart.formBits.text,
+                 bit: host.ownFormPart.formBit.text, order: formOrder, signed: host.ownFormPart.formSigned.checked,
+                 bytes: host.ownFormPart.formBytes.text, scale: host.ownFormPart.formScale.text, offset: host.ownFormPart.formOffset.text,
+                 unit: host.ownFormPart.formUnit.text, decimals: host.ownFormPart.formDecimals.text, group: formGroup,
+                 kind: formKind, values: host.ownFormPart.formValues.text, expr: host.ownFormPart.computedPart.formExpr.text }
     }
 
     function fillForm(f) {
-        host.formName.text = f.name
-        host.formRx.text = f.rx
-        host.formTx.text = f.tx
+        host.ownFormPart.formName.text = f.name
+        host.ownFormPart.formRx.text = f.rx
+        host.ownFormPart.formTx.text = f.tx
         formService = f.service
-        host.formNumber.text = f.number
-        host.formByte.text = f.byte
-        host.formBits.text = f.bits
-        host.formBit.text = f.bit
+        host.ownFormPart.formNumber.text = f.number
+        host.ownFormPart.formByte.text = f.byte
+        host.ownFormPart.formBits.text = f.bits
+        host.ownFormPart.formBit.text = f.bit
         formOrder = f.order
-        host.formSigned.checked = f.signed
-        host.formBytes.text = f.bytes
-        host.formScale.text = f.scale
-        host.formOffset.text = f.offset
-        host.formUnit.text = f.unit
-        host.formDecimals.text = f.decimals
+        host.ownFormPart.formSigned.checked = f.signed
+        host.ownFormPart.formBytes.text = f.bytes
+        host.ownFormPart.formScale.text = f.scale
+        host.ownFormPart.formOffset.text = f.offset
+        host.ownFormPart.formUnit.text = f.unit
+        host.ownFormPart.formDecimals.text = f.decimals
         formGroup = f.group
         formKind = f.kind
-        host.formValues.text = f.values
-        host.exprEditor.formExpr.text = f.expr
+        host.ownFormPart.formValues.text = f.values
+        host.ownFormPart.computedPart.formExpr.text = f.expr
         formProblem = ""
         formNote = ""
         readResult = null
@@ -96,7 +96,7 @@ Item {
     // The adapter Read once asks on: the field's, when it names one, else
     // the vehicle's last
     function readOnceAdapter() {
-        const typed = host.uriField.text.trim()
+        const typed = host.connectPart.uriField.text.trim()
         if (/^(j2534|elm327|socketcan):\/\//i.test(typed))
             return typed
         return host.pickedVehicle !== null ? host.pickedVehicle.uri : ""
@@ -171,7 +171,7 @@ Item {
         if (host.pickedVehicle === null)
             return false
         const f = readForm()
-        if (f.kind === "computed") return host.exprEditor.save(f)
+        if (f.kind === "computed") return host.ownFormPart.computedPart.save(f)
         const signal = SignalForm.draft(f)
         const named = host.ownSignals.find(s => s.name === signal.name && s.key !== editingKey)
         if (editingKey !== "" && named !== undefined) {
@@ -258,7 +258,7 @@ Item {
         vinPickNote = ""
         host.saveVehicles(VehicleBook.pick(host.vehicles, id))
         if (host.pickedVehicle !== null && host.pickedVehicle.uri !== "")
-            host.uriField.text = host.connectFromPart.listConnectUri(host.pickedVehicle.uri)
+            host.connectPart.uriField.text = host.connectFromPart.listConnectUri(host.pickedVehicle.uri)
     }
 
     // A change of the list from the page's buttons: the field empties
@@ -266,7 +266,7 @@ Item {
     function changeVehicles(doc) {
         host.confirming = ""
         host.saveVehicles(doc)
-        host.vehicleLabelField.text = ""
+        host.vehiclePickerPart.vehicleLabelField.text = ""
     }
 
     // Live's ticks and unticks, the picked vehicle's from now on

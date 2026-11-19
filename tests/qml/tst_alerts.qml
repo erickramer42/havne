@@ -92,7 +92,7 @@ TestCase {
                   { enabled: false }),
               rpm("missing", "Not in the mock", { signal: ["id:7005"], unit: "kPa", above: 300 })])
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         alerts.refreshRows()
         compare(wordsOf(rowOf(page, 0), "alertName"), "Always on")
@@ -121,7 +121,7 @@ TestCase {
         save([rpm("missing", "Not in the mock", { signal: ["key:not_here"], unit: "kPa", above: 300 }),
               rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(page, "settingsAlertsPart").refreshRows()
         const row = rowOf(page, 0)
         compare(wordsOf(row, "alertSummary"), "a signal not in this profile above 300 kPa")
@@ -163,7 +163,7 @@ TestCase {
         save([rpm("fast", "Fast", { signal: ["id:3001"], unit: "km/h", above: 20 })])
         Bridge.unitSystem = 1
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         alerts.refreshRows()
         const speed = alerts.rows.find(r => r.ref === "id:3001")
@@ -382,7 +382,7 @@ TestCase {
         compare(editor.nameField.text, "Alert 1")
         verify(editor.isNew)
         const signalTerm = termOf(editor, 0)
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(signalTerm, "alertTermSignal").clicked()
         find(signalTerm, "alertPick_id:1001").clicked()
         type(signalTerm.levelField, "6000")
@@ -490,7 +490,7 @@ TestCase {
         find(page, "alertAdd").clicked()
         const editor = editorOf(page)
         compare(editor.nameField.text, "Alert 1", "the first free number")
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(termOf(editor, 0), "alertTermSignal").clicked()
         find(termOf(editor, 0), "alertPick_id:1001").clicked()
         type(termOf(editor, 0).levelField, "7000")
@@ -544,7 +544,7 @@ TestCase {
     // danger level as above, at danger, clearing inside it
     function test_addFromAGaugeKeysLevels() {
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         find(alerts, "alertAddFromSignal").clicked()
         verify(find(alerts, "alertSignalPanel").visible)

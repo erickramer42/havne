@@ -157,14 +157,14 @@ Item {
 
     function openSave(what) {
         saving = what
-        host.saveDialog.title = what.kind === "plugin" ? qsTr("Export the plugin")
+        host.signalsPart.saveDialog.title = what.kind === "plugin" ? qsTr("Export the plugin")
                                                   : qsTr("Save as a signal file")
-        host.saveDialog.nameFilters = what.kind === "plugin"
+        host.signalsPart.saveDialog.nameFilters = what.kind === "plugin"
             ? [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
             : [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
-        host.saveDialog.selectedFile = host.saveDialog.currentFolder.toString().replace(/\/$/, "")
+        host.signalsPart.saveDialog.selectedFile = host.signalsPart.saveDialog.currentFolder.toString().replace(/\/$/, "")
                                   + "/" + what.file
-        host.saveDialog.open()
+        host.signalsPart.saveDialog.open()
     }
 
     // What each save writes and the name it starts from: a variant's
