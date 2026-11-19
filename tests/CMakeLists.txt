@@ -2059,6 +2059,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/exprcheck.cpp
         ../app/pluginstore.cpp
         ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
@@ -2139,6 +2141,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
