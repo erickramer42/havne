@@ -51,12 +51,13 @@ using ecuio_sim_timing::sim_timing_rng;
 
 enum class adapter { j2534, socketcan, elm327 };
 
-// An adapter model's constants (the defaults are the 2026-11-09
-// baseline's and the 2026-11-03 tap's, uncalibrated)
+// An adapter model's constants. The J2534 ones are the OBDX Pro VX's,
+// fitted to the car (docs/bench-sessions/2026-11-18-pacing-car.md);
+// the rest are the 2026-11-09 baseline's and the 2026-11-03 tap's
 struct adapter_model {
     adapter kind = adapter::j2534;
-    int64_t write_us = 1000;  /* J2534: a write through the surrogate */
-    int64_t deliver_us = 500; /* J2534: the last frame to the engine */
+    int64_t write_us = 1500;   /* J2534: a write through the surrogate */
+    int64_t deliver_us = 1000; /* J2534: the last frame to the engine */
     bool hold = true;         /* J2534: ?hold= (j2534_hold.h) */
     int64_t fc_turn_us = 170; /* the adapter's Flow Control after a FF */
     int64_t echo_us = 100;    /* SocketCAN: the request's echo */
@@ -75,12 +76,16 @@ struct adapter_model {
     int64_t late_prompt_us = 0;
 };
 
-// The MX+ over Bluetooth and the VX in ELM mode over USB at 115,200 baud
-// (10 bits a character), uncalibrated
+// The MX+ over Bluetooth, fitted to the car (docs/bench-sessions/
+// 2026-11-18-pacing-car.md), and the VX in ELM mode over USB at 115,200
+// baud (10 bits a character), uncalibrated
 inline adapter_model elm327_bluetooth()
 {
     adapter_model m;
     m.kind = adapter::elm327;
+    m.link_us = 2000;
+    m.char_us = 87;
+    m.command_us = 2000;
     return m;
 }
 inline adapter_model vx_elm_mode()
