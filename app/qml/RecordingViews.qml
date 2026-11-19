@@ -67,7 +67,7 @@ Item {
             root.host.slots = ({})
             root.host.plotted = defaults
             // A kept arrangement is used again: stamped, so the oldest goes first
-            root.host.viewerSettings.views = JSON.stringify(ChartLayout.viewsTouched(
+            root.host.viewerSettings.views = JSON.stringify(ChartViews.viewsTouched(
                 root.host.viewsBook, root.host.panesPart.viewNameOf(root.recording.folder), Date.now()))
             root.host.readout = ({})
             let rows = 0
