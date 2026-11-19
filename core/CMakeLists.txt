@@ -38,6 +38,7 @@ add_library(ecuio-core STATIC
     src/replay_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp
+    src/j2534_worker.cpp
     src/elm327_transport.cpp
     src/elm327_worker.cpp
     src/elm327_setup.cpp
