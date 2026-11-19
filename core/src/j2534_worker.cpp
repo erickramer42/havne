@@ -10,7 +10,8 @@
 //          J2534HealthTest.LongRepliesArriveWhole
 //          The floor and the timer's wait: J2534HealthTest.TheFloor*,
 //          .VxTheFloorsWaitReadsNothing
-//          The hold (Known Issue #42): UNIT: J2534HoldTest
+//          The hold (Known Issue #42): UNIT: J2534HoldTest; on the fake,
+//          tests/test_j2534_hold_bus.cpp (J2534HealthTest)
 //
 // The J2534 session's worker: the read pump, a request's write, the
 // link-health feed and the close's 10 01. j2534_transport.cpp starts it

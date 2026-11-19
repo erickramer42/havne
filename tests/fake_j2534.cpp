@@ -42,6 +42,10 @@
 //    holds each response back that long after the write (default 0);
 //    ECUIO_FAKE_LONG_REPLY_DELAY_MS adds its delay to a response longer
 //    than one Single Frame (over 7 bytes), as a long reply takes;
+//    ECUIO_FAKE_LOST_UNDER_SEGMENTS=1 drops a Single Frame reply from
+//    one ID arriving while another ID's long reply is on the bus (its
+//    First Frame at the reply delay to its whole arrival), whichever
+//    was written first: Known Issue #42 on the VX, counted on the page;
 //    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
 //    (7F <service> 78) at once, ahead of that reply.
 //    ECUIO_FAKE_HELD_SERVICE=<service, hex> answers each request of that
@@ -787,6 +791,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const unsigned long long_delay_ms =
         fake_j2534::knob_ms("ECUIO_FAKE_LONG_REPLY_DELAY_MS", 0);
     const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
+    const bool lose = fake_j2534::knob_on("ECUIO_FAKE_LOST_UNDER_SEGMENTS");
     long held_service = -1;
     {
         char hb[32] = {};
@@ -971,10 +976,14 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             written_us + 1000LL * static_cast<long long>(delay_ms);
         static unsigned long resp_ts = 0x1000;
         resp_ts += 1;
-        fake_j2534::enqueue_rx_locked(
-            echo, echo_len,
-            vx ? fake_j2534::vendor_stamp(arrives_us) : resp_ts, 0,
-            arrives_us);
+        const uint32_t lost = fake_j2534::enqueue_reply_locked(
+            echo, echo_len, vx ? fake_j2534::vendor_stamp(arrives_us) : resp_ts,
+            written_us + 1000LL * static_cast<long long>(reply_delay_ms),
+            arrives_us, lose);
+        fake_control::Page* page = fake_control::attach();
+        if (lost > 0 && page != nullptr) {
+            fake_control::count_lost(page, lost);
+        }
     }
 
     return STATUS_NOERROR;   /* *pNumMsgs stays 1: fully written */
