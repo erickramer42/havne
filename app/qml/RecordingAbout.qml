@@ -30,7 +30,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        text: root.host.recording.state === RecordingView.Open ? root.host.infoText() : ""
+        text: root.host.recording.state === RecordingView.Open ? root.host.decodePart.infoText() : ""
     }
     RowLayout {
         id: aboutActions
@@ -72,10 +72,10 @@ ColumnLayout {
         valueRole: "value"
         // The model stays while the box is hidden: a model made again
         // resets the index, which the binding below wouldn't set back
-        model: root.host.decodeChoices()
+        model: root.host.decodePart.decodeChoices()
         currentIndex: Math.max(0, indexOfValue(root.host.recording.decodedWith))
         Accessible.name: qsTr("Where the values come from")
-        onActivated: index => root.host.decodeWith(valueAt(index))
+        onActivated: index => root.host.decodePart.decodeWith(valueAt(index))
     }
 
     // The picked vehicle's baseline: this recording made it, or the
@@ -277,6 +277,6 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        text: root.host.recording.state === RecordingView.Open ? root.host.checkText() : ""
+        text: root.host.recording.state === RecordingView.Open ? root.host.decodePart.checkText() : ""
     }
 }

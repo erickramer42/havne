@@ -28,6 +28,8 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias decodePart: decodePart
+    readonly property var decodeWith: decodePart.decodeWith
     property alias rowInfoPart: rowInfoPart
     readonly property var rowFacts: rowInfoPart.rowFacts
     property alias formatPart: formatPart
@@ -597,6 +599,8 @@ Page {
 
     RecordingRowInfo { id: rowInfoPart; host: root }
 
+    RecordingDecode { id: decodePart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -971,58 +975,6 @@ Page {
             if (x1 > at)
                 ctx.fillRect(at, top, x1 - at, 4)
         }
-    }
-
-    // Where the values can come from (ADR-0049's appendix of 2026-11-06):
-    // as recorded (signals.csv), or the frames decoded through the
-    // recording's own signal file or a profile the app has loaded
-    function decodeChoices() {
-        const out = [{ text: qsTr("Values as recorded"), value: "" }]
-        if (recording.ownSignalFile)
-            out.push({ text: qsTr("Its frames through its own signal file"), value: "signals.json" })
-        for (const p of Bridge.decodeProfiles())
-            out.push({ text: qsTr("Its frames through %1").arg(p.name !== "" ? p.name : p.profile),
-                       value: p.profile })
-        return out
-    }
-    function decodeWith(value) {
-        if (value === recording.decodedWith && recording.state === RecordingView.Open)
-            return
-        decodeReopen = true
-        if (value === "")
-            recording.open(recording.folder)
-        else
-            recording.openFrames(recording.folder, value)
-    }
-
-    function infoText() {
-        const info = recording.info
-        let text = qsTr("%1 long").arg(formatPart.lengthText(recording.durationMs))
-        if (recording.decodedWith === "signals.json")
-            text += qsTr(" · values decoded from its frames through its own signal file")
-        else if (recording.decodedWith !== "")
-            text += qsTr(" · values decoded from its frames through %1").arg(recording.decodedWith)
-        else if (recording.signalList.every(s => s.samples === 0))
-            text += qsTr(" · no values were recorded: decode its frames with a profile")
-        if (info.utcStartMs > 0)
-            text += qsTr(" · started %1").arg(new Date(info.utcStartMs).toLocaleString(Qt.locale(), Locale.ShortFormat))
-        if (info.recordsDropped > 0)
-            text += qsTr(" · %1 records dropped while recording").arg(info.recordsDropped)
-        if (info.noSummary)
-            text += qsTr(" · it ended without its summary (the app or the power stopped)")
-        return text
-    }
-    function checkText() {
-        const check = recording.check
-        // A folder of values alone (a CSV import): nothing to check
-        if (!recording.hasFrames)
-            return qsTr("Frames check: the recording has no frames")
-        if (!check.ran)
-            return qsTr("Frames check: didn't run (%1)").arg(check.error)
-        const n = recording.findings.length
-        return n === 0 ? qsTr("Frames check: nothing found in %1 frames").arg(check.frames)
-                       : n === 1 ? qsTr("Frames check: 1 finding")
-                                 : qsTr("Frames check: %1 findings").arg(n)
     }
 
     // Import's file and a CSV's column map
