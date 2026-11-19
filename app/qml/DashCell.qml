@@ -271,7 +271,7 @@ GaugeCard {
         onClicked: {
             if (strayed)
                 return
-            if (card.host.driving) {
+            if (card.host.drivePart.driving) {
                 card.host.drivePart.driveTap()
                 return
             }
@@ -281,7 +281,7 @@ GaugeCard {
                 card.host.select(card.cellIndex)
         }
         onPressAndHold: (mouse) => {
-            if (card.host.driving)
+            if (card.host.drivePart.driving)
                 return
             if (strayed)
                 mouse.accepted = false

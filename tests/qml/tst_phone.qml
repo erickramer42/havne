@@ -2200,13 +2200,13 @@ TestCase {
         verify(main, "Main loads")
         const dash = find(main.contentItem, "dashboardPage")
         const settings = find(main.contentItem, "settingsPage")
-        settings.uriField.text = ""
+        settings.connectPart.uriField.text = ""
         settings.uriPart.chooseProfile("obd2")
         dash.startEditing()
         dash.addFlowPart.pickKind("ring")
         verify(dash.addFlowPart.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
                "obd2's speed, with no URI typed")
-        settings.uriField.text = "mock://demo"
+        settings.connectPart.uriField.text = "mock://demo"
         tryVerify(() => dash.addFlowPart.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][0]),
                   3000, "the list follows the field")
         dash.stopEditing()
@@ -2690,8 +2690,8 @@ TestCase {
         main.gotoPage(main.dashboardPage)
         main.openConnectFromDash()
         compare(main.currentPage, main.settingsPage)
-        settings.uriField.text = "mock://demo"
-        settings.requestConnect("mock://demo")
+        settings.connectPart.uriField.text = "mock://demo"
+        settings.connectFromPart.requestConnect("mock://demo")
         tryCompare(main, "currentPage", main.dashboardPage, 10000, "back on Dash with the gauges")
         verify(!settings.backLeaves)
         Bridge.disconnectSession()
@@ -2769,7 +2769,7 @@ TestCase {
         tryVerify(() => Bridge.connected, 10000, "the replay connects")
         compare(Bridge.currentUri, row.uri)
         tryCompare(main, "currentPage", main.livePage, 2000, "on Live once it connects")
-        compare(find(main.contentItem, "settingsPage").uriField.text, row.uri, "Settings shows it")
+        compare(find(main.contentItem, "settingsPage").connectPart.uriField.text, row.uri, "Settings shows it")
     }
 
     // A Replay the core refuses (its folder gone) leaves the user on
@@ -2783,13 +2783,13 @@ TestCase {
         const settings = find(main.contentItem, "settingsPage")
         const uri = "replay://" + Harness.recordingFixtures + "/no-such-recording?profile=obd2"
         main.replayRecording(uri)
-        tryVerify(() => settings.errorLabel.text !== "", 10000, "the refusal arrives")
+        tryVerify(() => settings.connectPart.errorLabel.text !== "", 10000, "the refusal arrives")
         verify(!Bridge.connected, "nothing connected")
         compare(main.currentPage, main.settingsPage, "on Settings, not Live")
-        verify(settings.errorLabel.visible, "the refusal shows")
+        verify(settings.connectPart.errorLabel.visible, "the refusal shows")
         compare(settings.shownKey, "connection", "the Connection page")
-        compare(settings.uriField.text, uri, "the address in the field")
-        verify(settings.errorLabel.text !== "", "with its reason")
+        compare(settings.connectPart.uriField.text, uri, "the address in the field")
+        verify(settings.connectPart.errorLabel.text !== "", "with its reason")
         compare(main.replayPending, "", "nothing left waiting")
         // Back returns to Recordings, as Other address returns to Dash
         verify(main.goBack(), "Back is the app's")
@@ -2825,7 +2825,7 @@ TestCase {
         main.openConnectFromDash()
         compare(main.currentPage, main.settingsPage)
         verify(settings.backLeaves, "Back leaves for Dash")
-        settings.requestConnect("mock://demo?profile=no-such-profile")
+        settings.connectFromPart.requestConnect("mock://demo?profile=no-such-profile")
         tryVerify(() => find(settings, "errorShowLog").visible, 5000, "the refusal")
         settings.logRequested()
         compare(main.currentPage, main.logPage)
@@ -3194,7 +3194,7 @@ TestCase {
         tryCompare(list, "chosen", "mock://demo", 2000, "the recent address")
         find(list, "connectGo").clicked()
         tryVerify(() => Bridge.connected, 5000, "it connects")
-        compare(settings.uriField.text, "mock://demo", "through Settings' field")
+        compare(settings.connectPart.uriField.text, "mock://demo", "through Settings' field")
         tryVerify(() => find(home, "homeSession").visible, 2000, "the session's card")
     }
 
@@ -3920,7 +3920,7 @@ TestCase {
                     JSON.stringify([{ profile: "plugin.example-sim.my2019",
                                       name: "Example: the simulated car", variant: "my2019" }]))
             compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
-            compare(dash.offlineUri, settings.offlineUri)
+            compare(dash.offlineUri, settings.uriPart.offlineUri)
         } finally {
             for (const p of settings.picksPart.pluginList)
                 settings.rowActionsPart.removePlugin(p.sha256)

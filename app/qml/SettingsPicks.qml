@@ -75,9 +75,9 @@ Item {
     // vehicle picks any of its variants
     readonly property var variantRows: {
         const offered = storeRev >= 0 && vinRev >= 0
-            ? Bridge.offeredVariants(host.ownPart.pickedId, host.vinLookupField.text, picks) : []
+            ? Bridge.offeredVariants(host.ownPart.pickedId, host.vinLookupPart.vinLookupField.text, picks) : []
         const kept = host.pickedVehicle !== null && host.pickedVehicle.vinMatches !== undefined
-                     && host.vinLookupField.text.trim() === "" ? host.pickedVehicle.vinMatches : []
+                     && host.vinLookupPart.vinLookupField.text.trim() === "" ? host.pickedVehicle.vinMatches : []
         const rows = []
         for (const o of offered) {
             const p = pluginBySha[o.sha256]
@@ -193,7 +193,7 @@ Item {
             return ""
         }
         const readsDefault = host.uriPart.profileChoice === "default"
-            && host.uriPart.queryValue(host.uriPart.splitUri(host.uriField.text).pairs, "profile") === undefined
+            && host.uriPart.queryValue(host.uriPart.splitUri(host.connectPart.uriField.text).pairs, "profile") === undefined
         host.saveVehicles(VehicleBook.setPicks(host.vehicles, r.picks))
         if (!readsDefault)
             return "picked"

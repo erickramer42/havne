@@ -134,10 +134,10 @@ TestCase {
         compare(find(page, "formExprProblem").text, "")
         verify(!find(page, "formExprMark").visible)
         verify(find(page, "formInput_0").text.indexOf("Reads ") === 0)
-        compare(page.exprEditor.leafRefs, ["obd2.map", "obd2.baro"])
+        compare(page.ownFormPart.computedPart.leafRefs, ["obd2.map", "obd2.baro"])
         find(page, "formExpr").text = "obd2.map - bost"
         verify(find(page, "formExprProblem").text.indexOf("bost") >= 0, find(page, "formExprProblem").text)
-        compare(page.exprEditor.checked.at, 12)
+        compare(page.ownFormPart.computedPart.checked.at, 12)
         verify(find(page, "formExprMark").visible, "the character is marked")
         const mark = find(page, "formExprMark")
         tryVerify(() => Math.abs(mark.x - find(page, "formExpr").positionToRectangle(11).x) < 0.5, 2000,
@@ -454,7 +454,7 @@ TestCase {
         compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "the demo connects")
         tryVerify(() => Bridge.connected, 5000, "connected")
         tryVerify(() => find(page, "formUseLive").visible, 5000, "the button shows")
-        const leaves = page.exprEditor.checked.leaves
+        const leaves = page.ownFormPart.computedPart.checked.leaves
         compare(leaves.length, 2)
         tryVerify(() => leaves.every(l => sessionValue(l.id) !== undefined), 10000, "the demo has both values")
         find(page, "formUseLive").clicked()
@@ -469,7 +469,7 @@ TestCase {
         // A signal the car doesn't send has no value: its field stays empty
         tryVerify(() => Bridge.signalModel.hiddenCount > 0, 10000, "the demo car lacks some PIDs")
         const hidden = Bridge.signalModel.hiddenSignals().map(h => h.name)
-        const none = page.exprEditor.editor.names().find(r => r.usable && r.ref.startsWith("obd2.")
+        const none = page.ownFormPart.computedPart.editor.names().find(r => r.usable && r.ref.startsWith("obd2.")
                                                            && hidden.indexOf(r.name) >= 0)
         verify(none !== undefined, "a PID the demo doesn't send is offered")
         find(page, "formExpr").text = "obd2.coolant + " + none.ref

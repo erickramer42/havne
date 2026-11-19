@@ -14,7 +14,7 @@ Item {
     id: driveStatus
     required property DashboardPage host
     objectName: "driveStatusLine"
-    visible: driveStatus.host.driving
+    visible: driveStatus.host.drivePart.driving
     x: 0
     y: driveStatus.host.driveInsetTop
     width: driveStatus.host.width

@@ -31,15 +31,15 @@ Page {
     readonly property bool joined: true
     readonly property real cellGap: joined ? 0 : gap
     // The space above the header
-    readonly property real topGap: driving ? 0 : phoneForm ? 12 : margin
+    readonly property real topGap: drive.driving ? 0 : phoneForm ? 12 : margin
     // The desktop's page strip shows, and its shown tab meets the panel:
     // not with an edit panel open, which sits a gap under the strip
     readonly property bool stripShown: !phoneForm && (pages.length > 1 || editing)
-    readonly property bool stripMeetsPanel: !phoneForm && stripShown && panel === "" && !driving
+    readonly property bool stripMeetsPanel: !phoneForm && stripShown && panel === "" && !drive.driving
     // The space above the panel, or above an edit panel over it
     readonly property real gridTop: stripMeetsPanel ? 0 : topGap
     // The panel's distance from the page's sides; none in the drive view
-    readonly property real panelMargin: driving ? 0 : margin
+    readonly property real panelMargin: drive.driving ? 0 : margin
     // The edit panel's side column: on the desktop form the open panel stands
     // right of the grid, this wide, in a column that scrolls by itself, while
     // the cells it leaves are at least this wide (the cells narrow, the
@@ -423,8 +423,6 @@ Page {
         id: drive
         host: root
     }
-    function barTouched() { return drive.barTouched() }
-    property alias barsShown: drive.barsShown
     property alias driveHideMs: drive.driveHideMs
     property alias driveInsetBottom: drive.driveInsetBottom
     property alias driveInsetTop: drive.driveInsetTop
@@ -432,9 +430,6 @@ Page {
     property alias driveLogTime: drive.driveLogTime
     property alias driveOrientation: drive.driveOrientation
     property alias driveTabBarHeight: drive.driveTabBarHeight
-    property alias driving: drive.driving
-    function goBack() { return drive.goBack() }
-    function leaveDrive(forGood) { return drive.leaveDrive(forGood) }
     // ---- Copy and paste (section 5)
 
     function copySelected() {
@@ -531,7 +526,7 @@ Page {
     }
     // Undo and Redo on the desktop form, in edit mode or out of it; a
     // field with the focus keeps its own
-    readonly property bool undoKeys: visible && form === "desktop" && !typing && !driving
+    readonly property bool undoKeys: visible && form === "desktop" && !typing && !drive.driving
     Shortcut {
         id: undoKey
         sequence: "Ctrl+Z"
@@ -583,7 +578,7 @@ Page {
         // outside edit mode isn't undone by a Ctrl+Z days later. Edit mode
         // stays open while hidden, so its history stays with it
         if (!visible) {
-            leaveDrive(true)
+            drive.leaveDrive(true)
             if (!editing)
                 history.clearHistory()
         }
@@ -600,7 +595,7 @@ Page {
             root.maybeSweep()
             // The view comes back with a session only with Dash showing
             if (!Bridge.connected)
-                root.leaveDrive(false)
+                drive.leaveDrive(false)
             else if (store.phoneDrive && root.visible && !drive.isReplay(Bridge.currentUri))
                 drive.enterDrive()
         }
@@ -701,7 +696,7 @@ Page {
     AlertBand {
         id: driveAlertBand
         objectName: "driveAlertBand"
-        visible: root.driving && shown
+        visible: drive.driving && shown
         z: 2
         x: Theme.barGap
         y: driveStatus.y + driveStatus.height
@@ -740,7 +735,7 @@ Page {
         anchors.bottom: swipe.bottom
         width: Math.max(0, root.width - 2 * root.margin)
         height: Theme.touchTarget + 8
-        visible: history.undoLine !== "" && !root.driving
+        visible: history.undoLine !== "" && !drive.driving
         color: Theme.surface
         border.width: 1
         border.color: Theme.hairline
@@ -786,7 +781,7 @@ Page {
         objectName: "dashIndicator"
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
-        visible: root.form === "phone" && root.pages.length > 1 && !root.driving
+        visible: root.form === "phone" && root.pages.length > 1 && !drive.driving
         count: swipe.count
         currentIndex: swipe.currentIndex
     }
@@ -794,7 +789,7 @@ Page {
     // The first entries' hint: over the gauges, and it takes no touch
     Rectangle {
         objectName: "driveHint"
-        visible: root.driving && drive.driveHintUp
+        visible: drive.driving && drive.driveHintUp
         z: 1
         anchors.centerIn: swipe
         width: driveHintText.implicitWidth + 24

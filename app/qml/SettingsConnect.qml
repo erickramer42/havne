@@ -59,7 +59,7 @@ ColumnLayout {
                 if (!root.host.uriPart.composing)
                     root.host.uriPart.readChoices()
             }
-            onAccepted: root.host.requestConnect(text)
+            onAccepted: root.host.connectFromPart.requestConnect(text)
         }
 
         ThemedButton {
@@ -81,7 +81,7 @@ ColumnLayout {
                     root.logExplains = false
                     errorLabel.text = ""
                 } else {
-                    root.host.requestConnect(uriField.text)
+                    root.host.connectFromPart.requestConnect(uriField.text)
                 }
             }
         }
