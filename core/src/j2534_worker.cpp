@@ -349,6 +349,27 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
     }
 }
 
+/* The pass's sends: for each channel, the wait that ran out, then its due
+ * request written */
+void ask_channels(ecuio_j2534_transport* t, ecuio_request_engine& e,
+                  link_health& h)
+{
+    const int64_t now = engine_now_us(t);
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        if (ecuio_engine_expire(&e, c, now)) {
+            ecuio_request_timed_out(e, h);
+        }
+        const int32_t r = ecuio_engine_due(&e, c, now);
+        if (r != ECUIO_ENGINE_NONE) {
+            const int64_t start = engine_now_us(t);
+            const bool sent =
+                send_request(t, ecuio_engine_request_of(&e, c, r), h,
+                             r == ECUIO_ENGINE_ONCE);
+            ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
+        }
+    }
+}
+
 } // namespace
 
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
@@ -404,20 +425,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
     while (!t->stop_requested.load()) {
         link_judge_waiting(h);
         if (requests) {
-            const int64_t now = engine_now_us(t);
-            for (uint32_t c = 0; c < e.chan_count; ++c) {
-                if (ecuio_engine_expire(&e, c, now)) {
-                    ecuio_request_timed_out(e, h);
-                }
-                const int32_t r = ecuio_engine_due(&e, c, now);
-                if (r != ECUIO_ENGINE_NONE) {
-                    const int64_t start = engine_now_us(t);
-                    const bool sent =
-                        send_request(t, ecuio_engine_request_of(&e, c, r), h,
-                                     r == ECUIO_ENGINE_ONCE);
-                    ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
-                }
-            }
+            ask_channels(t, e, h);
         }
 
         /* With nothing due on any channel (a scan that found nothing
