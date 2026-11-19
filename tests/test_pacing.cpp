@@ -275,6 +275,50 @@ TEST(PacingTest, TheVxInElmModeHoldsAMultiFramePackToItsLatePrompt)
     EXPECT_GT(kept.requests_per_s(), 4.0 * late.requests_per_s());
 }
 
+/* ?packframes=1 on the VX in ELM mode, the test car's PIDs: each pack a
+ * Single Frame, so the count digit's prompt ends it and the late prompt
+ * never waits. A pack of about 2.6 values every 21 ms (the floor) against
+ * about 6.9 every 118 ms: about 1.9x the values, 5.7x the requests */
+TEST(PacingTest, OneFramePacksSpareTheVxInElmModeItsLatePrompt)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.picks.clear();
+    cfg.supported = pacing::test_car_pids();
+    const pacing::bench_result whole = run(cfg);
+    cfg.params.pack_frames = 1;
+    const pacing::bench_result one = run(cfg);
+    ASSERT_GT(whole.values_per_s(), 0.0);
+    EXPECT_GT(one.values_per_s(), 1.7 * whole.values_per_s())
+        << one.values_per_s() << " one-frame packs, " << whole.values_per_s()
+        << " unlimited";
+    EXPECT_GT(one.requests_per_s(), 4.0 * whole.requests_per_s());
+    EXPECT_EQ(one.cuts, 0u);
+    EXPECT_EQ(one.timeouts, 0u);
+}
+
+/* ?packframes= on J2534, the test car's PIDs: a two-frame pack (about 5.2
+ * values in 11.4 ms) loses nothing to the six-PID pack's three frames
+ * (about 6.9 in 16.6 ms); a one-frame pack loses about a tenth, since the
+ * 5 ms floor and the write hold it to about 6.2 ms for about 2.3 values */
+TEST(PacingTest, TwoFramePacksLoseNothingOnJ2534)
+{
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.picks.clear();
+    cfg.supported = pacing::test_car_pids();
+    const pacing::bench_result whole = run(cfg);
+    cfg.params.pack_frames = 2;
+    const pacing::bench_result two = run(cfg);
+    cfg.params.pack_frames = 1;
+    const pacing::bench_result one = run(cfg);
+    ASSERT_GT(whole.values_per_s(), 0.0);
+    EXPECT_GE(two.values_per_s(), whole.values_per_s())
+        << two.values_per_s() << " two-frame packs, " << whole.values_per_s()
+        << " unlimited";
+    EXPECT_GT(one.values_per_s(), 0.8 * whole.values_per_s());
+    EXPECT_LT(one.values_per_s(), 0.95 * whole.values_per_s());
+    EXPECT_EQ(two.timeouts + one.timeouts, 0u);
+}
+
 /* The simulated car's second module over an ELM327 that keeps the count
  * digit (the VX in ELM mode ignores it after a multi-frame reply, so
  * never cuts one): D102's reply spans frames, so the digit cuts it once;
