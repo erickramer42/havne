@@ -179,6 +179,7 @@ qt_add_qml_module(app_ui
         qml/Captioned.qml
         qml/HeaderButton.qml
         qml/Heading.qml
+        qml/MainHeader.qml
         qml/LabeledFlow.qml
         qml/SettingsAdapter.qml
         qml/SettingsAdvanced.qml
