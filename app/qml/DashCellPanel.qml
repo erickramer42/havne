@@ -19,7 +19,7 @@ GaugeCard {
     readonly property var cell: panelCard.host.selectedCell
     readonly property string kind: cell ? cell.kind : ""
     readonly property string unitShown: cell ? panelCard.host.shownUnit(cell.unit ?? "") : ""
-    readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
+    readonly property var range: DashboardEdit.defaultRange(cell ? cell.unit ?? "" : "")
     // The row the cell shows, whose decimals it uses until it has its own
     readonly property SignalHub.Entry entry: panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell && cell.refs ? cell.refs : []))
     // With no session the hub has no row: the listed profile's row gives the decimals
@@ -281,7 +281,7 @@ GaugeCard {
                 objectName: "panelH"
                 Accessible.name: panelCard.host.phoneForm ? qsTr("Height") : qsTr("Rows")
                 // The phone reads it in columns, the unit Columns uses
-                textFromValue: v => panelCard.host.phoneForm ? DashboardBook.heightInColumns(v) : String(v)
+                textFromValue: v => panelCard.host.phoneForm ? DashboardEdit.heightInColumns(v) : String(v)
                 Layout.preferredHeight: Theme.touchTarget
                 // A stored h under the phone's step stays reachable
                 from: panelCard.host.phoneForm && panelCard.cell
@@ -292,7 +292,7 @@ GaugeCard {
                 stepSize: panelCard.host.spanScale
                 value: panelCard.cell ? panelCard.cell.h : 1
                 onValueModified: panelCard.host.editsPart.resize(panelCard.cell.w, panelCard.host.phoneForm
-                    ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
+                    ? DashboardEdit.stepRows(panelCard.cell.h, value > panelCard.cell.h)
                     : value)
             }
 
@@ -418,9 +418,9 @@ GaugeCard {
                     const s = panelCard.host.spanScale
                     let base = panelCard.host.doc
                     if (c && on && c.w === 2 * s && c.h === 2 * s)
-                        base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, s, 4 * s)
+                        base = DashboardEdit.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, s, 4 * s)
                     else if (c && !on && c.w === s && c.h === 4 * s)
-                        base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, 2 * s, 2 * s)
+                        base = DashboardEdit.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, 2 * s, 2 * s)
                     panelCard.host.editsPart.setOptions({ vertical: on }, base)
                 }
             }

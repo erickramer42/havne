@@ -501,7 +501,7 @@ DashEditKit {
     function test_theListCantAddPastTheFormsPages() {
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
-            d = DashboardBook.addPage(d, "P" + d.pages.length)
+            d = DashboardEdit.addPage(d, "P" + d.pages.length)
         const page = pageOf({}, d)
         page.startEditing()
         verify(!find(page, "dashPageAdd").enabled, "the + tab is off")
@@ -619,7 +619,7 @@ DashEditKit {
         src.destroy()
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
-            d = DashboardBook.addPage(d, "P" + d.pages.length)
+            d = DashboardEdit.addPage(d, "P" + d.pages.length)
         const page = storedPageOf({}, d)
         verify(!page.layoutFilePart.loadLayoutFrom(url, true))
         verify(page.layoutFilePart.layoutNote.indexOf("Not added") === 0, page.layoutFilePart.layoutNote)
@@ -686,7 +686,7 @@ DashEditKit {
         src.destroy()
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
-            d = DashboardBook.addPage(d, "P" + d.pages.length)
+            d = DashboardEdit.addPage(d, "P" + d.pages.length)
         const page = storedPageOf({}, d)
         verify(!page.layoutFilePart.loadLayoutFrom(url, true))
         compare(page.layoutFilePart.layoutNote, "Not added: a form holds 10 pages at most")
@@ -727,7 +727,7 @@ DashEditKit {
     function test_thePresetButtonsAreOffAtThePageLimit() {
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
-            d = DashboardBook.addPage(d, "P" + d.pages.length)
+            d = DashboardEdit.addPage(d, "P" + d.pages.length)
         const page = pageOf({}, d)
         page.startEditing()
         page.editsPart.openPresets("add")
@@ -744,7 +744,7 @@ DashEditKit {
     // of 2 by 6 lacked; the desktop's ring is the Standard page's own
     function test_aShowcaseRingIsAtLeastASquare() {
         for (const c of DashboardBook.presetPage("showcase", "phone").cells.filter(x => x.kind === "ring"))
-            verify(Number(DashboardBook.heightInColumns(c.h)) >= c.w, c.label + " is " + c.w + " by " + c.h)
+            verify(Number(DashboardEdit.heightInColumns(c.h)) >= c.w, c.label + " is " + c.w + " by " + c.h)
         const std = DashboardBook.presetPage("standard", "desktop").cells.filter(x => x.kind === "ring")[0]
         for (const c of DashboardBook.presetPage("showcase", "desktop").cells.filter(x => x.kind === "ring"))
             verify(c.w === std.w && c.h === std.h, c.label + " is " + c.w + " by " + c.h)

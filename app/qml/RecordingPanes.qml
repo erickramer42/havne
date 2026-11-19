@@ -20,7 +20,7 @@ Item {
     function writeView(patch) {
         if (part.host.viewName === "")
             return
-        part.host.viewerSettings.views = JSON.stringify(ChartLayout.viewsWith(part.host.viewsBook, part.host.viewName, patch, Date.now()))
+        part.host.viewerSettings.views = JSON.stringify(ChartViews.viewsWith(part.host.viewsBook, part.host.viewName, patch, Date.now()))
         part.host.chart.requestPaint()
     }
     // A signal's id: its key, else its name (ComparePairs.idOf)

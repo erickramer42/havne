@@ -214,8 +214,8 @@ TestCase {
         }
         // Without a phase the columns count from 0 px
         const seg = [{ x: 0.5, y: 0 }, { x: 3.5, y: 0 }]
-        compare(ChartLayout.bandPieces(seg, 2, 6)[0].points.map(p => p.x), [0.5, 2, 3.5])
-        compare(ChartLayout.bandPieces(seg, 2, 6, 1)[0].points.map(p => p.x), [0.5, 1, 3, 3.5])
+        compare(ChartBands.bandPieces(seg, 2, 6)[0].points.map(p => p.x), [0.5, 2, 3.5])
+        compare(ChartBands.bandPieces(seg, 2, 6, 1)[0].points.map(p => p.x), [0.5, 1, 3, 3.5])
     }
 
     // A holding chart's label column fits the window's extremes and only
@@ -907,10 +907,10 @@ TestCase {
 
     // The views the viewer keeps for each recording
     function test_theViewsTextIsReadWithWhatIsDamagedLeftOut() {
-        compare(JSON.stringify(ChartLayout.viewsParse("")), "{}")
-        compare(JSON.stringify(ChartLayout.viewsParse("{ not json")), "{}")
-        compare(JSON.stringify(ChartLayout.viewsParse("[1, 2]")), "{}")
-        compare(JSON.stringify(ChartLayout.viewsParse(null)), "{}")
+        compare(JSON.stringify(ChartViews.viewsParse("")), "{}")
+        compare(JSON.stringify(ChartViews.viewsParse("{ not json")), "{}")
+        compare(JSON.stringify(ChartViews.viewsParse("[1, 2]")), "{}")
+        compare(JSON.stringify(ChartViews.viewsParse(null)), "{}")
         const many = {}
         for (let i = 0; i < 65; ++i)
             many["s" + i] = "own:1"
@@ -924,39 +924,39 @@ TestCase {
             tooMany: { used: 1, assign: many },
             fine: { used: 9 }
         })
-        const got = ChartLayout.viewsParse(text)
+        const got = ChartViews.viewsParse(text)
         compare(Object.keys(got).sort().join(","), "a,fine")
         compare(JSON.stringify(got.a), JSON.stringify(good))
         compare(JSON.stringify(got.fine.assign), "{}")
         // A text past the bound is none at all
-        compare(JSON.stringify(ChartLayout.viewsParse(" ".repeat(ChartLayout.viewsMaxText + 1))), "{}")
+        compare(JSON.stringify(ChartViews.viewsParse(" ".repeat(ChartViews.viewsMaxText + 1))), "{}")
     }
 
     function test_aRecordingsEntryIsWrittenStampedAndGoesWhenEmpty() {
-        let v = ChartLayout.viewsWith({}, "r1", { assign: { RPM: "own:1" } }, 100)
+        let v = ChartViews.viewsWith({}, "r1", { assign: { RPM: "own:1" } }, 100)
         compare(v.r1.used, 100)
         compare(v.r1.assign.RPM, "own:1")
-        v = ChartLayout.viewsWith(v, "r1", { shares: { "3": [1, 1, 1] } }, 200)
+        v = ChartViews.viewsWith(v, "r1", { shares: { "3": [1, 1, 1] } }, 200)
         compare(v.r1.used, 200)
         compare(v.r1.assign.RPM, "own:1", "a field left out stays")
-        v = ChartLayout.viewsTouched(v, "r1", 300)
+        v = ChartViews.viewsTouched(v, "r1", 300)
         compare(v.r1.used, 300)
-        compare(JSON.stringify(ChartLayout.viewsTouched(v, "other", 400)), JSON.stringify(v), "no entry, no stamp")
-        v = ChartLayout.viewsWith(v, "r1", { assign: {} }, 500)
+        compare(JSON.stringify(ChartViews.viewsTouched(v, "other", 400)), JSON.stringify(v), "no entry, no stamp")
+        v = ChartViews.viewsWith(v, "r1", { assign: {} }, 500)
         verify(v.r1 !== undefined, "the heights still hold it")
-        v = ChartLayout.viewsWith(v, "r1", { shares: {} }, 600)
+        v = ChartViews.viewsWith(v, "r1", { shares: {} }, 600)
         compare(v.r1, undefined, "nothing left, no entry")
     }
 
     function test_theLeastRecentlyUsedViewsGoPastTheCap() {
         let v = {}
-        for (let i = 0; i < ChartLayout.viewsMax; ++i)
-            v = ChartLayout.viewsWith(v, "r" + i, { assign: { RPM: "own:1" } }, 1000 + i)
-        compare(Object.keys(v).length, ChartLayout.viewsMax)
+        for (let i = 0; i < ChartViews.viewsMax; ++i)
+            v = ChartViews.viewsWith(v, "r" + i, { assign: { RPM: "own:1" } }, 1000 + i)
+        compare(Object.keys(v).length, ChartViews.viewsMax)
         // r0 is the oldest: touched, it is the newest, and r1 goes first
-        v = ChartLayout.viewsTouched(v, "r0", 5000)
-        v = ChartLayout.viewsWith(v, "new", { assign: { RPM: "own:1" } }, 6000)
-        compare(Object.keys(v).length, ChartLayout.viewsMax)
+        v = ChartViews.viewsTouched(v, "r0", 5000)
+        v = ChartViews.viewsWith(v, "new", { assign: { RPM: "own:1" } }, 6000)
+        compare(Object.keys(v).length, ChartViews.viewsMax)
         verify(v.r0 !== undefined && v.new !== undefined, "the used and the new stay")
         compare(v.r1, undefined, "the least recently used went")
     }

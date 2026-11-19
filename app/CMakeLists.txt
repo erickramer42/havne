@@ -90,8 +90,8 @@ qt_add_library(app_ui STATIC
     windowtheme.h
 )
 
-set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/ComparePairs.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml
+set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/ChartViews.qml qml/ChartBands.qml qml/ComparePairs.qml qml/VehicleBook.qml
+                            qml/DashboardBook.qml qml/DashboardEdit.qml qml/SignalForm.qml qml/Immersive.qml
                             qml/ConditionBook.qml qml/SessionLabel.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
@@ -177,7 +177,10 @@ qt_add_qml_module(app_ui
         qml/RecordingsPage.qml
         qml/SettingsPage.qml
         qml/Captioned.qml
+        qml/HeaderButton.qml
         qml/Heading.qml
+        qml/MainHeader.qml
+        qml/MainTabBar.qml
         qml/LabeledFlow.qml
         qml/SettingsAdapter.qml
         qml/SettingsAdvanced.qml
@@ -209,10 +212,13 @@ qt_add_qml_module(app_ui
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
+        qml/ChartViews.qml
+        qml/ChartBands.qml
         qml/ComparePairs.qml
         qml/StripChart.qml
         qml/VehicleBook.qml
         qml/DashboardBook.qml
+        qml/DashboardEdit.qml
         qml/SignalForm.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml

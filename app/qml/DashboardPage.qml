@@ -226,7 +226,7 @@ Page {
     // A copied cell and the form it came from (section 5), for the app's run
     property var copied: null        // { form, cell }
     readonly property bool canPaste: copied !== null && copied.form === form
-                                     && DashboardBook.canAddCell(doc, pageIndex)
+                                     && DashboardEdit.canAddCell(doc, pageIndex)
 
     DashHistory {
         id: history
@@ -409,7 +409,7 @@ Page {
             return null
         const o = cell.options ?? ({})
         // The range the cell draws: its own ends, else its unit's default
-        const range = DashboardBook.defaultRange(cell.unit ?? "")
+        const range = DashboardEdit.defaultRange(cell.unit ?? "")
         return ConditionBook.alertFromLevels(name, cell.refs, cell.unit ?? "", o,
                                              typeof o.from === "number" ? o.from : range.from,
                                              typeof o.to === "number" ? o.to : range.to, [])
@@ -433,7 +433,7 @@ Page {
     // ---- Copy and paste (section 5)
 
     function copySelected() {
-        const c = DashboardBook.copyCell(doc, pageIndex, selected)
+        const c = DashboardEdit.copyCell(doc, pageIndex, selected)
         if (c !== null)
             copied = { form: form, cell: c }
     }
@@ -441,7 +441,7 @@ Page {
         if (!canPaste)
             return
         commitTyping()
-        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell),
+        edit(DashboardEdit.pasteCell(doc, pageIndex, i, copied.cell),
              history.stepOf("", qsTr("pasted %1").arg(cellName(copied.cell)), -1, i + 1))
     }
 
@@ -459,18 +459,18 @@ Page {
     }
     // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
     // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
-    readonly property var gaugeSets: DashboardBook.copySets(Bridge.gaugeSignals)
+    readonly property var gaugeSets: DashboardEdit.copySets(Bridge.gaugeSignals)
     function counterparts(ref) {
-        return DashboardBook.counterparts(ref, gaugeSets)
+        return DashboardEdit.counterparts(ref, gaugeSets)
     }
     function lookupRefs(refs) {
-        return DashboardBook.lookupRefs(refs, gaugeSets)
+        return DashboardEdit.lookupRefs(refs, gaugeSets)
     }
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
     function keyOfRef(ref) {
-        return DashboardBook.keyOfRef(ref, gaugeSets)
+        return DashboardEdit.keyOfRef(ref, gaugeSets)
     }
     DashEdits {
         id: edits
@@ -616,7 +616,7 @@ Page {
     }
     // A number typed in the unit shown, in the unit stored
     function stored(unit, v) {
-        return Bridge.unitSystem === 0 ? v : DashboardBook.roundStored(Bridge.decodedValue(unit, v))
+        return Bridge.unitSystem === 0 ? v : DashboardEdit.roundStored(Bridge.decodedValue(unit, v))
     }
     // A number for a field: at most four decimals, none trailing
     function fieldText(v, places) {
