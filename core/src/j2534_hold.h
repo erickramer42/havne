@@ -34,7 +34,7 @@
 // answers late, inside another's segmented reply, is found again.
 //
 // A session request (10 03, 3E 00) waits for the hold like any request,
-// since its reply can be lost too, except in its session with S3 a second
+// since its reply can be lost too, except in its session with S3 300 ms
 // or less away (or past): then it goes through, so no session ages past
 // S3 (behind a talk offered first while S3 hasn't passed, as due puts
 // it).
@@ -70,7 +70,12 @@ struct j2534_hold {
 
 constexpr uint32_t J2534_HOLD_SILENT_MISSES = 2; /* waits in a row */
 constexpr uint32_t J2534_HOLD_PROBE_EVERY = 8;   /* a silent channel's */
-constexpr int64_t J2534_HOLD_S3_MARGIN_US = 1000000;
+/* A hold lasts about a segmented wait; the window opens past the longest
+ * keep-alive, so no keep-alive is let through at its own due time */
+constexpr int64_t J2534_HOLD_S3_MARGIN_US = 300000;
+static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US >
+                  ECUIO_ENGINE_KEEPALIVE_MAX_US,
+              "the session gate opens before the longest keep-alive is due");
 
 inline bool j2534_hold_applies(const j2534_hold& h,
                                const ecuio_request_engine* e)
