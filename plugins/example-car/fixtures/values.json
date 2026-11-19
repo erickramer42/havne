@@ -1,0 +1,26 @@
+{
+  "havne_fixtures": 1,
+  "values": [
+    {"variant": "whole", "signal": "pcm_oil_pressure", "value": 345.6},
+    {"variant": "whole", "signal": "pcm_oil_temp", "value": 96},
+    {"variant": "whole", "signal": "tcm_fluid_temp", "value": 82},
+    {"variant": "whole", "signal": "tcm_gear", "value": 3},
+    {"variant": "whole", "signal": "abs_wheel_fl", "value": 52.37},
+    {"variant": "whole", "signal": "abs_wheel_fr", "value": 51.9},
+    {"variant": "whole", "signal": "eps_angle", "value": -12.5},
+    {"variant": "whole", "signal": "bcm_voltage", "value": 13.8},
+    {"variant": "whole", "signal": "ipc_fuel_shown", "value": 63.5},
+    {"variant": "whole", "signal": "hvac_cabin_temp", "value": 21.5},
+    {"variant": "whole", "signal": "srs_driver_belt", "value": 1},
+    {"variant": "whole", "signal": "gw_bus_load", "value": 37},
+    {"variant": "whole", "signal": "tpms_pressure_fl", "value": 236},
+    {"variant": "whole", "signal": "sccm_wiper", "value": 2},
+    {"variant": "whole", "signal": "ddm_window", "value": 40},
+    {"variant": "whole", "signal": "pdm_window", "value": 100},
+    {"variant": "whole", "signal": "seat_heater", "value": 1},
+    {"variant": "whole", "signal": "park_rear_distance", "value": 120},
+    {"variant": "whole", "signal": "cam_temp", "value": 31},
+    {"variant": "whole", "signal": "radar_lead_distance", "value": 48.2},
+    {"variant": "whole", "signal": "audio_volume", "value": 12}
+  ]
+}

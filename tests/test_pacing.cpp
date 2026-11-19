@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -97,6 +98,18 @@ TEST(PacingTest, TheDrawIsTheSimulatedCarsOwn)
     pacing::sim_timing none;
     auto r = pacing::sim_timing_rng(none.seed, 0x7E8);
     EXPECT_EQ(pacing::sim_timing_draw(none, r), 0);
+
+    /* A P99 far above its P50 reaches the 60 s cap (z past about 2.6,
+     * about 1 draw in 200) and never passes it, as the simulated car's */
+    pacing::sim_timing wide;
+    wide.p50_us = 1;
+    wide.p99_us = 10000000;
+    auto w = pacing::sim_timing_rng(wide.seed, 0x7E8);
+    int64_t most = 0;
+    for (int i = 0; i < 20000; ++i) {
+        most = std::max(most, pacing::sim_timing_draw(wide, w));
+    }
+    EXPECT_EQ(most, 60000000);
 }
 
 /* A run repeats exactly; another seed moves it */
@@ -362,6 +375,78 @@ TEST(PacingTest, AnElm327WaitsOutASilentModuleToItsNoData)
     EXPECT_LT(asked, 10.0) << asked;
     EXPECT_GT(r.timeouts, 0u);
     EXPECT_EQ(r.tally.window_values(), 0u);
+}
+
+namespace {
+
+ecuio_signal_def_t did_word(uint16_t id, uint32_t rx, uint16_t did,
+                            const char* name)
+{
+    ecuio_signal_def_t d{};
+    d.id = id;
+    d.message_id = rx;
+    d.mux_length = 3;
+    d.mux_key = 0x620000u | did;
+    d.kind = ECUIO_VALUE_UINT;
+    d.byte_order = ECUIO_BYTE_ORDER_BE;
+    d.start_byte = 3;
+    d.bit_length = 16;
+    d.scale = 1.0;
+    std::snprintf(d.name, sizeof d.name, "%s", name);
+    return d;
+}
+
+// Two modules' DIDs, each a word in one Single Frame, registered for the
+// session and the simulated car alike (which answers each module from
+// the set); the registry keeps the pointers, so static storage
+struct TwoModules {
+    TwoModules()
+    {
+        static const ecuio_signal_def_t defs[] = {
+            did_word(1, 0x7E8, 0x1E1C, "Engine A"),
+            did_word(2, 0x7E8, 0x1E1D, "Engine B"),
+            did_word(3, 0x7EA, 0xD200, "Module A"),
+            did_word(4, 0x7EA, 0xD201, "Module B"),
+        };
+        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
+                                                        {0x7EA, 0x7E2, 0, 0}};
+        static ecuio_signal_set_t set{};
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 4;
+        set.defs = defs;
+        set.channel_count = 2;
+        set.channels = channels;
+        ecuio_validation_t why{};
+        EXPECT_EQ(ecuio_profile_register(kName, &set, &why), ECUIO_OK)
+            << "code " << why.code << " at " << why.index;
+    }
+    ~TwoModules() { EXPECT_EQ(ecuio_profile_unregister(kName), ECUIO_OK); }
+    TwoModules(const TwoModules&) = delete;
+    TwoModules& operator=(const TwoModules&) = delete;
+    static constexpr const char* kName = "pacing-two";
+};
+
+} // namespace
+
+/* Two modules over an ELM327: a module keeps the turn until it has asked
+ * each of its DIDs once (request_turns.h), so AT SH goes once for each
+ * turn of two requests, not before every request */
+TEST(PacingTest, AnElm327SwitchesHeaderOnceATurn)
+{
+    const TwoModules profile;
+    pacing::bench_config cfg = one_pid_elm(pacing::vx_elm_mode());
+    cfg.profile = TwoModules::kName;
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    const pacing::bench_result r = run(cfg);
+    const cli::SummaryFigures f = cli::summary_figures(r.tally, {});
+    EXPECT_EQ(f.signals, 4u);
+    EXPECT_EQ(r.timeouts, 0u);
+    const double asked = static_cast<double>(r.sent_us.size());
+    ASSERT_GT(asked, 1000.0);
+    EXPECT_NEAR(static_cast<double>(r.headers) / asked, 0.5, 0.05)
+        << r.headers << " AT SH for " << asked << " requests";
 }
 
 /* The draw's fixed vectors, pinned on both sides (SimTimingTest pins the

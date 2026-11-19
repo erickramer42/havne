@@ -1,0 +1,52 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its pcm",
+  "extends": "obd2",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up pcm at 7E8",
+  "signals": [
+    {
+      "key": "pcm_name",
+      "name": "Engine Module Name",
+      "kind": "text",
+      "ecu": "pcm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "pcm_oil_pressure",
+      "name": "Engine Oil Pressure",
+      "ecu": "pcm",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 16, "order": "be"},
+      "scale": 0.1,
+      "unit": "kPa",
+      "decimals": 0,
+      "group": "engine",
+      "plot": 1,
+      "gauge": {"min": 0, "max": 700, "warn_low": 100, "warn_high": 600}
+    },
+    {
+      "key": "pcm_oil_temp",
+      "name": "Engine Oil Temp",
+      "ecu": "pcm",
+      "read": {"service": "22", "number": "4A11"},
+      "field": {"byte": 0, "bits": 8},
+      "offset": -40,
+      "unit": "°C",
+      "decimals": 0,
+      "group": "engine",
+      "gauge": {"min": -40, "max": 160, "warn_high": 130}
+    },
+    {
+      "key": "pcm_oil_over_coolant",
+      "name": "Oil Over Coolant",
+      "kind": "computed",
+      "expr": "pcm_oil_temp - obd2.coolant",
+      "unit": "°C",
+      "decimals": 0,
+      "group": "engine",
+      "gauge": {"min": -20, "max": 60, "warn_high": 40}
+    }
+  ]
+}

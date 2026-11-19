@@ -1,0 +1,27 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its ddm",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up ddm at 52A",
+  "signals": [
+    {
+      "key": "ddm_name",
+      "name": "Driver Door Module Name",
+      "kind": "text",
+      "ecu": "ddm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "ddm_window",
+      "name": "Driver Window",
+      "ecu": "ddm",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "unit": "%",
+      "decimals": 0,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 100}
+    }
+  ]
+}

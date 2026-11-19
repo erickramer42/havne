@@ -1,0 +1,28 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its ipc",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up ipc at 524",
+  "signals": [
+    {
+      "key": "ipc_name",
+      "name": "Cluster Module Name",
+      "kind": "text",
+      "ecu": "ipc",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "ipc_fuel_shown",
+      "name": "Fuel Level Shown",
+      "ecu": "ipc",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "scale": 0.5,
+      "unit": "%",
+      "decimals": 0,
+      "group": "fuel",
+      "gauge": {"min": 0, "max": 100, "warn_low": 10}
+    }
+  ]
+}

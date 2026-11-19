@@ -1,0 +1,28 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its radar",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up radar at 52F",
+  "signals": [
+    {
+      "key": "radar_name",
+      "name": "Radar Module Name",
+      "kind": "text",
+      "ecu": "radar",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "radar_lead_distance",
+      "name": "Lead Distance",
+      "ecu": "radar",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 16, "order": "be"},
+      "scale": 0.1,
+      "unit": "m",
+      "decimals": 1,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 200, "warn_low": 10}
+    }
+  ]
+}

@@ -406,7 +406,7 @@ fake DLL as a device first, and `scripts/coverage.sh` demands it.
 ```sh
 export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
 export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk)Test\." --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car)Test\." --output-on-failure
 ```
 
 Use Windows-style paths in these variables (forward slashes are

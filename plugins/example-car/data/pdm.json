@@ -1,0 +1,27 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its pdm",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up pdm at 52B",
+  "signals": [
+    {
+      "key": "pdm_name",
+      "name": "Passenger Door Module Name",
+      "kind": "text",
+      "ecu": "pdm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "pdm_window",
+      "name": "Passenger Window",
+      "ecu": "pdm",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "unit": "%",
+      "decimals": 0,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 100}
+    }
+  ]
+}

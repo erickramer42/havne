@@ -1,0 +1,39 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its tcm",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up tcm at 520",
+  "signals": [
+    {
+      "key": "tcm_name",
+      "name": "Transmission Module Name",
+      "kind": "text",
+      "ecu": "tcm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "tcm_fluid_temp",
+      "name": "Trans Fluid Temp",
+      "ecu": "tcm",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "offset": -40,
+      "unit": "°C",
+      "decimals": 0,
+      "group": "engine",
+      "plot": 4,
+      "gauge": {"min": -40, "max": 160, "warn_high": 120}
+    },
+    {
+      "key": "tcm_gear",
+      "name": "Selected Gear",
+      "kind": "enum",
+      "ecu": "tcm",
+      "read": {"service": "22", "number": "4A20"},
+      "field": {"byte": 0, "bits": 8},
+      "values": {"0": "Park", "1": "Reverse", "2": "Neutral", "3": "Drive"},
+      "group": "vehicle"
+    }
+  ]
+}

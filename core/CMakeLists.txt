@@ -50,12 +50,16 @@ add_library(ecuio-core STATIC
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/sim.cpp
+    src/sim_bus.cpp
     src/socketcan_interfaces.cpp
     src/socketcan_request.cpp
     src/socketcan_transport.cpp
     src/talk_seam.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/signal_file_parts.cpp
+    src/signal_file_rules.cpp
+    src/signal_file_source.cpp
     src/signal_expr.cpp
     src/signal_file_expr.cpp
     src/signal_keys.cpp

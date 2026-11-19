@@ -1,0 +1,26 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its seat",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up seat at 52C",
+  "signals": [
+    {
+      "key": "seat_name",
+      "name": "Seat Module Name",
+      "kind": "text",
+      "ecu": "seat",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "seat_heater",
+      "name": "Seat Heater",
+      "kind": "enum",
+      "ecu": "seat",
+      "read": {"service": "22", "number": "4A20"},
+      "field": {"byte": 0, "bits": 8},
+      "values": {"0": "Off", "1": "Low", "2": "High"},
+      "group": "vehicle"
+    }
+  ]
+}

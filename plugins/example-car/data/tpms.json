@@ -1,0 +1,29 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its tpms",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up tpms at 528",
+  "signals": [
+    {
+      "key": "tpms_name",
+      "name": "Tire Pressure Module Name",
+      "kind": "text",
+      "ecu": "tpms",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "tpms_pressure_fl",
+      "name": "Tire Pressure FL",
+      "ecu": "tpms",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "scale": 2,
+      "unit": "kPa",
+      "decimals": 0,
+      "group": "vehicle",
+      "plot": 5,
+      "gauge": {"min": 150, "max": 350, "warn_low": 200, "warn_high": 300}
+    }
+  ]
+}
