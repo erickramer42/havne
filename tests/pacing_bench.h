@@ -275,7 +275,8 @@ private:
     ecuio_session_t* m_session = nullptr;
     ecuio_sim_t* m_sim = nullptr;
     std::unique_ptr<ecuio_request_engine> m_engine;
-    j2534_hold m_hold; /* J2534: the worker's, after the engine's init */
+    j2534_hold m_hold; /* J2534: the worker's hold, holding no row before
+                        * the first look */
     std::vector<std::mt19937_64> m_rng; /* one for each channel's module */
     std::priority_queue<event, std::vector<event>, std::greater<event>>
         m_events;
