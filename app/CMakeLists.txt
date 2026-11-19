@@ -51,7 +51,10 @@ qt_add_library(app_ui STATIC
     variantshape.h
     pluginstore.cpp
     pluginstore_pages.cpp
+    pluginstore_import.cpp
+    pluginstore_picks.cpp
     pluginstore.h
+    pluginstore_parts.h
     alerttone.cpp
     alerttone.h
     conditionmodel.cpp
