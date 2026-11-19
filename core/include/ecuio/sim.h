@@ -23,9 +23,11 @@ extern "C" {
  *
  * The URI, one of:
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
- *          [&vin=<VIN>][&faults=<f>:<n>[,...]]
+ *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
- *            [&faults=<f>:<n>[,...]]
+ *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
+ *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
+ *   fc=<us>[@<reply ID>][,...], cf=<us>[@<reply ID>][,...] and seed=<n>
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
  * J1979 PID. modules=2: a second module too, on 0x7E1 answering as
@@ -56,7 +58,24 @@ extern "C" {
  * 09 02 answers instead of the recording's.
  * faults, both: silent, late, pending (7F <service> 78 first, the reply
  * 300 ms later), bad_sequence and stalled, each every nth reply
- * (1-10000) of each module, the bitmaps never broken.
+ * (1-10000) of each module, on that module's own count, the bitmaps
+ * never broken. @<reply ID> (11-bit hex) aims a fault at the module
+ * answering on it alone (faults=late:3@7EA), in place of that fault
+ * for every module; at most 32 aims.
+ * The timing, both: delay is each reply's time from the request to its
+ * first frame, a log-normal through its median p50 and its 99th
+ * percentile p99 (1 <= p50 <= p99 <= 10000000), drawn on a generator of
+ * each module's own from seed (a decimal, 1 by default), one draw for
+ * each request the module answers; a late fault adds its time to the
+ * draw, a pending reply keeps its own. fc is the time from the tester's
+ * Flow Control to the first Consecutive Frame, cf the module's least gap
+ * between Consecutive Frames, the tester's STmin when that is longer
+ * (each 0 to 1000000). @<reply ID> aims an item at one module, in place
+ * of the key's item for every module; at most 32 aims for each key. A
+ * key may come again: its later items replace earlier ones, and its aims
+ * count together.
+ * With none of them, a reply starts at once and its frames go at the
+ * tester's pace.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -131,6 +150,10 @@ _Static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
  *   with a 29-bit channel, one on 0x7DF, or one sharing an ID with the
  *   engine ECU's pair but not the pair itself, ECUIO_ERR_INVALID_ARGUMENT;
  *   both on every platform, after the URI and before NO_TRANSPORT.
+ * - faults=, delay=, fc= or cf= aiming at a reply ID none of the sim's
+ *   ECUs answers on: ECUIO_ERR_BAD_URI, the detail naming the IDs they
+ *   do; after the profile, whose modules it needs, and before
+ *   NO_TRANSPORT.
  * - Whatever the bus, a frame another node sends on 0x7E8 silences it
  *   for good (ECUIO_SIM_YIELDED): an ECU already answers there.
  */
@@ -219,9 +242,15 @@ ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
 typedef struct ecuio_sim_reply {
     uint32_t reply_id;    /* the 11-bit CAN ID it is sent on */
     uint32_t flags;       /* ECUIO_SIM_REPLY_* */
-    int64_t delay_us;     /* when it starts, after the request */
+    int64_t delay_us;     /* when it starts, after the request: the
+                             module's drawn delay (delay=), plus a
+                             fault's */
     uint32_t length;      /* bytes of data: 1..4095, ISO-TP's longest */
-    uint32_t reserved[5]; /* zero; ABI growth space */
+    uint32_t fc_us;       /* fc=: the tester's Flow Control to the first
+                             Consecutive Frame, 0 for at once */
+    uint32_t cf_us;       /* cf=: the module's least gap between
+                             Consecutive Frames; a longer STmin wins */
+    uint32_t reserved[3]; /* zero; ABI growth space */
     uint8_t data[ECUIO_FRAME_DATA_MAX]; /* the whole message, from its
                                            service byte; zero past
                                            length */
@@ -232,6 +261,12 @@ static_assert(sizeof(ecuio_sim_reply_t) == 4136,
               "ecuio_sim_reply_t size is ABI");
 static_assert(offsetof(ecuio_sim_reply_t, delay_us) == 8,
               "sim reply delay_us offset is ABI");
+static_assert(offsetof(ecuio_sim_reply_t, fc_us) == 20,
+              "sim reply fc_us offset is ABI");
+static_assert(offsetof(ecuio_sim_reply_t, cf_us) == 24,
+              "sim reply cf_us offset is ABI");
+static_assert(offsetof(ecuio_sim_reply_t, reserved) == 28,
+              "sim reply reserved offset is ABI");
 static_assert(offsetof(ecuio_sim_reply_t, data) == 40,
               "sim reply data offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -239,6 +274,12 @@ _Static_assert(sizeof(ecuio_sim_reply_t) == 4136,
                "ecuio_sim_reply_t size is ABI");
 _Static_assert(offsetof(ecuio_sim_reply_t, delay_us) == 8,
                "sim reply delay_us offset is ABI");
+_Static_assert(offsetof(ecuio_sim_reply_t, fc_us) == 20,
+               "sim reply fc_us offset is ABI");
+_Static_assert(offsetof(ecuio_sim_reply_t, cf_us) == 24,
+               "sim reply cf_us offset is ABI");
+_Static_assert(offsetof(ecuio_sim_reply_t, reserved) == 28,
+               "sim reply reserved offset is ABI");
 _Static_assert(offsetof(ecuio_sim_reply_t, data) == 40,
                "sim reply data offset is ABI");
 #endif

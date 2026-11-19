@@ -1075,3 +1075,48 @@ sections 2, 3, 6 and 8, each with its reason:
   by its name carries `key` after it (`null` before format 4); the
   lines' tables are in ADR-0031's note of 2026-11-17. `--signal` follows
   the find rule, and `view --frames` decodes with the file's keys.
+- **The viewer by key.** The viewer keeps a signal's pane, and names the
+  plotted export's columns, by the signal's key. An older recording keeps
+  its panes by name in both its values and its frames opens (its values
+  have names alone); its plotted export names a column by key in a frames
+  open, by name in its values. A pane kept by name is read while the key
+  has none, and in a format 4 recording the next change writes the key. A
+  frames open is keyed by the set's signal file
+  (`ecuio_recording_open_frames_with`): the recording's own
+  `signals.json`, or a registered profile's file, whose text the app
+  copies on the GUI thread for the open's thread to load its own copy,
+  kept only when its set (the defs, channels, enum labels and computed
+  programs) is the registered set's byte for byte, since the file's set is
+  then what the frames decode by. A profile with no file opens with its
+  set alone (`id:<n>` for a computed signal).
+- **Compare's pairs.** One rule, `cli/signal_pairs.h`, for `havne-cli
+  view`'s `delta` and the viewer's Compare (its dashed traces, the
+  cursor's values there, the difference and the rise or fall alignment): a
+  signal pairs with the other recording's signal of its key, when it has a
+  key the other holds; else with the signal of its name, when that name is
+  one signal's in each recording and that signal isn't the pair of a key
+  this recording holds. A renamed signal keeps its pair by key, and a new
+  signal of its old name takes none. A name two signals of either
+  recording have pairs nothing by name, since nothing says which of them
+  the other recorded. An `id:<n>` key is a set's own numbering, so it
+  pairs by name. Keys on both sides with none in common still pair by a
+  name each has once, so an `obd2` recording still compares with a
+  manufacturer plugin's. The unit is the caller's: the dashed trace takes
+  any pair; `delta` and the difference take a number in the same unit, its
+  case aside. `view --align-on rise:<signal>:<level>` finds the signal in
+  each recording by core's find rule (a key, else a name one signal has; a
+  repeated name is usage); the app aligns on the signal picked here and
+  its pair there.
+- **The validator takes a repeated name (section 6).**
+  `ECUIO_VALIDATE_ERR_DUPLICATE_NAME` stays defined, retired, never
+  returned or reused, so no caller's build breaks on it. The loader keeps
+  a format 1 or 2 file's refusal of two signals of one name ("a name names
+  one signal"), and signal-file format 3 (step 4) is where a file first
+  holds one; until then a repeated name reaches a set only from a set built
+  in code and registered through the C API. Python's `Session` finds a
+  signal by core's find rule (`ecuio_signal_set_find`: a key, else a name
+  one signal has; a repeated name is a `KeyError` with core's words, which
+  list the keys) for `set_focus`, `ranked_signals` and a health report's
+  values. A health report read from a recording's values by name (before
+  format 4, no frames) gives no value to a name two of the set's defs
+  share, since nothing says whose rows they are.

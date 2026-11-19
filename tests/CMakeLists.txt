@@ -29,7 +29,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp test_pick_only.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -95,8 +95,8 @@ app_enable_warnings(bench_recording)
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
-    test_plugin_least_core.cpp test_plugin_conversation.cpp
+    test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_base64.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
@@ -127,7 +127,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp test_scan_retry.cpp)
+    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp
+    test_sim_car.cpp test_sim_timing.cpp test_scan_retry.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -159,8 +160,10 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
 # test_elm327_talk.cpp: a talk through the test seam, against the fake.
 # test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
+# test_elm327_pack.cpp: packs sized by their reply's frames, against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp)
+    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
+    test_elm327_pack.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -227,9 +230,10 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
                    test_vcan_requests.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -303,7 +307,8 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp test_cli_pairs.cpp test_cli_summary.cpp)
+        test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
+        test_cli_summary.cpp test_cli_emulator.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -411,6 +416,9 @@ if(TARGET havne-cli)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
+        app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
+        set_tests_properties(CliElm327RunTest.TheMadeUpCarsModulesAllAnswer PROPERTIES TIMEOUT 180)
         app_cli_elm327(PythonObdReadsIt python-obd)
         set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
@@ -999,6 +1007,16 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
             plugins-check-format2.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
+        # A plugin's Dashboard pages (ADR-0052's appendix on pages): a page
+        # line for each, through the layout check, and the requires_core
+        # line its older requires.core earns
+        app_cli_golden(PluginsCheckJudgesAPluginsPages plugins-check-pages.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages)
+        # A key no variant has, a cell the layout check drops and a second
+        # page of one name: each page fails, so the check does
+        app_cli_golden(PluginsCheckFailsAPageThatWontRead plugins-check-pages-bad.jsonl
+            --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages-bad.json)
         # A format 2 plugin with the conversation tier (ADR-0066): what its
         # manifest lets its module cause to be sent, after the plugin line;
         # then the same plugin as a folder with its module a file, a
@@ -2036,9 +2054,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_one_store.cpp
         test_bridge_variantshape.cpp
         test_bridge_plugincopies.cpp
+        test_bridge_pluginpages.cpp
         test_store_migration.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
+        ../app/recordingview_asks.cpp
+        ../app/recordingview_queries.cpp
+        ../app/recordingview_stretches.cpp
+        ../app/recordingview_conditions.cpp
+        ../app/recordingview_internal.h
         ../app/recording_frameset.cpp
         ../app/recording_pairs.cpp
         ../app/recordingexport.cpp
@@ -2051,6 +2075,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/exprcheck.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
@@ -2130,6 +2157,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
@@ -2463,6 +2493,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
     target_include_directories(test_j2534_stream PRIVATE
@@ -2520,12 +2551,13 @@ endif()
 # J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
 # session through the surrogate: in this tree the x64 one beside the
 # test, in the cross-arch run the Win32 tree's. test_j2534_talk.cpp's
-# cases (a request longer than a frame, through the test seam) run the
-# same way.
+# cases (a request longer than a frame, through the test seam) and
+# test_j2534_car.cpp's (18 modules on the fake) run the same way.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
         test_j2534_talk.cpp
+        test_j2534_car.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
@@ -2601,6 +2633,21 @@ endif()
 # platform has (ADR-0042 section 4), a measurement for docs/performance.md;
 # built with the tests, never run by ctest
 find_package(Threads REQUIRED)
+# The request engine on a simulated clock (tests/pacing_bench.h):
+# test_pacing gates the pacing on the model's figures; bench_pacing
+# prints them for docs/performance.md (not in ctest)
+add_executable(test_pacing test_pacing.cpp)
+target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_pacing)
+gtest_discover_tests(test_pacing DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+add_executable(bench_pacing bench_pacing.cpp)
+target_include_directories(bench_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(bench_pacing PRIVATE ecuio-core)
+app_enable_warnings(bench_pacing)
+
 add_executable(bench_timing bench_timing.cpp)
 target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
 # core/src: fake_ecus.h's sim_security.h

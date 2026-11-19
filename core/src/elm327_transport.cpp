@@ -37,9 +37,9 @@
 
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
-    "baud",     "serial",   "filter",       "txid", "poll", "probe",
-    "identify", "diagnose", "pack",         "scan", "gap",  "profile",
-    "did",      "session",  "keepalive_ms", nullptr};
+    "baud",     "serial",   "filter",       "txid",       "poll", "probe",
+    "identify", "diagnose", "pack",         "scan",       "gap",  "profile",
+    "did",      "session",  "keepalive_ms", "packframes", nullptr};
 
 namespace ecuio_elm327 {
 

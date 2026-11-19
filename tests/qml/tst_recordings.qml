@@ -100,7 +100,7 @@ TestCase {
     // Opens pull-early and waits for its viewer
     function openEarlyViewer() {
         const page = createPage()
-        page.open(earlyRow)
+        page.openPart.open(earlyRow)
         tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
         return page
     }
@@ -112,7 +112,7 @@ TestCase {
     function openEarly() {
         const page = createPage()
         page.recordings = [lateRow, earlyRow]
-        page.open(earlyRow)
+        page.openPart.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
         verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
@@ -148,7 +148,7 @@ TestCase {
         verify(choice.mapToItem(page, 0, 0).y < chart.mapToItem(page, 0, 0).y, "above the chart")
         find(page, "compareButton").clicked()
         verify(!page.compareOpen && !choice.visible, "closed again")
-        page.compareWith(earlyRow)
+        page.comparePart.compareWith(earlyRow)
         verify(page.compareOpen, "a started compare opens them")
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         verify(waitForPolish(page.Window.window), "laid out")
@@ -184,7 +184,7 @@ TestCase {
         const folder = Harness.importCsvFixture("logger-a", "20261105-220322 Logger A")
         verify(folder !== "", "the fixture imports")
         const page = createPage()
-        page.refresh()
+        page.refreshPart.refresh()
         const at = page.recordings.findIndex(r => r.folder.endsWith("/20261105-220322 Logger A"))
         verify(at >= 0, "the import is listed")
         compare(page.recordings[at].title, "2026-11-05 22:03:22 · Logger A")
@@ -201,7 +201,7 @@ TestCase {
         compare(find(page, "checkSummary").text, "Frames check: the recording has no frames")
         verify(!find(page, "replayView").visible, "no Replay of the view")
         verify(!find(page, "decodeChoice").visible, "no frames to decode")
-        compare(page.series(400).length, 3, "its numbers are plotted")
+        compare(page.seriesPart.series(400).length, 3, "its numbers are plotted")
     }
 
     // Through the phone's picker: the panel names the file and the map as the
@@ -259,7 +259,7 @@ TestCase {
         const map = Harness.writeScratchFile("import-map.json",
             '{"havne_column_map": 1, "time": {"column": "time", "unit": "s"}, '
             + '"signals": [{"column": "rpm", "name": "RPM", "unit": "rpm"}]}')
-        page.chooseImportFile(csv)
+        page.openPart.chooseImportFile(csv)
         verify(panel.visible)
         compare(find(page, "importFileName").text, "Import import-log.csv")
         verify(find(page, "importKind_csv").selected, "guessed from its first line")
@@ -267,7 +267,7 @@ TestCase {
         verify(!find(page, "importInterface").visible)
         tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
         verify(!find(page, "importStart").enabled, "a time with fractions has no unit yet")
-        page.chooseImportMap(map)
+        page.openPart.chooseImportMap(map)
         verify(!find(page, "guessPreview").visible, "a map file skips the guess")
         compare(find(page, "importMapName").text, "import-map.json")
         verify(find(page, "importStart").enabled)
@@ -280,14 +280,14 @@ TestCase {
         verify(!panel.visible, "done with the file")
         verify(page.viewing, "the import opens its recording")
         verify(note.visible, "its words stay above the viewer")
-        page.backToList()
+        page.openPart.backToList()
         verify(!note.visible)
         verify(page.recordings.some(r => r.title.endsWith(" · CSV import")),
                "it joins the list")
 
         const log = Harness.writeScratchFile("import-two.log",
             "(1.000000) can0 7E8#01\n(1.100000) can1 123#02\n(1.600000) can1 123#03\n")
-        page.chooseImportFile(log)
+        page.openPart.chooseImportFile(log)
         verify(!note.visible, "a new file, no old words")
         verify(find(page, "importKind_candump").selected, "guessed from its first line")
         verify(!find(page, "importMapName").visible, "a candump log has no column map")
@@ -306,20 +306,20 @@ TestCase {
                   "the import ends")
         compare(note.text, "Imported 2 frames over 0.5 s")
         verify(!panel.visible)
-        page.backToList()
+        page.openPart.backToList()
         verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
 
         // The next log needs no interface: the one typed for the last is gone
         const one = Harness.writeScratchFile("import-one.log", "(1.000000) can0 7E8#01\n")
-        page.chooseImportFile(one)
+        page.openPart.chooseImportFile(one)
         compare(find(page, "importInterface").text, "")
         find(page, "importStart").clicked()
         tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
                   "the import ends")
         compare(note.text, "Imported 1 frames over 0.0 s")
-        page.backToList()
+        page.openPart.backToList()
 
-        page.chooseImportFile(log)
+        page.openPart.chooseImportFile(log)
         find(page, "importKind_csv").clicked()
         compare(page.importKind, RecordingImport.Csv)
         tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
@@ -338,7 +338,7 @@ TestCase {
 0,800,12
 500,900,30
 ")
-        page.chooseImportFile(csv)
+        page.openPart.chooseImportFile(csv)
         const preview = guessed(page)
         const start = find(page, "importStart")
         const label = find(page, "importLabel")
@@ -355,17 +355,17 @@ TestCase {
         start.clicked()
         tryVerify(() => page.viewing, 10000, "the import opens its recording")
         verify(page.openedTitle.endsWith(" · Cold start"), page.openedTitle)
-        page.backToList()
+        page.openPart.backToList()
     }
 
     // A row says its length, its kind and signals, and its marks
     function test_aRowSaysItsLengthKindAndMarks() {
         const page = createPage()
-        compare(page.rowFacts({ durationMs: 60000, log: true, signals: 13, marks: 0, frames: true }),
+        compare(page.rowInfoPart.rowFacts({ durationMs: 60000, log: true, signals: 13, marks: 0, frames: true }),
                 "1 min 0 s · log, 13 signals")
-        compare(page.rowFacts({ durationMs: 12000, log: false, signals: 5, marks: 2, frames: true }),
+        compare(page.rowInfoPart.rowFacts({ durationMs: 12000, log: false, signals: 5, marks: 2, frames: true }),
                 "12 s · session · 2 marks")
-        compare(page.rowFacts({ durationMs: -1, log: false, signals: 3, marks: 1, frames: false }),
+        compare(page.rowInfoPart.rowFacts({ durationMs: -1, log: false, signals: 3, marks: 1, frames: false }),
                 "3 signals · 1 mark")
     }
 
@@ -387,7 +387,7 @@ TestCase {
         const page = createPage()
         const csv = Harness.writeScratchFile("guess-log.csv",
             "Time (ms),RPM [rpm],Note,Load [%]\n0,800,a,12\n500,900,b,30\n1000,950,c,55\n")
-        page.chooseImportFile(csv)
+        page.openPart.chooseImportFile(csv)
         const preview = guessed(page)
         verify(preview.visible)
         compare(find(page, "importMapName").text, "Guessed from the header")
@@ -432,7 +432,7 @@ TestCase {
         const page = createPage()
         const text = "Time (ms),RPM [rpm],Load [%],Note\n0,800,12,a\n,850,20,b\n"
                      + "500,900,30,c\n , , , \n"
-        page.chooseImportFile(Harness.writeScratchFile("untimed-log.csv", text))
+        page.openPart.chooseImportFile(Harness.writeScratchFile("untimed-log.csv", text))
         const preview = guessed(page)
         verify(find(page, "importStart").enabled)
         verify(preview.guess.notes.some(
@@ -446,7 +446,7 @@ TestCase {
         verify(Qt.colorEqual(find(page, "importNote").color, Theme.success))
 
         // One such row is said as one
-        page.chooseImportFile(Harness.writeScratchFile("untimed-log-1.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("untimed-log-1.csv",
             "Time (ms),RPM [rpm],Load [%],Note\n0,800,12,a\n,850,20,b\n500,900,30,c\n"))
         guessed(page)
         find(page, "importStart").clicked()
@@ -455,9 +455,9 @@ TestCase {
         compare(find(page, "importNote").text,
                 "Imported 6 values, 1 row with no time left out")
 
-        page.chooseImportFile(Harness.writeScratchFile("untimed-log-2.csv", text))
+        page.openPart.chooseImportFile(Harness.writeScratchFile("untimed-log-2.csv", text))
         guessed(page)
-        page.chooseImportMap(Harness.writeScratchFile("untimed-map.json",
+        page.openPart.chooseImportMap(Harness.writeScratchFile("untimed-map.json",
             '{"havne_column_map": 1, "time": {"column": "Time (ms)", "unit": "ms"}, '
             + '"signals": [{"column": "RPM [rpm]", "name": "RPM", "unit": "rpm"}]}'))
         find(page, "importStart").clicked()
@@ -471,7 +471,7 @@ TestCase {
     // the unit shows chosen and changes with a tap
     function test_aTimeWithoutAUnitReadsAsMilliseconds() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-plain.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-plain.csv",
             "time,rpm\n0,800\n1,900\n2,950\n"))
         const preview = guessed(page)
         verify(!find(preview, "guessWaiting").visible)
@@ -488,7 +488,7 @@ TestCase {
     // and says so
     function test_aTimeWithFractionsWaitsForAUnit() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-fraction.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-fraction.csv",
             "time,rpm
 0.0,800
 0.5,900
@@ -508,12 +508,12 @@ TestCase {
     // can fix (dates with no zone) leaves both waiting
     function test_saveWaitsForATimeImportCanRead() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-save-unit.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-save-unit.csv",
             "time,rpm\n0,800\n1,900\n2,950\n"))
         let preview = guessed(page)
         verify(preview.ready)
         verify(find(preview, "saveMapButton").enabled, "ms, as the guess read it")
-        page.chooseImportFile(Harness.writeScratchFile("guess-save-zone.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-save-zone.csv",
             "time,rpm\n2026-11-05T22:03:22,800\n2026-11-05T22:03:23,900\n"))
         preview = guessed(page)
         verify(!preview.ready)
@@ -524,7 +524,7 @@ TestCase {
     // A column whose header the file has twice is left out for good
     function test_aDuplicatedHeaderColumnCantBePutBack() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-dup.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-dup.csv",
             "time (s),rpm,dup,dup\n0,800,1,2\n1,900,3,4\n2,950,5,6\n"))
         const preview = guessed(page)
         compare(preview.columns.length, 3)
@@ -536,7 +536,7 @@ TestCase {
     // A time with a zone to give, not a unit, can't be fixed here
     function test_aTimeThatNeedsAZoneAsksForAMap() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-zone.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-zone.csv",
             "time,rpm\n2026-11-05T22:03:22,800\n2026-11-05T22:03:23,900\n2026-11-05T22:03:24,950\n"))
         const preview = guessed(page)
         verify(find(preview, "guessWaiting").visible)
@@ -549,7 +549,7 @@ TestCase {
     // the way out
     function test_aFileWithNoHeaderIsRefusedInCoresWords() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-none.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-none.csv",
                                                        "just,words\nmore,words\n"))
         guessed(page)
         const note = find(page, "importNote")
@@ -565,7 +565,7 @@ TestCase {
     // header; one with no header can't
     function test_aLeftOutColumnCanBePutBack() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-back.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-back.csv",
             "time (s),rpm,empty,\n0,800,,\n1,900,,\n2,950,,\n"))
         const preview = guessed(page)
         compare(preview.columns.length, 3)
@@ -595,7 +595,7 @@ TestCase {
         const note = find(page, "importNote")
         Harness.failImportThreads(Bridge.recordingImport, true)
         try {
-            page.chooseImportFile(Harness.writeScratchFile("nostart.csv",
+            page.openPart.chooseImportFile(Harness.writeScratchFile("nostart.csv",
                 "time (s),rpm\n0,800\n1,900\n"))
             verify(page.importFailed)
             verify(!Bridge.recordingImport.busy)
@@ -603,7 +603,7 @@ TestCase {
             verify(note.text.indexOf("The file couldn't be read") === 0, note.text)
             verify(Qt.colorEqual(note.color, Theme.danger))
 
-            page.chooseImportFile(Harness.writeScratchFile("nostart.log",
+            page.openPart.chooseImportFile(Harness.writeScratchFile("nostart.log",
                 "(1.000000) can0 7E8#01\n"))
             verify(!note.visible, "a new file, no old words")
             verify(find(page, "importStart").enabled)
@@ -630,11 +630,11 @@ TestCase {
         const note = find(page, "importNote")
         const cancel = find(page, "importCancel")
         const busy = find(page, "importBusy")
-        page.refresh()
+        page.refreshPart.refresh()
         const before = page.recordings.length
         Harness.holdImports(Bridge.recordingImport, 15000)
         try {
-            page.chooseImportFile(Harness.writeScratchFile("cancel-one.log",
+            page.openPart.chooseImportFile(Harness.writeScratchFile("cancel-one.log",
                 "(1.000000) can0 7E8#01\n"))
             verify(cancel.enabled)
             find(page, "importStart").clicked()
@@ -665,7 +665,7 @@ TestCase {
             Bridge.recordingImport.cancel()
             tryVerify(() => !Bridge.recordingImport.busy, 20000, "the held import ends")
         }
-        page.refresh()
+        page.refreshPart.refresh()
         compare(page.recordings.length, before, "nothing was imported")
 
         find(page, "importStart").clicked()
@@ -674,10 +674,10 @@ TestCase {
         compare(note.text, "Imported 1 frames over 0.0 s")
         verify(Qt.colorEqual(note.color, Theme.success))
         verify(!panel.visible)
-        page.backToList()   // the import opened its recording
+        page.openPart.backToList()   // the import opened its recording
         compare(page.recordings.length, before + 1)
 
-        page.chooseImportFile(Harness.writeScratchFile("cancel-two.log",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("cancel-two.log",
             "(1.000000) can0 7E8#01\n"))
         verify(panel.visible)
         cancel.clicked()
@@ -689,7 +689,7 @@ TestCase {
     // from the list afterwards shows none of them
     function test_aRefusedImportsWordsDoNotSitOverTheNextRecording() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("note-refused.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("note-refused.csv",
             "time (s),rpm
 0,800
 1,900
@@ -710,7 +710,7 @@ TestCase {
 
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
             "time (s),rpm\n0,800\n1,900\n2,950\n"))
         const preview = guessed(page)
         const longName = "n".repeat(40)
@@ -733,7 +733,7 @@ TestCase {
     // another; it is offered next time, and picking it skips the guess
     function test_aGuessedMapIsSavedAndOfferedNextTime() {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("guess-save.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-save.csv",
             "time (s),rpm\n0,800\n1,900\n2,950\n"))
         const preview = guessed(page)
         const stamp = String(Date.now())
@@ -752,7 +752,7 @@ TestCase {
         find(preview, "saveMapName").text = "left over"
 
         // Next file: the saved map is offered; picking it skips the guess
-        page.chooseImportFile(Harness.writeScratchFile("guess-next.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("guess-next.csv",
             "time (s),rpm\n0,800\n1,900\n"))
         verify(page.importGuessing, "reading the second file")
         compare(find(preview, "saveMapNote").text, "", "the last file's note is gone while reading")
@@ -765,7 +765,7 @@ TestCase {
         compare(second.columns.length, 1, "the second file's columns")
         verify(find(page, "savedMaps").visible)
         const at = page.savedMaps.findIndex(m => m.name === safe)
-        page.chooseImportMap(page.savedMaps[at].url)
+        page.openPart.chooseImportMap(page.savedMaps[at].url)
         compare(find(page, "importMapName").text, safe + ".json")
         verify(!preview.visible)
         verify(find(page, "importStart").enabled)
@@ -837,10 +837,10 @@ TestCase {
         verify(button.visible)
         button.clicked()
         compare(replaySpy.signalArguments[0][0], findingsRow.uri, "all in view")
-        page.setView(2500, 7250)
+        page.cursorsPart.setView(2500, 7250)
         button.clicked()
         compare(replaySpy.signalArguments[1][0], findingsRow.uri + "&from=2.5&to=7.25")
-        page.setView(0, 4000)
+        page.cursorsPart.setView(0, 4000)
         button.clicked()
         compare(replaySpy.signalArguments[2][0], findingsRow.uri + "&from=0&to=4")
         compare(replaySpy.count, 3)
@@ -967,7 +967,7 @@ profile  raw
         Harness.writeScratchFile(name + "/events.log", header)
         Harness.writeScratchFile(name + "/signals.csv", rows)
         const page = createPage()
-        page.open({ title: "Fast", folder: folder })
+        page.openPart.open({ title: "Fast", folder: folder })
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         const panel = openExport(page)
         restoreExportChoices(panel)
@@ -985,7 +985,7 @@ profile  raw
         const folder = Harness.importCsvFixture("logger-a", "export-slow")
         verify(folder !== "", "the fixture imports")
         const page = createPage()
-        page.open({ title: "Slow", folder: folder })
+        page.openPart.open({ title: "Slow", folder: folder })
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         const panel = openExport(page)
         restoreExportChoices(panel)
@@ -1152,7 +1152,7 @@ profile  raw
         const page = createPage()
         const folder = Harness.writeFramesRecording("export-frames-only", 50, 10000)
         verify(folder !== "")
-        page.open({ title: "Frames", uri: "replay://x?profile=raw", source: "", folder: folder, profile: "raw" })
+        page.openPart.open({ title: "Frames", uri: "replay://x?profile=raw", source: "", folder: folder, profile: "raw" })
         tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
         const panel = openExport(page)
         compare(panel.format, "pcapng", "CSV isn't offered")
@@ -1170,7 +1170,7 @@ profile  raw
 
     function test_aDecodedViewSaysTheCsvIsAsRecorded() {
         const page = openFindings()
-        page.decodeWith("obd2")
+        page.decodePart.decodeWith("obd2")
         tryVerify(() => page.viewing && find(page, "recordingInfo").visible
                         && find(page, "recordingInfo").text.indexOf("decoded") >= 0, 10000, "decoded")
         const panel = openExport(page)
@@ -1273,7 +1273,7 @@ profile  raw
         const page = createPage()
         page.reportNote = "Report saved: 1 ECU, 0 trouble codes, 0 key values"
         const url = Harness.writeScratchFile("never.json", "")
-        verify(!page.saveReportTo(url, 1), "nothing to report on")
+        verify(!page.reportPart.saveReportTo(url, 1), "nothing to report on")
         compare(page.reportNote, "Report not saved: the report couldn't start")
         verify(page.reportFailed, "in the failure's color")
     }
@@ -1286,12 +1286,12 @@ profile  raw
         const button = find(page, "saveReport")
         verify(button.visible)
         verify(button.enabled)
-        page.zoomAt(5000, 0.25)
+        page.cursorsPart.zoomAt(5000, 0.25)
         verify(page.viewT1 - page.viewT0 < 20000, "zoomed in")
         const url = Harness.writeScratchFile("findings.json", "")
         verify(url.toString() !== "")
         page.vehicles = vehicleBook(startEarlyRow.folder)
-        verify(page.saveReportTo(url, 1))
+        verify(page.reportPart.saveReportTo(url, 1))
         const note = find(page, "reportNote")
         tryVerify(() => note.text.indexOf("Report saved: ") === 0, 10000, note.text)
         verify(/^Report saved: \d+ ECUs?, \d+ trouble codes?, \d+ key values?$/.test(note.text),
@@ -1306,7 +1306,7 @@ profile  raw
         verify(report.key_values.length > 0, "RPM's value at the end")
 
         // Another recording opened: the note is the old one's no more
-        page.open(earlyRow)
+        page.openPart.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the next opens")
         compare(note.text, "")
     }
@@ -1339,7 +1339,7 @@ profile  raw
 
         // The part in view alone: zoomed to the first second there are
         // fewer rows, once the view has rested
-        page.setView(0, 1000)
+        page.cursorsPart.setView(0, 1000)
         tryVerify(() => parseInt(words.text) < total, 10000,
                   "the rows follow the view: " + words.text)
 
@@ -1369,8 +1369,8 @@ profile  raw
         verify(find(page, "signalRows").visible)
         compare(page.detailView, "values")
 
-        page.backToList()
-        page.open(findingsRow)
+        page.openPart.backToList()
+        page.openPart.open(findingsRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens again")
         compare(find(page, "filterIds").text, "")
         compare(find(page, "framesFilterToggle").text, "Filter")
@@ -1409,7 +1409,7 @@ profile  raw
         const page = createPage()
         const folder = Harness.importCsvFixture("logger-a", "viewer-frames-import")
         verify(folder !== "", "the import is made")
-        page.open({ title: "Imported", folder: folder })
+        page.openPart.open({ title: "Imported", folder: folder })
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         verify(!find(page, "detailView_frames").visible)
         verify(!find(page, "detailView_values").visible)
@@ -1422,7 +1422,7 @@ profile  raw
         const folder = Harness.writeFramesRecording("viewer-frames-long", 10200, 1000)
         verify(folder !== "")
         const page = createPage()
-        page.open({ title: "Long", folder: folder })
+        page.openPart.open({ title: "Long", folder: folder })
         // Each wait covers a read of 10,200 rows and a 10,000-row table
         // on whatever else the machine is doing (a build beside the
         // suite took the open past 10 s); the case measures the cap and
@@ -1438,12 +1438,12 @@ profile  raw
         tryVerify(() => words.text === "The first 10,000 frames from 0.0 s: zoom in for the rest",
                   longWait, "the table's cap is said")
         compare(find(find(page, "viewerFrameTable"), "frameList").count, 10000)
-        page.setView(0, 2000)
+        page.cursorsPart.setView(0, 2000)
         tryVerify(() => words.text === "2000 frames in view", longWait, "the rows of 2 s")
 
         // A view that does not start at the recording's start: the rows
         // are those from its left edge
-        page.setView(5000, 6000)
+        page.cursorsPart.setView(5000, 6000)
         tryVerify(() => words.text === "1001 frames in view", longWait, "the rows from 5 s")
         const list = find(find(page, "viewerFrameTable"), "frameList")
         tryVerify(() => list.itemAtIndex(0) !== null, longWait)
@@ -1469,7 +1469,7 @@ profile  raw
             verify(back.flat, "quiet")
             compare(back.Accessible.name, "All recordings")
             verify(!header.visible, "the tab names the page")
-            page.setCursor(5000)
+            page.cursorsPart.setCursor(5000)
             compare(find(page, "cursorTime").text, "At 5.0 s", "a cursor reads the same")
         } finally {
             Theme.compact = false
@@ -1624,12 +1624,12 @@ profile  raw
             const zoom = find(page, "zoomAll")
             const gap = zoom.mapToItem(page, 0, 0).y - splitter.mapToItem(page, 0, splitter.height).y
             verify(gap >= 0 && gap <= 16, "the zoom row " + gap + " px under the splitter")
-            page.toggleMaximized()
+            page.refreshPart.toggleMaximized()
             verify(waitForPolish(page.Window.window), "maximized")
             const chart = find(page, "chartFrame")
             const under = zoom.mapToItem(page, 0, 0).y - chart.mapToItem(page, 0, chart.height).y
             verify(under >= 0 && under <= 16, "maximized, the zoom row " + under + " px under the chart")
-            page.toggleMaximized()
+            page.refreshPart.toggleMaximized()
         } finally {
             page.height = 900
         }
@@ -1686,7 +1686,7 @@ profile  raw
         mouseClick(frames)
         verify(page.framesShown, "the Frames view")
         tryVerify(() => table.visible, 2000, "the table")
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         try {
             verify(waitForPolish(page.Window.window), "laid out")
             verify(!chart.visible, "no chart")
@@ -1702,7 +1702,7 @@ profile  raw
             verify(chart.height > page.height * 0.6, "the chart has the page: " + chart.height)
         } finally {
             if (page.chartMaximized)
-                page.toggleMaximized()
+                page.refreshPart.toggleMaximized()
             page.detailView = "values"
         }
     }
@@ -1720,18 +1720,18 @@ profile  raw
             verify(!page.pinnedViewer, "a desktop's page scrolls as a whole")
             verify(scroll.contentHeight > scroll.height, "the page scrolls")
             scroll.contentY = scroll.contentHeight - scroll.height
-            page.openExport()
+            page.reportPart.openExport()
             compare(scroll.contentY, 0, "at the top")
             const panel = find(page, "exportPanel")
             verify(panel.visible, "the panel")
             verify(panel.mapToItem(scroll, 0, 0).y < scroll.height / 2, "on the first screen")
-            page.closeExport()
+            page.reportPart.closeExport()
 
             Theme.compact = true
             verify(waitForPolish(page.Window.window), "a phone upright")
             verify(page.pinnedViewer, "upright the viewer is pinned")
             verify(!scroll.interactive, "the page itself stays put")
-            page.openExport()
+            page.reportPart.openExport()
             verify(!page.pinnedViewer, "the panel takes the page")
             compare(scroll.contentY, 0, "at the top")
             verify(panel.visible && panel.mapToItem(scroll, 0, 0).y < scroll.height / 2,
@@ -1739,7 +1739,7 @@ profile  raw
             verify(waitForPolish(page.Window.window), "the panel laid out")
             verify(scroll.contentHeight > scroll.height, "the panel scrolls the page")
             scroll.contentY = scroll.contentHeight - scroll.height
-            page.closeExport()
+            page.reportPart.closeExport()
             verify(page.pinnedViewer, "pinned again")
             compare(scroll.contentY, 0, "the pinned page from its top")
         } finally {
@@ -1815,7 +1815,7 @@ profile  raw
     }
     function test_aPhonesImportPanelIsATouchsSize(data) {
         const page = createPage()
-        page.chooseImportFile(Harness.writeScratchFile("phone-guess-plain.csv",
+        page.openPart.chooseImportFile(Harness.writeScratchFile("phone-guess-plain.csv",
             "time,rpm\n0,800\n1,900\n2,950\n"))
         const preview = guessed(page)
         Theme.compact = true
@@ -1944,7 +1944,7 @@ profile  raw
         verify(page.plotted[0], "RPM, ranked, is plotted")
         compare(page.viewT0, 0)
         compare(page.viewT1, 20000)
-        const series = page.series(400)
+        const series = page.seriesPart.series(400)
         compare(series.length, 1)
         compare(series[0].row, 0)
         verify(series[0].columns.lows.length > 0)
@@ -1954,8 +1954,8 @@ profile  raw
                find(page, "recordingInfo").text)
 
         // Unticked, nothing is plotted
-        page.togglePlotted(0)
-        compare(page.series(400).length, 0)
+        page.cursorsPart.togglePlotted(0)
+        compare(page.seriesPart.series(400).length, 0)
     }
 
     // The values from the frames (ADR-0049's appendix of 2026-11-06): the
@@ -1977,7 +1977,7 @@ profile  raw
                   10000, "the frames open")
         compare(choice.currentIndex, obd2)
         compare(find(page, "signalRows").count, 1)
-        verify(page.series(400).length === 1, "RPM is plotted")
+        verify(page.seriesPart.series(400).length === 1, "RPM is plotted")
         choice.activated(0)
         tryVerify(() => info.visible && info.text.indexOf("values decoded") < 0,
                   10000, "signals.csv again")
@@ -1993,13 +1993,13 @@ profile  raw
         const page = openFindings()
         page.viewT0 = 2000
         page.viewT1 = 12000
-        const before = page.series(400)[0].columns
+        const before = page.seriesPart.series(400)[0].columns
         const colMs = (before.t1 - before.t0) / before.lows.length
         verify(colMs > 0 && Math.abs(before.t0 / colMs - Math.round(before.t0 / colMs)) < 1e-6,
                "the grid starts on a whole column: " + before.t0)
         page.viewT0 += colMs * 0.4
         page.viewT1 += colMs * 0.4
-        const after = page.series(400)[0].columns
+        const after = page.seriesPart.series(400)[0].columns
         const shift = Math.round((after.t0 - before.t0) / colMs)
         let shared = 0, differ = 0
         for (let c = 0; c + shift < before.lows.length && c < after.lows.length; ++c) {
@@ -2015,7 +2015,7 @@ profile  raw
 
     function test_theTicksStartAtTheDefault() {
         const page = createPage()
-        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        page.openPart.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
         const ticked = []
@@ -2027,7 +2027,7 @@ profile  raw
         }
         compare(JSON.stringify(ticked), "[true,true,true,false]")
         verify(!find(rows.itemAtIndex(3), "plotCheck").enabled, "a text signal has nothing to plot")
-        compare(page.series(400).length, 3)
+        compare(page.seriesPart.series(400).length, 3)
     }
 
     // The cursor reads each signal's value in force at its time
@@ -2036,12 +2036,12 @@ profile  raw
         compare(find(page, "cursorTime").text, "Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
-        page.setCursor(5000)
+        page.cursorsPart.setCursor(5000)
         compare(find(page, "cursorTime").text, "At 5.0 s")
         const at = page.readout[0]
         verify(at.atMs >= 0 && at.atMs <= 5000, "the sample in force: " + at.atMs)
-        compare(find(row, "cursorValue").text, page.valueText(Number(at.text), 0, "rpm"))
-        compare(page.series(400)[0].labelValue, Number(at.text), "the label shows it too")
+        compare(find(row, "cursorValue").text, page.formatPart.valueText(Number(at.text), 0, "rpm"))
+        compare(page.seriesPart.series(400)[0].labelValue, Number(at.text), "the label shows it too")
     }
 
     // A tap lands on the first plotted signal's sample nearest it, so its
@@ -2051,7 +2051,7 @@ profile  raw
     // An enum signal's cursor value is its label, not its raw number
     function test_theCursorReadsAnEnumsLabel() {
         const page = createPage()
-        page.open({ title: "Fuel", folder: Harness.recordingFixtures + "/fuel-status" })
+        page.openPart.open({ title: "Fuel", folder: Harness.recordingFixtures + "/fuel-status" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.count === 2, 10000, "the recording opens")
         let row = null
@@ -2061,9 +2061,9 @@ profile  raw
                 row = rows.itemAtIndex(i)
         }
         verify(row !== null, "the enum's row")
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         compare(find(row, "cursorValue").text, "Open loop, cold")
-        page.setCursor(4200)
+        page.cursorsPart.setCursor(4200)
         compare(find(row, "cursorValue").text, "Closed loop")
     }
 
@@ -2074,18 +2074,18 @@ profile  raw
         const throttle = sigs.find(s => s.name === "Throttle").index
         page.plotted = ({ [rpm]: true, [throttle]: true })
         // RPM every 100 ms from 100 ms, Throttle 1 ms after each
-        compare(page.snapped(1140), 1100)
-        compare(page.snapped(1160), 1200)
-        page.setView(0, 4000)
-        page.setCursor(page.snapped(1160))
+        compare(page.cursorsPart.snapped(1140), 1100)
+        compare(page.cursorsPart.snapped(1160), 1200)
+        page.cursorsPart.setView(0, 4000)
+        page.cursorsPart.setCursor(page.cursorsPart.snapped(1160))
         compare(page.readout[rpm].atMs, 1200)
-        const labelMs = row => page.series(400).find(s => s.row === row).labelMs
+        const labelMs = row => page.seriesPart.series(400).find(s => s.row === row).labelMs
         compare(labelMs(rpm), 1200, "RPM's dot on its sample, at the cursor")
         compare(labelMs(throttle), 1101, "Throttle's on its own, 99 ms behind")
-        page.setView(2000, 4000)
+        page.cursorsPart.setView(2000, 4000)
         verify(isNaN(labelMs(rpm)), "no dot for a cursor out of view")
         page.plotted = ({})
-        compare(page.snapped(1160), 1160)
+        compare(page.cursorsPart.snapped(1160), 1160)
     }
 
     // Maximized on a wide page, the cursor's values sit in a strip beside
@@ -2095,9 +2095,9 @@ profile  raw
         const page = openFindings()
         page.height = 600
         page.stripFolded = false
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         verify(page.chartMaximized, "maximized")
-        page.setCursor(5000)
+        page.cursorsPart.setCursor(5000)
         const strip = find(page, "cursorStrip")
         const fold = find(page, "stripFold")
         const chart = find(page, "chart")
@@ -2117,7 +2117,7 @@ profile  raw
         mouseClick(fold)
         verify(!page.stripFolded)
         tryVerify(() => strip.visible && chart.shownW === open, 2000, "the strip is back")
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         page.height = 900
     }
 
@@ -2127,8 +2127,8 @@ profile  raw
         const page = openFindings()
         page.width = 400
         page.stripFolded = false
-        page.toggleMaximized()
-        page.setCursor(5000)
+        page.refreshPart.toggleMaximized()
+        page.cursorsPart.setCursor(5000)
         const frame = find(page, "chartFrame")
         const strip = find(page, "cursorStrip")
         const fold = find(page, "stripFold")
@@ -2149,7 +2149,7 @@ profile  raw
         compare(chart.shownW, frame.width - 8)
         mouseClick(fold)
         tryVerify(() => strip.visible && chart.shownH === open, 2000, "the band is back")
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         page.width = 900
     }
 
@@ -2208,7 +2208,7 @@ profile  raw
             rows[s.index] = s
         for (const tr of l.traces)
             compare(l.panes[tr.pane].label, rows[tr.row].unit, rows[tr.row].name + " in its unit's pane")
-        page.compareWith(lateRow)
+        page.comparePart.compareWith(lateRow)
         tryVerify(() => page.compareAligned && chart.drawn
                         && chart.drawn.traces.some(t => t.dash !== undefined), 10000, "the compare drawn")
         for (const tr of chart.drawn.traces.filter(t => t.dash !== undefined))
@@ -2226,8 +2226,8 @@ profile  raw
     }
     // Both cursors placed, their statistics arrived
     function spanned(page, a, b) {
-        page.setCursor(a)
-        page.setCursorB(b)
+        page.cursorsPart.setCursor(a)
+        page.cursorsPart.setCursorB(b)
         tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
     }
     function atTime(page, chart, t) {
@@ -2269,14 +2269,14 @@ profile  raw
     function test_theLabelsFollowTheReadoutAfterACrossing() {
         const page = openEarly()
         const rpm = rowOf(page, "RPM")
-        const labelOf = () => page.series(400).filter(t => t.row === rpm.index)[0]
+        const labelOf = () => page.seriesPart.series(400).filter(t => t.row === rpm.index)[0]
         spanned(page, 1000, 3000)
         compare(labelOf().labelValue, Number(page.readout[rpm.index].text), "A is the earlier")
-        page.setCursor(5000)
+        page.cursorsPart.setCursor(5000)
         verify(page.cursorMs > page.cursorBMs, "A is past B")
         const earlier = Number(page.readoutB[rpm.index].text)
         verify(earlier !== Number(page.readout[rpm.index].text), "the two cursors read differently")
-        compare(find(rpm.item, "cursorValue").text, page.valueText(earlier, 0, "rpm"),
+        compare(find(rpm.item, "cursorValue").text, page.formatPart.valueText(earlier, 0, "rpm"),
                 "the rows' A is the earlier one")
         compare(labelOf().labelValue, earlier, "and so is the label")
         compare(labelOf().labelMs, page.readoutB[rpm.index].atMs, "its dot too")
@@ -2303,14 +2303,14 @@ profile  raw
         compare(find(row, "statMean").text, grouped(2003) + " rpm")
         compare(find(row, "statRate").text, "-9.5 rpm/s")
         // A rising signal's change and rate carry their sign
-        const up = page.changeText(12.5, 1, "kPa")
+        const up = page.textsPart.changeText(12.5, 1, "kPa")
         compare(up, "+12.5 kPa")
 
         // Text has B and no change; a row not plotted has both
         const vin = rowOf(page, "VIN")
         compare(find(vin.item, "cursorDelta").text, "")
         compare(findChild(table, "statRow_" + vin.index), null, "text isn't in the table")
-        page.togglePlotted(rpm.index)
+        page.cursorsPart.togglePlotted(rpm.index)
         tryVerify(() => findChild(table, "statRow_" + rpm.index) === null, 2000,
                   "the table is the plotted signals")
         compare(find(rpm.item, "cursorDelta").text, "-19 rpm", "the row keeps its change")
@@ -2331,7 +2331,7 @@ profile  raw
     function test_twoCursorsTogetherAreNoSpan() {
         const page = openEarly()
         spanned(page, 2000, 3000)
-        page.setCursor(3000)
+        page.cursorsPart.setCursor(3000)
         verify(page.hasCursorB, "the second stays")
         verify(!page.hasSpan)
         compare(Object.keys(page.spanStats).length, 0)
@@ -2346,7 +2346,7 @@ profile  raw
         mouseClick(zoom)
         fuzzyCompare(page.viewT0, 9500, 0.5, "the span with a margin")
         fuzzyCompare(page.viewT1, 20500, 0.5)
-        page.askSpanStats()
+        page.cursorsPart.askSpanStats()
         mouseClick(find(page, "clearSpan"))
         verify(!page.hasCursorB, "the second has gone")
         compare(page.cursorMs, 10000, "the first stays")
@@ -2386,7 +2386,7 @@ profile  raw
             compare(page.cursorBMs % 100, 0)
             verify(isNaN(page.boxFromMs), "the box has gone")
 
-            page.setView(5000, 25000)
+            page.cursorsPart.setView(5000, 25000)
             const before = page.viewT0
             dragAcross(frame, x, y, 80, Qt.NoModifier)
             verify(page.viewT0 < before, "a plain drag pans")
@@ -2407,7 +2407,7 @@ profile  raw
             const chart = panedChart(page)
             const y = inPlot(chart, 0).y
             const x = atTime(page, chart, 15000)
-            page.setCursor(5000)
+            page.cursorsPart.setCursor(5000)
             mousePress(frame, x, y)
             wait(200)
             mouseRelease(frame, x, y)
@@ -2423,7 +2423,7 @@ profile  raw
             compare(page.cursorMs, 5000, "the first stays")
             mouseRelease(frame, px, py)
 
-            page.clearCursorB()
+            page.cursorsPart.clearCursorB()
             const view = [page.viewT0, page.viewT1]
             const to = atTime(page, chart, 25000)
             mousePress(frame, px, py)
@@ -2491,7 +2491,7 @@ profile  raw
     function test_theKeysStepTheCursors() {
         const page = openEarly()
         page.forceActiveFocus()
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         keyClick(Qt.Key_Right)
         tryCompare(page, "cursorMs", 1100, 2000, "a sample on")
         keyClick(Qt.Key_Left)
@@ -2499,7 +2499,7 @@ profile  raw
 
         keyClick("b")
         verify(!page.arrowsMoveB, "with no second cursor B does nothing")
-        page.setCursorB(3000)
+        page.cursorsPart.setCursorB(3000)
         keyClick("b")
         verify(page.arrowsMoveB)
         keyClick(Qt.Key_Right)
@@ -2516,8 +2516,8 @@ profile  raw
         keyClick(Qt.Key_Home)
         tryCompare(page, "cursorMs", 100, 2000, "the first sample")
 
-        page.setView(10000, 12000)
-        page.setCursor(11900)
+        page.cursorsPart.setView(10000, 12000)
+        page.cursorsPart.setCursor(11900)
         // A step reads the cursor's time when the key is pressed and lands
         // later: the second key waits for the first's step, or both read
         // 11900 and neither goes off the view
@@ -2526,36 +2526,36 @@ profile  raw
         keyClick(Qt.Key_Right)
         tryVerify(() => page.cursorMs > 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
                   2000, "a step off the view brings it back")
-        page.clearCursorB()
+        page.cursorsPart.clearCursorB()
     }
 
     // The compared recording's value is read where the rows read this
     // one's: at the earlier of two cursors
     function test_theComparedValueFollowsTheEarlierCursor() {
         const page = openEarly()
-        page.compareWith(lateRow)
+        page.comparePart.compareWith(lateRow)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        page.setAlignOn("rise")
+        page.comparePart.setAlignOn("rise")
         page.alignHysteresis = 500
         page.alignLevel = 4000
         verify(page.compareAligned)
         const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
-        const atTen = page.compareValuesAt(10000)[rpm].atMs
-        const atTwenty = page.compareValuesAt(20000)[rpm].atMs
+        const atTen = page.comparePart.compareValuesAt(10000)[rpm].atMs
+        const atTwenty = page.comparePart.compareValuesAt(20000)[rpm].atMs
         verify(atTen !== atTwenty, "the two times read different samples there")
         spanned(page, 20000, 10000)
         compare(page.compareReadout[rpm].atMs, atTen, "the earlier cursor's sample, not the first's")
         // The dashed label's dot is at the earlier cursor too, shown while
         // that one is in view, whatever the first cursor does
-        page.setView(5000, 15000)
-        const dashed = page.series(400).filter(s => s.dash !== undefined && s.row === rpm)
+        page.cursorsPart.setView(5000, 15000)
+        const dashed = page.seriesPart.series(400).filter(s => s.dash !== undefined && s.row === rpm)
         compare(dashed.length, 1, "the compared RPM is drawn")
         compare(dashed[0].labelMs, atTen + page.compareOffsetMs, "its label is at the earlier cursor")
-        page.showAll()
-        page.setCursorB(30000)
+        page.cursorsPart.showAll()
+        page.cursorsPart.setCursorB(30000)
         compare(page.compareReadout[rpm].atMs, atTwenty, "the first is the earlier again")
-        page.setCursorB(10000)
-        page.clearCursorB()
+        page.cursorsPart.setCursorB(10000)
+        page.cursorsPart.clearCursorB()
         compare(page.compareReadout[rpm].atMs, atTwenty, "one cursor: the first's")
     }
 
@@ -2568,10 +2568,10 @@ profile  raw
         try {
             const chart = panedChart(page)
             // an end off the sample grid: the nearest sample to it lies past it
-            page.setView(10000, 19960)
+            page.cursorsPart.setView(10000, 19960)
             verify(waitForPolish(page.Window.window), "laid out")
-            page.setCursor(12000)
-            page.setCursorB(15000)
+            page.cursorsPart.setCursor(12000)
+            page.cursorsPart.setCursorB(15000)
             const frame = find(page, "chartFrame")
             const handle = find(page, "cursorHandleB")
             const grab = find(handle, "handleDrag")
@@ -2587,7 +2587,7 @@ profile  raw
             pressed = false
             verify(page.cursorBMs <= page.viewT1 + 1e-6, "ends inside the view: " + page.cursorBMs)
             verify(handle.visible, "and the drop leaves it shown")
-            compare(page.cursorBMs, page.snapped(page.cursorBMs), "on a sample")
+            compare(page.cursorBMs, page.cursorsPart.snapped(page.cursorBMs), "on a sample")
         } finally {
             if (pressed)
                 mouseRelease(find(page, "chartFrame"), 0, 0)   // a failed check leaves no button held
@@ -2598,13 +2598,13 @@ profile  raw
     // A time is rounded to tenths as a whole: never 1:60.0
     function test_aTimeNeverReadsSixtySeconds() {
         const page = openEarly()
-        compare(page.timeText(119960, true), "2:00.0")
-        compare(page.timeText(59960, true), "1:00.0")
-        compare(page.timeText(59940, true), "59.9 s")
-        compare(page.timeText(3599960, true), "1:00:00.0")
-        compare(page.timeText(-59960, true), "-1:00.0")
-        compare(page.timeText(12300, true), "12.3 s")
-        compare(page.timeText(62300, true), "1:02.3")
+        compare(page.formatPart.timeText(119960, true), "2:00.0")
+        compare(page.formatPart.timeText(59960, true), "1:00.0")
+        compare(page.formatPart.timeText(59940, true), "59.9 s")
+        compare(page.formatPart.timeText(3599960, true), "1:00:00.0")
+        compare(page.formatPart.timeText(-59960, true), "-1:00.0")
+        compare(page.formatPart.timeText(12300, true), "12.3 s")
+        compare(page.formatPart.timeText(62300, true), "1:02.3")
     }
 
     // A decode chosen while comparing on pulls asks again for the pulls
@@ -2612,7 +2612,7 @@ profile  raw
     function test_aDecodeWhileComparingOnPullsAsksAgain() {
         const page = openFindings()
         page.recordings = [findingsRow, earlyRow]
-        page.compareWith(earlyRow)
+        page.comparePart.compareWith(earlyRow)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         const choice = find(page, "alignChoice")
         choice.currentIndex = choice.indexOfValue("pull")
@@ -2633,7 +2633,7 @@ profile  raw
     function test_aFocusedBoxKeepsItsKeys() {
         const page = openEarly()
         page.forceActiveFocus()
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         // The box sits in Compare's controls, shown while Compare is open
         find(page, "compareButton").clicked()
         const choice = find(page, "compareChoice")
@@ -2644,7 +2644,7 @@ profile  raw
         // Left and Right it doesn't use: the cursor still steps
         keyClick(Qt.Key_Right)
         tryVerify(() => page.cursorMs > 1000, 2000, "Right steps the cursor beside a focused box")
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         keyClick(Qt.Key_End)
         verify(page.comparing, "End went to the box: it picked the last recording")
         keyClick(Qt.Key_Home)
@@ -2655,7 +2655,7 @@ profile  raw
         keyClick("f")
         compare(page.maximizedTall, before, "F didn't maximize the chart")
         // no open of the compared recording is left running
-        page.stopComparing()
+        page.comparePart.stopComparing()
         compare(page.comparing, false, "the comparison is stopped")
     }
 
@@ -2701,9 +2701,9 @@ profile  raw
         tryVerify(() => info.visible && info.text.indexOf("values decoded from its frames through obd2") > 0,
                   10000, "decoded through obd2")
         compare(choice.currentIndex, obd2)
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         verify(waitForPolish(page.Window.window), "maximized")
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         verify(waitForPolish(page.Window.window), "and back")
         compare(choice.currentIndex, obd2, "the box still reads obd2")
     }
@@ -2712,16 +2712,16 @@ profile  raw
     function test_theSecondCursorsHintComesOnce() {
         const page = openEarly()
         page.spanHintSeen = false
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         verify(page.spanHintUp)
         verify(find(page, "spanLine").visible)
         compare(find(page, "spanText").text, "At 1.0 s. Shift+click to place the second cursor")
         verify(!find(page, "zoomToSpan").visible, "nothing to zoom to yet")
-        page.setCursorB(3000)
+        page.cursorsPart.setCursorB(3000)
         verify(!page.spanHintUp, "the second cursor ends it")
-        page.clearCursorB()
+        page.cursorsPart.clearCursorB()
         page.cursorMs = NaN
-        page.setCursor(2000)
+        page.cursorsPart.setCursor(2000)
         verify(!page.spanHintUp, "not a second time")
         verify(page.spanHintSeen, "and that's kept")
         verify(!find(page, "spanLine").visible)
@@ -2731,7 +2731,7 @@ profile  raw
     function test_theStripShowsTheSpanMaximized() {
         const page = openEarly()
         spanned(page, 1000, 3000)
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
         try {
             const strip = find(page, "cursorStrip")
             tryVerify(() => strip.visible && strip.count > 0, 5000, "the strip shows")
@@ -2740,10 +2740,10 @@ profile  raw
             const cell = strip.itemAtIndex(0)
             compare(find(cell, "stripValue").text, grouped(2001) + " rpm")
             tryCompare(find(cell, "stripSpan"), "text", "B " + grouped(1982) + " rpm · Δ -19 rpm")
-            page.clearCursorB()
+            page.cursorsPart.clearCursorB()
             compare(strip.cellHeight, 40)
         } finally {
-            page.toggleMaximized()
+            page.refreshPart.toggleMaximized()
         }
     }
 
@@ -2759,7 +2759,7 @@ profile  raw
                         && page.spanStats[coolant.index].unit === "°F", 5000, "asked again in °F")
         tryCompare(find(rowOf(page, "Coolant").item, "cursorBValue"), "text", "190 °F", 2000,
                    "the second cursor's too")
-        page.open(lateRow)
+        page.openPart.open(lateRow)
         tryVerify(() => find(page, "signalRows").visible && !page.hasCursor, 10000, "the new open")
         verify(!page.hasCursorB)
         compare(Object.keys(page.spanStats).length, 0)
@@ -2772,7 +2772,7 @@ profile  raw
         const restore = growWindow(page)
         try {
             const chart = panedChart(page)
-            page.setView(0, 5000)
+            page.cursorsPart.setView(0, 5000)
             spanned(page, 1000, 3000)
             const rpm = rowOf(page, "RPM")
             const stat = page.spanStats[rpm.index]
@@ -2785,7 +2785,7 @@ profile  raw
             fuzzyCompare(high.x, xAt(stat.highestMs), 0.01)
             fuzzyCompare(low.x, xAt(stat.lowestMs), 0.01)
             verify(high.y < low.y, "the highest above the lowest")
-            page.clearCursorB()
+            page.cursorsPart.clearCursorB()
             tryVerify(() => page.spanDots.length === 0, 3000, "gone with the span")
         } finally {
             restore()
@@ -2799,17 +2799,17 @@ profile  raw
         const chart = panedChart(page)
         compare(chart.drawn.axisH, ChartLayout.axisH)
         const paints = chart.paints
-        page.setCursor(1000)
+        page.cursorsPart.setCursor(1000)
         tryVerify(() => chart.paints > paints, 2000, "drawn with the cursor")
         compare(chart.drawn.axisH, ChartLayout.axisH, "the desktop's stays")
         page.cursorMs = NaN
         Theme.compact = true
         try {
-            page.setCursor(NaN)
+            page.cursorsPart.setCursor(NaN)
             page.cursorMs = NaN
             chart.requestPaint()
             tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisH, 2000, "none yet")
-            page.setCursor(1000)
+            page.cursorsPart.setCursor(1000)
             tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisHCursor, 2000, "grown")
         } finally {
             Theme.compact = false
@@ -2820,14 +2820,14 @@ profile  raw
     // most panes the recording gives
     function test_theFrameTestPlotsOneSignalOfEachUnit() {
         const page = openEarly()
-        compare(page.frameTestSignals(find(page, "signalRows").model).map(s => s.name).join(","),
+        compare(page.frameTestPart.frameTestSignals(find(page, "signalRows").model).map(s => s.name).join(","),
                 "RPM,Throttle,Coolant")
         const s = (name, unit) => ({ name: name, unit: unit, isText: false, samples: 1 })
         const list = [s("A", "rpm"), s("B", "rpm"), s("C", "%"), s("D", "°C"), s("E", "°F"),
                       { name: "T", unit: "", isText: true, samples: 1 }, s("F", "V"), s("G", "V")]
-        compare(page.frameTestSignals(list).map(s => s.name).join(","), "A,C,D,F",
+        compare(page.frameTestPart.frameTestSignals(list).map(s => s.name).join(","), "A,C,D,F",
                 "a signal of each pane first")
-        compare(page.frameTestSignals(list.slice(0, 3)).map(s => s.name).join(","), "A,C,B",
+        compare(page.frameTestPart.frameTestSignals(list.slice(0, 3)).map(s => s.name).join(","), "A,C,B",
                 "then the others")
     }
 
@@ -2844,13 +2844,13 @@ profile  raw
         try {
             verify(waitForPolish(page.Window.window), "laid out as a phone")
             compare(Theme.touchTarget, 48)
-            page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+            page.panesPart.setPaneRange("unit %", { vMin: 0, vMax: 10 })
             const p = chart.drawn.panes[1]
             const left = chart.drawn.left
             verify(left < Theme.touchTarget, "the captions end before a touch's width: " + left)
             const x = (left + Theme.touchTarget) / 2
             const y = p.top + p.h / 2
-            compare(page.doubleTapAt(x, y), "axis")
+            compare(page.panesPart.doubleTapAt(x, y), "axis")
             compare(page.paneRanges["unit %"], undefined)
         } finally {
             Theme.compact = false
@@ -2859,12 +2859,12 @@ profile  raw
         const left = chart.drawn.left
         const p = chart.drawn.panes[1]
         const y = p.top + p.h / 2
-        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+        page.panesPart.setPaneRange("unit %", { vMin: 0, vMax: 10 })
         // On the desktop the strip is the captions alone, so a point past
         // them, and past a touch where that is wider, is the plot
-        compare(page.doubleTapAt(Math.max(left, Theme.touchTarget) + 1, y), "maximize",
+        compare(page.panesPart.doubleTapAt(Math.max(left, Theme.touchTarget) + 1, y), "maximize",
                 "on the desktop that's the plot")
-        page.toggleMaximized()
+        page.refreshPart.toggleMaximized()
     }
 
     // A pane's range: Ctrl+wheel zooms it about the pointer, a drag on its
@@ -2880,8 +2880,8 @@ profile  raw
             const at = inPlot(chart, 1, 0.25)
             const span = page.viewT1 - page.viewT0
             // The plot's edges are the view's: the axes' column is left of it
-            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left), page.viewT0, 1e-6, "the plot's left edge")
-            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left + chart.drawn.plotW - 1), page.viewT1, 1e-6,
+            fuzzyCompare(page.cursorsPart.timeAt(chart.x + chart.drawn.left), page.viewT0, 1e-6, "the plot's left edge")
+            fuzzyCompare(page.cursorsPart.timeAt(chart.x + chart.drawn.left + chart.drawn.plotW - 1), page.viewT1, 1e-6,
                          "its right edge")
             mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
             const zoomed = page.paneRanges["unit %"]
@@ -2922,8 +2922,8 @@ profile  raw
             Bridge.unitSystem = 0
             mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
             verify(page.paneRanges["unit %"], "and again")
-            page.backToList()
-            page.open(earlyRow)
+            page.openPart.backToList()
+            page.openPart.open(earlyRow)
             tryVerify(() => find(page, "signalRows").visible, 10000, "open again")
             compare(Object.keys(page.paneRanges).length, 0, "a range lasts while the recording is open")
         } finally {
@@ -2962,7 +2962,7 @@ profile  raw
             verify(!page.chartMaximized, "a seam's double click maximizes nothing")
             tryVerify(() => Math.abs(chart.drawn.panes[0].h - chart.drawn.panes[1].h) < 0.5, 2000, "even")
         } finally {
-            page.setPaneShares(3, null)
+            page.panesPart.setPaneShares(3, null)
             restore()
         }
     }
@@ -3012,22 +3012,22 @@ profile  raw
     // however it's moved
     function test_theViewStaysInsideTheRecording() {
         const page = openFindings()
-        page.setView(-5000, 1000)
+        page.cursorsPart.setView(-5000, 1000)
         compare(page.viewT0, 0)
         compare(page.viewT1, 6000)
-        page.zoomAt(3000, 0.5)
+        page.cursorsPart.zoomAt(3000, 0.5)
         compare(page.viewT1 - page.viewT0, 3000)
-        page.setView(19900, 19950)
+        page.cursorsPart.setView(19900, 19950)
         compare(page.viewT1 - page.viewT0, page.minSpanMs)
         compare(page.viewT1, 20000)
-        page.zoomAt(10000, 1000)
+        page.cursorsPart.zoomAt(10000, 1000)
         compare(page.viewT0, 0)
         compare(page.viewT1, 20000)
 
         // A drag left moves the view later, a tap places the cursor, the
         // wheel zooms in
         const frame = find(page, "chartFrame")
-        page.setView(0, 4000)
+        page.cursorsPart.setView(0, 4000)
         // A drag in steps, as a pointer moves (mouseDrag's two moves don't
         // carry a DragHandler past its threshold)
         // The test's window is 200 px: grown to the page, so the pointer
@@ -3072,7 +3072,7 @@ profile  raw
         compare(page.viewT1 - page.viewT0, 20000)
         // A sideways scroll doesn't zoom, and a notch in four parts, as a
         // high-resolution wheel or a touchpad sends it, zooms as one does
-        page.setView(4000, 8000)
+        page.cursorsPart.setView(4000, 8000)
         mouseWheel(frame, x, y, 120, 0)
         compare(page.viewT0, 4000, "a sideways scroll leaves the view")
         compare(page.viewT1, 8000)
@@ -3088,12 +3088,12 @@ profile  raw
     function test_theChartDropsAntialiasingWhileTheViewMoves() {
         const page = openFindings()
         const chart = find(page, "chart")
-        page.setView(0, 4000)
+        page.cursorsPart.setView(0, 4000)
         tryVerify(() => !chart.moving, 2000, "rested after opening")
-        page.setView(1000, 5000)
+        page.cursorsPart.setView(1000, 5000)
         verify(!chart.moving, "one change is not a move")
         verify(chart.antialiasing)
-        page.setView(1100, 5100)
+        page.cursorsPart.setView(1100, 5100)
         verify(chart.moving, "a second change soon after is")
         verify(!chart.antialiasing)
         tryVerify(() => !chart.moving, 2000, "the view rests")
@@ -3165,7 +3165,7 @@ profile  raw
     // signal's row, so signals far apart in the list never share one
     function test_plottedSignalsNeverShareAColor() {
         const page = createPage()
-        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        page.openPart.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
         const numbers = [0, 1, 2]   // the fourth row is text
@@ -3173,54 +3173,54 @@ profile  raw
         // Every number plotted, a row far from its neighbors included
         for (const i of numbers) {
             if (page.plotted[i] !== true)
-                page.togglePlotted(i)
+                page.cursorsPart.togglePlotted(i)
         }
-        const colors = () => page.series(400).map(t => String(Theme.seriesColor(t.slot)))
+        const colors = () => page.seriesPart.series(400).map(t => String(Theme.seriesColor(t.slot)))
         compare(new Set(colors()).size, numbers.length, "a color each")
-        compare(page.series(400).length, numbers.length)
+        compare(page.seriesPart.series(400).length, numbers.length)
     }
 
     // Unplotting one signal recolors none of the others; plotting it
     // again takes the lowest free slot
     function test_aTraceKeepsItsColorWhileItStaysPlotted() {
         const page = createPage()
-        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        page.openPart.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
         const numbers = [0, 1, 2]   // the fourth row is text
         for (const i of numbers) {
             if (page.plotted[i] !== true)
-                page.togglePlotted(i)
+                page.cursorsPart.togglePlotted(i)
         }
         const before = {}
         for (const i of numbers)
-            before[i] = page.slotOf(i)
+            before[i] = page.panesPart.slotOf(i)
         const gone = numbers[0]
-        page.togglePlotted(gone)
+        page.cursorsPart.togglePlotted(gone)
         for (const i of numbers.slice(1))
-            compare(page.slotOf(i), before[i], "signal " + i + " keeps its slot")
-        page.togglePlotted(gone)
-        compare(page.slotOf(gone), before[gone], "the freed slot is taken again")
+            compare(page.panesPart.slotOf(i), before[i], "signal " + i + " keeps its slot")
+        page.cursorsPart.togglePlotted(gone)
+        compare(page.panesPart.slotOf(gone), before[gone], "the freed slot is taken again")
     }
 
     // The slots follow the order of plotting: the first signal ticked
     // takes the first color whatever its row
     function test_theColorsFollowTheOrderOfPlotting() {
         const page = createPage()
-        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        page.openPart.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
         const rows = find(page, "signalRows")
         tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
         for (const i of [0, 1, 2]) {
             if (page.plotted[i] === true)
-                page.togglePlotted(i)
+                page.cursorsPart.togglePlotted(i)
         }
-        page.togglePlotted(2)
-        page.togglePlotted(0)
-        page.togglePlotted(1)
-        compare(page.slotOf(2), 0, "the first ticked, the first color")
-        compare(page.slotOf(0), 1)
-        compare(page.slotOf(1), 2)
-        compare(page.series(400).find(t => t.row === 2).slot, 0, "and the chart draws it so")
+        page.cursorsPart.togglePlotted(2)
+        page.cursorsPart.togglePlotted(0)
+        page.cursorsPart.togglePlotted(1)
+        compare(page.panesPart.slotOf(2), 0, "the first ticked, the first color")
+        compare(page.panesPart.slotOf(0), 1)
+        compare(page.panesPart.slotOf(1), 2)
+        compare(page.seriesPart.series(400).find(t => t.row === 2).slot, 0, "and the chart draws it so")
     }
 
     // The Jump row steps between a recording's pulls: the stretch in view
@@ -3230,7 +3230,7 @@ profile  raw
         page.recordings = [twiceRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        compare(page.stretchesOf("pull").length, 2)
+        compare(page.comparePart.stretchesOf("pull").length, 2)
         const status = find(page, "jumpStatus")
         compare(status.text, "2 pulls · No cruise found")
         verify(!find(page, "jumpPrevious_pull").enabled, "nothing before the view's start")
@@ -3253,7 +3253,7 @@ profile  raw
         compare(status.text, "Pull 1 of 2 · 18.0 s")
 
         // A cursor moved off the stretch's start puts the counts back
-        page.setCursor(25000)
+        page.cursorsPart.setCursor(25000)
         compare(status.text, "2 pulls · No cruise found")
     }
 
@@ -3266,7 +3266,7 @@ profile  raw
         openRow(page, findingsRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
         verify(page.recording.pullsLackSignals, "core finds no throttle or load")
-        compare(page.stretchesOf("pull").length, 0)
+        compare(page.comparePart.stretchesOf("pull").length, 0)
         compare(find(page, "jumpStatus").text,
                 "No pull found (no throttle or load signal) · No cruise found")
     }
@@ -3296,7 +3296,7 @@ profile  raw
         page.recordings = [twiceRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        compare(page.stretchesOf("pull").length, 2)
+        compare(page.comparePart.stretchesOf("pull").length, 2)
         find(page, "jumpStretches").clicked()
         verify(page.stretchesOpen)
         verify(waitForPolish(page.Window.window), "laid out")
@@ -3309,13 +3309,13 @@ profile  raw
         verify(page.stretchList === null, "looking again after Apply")
         compare(find(page, "jumpStatus").text, "Looking for stretches…")
         tryVerify(() => page.stretchList !== null, 10000, "the new answer")
-        compare(page.stretchesOf("pull").length, 0, "no pull climbs 5000 rpm")
+        compare(page.comparePart.stretchesOf("pull").length, 0, "no pull climbs 5000 rpm")
         compare(find(page, "jumpStatus").text, "No pull found · No cruise found")
         compare(page.stretchRules.pullRise, 5000)
         verify(page.stretchesOpen, "the desktop's panel stays up")
         find(page, "stretchesReset").clicked()
         compare(rise.text, "", "the field is empty again")
-        tryVerify(() => page.stretchList !== null && page.stretchesOf("pull").length === 2, 10000,
+        tryVerify(() => page.stretchList !== null && page.comparePart.stretchesOf("pull").length === 2, 10000,
                   "the defaults find the two again")
     }
 
@@ -3327,7 +3327,7 @@ profile  raw
         page.recordings = [twiceRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002], "the lift")
+        compare(page.comparePart.stretchesOf("pull").map(s => s.toMs), [25002, 35002], "the lift")
         find(page, "jumpStretches").clicked()
         verify(waitForPolish(page.Window.window), "laid out")
         const lift = find(page, "pullEnd_lift")
@@ -3336,12 +3336,12 @@ profile  raw
         top.clicked()
         verify(top.selected && !lift.selected)
         tryVerify(() => page.stretchList !== null, 10000, "asked again at the tap")
-        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000], "top speed")
+        compare(page.comparePart.stretchesOf("pull").map(s => s.toMs), [25000, 35000], "top speed")
         compare(page.stretchRules.pullEnd, "top-speed", "kept with the levels")
         find(page, "stretchesReset").clicked()
         verify(lift.selected, "Defaults puts the lift back")
         tryVerify(() => page.stretchList !== null
-                  && page.stretchesOf("pull").map(s => s.toMs).join() === "25002,35002", 10000,
+                  && page.comparePart.stretchesOf("pull").map(s => s.toMs).join() === "25002,35002", 10000,
                   "the lift's ends again")
         compare(page.stretchRules.pullEnd, undefined)
     }
@@ -3355,14 +3355,14 @@ profile  raw
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
         compare(page.rulesProblem, "", "no refusal")
-        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002])
+        compare(page.comparePart.stretchesOf("pull").map(s => s.toMs), [25002, 35002])
         page.destroy()
         setStoredRules("{\"pullEnd\": \"top-speed\"}")
         page = createPage()
         page.recordings = [twiceRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000])
+        compare(page.comparePart.stretchesOf("pull").map(s => s.toMs), [25000, 35000])
         find(page, "jumpStretches").clicked()
         verify(waitForPolish(page.Window.window), "laid out")
         verify(find(page, "pullEnd_topSpeed").selected, "the panel shows the stored end")
@@ -3389,7 +3389,7 @@ profile  raw
         find(page, "stretchesApply").clicked()
         compare(problem.text, fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         verify(problem.visible)
-        compare(page.stretchesOf("pull").length, 2, "the earlier answer stands")
+        compare(page.comparePart.stretchesOf("pull").length, 2, "the earlier answer stands")
         compare(page.stretchRules.pullLevel, undefined, "and nothing was kept")
         find(page, "rule_pullLevel").text = ""
         find(page, "rule_pullRise").text = "abc"
@@ -3428,7 +3428,7 @@ profile  raw
             const chart = panedChart(page)
             const row = chart.drawn.traces[0].row
             const name = nameOfRow(page, row)
-            page.openPaneMenu(row, chart)
+            page.panesPart.openPaneMenu(row, chart)
             compare(page.paneMenuItems.length, 5, "by unit, three panes, a new one")
             compare(page.paneMenuItems[0].key, "")
             compare(page.paneMenuItems[0].text, "By unit")
@@ -3436,7 +3436,7 @@ profile  raw
             compare(page.paneMenuItems[4].key, "new")
             compare(page.paneMenuItems[4].text, "New pane")
             const mine = chart.drawn.panes[chart.drawn.traces[0].pane].key
-            page.choosePane("new")
+            page.panesPart.choosePane("new")
             // The signal was alone in its pane: the pane it left goes
             tryVerify(() => chart.drawn.panes.some(p => p.key === "own:1"), 5000, "a pane of its own")
             compare(chart.drawn.panes.length, 3)
@@ -3445,27 +3445,27 @@ profile  raw
             tryVerify(() => storedViews().indexOf("own:1") >= 0, 3000, "kept in the settings")
 
             // Closed and opened again: the arrangement is back
-            page.backToList()
-            page.open(earlyRow)
+            page.openPart.backToList()
+            page.openPart.open(earlyRow)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
             tryVerify(() => chart.drawn && chart.drawn.panes.some(p => p.key === "own:1"), 5000, "the pane again")
             compare(page.viewAssign[name], "own:1")
 
             // Another recording opens with the default panes
-            page.backToList()
-            page.open(lateRow)
+            page.openPart.backToList()
+            page.openPart.open(lateRow)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the other recording opens")
             tryVerify(() => chart.drawn && chart.drawn.panes.length === 3, 5000, "three panes")
             verify(!chart.drawn.panes.some(p => p.key === "own:1"), "the units' panes")
             compare(Object.keys(page.viewAssign).length, 0)
 
             // By unit puts the signal back
-            page.backToList()
-            page.open(earlyRow)
+            page.openPart.backToList()
+            page.openPart.open(earlyRow)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the first opens again")
             tryVerify(() => chart.drawn && chart.drawn.panes.some(p => p.key === "own:1"), 5000)
-            page.openPaneMenu(row, chart)
-            page.choosePane("")
+            page.panesPart.openPaneMenu(row, chart)
+            page.panesPart.choosePane("")
             tryVerify(() => chart.drawn.panes.some(p => p.key === mine), 5000, "its unit's pane is back")
             verify(!chart.drawn.panes.some(p => p.key === "own:1"))
             compare(page.viewAssign[name], undefined)
@@ -3481,12 +3481,12 @@ profile  raw
         try {
             const chart = panedChart(page)
             const first = chart.drawn.traces[0]
-            page.openPaneMenu(first.row, chart)
+            page.panesPart.openPaneMenu(first.row, chart)
             const mine = chart.drawn.panes[first.pane].key
             const target = page.paneMenuItems.find(i => i.key !== "" && i.key !== "new" && i.key !== mine)
             verify(target !== undefined, "another pane is offered")
             verify(target.text.indexOf("With ") === 0)
-            page.choosePane(target.key)
+            page.panesPart.choosePane(target.key)
             tryVerify(() => chart.drawn.panes.length === 2, 5000, "two panes")
         } finally {
             restore()
@@ -3519,9 +3519,9 @@ profile  raw
         const page = openEarly()
         verify(page.viewEntry !== undefined)
         tryVerify(() => page.viewEntry.used > 1000000000000, 3000, "stamped now: " + page.viewEntry.used)
-        page.backToList()
+        page.openPart.backToList()
         const before = storedViews()
-        page.open(lateRow)
+        page.openPart.open(lateRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the other opens")
         compare(storedViews(), before, "no entry, no write")
     }
@@ -3544,8 +3544,8 @@ profile  raw
             const l = chart.drawn
             const tr = l.traces.find(t => t.labeled)
             verify(tr !== undefined, "a labeled trace")
-            compare(page.labelRowAt(l.labelX + 2, tr.labelY), tr.row)
-            compare(page.labelRowAt(l.left + 5, tr.labelY), -1, "the plot is no label")
+            compare(page.panesPart.labelRowAt(l.labelX + 2, tr.labelY), tr.row)
+            compare(page.panesPart.labelRowAt(l.left + 5, tr.labelY), -1, "the plot is no label")
         } finally {
             restore()
         }
@@ -3554,10 +3554,10 @@ profile  raw
     // A comparison's difference traces are pinned, so no fold takes their pane
     function test_aDifferenceTraceIsPinned() {
         const page = swingCompared("pinned-differences")
-        page.series(400)
+        page.seriesPart.series(400)
         find(page, "compareDifference").toggled()
         differenceRead(page)
-        const all = page.series(400)
+        const all = page.seriesPart.series(400)
         const diffs = all.filter(s => s.pane !== undefined)
         verify(diffs.length > 0, "a difference trace")
         verify(diffs.every(s => s.pinned === true))
@@ -3598,7 +3598,7 @@ profile  raw
         page.recordings = [twiceRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        compare(page.stretchesOf("pull").length, 2, "the defaults found them")
+        compare(page.comparePart.stretchesOf("pull").length, 2, "the defaults found them")
         verify(!page.stretchFailed, "not a failed read")
         compare(page.rulesProblem, fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         find(page, "jumpStretches").clicked()
@@ -3606,7 +3606,7 @@ profile  raw
         compare(find(page, "stretchesProblem").text,
                 fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         setStoredRules("not json")
-        compare(page.readRules("not json").pullLevel, undefined, "damaged text is no levels")
+        compare(page.refreshPart.readRules("not json").pullLevel, undefined, "damaged text is no levels")
     }
 
     // The compared recording's pulls are counted by the same levels
@@ -3619,8 +3619,8 @@ profile  raw
         find(page, "rule_pullRise").text = "5000"
         find(page, "stretchesApply").clicked()
         tryVerify(() => page.stretchList !== null, 10000, "the new answer")
-        page.compareWith(earlyRow)
-        page.setAlignOn("pull")
+        page.comparePart.compareWith(earlyRow)
+        page.comparePart.setAlignOn("pull")
         tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
         compare(page.pullsHere.length, 0, "none here under that rise")
         compare(page.pullsThere.length, 0, "and none there: one rule for both")
@@ -3634,8 +3634,8 @@ profile  raw
         page.recordings = [twiceRow, earlyRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        page.compareWith(earlyRow)
-        page.setAlignOn("pull")
+        page.comparePart.compareWith(earlyRow)
+        page.comparePart.setAlignOn("pull")
         tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
         compare(page.pullsHere.length, 2)
         compare(page.pullsThere.length, 1, "asked under the defaults")
@@ -3649,19 +3649,19 @@ profile  raw
         openRow(page, twiceRow)
         for (const i of [0, 1, 2]) {
             if (page.plotted[i] === true)
-                page.togglePlotted(i)
+                page.cursorsPart.togglePlotted(i)
         }
-        page.togglePlotted(2)
-        page.togglePlotted(0)
-        page.togglePlotted(1)
-        compare(page.slotOf(2), 0, "the first recording's order")
-        page.backToList()
+        page.cursorsPart.togglePlotted(2)
+        page.cursorsPart.togglePlotted(0)
+        page.cursorsPart.togglePlotted(1)
+        compare(page.panesPart.slotOf(2), 0, "the first recording's order")
+        page.openPart.backToList()
         page.recordings = [twiceRow, earlyRow]
         openRow(page, earlyRow)
         const plotted = [0, 1, 2].filter(i => page.plotted[i] === true)
         verify(plotted.length >= 2, "the second recording plots some numbers")
         for (let k = 0; k < plotted.length; ++k)
-            compare(page.slotOf(plotted[k]), k, "the lowest slots, in order")
+            compare(page.panesPart.slotOf(plotted[k]), k, "the lowest slots, in order")
     }
 
     // A refused Apply leaves the levels in force as they were, and the
@@ -3671,12 +3671,12 @@ profile  raw
         page.recordings = [twiceRow, earlyRow]
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
-        page.applyStretchRules({ pullRise: 5000 })
+        page.comparePart.applyStretchRules({ pullRise: 5000 })
         tryVerify(() => page.stretchList !== null, 10000, "the new answer")
-        page.applyStretchRules({ pullLevel: 150 })
+        page.comparePart.applyStretchRules({ pullLevel: 150 })
         verify(page.rulesProblem !== "", "the refusal is said")
-        page.compareWith(earlyRow)
-        page.setAlignOn("pull")
+        page.comparePart.compareWith(earlyRow)
+        page.comparePart.setAlignOn("pull")
         tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
         compare(page.pullsHere.length, 0, "here by the levels in force")
         compare(page.pullsThere.length, 0, "and there by the same")
@@ -3690,7 +3690,7 @@ profile  raw
         openRow(page, twiceRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
         // 700 is a floor in km/h, and more than a mile an hour can be in mph
-        page.applyStretchRules({ cruiseFloor: 700 })
+        page.comparePart.applyStretchRules({ cruiseFloor: 700 })
         tryVerify(() => page.stretchList !== null, 10000, "the new answer")
         compare(page.rulesProblem, "")
         compare(page.stretchUnits, 0)
@@ -3698,7 +3698,7 @@ profile  raw
         tryVerify(() => page.stretchUnits === 1, 5000, "asked again in the other unit")
         tryVerify(() => page.stretchList !== null, 10000, "and answered")
         verify(page.rulesProblem.indexOf("621 mph") >= 0, "700 is no floor in mph: " + page.rulesProblem)
-        compare(page.stretchesOf("pull").length, 2, "the defaults found them")
+        compare(page.comparePart.stretchesOf("pull").length, 2, "the defaults found them")
         Bridge.unitSystem = 0
         tryVerify(() => page.stretchUnits === 0, 5000, "and back")
     }
@@ -3804,12 +3804,12 @@ profile  raw
         verify(!page.bandsShown, "switched off")
         find(page, "jumpBands").toggled()
         verify(page.bandsShown, "and on")
-        page.backToList()
+        page.openPart.backToList()
         verify(page.stretchList === null, "the list is the open's")
         page.recordings = [twiceRow, earlyRow]
         openRow(page, earlyRow)
         tryVerify(() => page.stretchList !== null, 10000, "the next recording's arrive")
-        compare(page.stretchesOf("pull").length, 1)
+        compare(page.comparePart.stretchesOf("pull").length, 1)
     }
 
     // A values recording of `count` number signals, each sampled ten times
@@ -3852,7 +3852,7 @@ profile  raw
             return picks
         }
         const columnMs = () => {
-            const c = page.series(400)[0].columns
+            const c = page.seriesPart.series(400)[0].columns
             return (c.t1 - c.t0) / c.lows.length
         }
         const spanS = (page.viewT1 - page.viewT0) / 1000
@@ -3872,13 +3872,13 @@ profile  raw
 
         // Compared, the rows drawn are both recordings'; the rows held are
         // each reader's own
-        page.compareWith(two)
+        page.comparePart.compareWith(two)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        compare(page.series(400).filter(s => s.dash !== undefined).length, 2, "both are drawn dashed")
+        compare(page.seriesPart.series(400).filter(s => s.dash !== undefined).length, 2, "both are drawn dashed")
         verify(columnMs() < 1000, "24,000 rows in each reader, 2,400 drawn: " + columnMs() + " ms a column")
         page.plotted = first(20)
         verify(columnMs() >= 1000, "twenty of each, 24,000 rows drawn: " + columnMs() + " ms a column")
-        page.stopComparing()
+        page.comparePart.stopComparing()
         verify(columnMs() < 1000, "twenty alone, 12,000: " + columnMs() + " ms a column")
     }
 
@@ -3929,7 +3929,7 @@ profile  raw
         const differenceTrace = () => {
             let trace
             tryVerify(() => {
-                trace = page.series(400).find(s => s.pane !== undefined)
+                trace = page.seriesPart.series(400).find(s => s.pane !== undefined)
                 return trace !== undefined && page.difference !== null
                        && page.difference.key === page.differenceWanted.key
             }, 10000, "the view's difference is read")
@@ -3949,21 +3949,21 @@ profile  raw
             return { count: count, most: most }
         }
 
-        page.compareWith(later)
+        page.comparePart.compareWith(later)
         verify(!box.enabled, "nothing to subtract until the two are lined up")
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        page.setAlignOn("rise")
+        page.comparePart.setAlignOn("rise")
         page.alignHysteresis = 200
         page.alignLevel = 3500
         verify(page.compareAligned, page.compareStatus)
         compare(page.compareOffsetMs, -500, "the copy lies over the recording")
         verify(box.enabled && !box.checked && !page.differenceShown, "off until asked for")
-        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
+        compare(page.seriesPart.series(400).filter(s => s.pane !== undefined).length, 0)
         box.toggled()
         verify(page.differenceShown && box.checked)
 
         // The whole ten minutes: columns of more than a second
-        page.showAll()
+        page.cursorsPart.showAll()
         let trace = differenceTrace()
         verify(columnMs(trace) >= 1000, columnMs(trace) + " ms a column")
         compare(trace.paneLabel, "\u0394 rpm")
@@ -3973,7 +3973,7 @@ profile  raw
         verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
         // What the chart draws there can't give it: the dashed trace holds
         // the copy's own whole seconds, half a second from this one's
-        const all = page.series(400)
+        const all = page.seriesPart.series(400)
         const mine = all.find(s => s.dash === undefined && s.pane === undefined).columns
         const dashed = all.find(s => s.dash !== undefined).columns
         let apart = 0
@@ -3985,7 +3985,7 @@ profile  raw
         verify(apart > 1, "the drawn columns differ by " + apart)
 
         // Zoomed in: columns under a second
-        page.setView(100000, 120000)
+        page.cursorsPart.setView(100000, 120000)
         trace = differenceTrace()
         verify(columnMs(trace) < 1000, columnMs(trace) + " ms a column")
         found = judged(trace, 0)
@@ -3993,7 +3993,7 @@ profile  raw
         verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
 
         // Switched off, the answer isn't drawn; on again, the one it held is
-        const panes = () => page.series(400).filter(s => s.pane !== undefined).length
+        const panes = () => page.seriesPart.series(400).filter(s => s.pane !== undefined).length
         box.toggled()
         verify(!page.differenceShown && !box.checked)
         compare(panes(), 0, "switched off")
@@ -4001,19 +4001,19 @@ profile  raw
         verify(page.differenceShown && box.checked)
         compare(panes(), 1, "switched on again")
         // Lined up another way, the answer for the offset before isn't drawn
-        page.setAlignOn("start")
+        page.comparePart.setAlignOn("start")
         compare(page.compareOffsetMs, 0)
         compare(panes(), 0, "an answer for another offset")
 
         // A recording 100 rpm higher is 100 higher in every column: the
         // compared one less this one
-        page.compareWith(higher)
+        page.comparePart.compareWith(higher)
         compare(page.difference, null, "the recording before's difference goes with it")
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        page.setAlignOn("start")
+        page.comparePart.setAlignOn("start")
         compare(page.compareOffsetMs, 0)
         verify(page.differenceShown, "another recording keeps the choice")
-        page.showAll()
+        page.cursorsPart.showAll()
         trace = differenceTrace()
         found = judged(trace, 100)
         verify(found.count > 100, "columns holding both: " + found.count)
@@ -4022,17 +4022,17 @@ profile  raw
         // This recording opened again drops the answer too: its values can
         // be another decode's
         verify(page.difference !== null)
-        page.open(here)
+        page.openPart.open(here)
         compare(page.difference, null, "this recording's answer goes with it")
         tryVerify(() => find(page, "recordingInfo").visible, 10000, "it opens again")
         page.plotted = picks
 
         // The same name in another unit is nothing to subtract
-        page.compareWith(other)
+        page.comparePart.compareWith(other)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        compare(page.differencePairs().length, 0)
-        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
-        compare(page.series(400).filter(s => s.dash !== undefined).length, 1, "still drawn dashed")
+        compare(page.seriesPart.differencePairs().length, 0)
+        compare(page.seriesPart.series(400).filter(s => s.pane !== undefined).length, 0)
+        compare(page.seriesPart.series(400).filter(s => s.dash !== undefined).length, 1, "still drawn dashed")
 
         find(page, "stopCompare").clicked()
         verify(!page.differenceShown && !box.checked, "Stop ends it")
@@ -4050,19 +4050,19 @@ profile  raw
         const picks = {}
         picks[page.shownSignals.find(s => s.name === "RPM").index] = true
         page.plotted = picks
-        page.compareWith(higher)
+        page.comparePart.compareWith(higher)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         compare(page.compareOffsetMs, 0)
-        page.showAll()
+        page.cursorsPart.showAll()
         return page
     }
     function differencePanes(page) {
-        return page.series(400).filter(s => s.pane !== undefined).length
+        return page.seriesPart.series(400).filter(s => s.pane !== undefined).length
     }
     // Draws until the drawn grid's difference has its answer
     function differenceRead(page) {
         tryVerify(() => {
-            page.series(400)
+            page.seriesPart.series(400)
             return page.difference !== null && page.difference.key === page.differenceWanted.key
         }, 10000, "the view's difference is read")
     }
@@ -4080,12 +4080,12 @@ profile  raw
         verify(Harness.refuseViewAsks(view, true), "a RecordingView")
         find(page, "compareDifference").toggled()
         tryVerify(() => {
-            page.series(400)
+            page.seriesPart.series(400)
             return page.differenceRefused !== null && page.differenceRefused.count === 2
         }, 10000, "asked, and once more")
         const key = page.differenceRefused.key
         for (let k = 0; k < 10; ++k) {
-            page.series(400)
+            page.seriesPart.series(400)
             wait(20)
         }
         compare(page.differenceRefused.count, 2, "left after the second")
@@ -4095,7 +4095,7 @@ profile  raw
         compare(differencePanes(page), 0)
 
         verify(Harness.refuseViewAsks(view, false))
-        page.setView(100000, 160000)
+        page.cursorsPart.setView(100000, 160000)
         differenceRead(page)
         compare(page.differenceRefused, null)
         compare(differencePanes(page), 1)
@@ -4118,14 +4118,14 @@ profile  raw
         compare(page.differenceAsk, null, "nothing is waited for")
         compare(differencePanes(page), 0)
         for (let k = 0; k < 5; ++k) {
-            page.series(400)
+            page.seriesPart.series(400)
             wait(20)
         }
         compare(page.differenceAsk, null, "the grid isn't asked again")
         compare(page.differenceRefused, null)
 
         verify(Harness.loseViewMeans(view, false))
-        page.setView(100000, 160000)
+        page.cursorsPart.setView(100000, 160000)
         differenceRead(page)
         compare(Object.keys(page.difference.rows).length, 1)
         compare(differencePanes(page), 1)
@@ -4143,7 +4143,7 @@ profile  raw
         compare(page.compareOffsetMs, 0)
         compare(page.viewT0, 0)
         compare(page.viewT1, 40000, "to the longer one's end")
-        const all = page.series(400)
+        const all = page.seriesPart.series(400)
         compare(all.length, 6, "three plotted, each twice")
         const dashed = all.filter(s => s.dash !== undefined)
         compare(dashed.length, 3)
@@ -4157,7 +4157,7 @@ profile  raw
                 "Dashed: " + lateRow.title + ", aligned on their starts")
         find(page, "stopCompare").clicked()
         verify(!page.comparing)
-        compare(page.series(400).length, 3)
+        compare(page.seriesPart.series(400).length, 3)
         compare(page.viewT1, 30000)
     }
 
@@ -4166,11 +4166,11 @@ profile  raw
     // 24.6 s; view-marker.jsonl; view-utc.jsonl: 90 s apart)
     function test_theAlignmentsAreHavneClisOwn() {
         const page = openEarly()
-        page.compareWith(lateRow)
+        page.comparePart.compareWith(lateRow)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         const status = find(page, "compareStatus")
 
-        page.setAlignOn("rise")
+        page.comparePart.setAlignOn("rise")
         compare(page.alignSignal, "RPM", "the first number signal")
         verify(!page.compareAligned, "no level yet")
         verify(status.text.indexOf("type a level") >= 0, status.text)
@@ -4185,11 +4185,11 @@ profile  raw
         // One pull, ten seconds apart: at the cursor the two agree, and
         // before the first's start only the compared one has values
         const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
-        page.setCursor(14600)
+        page.cursorsPart.setCursor(14600)
         compare(page.compareReadout[rpm].text, page.readout[rpm].text)
         const row = find(page, "signalRows").itemAtIndex(rpm)
         compare(find(row, "compareValue").text, find(row, "cursorValue").text)
-        page.setCursor(-5000)
+        page.cursorsPart.setCursor(-5000)
         compare(page.cursorMs, -5000)
         compare(find(page, "cursorTime").text, "At -5.0 s")
         verify(page.readout[rpm] === undefined, "nothing of the first's yet")
@@ -4202,17 +4202,17 @@ profile  raw
         verify(status.text.indexOf("isn't drawn") > 0, status.text)
         compare(page.viewT0, 0, "back to the first alone")
         compare(page.viewT1, 30000)
-        compare(page.series(400).length, 3)
+        compare(page.seriesPart.series(400).length, 3)
 
-        page.setAlignOn("marker")
+        page.comparePart.setAlignOn("marker")
         compare(page.alignLabel, "pull")
         verify(page.compareAligned)
         compare(page.compareOffsetMs, -10000, "11.5 s here, 21.5 s there")
-        page.setAlignOn("utc")
+        page.comparePart.setAlignOn("utc")
         compare(page.compareOffsetMs, 90000)
         compare(page.viewT1, 130000)
         verify(status.text.indexOf("1:30.0 apart") > 0, status.text)
-        page.setAlignOn("start")
+        page.comparePart.setAlignOn("start")
         compare(page.compareOffsetMs, 0)
 
         // Back to the list ends the comparison and its alignment
@@ -4234,7 +4234,7 @@ profile  raw
         const page = createPage()
         page.recordings = [twiceRow, earlyRow]
         openRow(page, twiceRow)
-        page.compareWith(earlyRow)
+        page.comparePart.compareWith(earlyRow)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         const status = find(page, "compareStatus")
         const here = find(page, "alignPullHere")
@@ -4287,26 +4287,26 @@ profile  raw
         // An ask that failed is said as that, never as a recording with
         // no pull
         page.pullsThereFailed = true
-        page.align()
+        page.comparePart.align()
         verify(!page.compareAligned)
         compare(status.text, earlyRow.title + " isn't drawn: its pulls couldn't be read")
         page.pullsHereFailed = true
-        page.align()
+        page.comparePart.align()
         compare(status.text, earlyRow.title + " isn't drawn: neither recording's pulls could be read")
         page.pullsThereFailed = false
-        page.align()
+        page.comparePart.align()
         compare(status.text, earlyRow.title + " isn't drawn: this recording's pulls couldn't be read")
         page.pullsHereFailed = false
-        page.align()
+        page.comparePart.align()
         verify(page.compareAligned)
         // At the pulls' start the compared one reads its own start
         const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
-        page.setCursor(31002)
+        page.cursorsPart.setCursor(31002)
         compare(page.compareReadout[rpm].atMs, 12300, "pull-early's sample in force at its pull's start")
 
         // A recording with no pull says so and isn't drawn: the cruise
-        page.stopComparing()
-        page.compareWith({ title: "Cruise", uri: "", folder: Harness.recordingFixtures + "/cruise",
+        page.comparePart.stopComparing()
+        page.comparePart.compareWith({ title: "Cruise", uri: "", folder: Harness.recordingFixtures + "/cruise",
                            source: "", profile: "test" })
         tryVerify(() => page.pullsThere !== null && page.pullsHere !== null, 10000, "its pulls are looked for")
         verify(!page.compareAligned)
@@ -4315,7 +4315,7 @@ profile  raw
         compare(page.alignPullHere, 1, "this recording's choice is kept")
 
         // Another alignment leaves the pulls; back to the list forgets them
-        page.setAlignOn("start")
+        page.comparePart.setAlignOn("start")
         verify(page.compareAligned)
         verify(!here.visible)
         find(page, "backToList").clicked()
@@ -4359,7 +4359,7 @@ profile  raw
     }
 
     function openRow(page, row) {
-        page.open(row)
+        page.openPart.open(row)
         tryVerify(() => find(page, "recordingInfo").visible, 10000, "the recording opens")
         verify(waitForPolish(page.Window.window), "the viewer laid out")
     }
@@ -4373,7 +4373,7 @@ profile  raw
         openRow(page, startEarlyRow)
         const choice = find(page, "alignChoice")
         const status = find(page, "compareStatus")
-        page.compareWith(startLateRow)
+        page.comparePart.compareWith(startLateRow)
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         choice.currentIndex = choice.indexOfValue("engine")
         verify(choice.currentIndex > 0, "the choice is offered")
@@ -4386,20 +4386,20 @@ profile  raw
         compare(status.text, "Dashed: " + startLateRow.title
                 + ", aligned on their engine starts, at 5.6 s here and 12.6 s there")
 
-        page.compareWith(earlyRow)
+        page.comparePart.compareWith(earlyRow)
         tryVerify(() => status.text.indexOf("isn't drawn") > 0, 10000, status.text)
         compare(status.text, earlyRow.title + " isn't drawn: it has no engine start"
                 + " (RPM reaching 500 after being below 100)")
         verify(!page.compareAligned)
         compare(page.viewT0, 0, "the first alone")
-        compare(page.series(400).length, 2, "its own traces alone")
+        compare(page.seriesPart.series(400).length, 2, "its own traces alone")
 
         openRow(page, earlyRow)
-        page.setAlignOn("engine")
-        page.compareWith(startEarlyRow)
+        page.comparePart.setAlignOn("engine")
+        page.comparePart.compareWith(startEarlyRow)
         tryVerify(() => status.text.indexOf("isn't drawn") > 0, 10000, status.text)
         verify(status.text.indexOf("this recording has no engine start") > 0, status.text)
-        page.compareWith(lateRow)
+        page.comparePart.compareWith(lateRow)
         tryVerify(() => status.text.indexOf("neither") > 0, 10000, status.text)
         verify(!page.compareAligned)
     }
@@ -4497,7 +4497,7 @@ profile  raw
     // start
     function test_aFindingsRowCentersTheView() {
         const page = openFindings()
-        page.setView(0, 2000)
+        page.cursorsPart.setView(0, 2000)
         const list = find(page, "findingList")
         tryVerify(() => list.itemAtIndex(1) !== null, 2000, "the row has a delegate")
         // The rate drop: 7.92 s for 1.4 s
@@ -4556,9 +4556,9 @@ profile  raw
                 ["rpm_high:off", "rpm_high:on", "coolant_high:on"])
 
         // Export takes the chart's room, the panel's with it, and gives it back
-        page.openExport()
+        page.reportPart.openExport()
         verify(!find(page, "conditionsPanel").visible, "hidden under Export")
-        page.closeExport()
+        page.reportPart.closeExport()
         verify(find(page, "conditionsPanel").visible, "back once Export closes")
 
         find(page, "jumpStretches").clicked()
@@ -4575,7 +4575,7 @@ profile  raw
     // the desktop's panel stays up
     function test_aConditionsRowCentersTheView() {
         const page = openConditions()
-        page.setView(0, 2000)
+        page.cursorsPart.setView(0, 2000)
         const list = find(page, "conditionList")
         tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
         mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
@@ -4586,7 +4586,7 @@ profile  raw
         compare(page.conditionPick, 0)
         verify(page.conditionsOpen, "the desktop's panel stays up")
         // A new recording drops the pick and the panel
-        page.backToList()
+        page.openPart.backToList()
         compare(page.conditionPick, -1)
         verify(!page.conditionsOpen)
     }
@@ -4652,7 +4652,7 @@ profile  raw
         verify(Array.isArray(page.chartFindings) && Array.isArray(page.chartMarkers), "plain arrays")
         page.chartFindings = [{ kind: 1, atMs: 1000, lengthMs: 500 }]
         page.chartMarkers = [{ timeMs: 2000, label: "Planted" }]
-        page.setView(0, 4000)
+        page.cursorsPart.setView(0, 4000)
         const ctx = {
             fillStyle: "", strokeStyle: "", lineWidth: 1, textAlign: "", textBaseline: "",
             rects: [], texts: [],
@@ -4729,7 +4729,7 @@ profile  raw
         Theme.developerMode = true
         verify(find(page, "frameTest").visible)
         page.frameTestSeconds = 0.6
-        page.setView(5000, 6000)
+        page.cursorsPart.setView(5000, 6000)
         let logged = ""
         const log = line => { logged = line }
         Bridge.logMessage.connect(log)
@@ -4801,7 +4801,7 @@ profile  raw
                + (seen.length ? seen.join(", ") : "nothing from the button")
                + ", at " + at.x + "," + at.y + ", the popup "
                + (bar.options.visible ? "visible" : "hidden"))
-        page.open(earlyRow)
+        page.openPart.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens again")
         compare(find(page, "signalRows").count, all, "back to the list cleared the filter: text '"
                 + bar.filter.text + "', plotted only " + bar.filter.plottedOnly
@@ -4810,7 +4810,7 @@ profile  raw
 
     function test_aRefusedFolderSaysWhyAndBackGoesToTheList() {
         const page = createPage()
-        page.open({ title: "Gone", folder: Harness.recordingFixtures + "/no-such-recording" })
+        page.openPart.open({ title: "Gone", folder: Harness.recordingFixtures + "/no-such-recording" })
         const error = find(page, "openError")
         tryVerify(() => error.visible, 10000, "refused")
         verify(error.text.indexOf("signals.csv") >= 0, error.text)
@@ -4930,23 +4930,23 @@ profile  raw
         verify(Harness.writeScratchFile("has-quiet/signals.csv",
                    "host_us,signal,value,unit\n100000,RPM,900,rpm\n100000,Quiet,5,rpm\n"
                    + "200000,Quiet,7,rpm\n").toString() !== "")
-        page.open({ title: "Lacks", uri: "replay://x?profile=test", source: "", folder: first,
+        page.openPart.open({ title: "Lacks", uri: "replay://x?profile=test", source: "", folder: first,
                     profile: "test" })
         tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
         const quiet = page.shownSignals.find(s => s.name === "Quiet")
         const rpm = page.shownSignals.find(s => s.name === "RPM")
-        page.togglePlotted(rpm.index)
-        page.togglePlotted(quiet.index)
+        page.cursorsPart.togglePlotted(rpm.index)
+        page.cursorsPart.togglePlotted(quiet.index)
         compare(page.plottedNoValues, ["Quiet"], "alone, it has nothing to draw")
-        compare(page.series(400).length, 0)
-        page.compareWith({ title: "Has", folder: second })
+        compare(page.seriesPart.series(400).length, 0)
+        page.comparePart.compareWith({ title: "Has", folder: second })
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         compare(page.plottedNoValues, [], "the compared recording draws it")
-        const all = page.series(400)
+        const all = page.seriesPart.series(400)
         compare(all.length, 1, "its dashed trace alone")
         verify(all[0].dash !== undefined, "dashed")
         compare(all[0].row, quiet.index)
-        page.stopComparing()
+        page.comparePart.stopComparing()
         compare(page.plottedNoValues, ["Quiet"], "alone again")
     }
 
@@ -4954,9 +4954,9 @@ profile  raw
     // instead of staying blank
     function test_aPlottedSignalWithNoValuesIsSaidInTheChart() {
         const page = createPage()
-        compare(page.noValuesText(["RPM"]), "RPM has no values in this recording")
-        compare(page.noValuesText(["RPM", "Speed"]), "RPM and Speed have no values in this recording")
-        compare(page.noValuesText(["RPM", "Speed", "Load"]),
+        compare(page.reportPart.noValuesText(["RPM"]), "RPM has no values in this recording")
+        compare(page.reportPart.noValuesText(["RPM", "Speed"]), "RPM and Speed have no values in this recording")
+        compare(page.reportPart.noValuesText(["RPM", "Speed", "Load"]),
                 "RPM, Speed and Load have no values in this recording")
         // A values recording listing two signals, with rows for one: the
         // harness's frames folder, its events.log and signals.csv written over
@@ -4972,7 +4972,7 @@ profile  raw
                    + "dropped, 0 notes dropped\n").toString() !== "")
         verify(Harness.writeScratchFile("no-values/signals.csv",
                    "host_us,signal,value,unit\n100000,RPM,1000,rpm\n").toString() !== "")
-        page.open({ title: "Quiet", uri: "replay://x?profile=test", source: "", folder: folder,
+        page.openPart.open({ title: "Quiet", uri: "replay://x?profile=test", source: "", folder: folder,
                     profile: "test" })
         tryVerify(() => find(page, "exportButton").visible, 10000, "the viewer opens")
         const chart = find(page, "chart")
@@ -4982,13 +4982,13 @@ profile  raw
         // RPM is plotted by default and draws, so the chart says nothing
         // about Quiet until RPM is unticked: the words are for a chart
         // with nothing to draw
-        page.togglePlotted(empty.index)
+        page.cursorsPart.togglePlotted(empty.index)
         compare(page.plottedNoValues, [], "RPM still draws")
         const rpm = page.shownSignals.find(s => s.name === "RPM")
-        page.togglePlotted(rpm.index)
+        page.cursorsPart.togglePlotted(rpm.index)
         tryCompare(chart, "emptyText", "Quiet has no values in this recording", 3000)
-        compare(page.series(400).length, 0, "nothing to draw, so the words show")
-        page.togglePlotted(empty.index)
+        compare(page.seriesPart.series(400).length, 0, "nothing to draw, so the words show")
+        page.cursorsPart.togglePlotted(empty.index)
         compare(chart.emptyText, "No signals plotted; tick a row to plot it")
     }
 }

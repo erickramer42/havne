@@ -114,7 +114,11 @@ an issue is resolved it is removed, and its number is not reused.
     ([2026-11-11-monitor-car](docs/bench-sessions/2026-11-11-monitor-car.md)).
     The request goes out again on its next turn, so a
     signal still updates, less often. For a session that asks two
-    modules through the VX, `?pack=0` keeps the losses near 1%.
+    modules through the VX, `?pack=0` keeps the losses near 1%. On
+    2026-11-18, with the engine's DID asked 84 times a second, the VX
+    delivered 55% of the second module's replies (596 of 1,082 on the
+    bus), against 76% on 2026-11-11
+    ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
 - **#43. On a phone with gesture navigation, leaving the drive view
     takes three back swipes.** The view hides Android's bars, and
     Android spends the first swipe from the edge showing them; the
@@ -123,22 +127,37 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#44. The extended session's close is fixed against the fakes; the
-    car re-run is owed (BENCH prep #36).** Through an ELM327 adapter the
-    close finishes a reply the stop cut off, then sends `10 01`, again
-    if the adapter answers `STOPPED`; through J2534 it reads the
-    module's answer before the filters stop, so the module isn't left
-    repeating it ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s
-    appendix "the close waits for the module"). Through SocketCAN the
-    close waits for a read still out before `10 01`, with J2534's bound
-    (the appendix of 2026-11-12), against the simulated bus only: a
-    SocketCAN session that asks needs an adapter whose driver offers
-    one-shot mode (BENCH prep #32). The car runs of
-    2026-11-11 found the earlier closes short
-    ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
-    [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
-    The number closes with a parked car run, a listener on the bus,
-    that reads one `50 01`.
+- **#45. A scan DID whose reply was lost is never asked again.**
+    Through the OBDX Pro VX, 0x7E8's single-frame reply to one DID of a
+    scan block was on the bus while 0x7E9's segmented reply was coming in,
+    and the VX did not deliver it. The DID went out once, and the scan sat
+    at 511 of 512 for the 84 s that remained
+    ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
+    The same block through the MX+ found all 43. In the poll after a scan a
+    lost reply's request goes out again on its next turn.
+- **#46. The VIN can switch the picked vehicle without changing the
+    session's profile.** Connected with a two-channel vehicle picked, the
+    VIN switched the pick to the four-channel vehicle the VIN was
+    recognized for, and the session kept the two-channel profile, so the
+    log names one vehicle and the session reads the other's channels
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#47. With an adapter's address, the "Default" profile reads plain
+    `obd2`, not the picked vehicle's plugin.** A user who picks a plugin's
+    vehicle and connects on Default reads `obd2` without the plugin's
+    signals; only picking the plugin's profile in Settings forms the URI
+    with it. A wording issue: the row names "Default" without saying what
+    it is for an adapter
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#48. A connect may log "no answer to the supported-PID query" before
+    the support line.** The walk's first `01 00` met a stray single frame,
+    asked again 0.4 s later, and the log shows the first line, then the
+    right one 0.3 s after, which a user reads as a fault. Low
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#49. The ELM327 worker's 5 s watchdog does not fire across a host's
+    sleep.** It counts the host's clock, so it fired only on the wake: a
+    session stood stalled for 19 minutes until the laptop woke, then
+    closed with a hard-failure line
+    ([2026-11-18-session-close-car](docs/bench-sessions/2026-11-18-session-close-car.md)).
 
 ## Roadmap
 
@@ -174,6 +193,17 @@ For people who want a log or a warning to start from the car's own state. A feat
   - a request budget of 1024 and a default pick of ranked signals, so an OBDb import of a whole car's set keeps its signals ([ADR-0051](docs/adr/0051-signal-files.md), [ADR-0056](docs/adr/0056-analysis-log.md)).
 - **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
 - **Left for v0.9.0:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063), a recording whose every condition event was lost saying so, a dial's caption over a numeral, the long-files limits, and a choice of where a pull ends (at the throttle's lift, the limiter included, or at top speed).
+
+### v0.9.0: the whole car (in progress)
+
+A feature release: the C ABI grows, append-only except the recording format and the signal set's layout, which break ([CHANGELOG.md](CHANGELOG.md) "Unreleased" lists each).
+- **Built on `dev`:**
+  - a profile sized for a whole car: up to 32 modules a session, a plugin variant's files read together, and a session that asks only the signals picked when a set derives more than 1024 requests ([ADR-0065](docs/adr/0065-car-sized-profile.md));
+  - a signal's key, so two signals of one name stay two: recording format 4, `--signal` and the viewer, a vehicle's ticks and Compare's pairs by key, and a validator that takes a repeated name;
+  - computed signals written in the signal form, and `havne-cli signals expr`;
+  - the conversation tier's first part ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)): the sandbox that runs a plugin's module, tier 2's service ceiling, a request longer than a frame on SocketCAN and J2534, the simulated ECU's security access, and the manifest's format 2 read at load. Core reads such a plugin's manifest and module; nothing runs the module yet, and the app's store takes the plugin and shows nothing of the tier.
+- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it.
+- **Left:** the conversation tier's session, its consent gate and its front ends; the simulated car with several modules; and a car run of the request engine's turns.
 
 ### Waiting on a tester: an iPhone download
 

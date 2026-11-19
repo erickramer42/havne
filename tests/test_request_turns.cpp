@@ -229,6 +229,43 @@ TEST(RequestTurnsTest, APackCountsEachOfItsRows)
     EXPECT_EQ(a->sent[11].bytes.size(), 7u) << "a pack of six";
 }
 
+/* Under packframes=1 the same eight PIDs go in packs of two or three, so
+ * channel 0's turn is more exchanges, and each turn still asks every one
+ * of its rows before channel 1's */
+TEST(RequestTurnsTest, ATurnUnderOneFramePacksAsksEachRow)
+{
+    auto a = adapter(2);
+    const uint8_t pids[] = {0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11};
+    for (const uint8_t pid : pids) {
+        add(&a->e, 0, {0x01, pid});
+    }
+    dids(&a->e, 1, 1, 0x80);
+    a->e.pack = true;
+    a->e.pack_frames = 1;
+    ecuio_engine_probe(&a->e);
+    a->ecus = [](uint32_t, const Bytes& q) { return answer(q, 0x00); };
+    a->asks(10 + 30);
+    const auto turns = runs(a->channels(10));
+    ASSERT_GE(turns.size(), 6u);
+    size_t i = 10;
+    for (size_t t = 0; t + 1 < turns.size(); ++t) {
+        std::set<uint8_t> asked;
+        for (int k = 0; k < turns[t].second; ++k, ++i) {
+            const Bytes& q = a->sent[i].bytes;
+            if (turns[t].first == 0) {
+                EXPECT_LE(q.size(), 4u) << "three PIDs at most";
+                asked.insert(q.begin() + 1, q.end());
+            }
+        }
+        if (turns[t].first == 0) {
+            EXPECT_GT(turns[t].second, 2) << "more exchanges than packs of six";
+            EXPECT_EQ(asked.size(), sizeof pids) << "turn " << t;
+        } else {
+            EXPECT_EQ(turns[t].second, 1);
+        }
+    }
+}
+
 /* The test car's four-channel pick: 0x7E8's walk comes after a DID, a
  * silent module's two rows and a refusing module's row, each exchange
  * 110 ms. It reaches the last bitmap, since its second starts at its

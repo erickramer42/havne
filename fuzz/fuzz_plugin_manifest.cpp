@@ -1,6 +1,7 @@
 // File/layer: fuzz/fuzz_plugin_manifest.cpp | C++17, Qt-free, libFuzzer
 // Testing: FUZZ: the plugin loader (ADR-0052, ADR-0066's format 2,
-//          ecuio_plugin_load) and its value fixtures (ecuio_plugin_values)
+//          ecuio_plugin_load), its pages (ecuio_plugin_page) and its value
+//          fixtures (ecuio_plugin_values)
 //
 // The first byte picks the form: even, a packed package (the rest up to
 // its first 0x1E byte is the file); odd, a folder, the rest cut at 0x1E
@@ -14,6 +15,7 @@
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 
+#include "json.h"              /* core/src: a page's text read back */
 #include "signal_file_build.h" /* core/src: a variant's merged text */
 #include "tier2_ceiling.h"     /* core/src: what a conversation may declare */
 #include "wasm_check.h"        /* core/src: a module's most bytes */
@@ -134,9 +136,11 @@ void check_values(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
 void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
 {
     ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
     bool sid_seen[256] = {};
     for (uint32_t i = 0; i < count; ++i) {
         check(ecuio_plugin_service(a, i, &sv) == ECUIO_OK);
+        check(sv.struct_size == sizeof sv && sv.flags == 0);
         check(!sid_seen[sv.sid]);
         sid_seen[sv.sid] = true;
         check(sv.sub_count <= ECUIO_PLUGIN_MAX_SUBS);
@@ -158,6 +162,12 @@ void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
         check(sv.reserved[0] == 0 && sv.reserved[1] == 0);
     }
     check(ecuio_plugin_service(a, count, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        sv.struct_size = sizeof sv - 1;
+        const ecuio_plugin_service_t untouched = sv;
+        check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&sv, &untouched, sizeof sv) == 0);
+    }
 }
 
 /* Each security level on one of the group's ECUs, once, inside its
@@ -166,9 +176,11 @@ void check_levels(const ecuio_plugin_t* a, uint32_t count,
                   const std::vector<uint32_t>& ecus, const bool* sub_27)
 {
     ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
     std::vector<ecuio_plugin_security_level_t> levels;
     for (uint32_t i = 0; i < count; ++i) {
         check(ecuio_plugin_security_level(a, i, &lv) == ECUIO_OK);
+        check(lv.struct_size == sizeof lv && lv.flags == 0);
         bool listed = false;
         for (const uint32_t known : ecus) {
             listed = listed || known == lv.rx_id;
@@ -191,6 +203,13 @@ void check_levels(const ecuio_plugin_t* a, uint32_t count,
     }
     check(ecuio_plugin_security_level(a, count, &lv) ==
           ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        lv.struct_size = sizeof lv - 1;
+        const ecuio_plugin_security_level_t untouched = lv;
+        check(ecuio_plugin_security_level(a, 0, &lv) ==
+              ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&lv, &untouched, sizeof lv) == 0);
+    }
 }
 
 /* Each ECU the module talks to, once: one of the plugin's, so a channel
@@ -235,6 +254,33 @@ std::vector<uint32_t> check_ecus(const ecuio_plugin_t* a, uint32_t count,
     return ecus;
 }
 
+/* Each page: its form, its text within the bound, the same for both
+ * loads, and written again by core to the same bytes */
+void check_pages(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
+                 uint32_t count)
+{
+    check(count <= ECUIO_PLUGIN_MAX_PAGES);
+    ecuio_plugin_page_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_page(a, count, &past) == ECUIO_ERR_INVALID_ARGUMENT);
+    check(ecuio_plugin_page_text(a, count) == nullptr);
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_page_t page{};
+        page.struct_size = sizeof page;
+        check(ecuio_plugin_page(a, i, &page) == ECUIO_OK);
+        check(page.form == ECUIO_PLUGIN_PAGE_PHONE ||
+              page.form == ECUIO_PLUGIN_PAGE_DESKTOP);
+        check(page.text_bytes <= ECUIO_PLUGIN_PAGE_MAX_BYTES);
+        const char* text = ecuio_plugin_page_text(a, i);
+        check(text != nullptr && strlen(text) == page.text_bytes);
+        check(std::string(text) == ecuio_plugin_page_text(b, i));
+        ecuio_json::Value v;
+        ecuio_json::Error error;
+        check(ecuio_json::parse(text, page.text_bytes, &v, &error));
+        check(ecuio_json::write(v) == text);
+    }
+}
+
 /* The conversation tier's part, read from both plugins alike: none
  * without the tier; with it, everything inside plugin.h's bounds and
  * tier 2's ceiling, each ECU, service and level once, each level's pair
@@ -250,7 +296,9 @@ void check_conversation(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     ecuio_plugin_conversation_ecu_t ecu{};
     ecu.struct_size = sizeof ecu;
     ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
     ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
     if ((tiers & ECUIO_PLUGIN_TIER_CONVERSATION) == 0) {
         check(s == ECUIO_ERR_INVALID_ARGUMENT);
         check(ecuio_plugin_conversation_ecu(a, 0, &ecu) ==
@@ -341,6 +389,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
           info.tiers ==
               (ECUIO_PLUGIN_TIER_DATA | ECUIO_PLUGIN_TIER_CONVERSATION));
     check_conversation(a, b, info.tiers, info.variant_count);
+    check_pages(a, b, info.page_count);
     check(info.variant_count >= 1 &&
           info.variant_count <= ECUIO_PLUGIN_MAX_VARIANTS);
     check(!folder ? info.fixture_count == 0

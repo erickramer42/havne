@@ -63,5 +63,5 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 0
     }
-    Component.onCompleted: head.host.noteHead(role, head)
+    Component.onCompleted: head.host.refreshPart.noteHead(role, head)
 }

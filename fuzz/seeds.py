@@ -25,7 +25,7 @@
 # fuzzer rarely gets a module past its header.
 # fuzz_sim's are runs of requests that enter the simulated ECU's extended
 # session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
-# would have to guess.
+# would have to guess; and URIs whose faults aim at one module.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -106,7 +106,6 @@ def main(argv):
         for path in variant["files"]:
             if path not in data_files:
                 data_files.append(path)
-    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
 
     # The JSON reader: every JSON file above, whole after the bounds
     # byte (0x1F: depth 32, the loaders' bound, and no size bound)
@@ -227,16 +226,10 @@ def main(argv):
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even
-    # first byte; the files inlined, no fixtures key, then a fixture)
-    after = SEP + fixtures[0] if fixtures else b""
-    folder = b"\x01" + manifest_bytes
-    for path in data_files:
-        folder += SEP + read(plugin + "/" + path)
-    write(out, "fuzz_plugin_manifest", "folder_example-sim", folder + after)
-    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
-    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
-    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
-    write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
+    # first byte; the files inlined, no fixtures key, then a fixture), for
+    # each example: example-car is a whole car of 18 modules
+    text, after = plugin_seeds(out, plugin)
+    plugin_seeds(out, "plugins/example-car")
     # The conversation tier (format 2): a packed package with its module
     # a binary file, the same as a folder (the module a piece of its own),
     # then one whose hash is another module's, one whose module imports,
@@ -244,6 +237,25 @@ def main(argv):
     for name, data in conversation_seeds().items():
         write(out, "fuzz_plugin_manifest", name, data)
     talker = conversation_seeds()["packed_conversation"][1:]
+    # A page for each form (ADR-0052's appendix on pages): the folder's
+    # pieces in the loader's order, its pages before its data files
+    pages_dir = "tests/fixtures/plugins/pages"
+    pages_bytes = read(pages_dir + "/manifest.json")
+    pages_manifest = json.loads(pages_bytes)
+    pages_data = []
+    for variant in pages_manifest["variants"]:
+        for path in variant["files"]:
+            if path not in pages_data:
+                pages_data.append(path)
+    pages_folder = b"\x01" + pages_bytes
+    for path in pages_manifest["pages"] + pages_data:
+        pages_folder += SEP + read(pages_dir + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_pages", pages_folder)
+    pages_packed = dict(pages_manifest)
+    pages_packed["files"] = {p: json.loads(read(pages_dir + "/" + p))
+                             for p in pages_data + pages_manifest["pages"]}
+    pages_text = json.dumps(pages_packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_pages", b"\x00" + pages_text)
 
     # Making and changing a packed plugin: a switches byte, then a signal
     # file to wrap, 0x1E and a signal file to put into the result; with
@@ -261,6 +273,7 @@ def main(argv):
         write(out, "fuzz_plugin_wrap", "packed_put_" + name, b"\x40" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "packed_slug_" + name, b"\x50" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "conversation_put_" + name, b"\x40" + talker + SEP + data)
+        write(out, "fuzz_plugin_wrap", "pages_put_" + name, b"\x40" + pages_text + SEP + data)
         for other, second in wrap_files:
             write(out, "fuzz_plugin_wrap", "put_" + name + "_" + other,
                   b"\x00" + data + SEP + second)
@@ -418,6 +431,14 @@ def main(argv):
     signals = b"\xef\xbb\xbfhost_us,signal,value,unit\n1500000,RPM,1726,RPM\n"
     write(out, "fuzz_export", "engine-ecu",
           b"F" + events + SEP + signals + SEP + SEP + ecu)
+    # A focus key named twice, holding the harness's scratch folder's
+    # name: the wide CSV's refusal quotes it, which names no folder
+    write(out, "fuzz_export", "focus-twice-folder-word",
+          b"4profile  obd2\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"signal  7E8:410C:2.0:16,RPM,number,RPM,0,1,1\n\n" + SEP +
+          b"host_us,signal,value,unit\n1000000,7E8:410C:2.0:16,900,RPM\n")
 
     # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
     # faults), then what a host sends, CR-ended: python-OBD's opening,
@@ -531,6 +552,18 @@ def main(argv):
         "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
     }.items():
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
+    # Its URIs (an odd first byte): faults and timing for every module and
+    # aimed at one
+    for name, uri in {
+        "uri-aimed": "mock://sim?modules=2&faults=late:3@7E9,silent:5,pending:2@7e8",
+        "uri-aimed-replaced": "mock://sim?faults=late:1,late:2@7E8,stalled:4@7E8",
+        "uri-aimed-refused": "mock://sim?faults=late:3@800",
+        "uri-timing": "mock://sim?modules=2&delay=3000:9000,900:30000@7E9&fc=4000"
+                      "&cf=5000,800@7E9&seed=7",
+        "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
+        "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
+    }.items():
+        write(out, "fuzz_sim", name, b"\x01" + uri.encode())
     return 0
 
 
@@ -540,6 +573,30 @@ SIM_SEEDS = {
     0x03: bytes([0x11, 0x92, 0x23, 0xA4, 0x35, 0xB6, 0x47, 0xC8, 0x59, 0xDA, 0x6B, 0xEC,
                  0x7D, 0xFE, 0x8F, 0x10]),
 }
+
+
+def plugin_seeds(out, plugin):
+    """fuzz_plugin_manifest's folder and packed seeds of one plugin folder;
+    the packed text and the fixture that follows a seed"""
+    manifest_bytes = read(plugin + "/manifest.json")
+    manifest = json.loads(manifest_bytes)
+    data_files = []  # each variant's files, in the order the loader asks for them
+    for variant in manifest["variants"]:
+        for path in variant["files"]:
+            if path not in data_files:
+                data_files.append(path)
+    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
+    name = os.path.basename(plugin)
+    after = SEP + fixtures[0] if fixtures else b""
+    folder = b"\x01" + manifest_bytes
+    for path in data_files:
+        folder += SEP + read(plugin + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_" + name, folder + after)
+    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
+    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
+    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_" + name, b"\x00" + text + after)
+    return text, after
 
 
 def sim_key(level, wrong=False):

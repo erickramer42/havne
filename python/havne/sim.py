@@ -12,9 +12,11 @@ from collections import namedtuple
 from . import _ecuio as e
 from ._core import check, lib, utf8
 
-Reply = namedtuple("Reply", "id data delay_us flags")
+Reply = namedtuple("Reply", "id data delay_us flags fc_us cf_us")
 Reply.__doc__ = ("One ECU's reply: the CAN ID it's sent on, the whole message from its "
-                 "service byte, when it starts after the request, ECUIO_SIM_REPLY_*")
+                 "service byte, when it starts after the request, ECUIO_SIM_REPLY_*, "
+                 "the tester's Flow Control to its first Consecutive Frame (fc=) and "
+                 "its least gap between them (cf=), in microseconds")
 
 
 class Sim:
@@ -60,7 +62,8 @@ class Sim:
                                 e.ECUIO_SIM_NOW if at_us is None else at_us,
                                 out, e.ECUIO_SIM_MAX_REPLIES, ctypes.byref(count)),
               "ecuio_sim_ask")
-        return [Reply(r.reply_id, ctypes.string_at(r.data, r.length), r.delay_us, r.flags)
+        return [Reply(r.reply_id, ctypes.string_at(r.data, r.length), r.delay_us, r.flags,
+                      r.fc_us, r.cf_us)
                 for r in out[:count.value]]
 
     @property

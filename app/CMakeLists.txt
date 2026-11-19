@@ -50,7 +50,11 @@ qt_add_library(app_ui STATIC
     variantshape.cpp
     variantshape.h
     pluginstore.cpp
+    pluginstore_pages.cpp
+    pluginstore_import.cpp
+    pluginstore_picks.cpp
     pluginstore.h
+    pluginstore_parts.h
     alerttone.cpp
     alerttone.h
     conditionmodel.cpp
@@ -69,6 +73,11 @@ qt_add_library(app_ui STATIC
     recordingframes.cpp
     recordingframes.h
     recordingview.cpp
+    recordingview_asks.cpp
+    recordingview_queries.cpp
+    recordingview_stretches.cpp
+    recordingview_conditions.cpp
+    recordingview_internal.h
     recordingview.h
     ${APP_BRIDGE_SOURCES}
     signalfilter.cpp
@@ -116,6 +125,28 @@ qt_add_qml_module(app_ui
         qml/RecordingZoomRow.qml
         qml/RecordingSignalRows.qml
         qml/RecordingFramesView.qml
+        qml/RecordingBaselineGone.qml
+        qml/RecordingRefresh.qml
+        qml/RecordingKeys.qml
+        qml/RecordingSplitter.qml
+        qml/RecordingSpanLine.qml
+        qml/RecordingDetailRow.qml
+        qml/RecordingEvents.qml
+        qml/RecordingWatchers.qml
+        qml/RecordingViews.qml
+        qml/RecordingDialogs.qml
+        qml/RecordingViewerTitle.qml
+        qml/RecordingCompare.qml
+        qml/RecordingDecode.qml
+        qml/RecordingRowInfo.qml
+        qml/RecordingFormat.qml
+        qml/RecordingTexts.qml
+        qml/RecordingSeries.qml
+        qml/RecordingCursors.qml
+        qml/RecordingOpen.qml
+        qml/RecordingPanes.qml
+        qml/RecordingReport.qml
+        qml/RecordingFrameTest.qml
         qml/RecordingAbout.qml
         qml/RecordingList.qml
         qml/RecordingImportPanel.qml

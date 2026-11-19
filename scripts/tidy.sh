@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # scripts/tidy.sh: clang-tidy over core/, surrogate/ and cli/, and app/ in a
 # tree with Qt, with .clang-tidy's checks, one summary line; each file's
-# output goes to Testing/tidy/<file>.log, and on a warning the warnings
+# output goes to Testing/tidy/<path, / as _>.log, and on a warning the warnings
 # are printed and the script exits 1. CI's clang-tidy job runs it.
 # The size checks' lines (a function past 80 lines or complexity 40) are
-# only counted, in the summary and in Testing/tidy/size.txt.
+# written to Testing/tidy/size.txt and judged against the committed baseline
+# scripts/tidy-size-baseline.txt (scripts/tidy-size-ratchet.sh): a function
+# past a threshold that the baseline doesn't list fails, and so does a
+# baseline line that no longer applies, so the list only shrinks.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
 #        HAVNE_TIDY_SHARD=<k>/<n> scripts/tidy.sh ...   (every n-th file from the k-th, k from 1 to n)
+#        scripts/tidy.sh --update-size-baseline ...     (also drops the baseline's lines that no
+#            longer apply; never adds one, and not in a shard: a header's function is seen by any shard)
 #
 # The tree is a Ninja (or Makefile) build with a compile database, which
 # the Visual Studio generator doesn't write, configured where cl.exe is
@@ -38,6 +43,11 @@ set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/tidy
 QT_KIT=
+UPDATE=0
+if [ "${1:-}" = --update-size-baseline ]; then
+    UPDATE=1
+    shift
+fi
 if [ "${1:-}" = --qt ]; then
     QT_KIT=${2:?"--qt takes the Qt kit's folder"}
     shift 2
@@ -145,18 +155,20 @@ if [ -n "${HAVNE_TIDY_SHARD:-}" ]; then
     files=$(printf '%s
 ' "$files" | awk -v k="$shard_k" -v n="$shard_n" '(NR - 1) % n == k - 1')
 fi
+[ -z "${HAVNE_TIDY_SHARD:-}" ] || [ "$UPDATE" = 0 ] || {
+    echo "--update-size-baseline judges the whole tree: not with HAVNE_TIDY_SHARD" >&2; exit 2; }
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 
 start=$SECONDS
 jobs=$(nproc 2>/dev/null || echo 4)
 printf '%s\n' "$files" | xargs -P "$jobs" -I{} sh -c \
-    '"$1" -p "$2" --quiet "$3" > "$4/$(basename "$3").log" 2>&1' \
-    sh "$TIDY" "$TREE" {} "$LOGDIR"
+    'rel=${3#"$5"/}; "$1" -p "$2" --quiet "$3" > "$4/$(printf %s "$rel" | tr / _).log" 2>&1' \
+    sh "$TIDY" "$TREE" {} "$LOGDIR" "$root"
 rc=$?
 dur=$((SECONDS - start))
 
 # A header's warning repeats in every file that includes it: print once.
-# The size checks never fail the run: counted apart, listed in size.txt.
+# The size checks are judged apart (the baseline), listed in size.txt.
 all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
     sed "s#^$root/##" | sort -u)
 sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
@@ -178,5 +190,12 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf 'tidy        ok    %4s s  %s files, no warnings; %s functions past the size thresholds, see %s/size.txt (%s)\n' \
+printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##" > "$LOGDIR/checked.txt"
+sharded=0
+[ -z "${HAVNE_TIDY_SHARD:-}" ] || sharded=1
+if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-baseline.txt \
+        "$LOGDIR/checked.txt" "$sharded" "$UPDATE"; then
+    exit 1
+fi
+printf 'tidy        ok    %4s s  %s files, no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \
     "$dur" "$count" "$nsized" "$LOGDIR" "$version"

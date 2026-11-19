@@ -292,6 +292,28 @@ inline ecuio_plugin_conversation_ecu_t ecu_of(const ecuio_plugin_t* p,
     return e;
 }
 
+/* The index-th declared service, read into a struct filled first */
+inline ecuio_plugin_service_t service_of(const ecuio_plugin_t* p,
+                                         uint32_t index)
+{
+    ecuio_plugin_service_t s;
+    std::memset(&s, 0xA5, sizeof s);
+    s.struct_size = sizeof s;
+    EXPECT_EQ(ecuio_plugin_service(p, index, &s), ECUIO_OK);
+    return s;
+}
+
+/* The index-th security level, read into a struct filled first */
+inline ecuio_plugin_security_level_t level_of(const ecuio_plugin_t* p,
+                                              uint32_t index)
+{
+    ecuio_plugin_security_level_t l;
+    std::memset(&l, 0xA5, sizeof l);
+    l.struct_size = sizeof l;
+    EXPECT_EQ(ecuio_plugin_security_level(p, index, &l), ECUIO_OK);
+    return l;
+}
+
 /* A change to Made's defaults and words its refusal holds */
 struct Refusal {
     const char* what;

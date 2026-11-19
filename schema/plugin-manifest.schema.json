@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
   "title": "Havne plugin manifest",
   "description": "A Havne plugin's manifest (formats 1 and 2, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest.",
+  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
   "type": "object",
   "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
   "properties": {
@@ -72,7 +72,7 @@
     },
     "ecus": {
       "$ref": "signal-file.schema.json#/$defs/ecus",
-      "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 4 in all, of one ID width."
+      "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 32 in all, of one ID width."
     },
     "variants": {
       "title": "Variants",
@@ -92,15 +92,20 @@
     },
     "files": {
       "title": "Files",
-      "description": "A packed plugin's files, at most 64, each by the path the manifest names it by: a data file, or in format 2 a binary file (an object with \"kind\"). A folder's manifest takes none.",
+      "description": "A packed plugin's files, at most 80, each by the path the manifest names it by: a data file, in format 2 a binary file (an object with \"kind\"), or a page the manifest's \"pages\" names. A folder's manifest takes none.",
       "type": "object",
-      "maxProperties": 64,
+      "maxProperties": 80,
       "propertyNames": { "$ref": "#/$defs/path" },
-      "additionalProperties": {
-        "if": { "type": "object", "required": ["kind"] },
-        "then": { "$ref": "#/$defs/binaryFile" },
-        "else": { "$ref": "#/$defs/dataFile" }
-      }
+      "additionalProperties": { "$ref": "#/$defs/packedFile" }
+    },
+    "pages": {
+      "title": "Pages",
+      "description": "The Dashboard pages the plugin carries, 1 to 16, each a page file (#/$defs/pageFile) by its path: a file beside the data in a folder, a member of \"files\" in a packed plugin.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/path" }
     },
     "conversation": { "$ref": "#/$defs/conversation" },
     "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
@@ -128,7 +133,9 @@
       "$comment": "A binary file is format 2's",
       "if": { "properties": { "havne_plugin": { "const": 1 } } },
       "then": {
-        "properties": { "files": { "additionalProperties": { "$ref": "#/$defs/dataFile" } } }
+        "properties": {
+          "files": { "additionalProperties": { "not": { "type": "object", "required": ["kind"] } } }
+        }
       }
     }
   ],
@@ -242,6 +249,29 @@
       },
       "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
       "additionalProperties": false
+    },
+    "packedFile": {
+      "title": "Packed file",
+      "description": "A member of a packed plugin's \"files\": a binary file when it has \"kind\", a data file when it has \"havne_signals\", else a page.",
+      "if": { "type": "object", "required": ["kind"] },
+      "then": { "$ref": "#/$defs/binaryFile" },
+      "else": {
+        "if": { "type": "object", "required": ["havne_signals"] },
+        "then": { "$ref": "#/$defs/dataFile" },
+        "else": { "$ref": "#/$defs/pageFile" }
+      }
+    },
+    "pageFile": {
+      "title": "Page file",
+      "description": "A Dashboard page the plugin carries: an ADR-0057 layout file of one page for one form, with no signal files to name (the plugin is the file its key: references need). The envelope is core's; the page and its cells are the layout file's rules, and keys this schema doesn't list are kept.",
+      "type": "object",
+      "required": ["format", "form", "pages"],
+      "properties": {
+        "format": { "const": 2 },
+        "form": { "enum": ["phone", "desktop"] },
+        "files": { "type": "array", "maxItems": 0 },
+        "pages": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "type": "object" } }
+      }
     },
     "binaryFile": {
       "title": "Binary file",

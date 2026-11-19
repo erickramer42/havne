@@ -40,7 +40,7 @@ ListView {
             anchors.fill: parent
             hoverEnabled: true
             Accessible.name: qsTr("Open %1").arg(recordingRow.modelData.title)
-            onClicked: root.host.open(recordingRow.modelData)
+            onClicked: root.host.openPart.open(recordingRow.modelData)
             HoverHandler { cursorShape: Qt.PointingHandCursor }
         }
 
@@ -63,7 +63,7 @@ ListView {
                 Label {
                     objectName: "recordingFacts"
                     visible: text !== ""
-                    text: root.host.rowFacts(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowFacts(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideRight
@@ -71,7 +71,7 @@ ListView {
                 }
                 Label {
                     objectName: "recordingDetail"
-                    text: root.host.rowDetail(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowDetail(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideMiddle
@@ -108,7 +108,7 @@ ListView {
                 baseColor: Theme.surface
                 enabled: root.host.sessionIdle
                 Layout.maximumWidth: enabled ? 96 : 160
-                Accessible.name: root.host.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
+                Accessible.name: root.host.refreshPart.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
                 onClicked: root.host.replayRequested(recordingRow.modelData.uri)
             }
         }

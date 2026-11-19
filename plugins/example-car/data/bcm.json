@@ -1,0 +1,29 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its bcm",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up bcm at 523",
+  "signals": [
+    {
+      "key": "bcm_name",
+      "name": "Body Module Name",
+      "kind": "text",
+      "ecu": "bcm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "bcm_voltage",
+      "name": "Body Supply Voltage",
+      "ecu": "bcm",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "scale": 0.1,
+      "unit": "V",
+      "decimals": 1,
+      "group": "electrical",
+      "plot": 2,
+      "gauge": {"min": 8, "max": 16, "warn_low": 11.5, "warn_high": 15}
+    }
+  ]
+}

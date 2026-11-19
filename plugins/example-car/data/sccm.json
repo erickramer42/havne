@@ -1,0 +1,26 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its sccm",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up sccm at 529",
+  "signals": [
+    {
+      "key": "sccm_name",
+      "name": "Steering Column Module Name",
+      "kind": "text",
+      "ecu": "sccm",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "sccm_wiper",
+      "name": "Wiper Stalk",
+      "kind": "enum",
+      "ecu": "sccm",
+      "read": {"service": "22", "number": "4A20"},
+      "field": {"byte": 0, "bits": 8},
+      "values": {"0": "Off", "1": "Interval", "2": "Low", "3": "High"},
+      "group": "vehicle"
+    }
+  ]
+}

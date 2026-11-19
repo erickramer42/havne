@@ -329,6 +329,8 @@ struct ecuio_request_engine {
     const uint8_t* duplicates = nullptr;
     uint32_t duplicate_count = 0;
     bool pack = false;          /* several PIDs per request (the driver's) */
+    /* The most CAN frames a pack's reply may take (?packframes=); 0 none */
+    uint8_t pack_frames = 0;
     /* ADR-0056 section 2: a focus is on. Every request it parked stays
      * parked, the kept ones run fast, and a request added later starts
      * parked, until ecuio_engine_unfocus. */

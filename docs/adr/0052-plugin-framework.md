@@ -340,6 +340,11 @@ parameters, preconditions, confirmation text). The app and `havne-cli`
 render them the same generic way; a plugin ships no QML and no
 strings outside its data.
 
+> **Note of 2026-11-18.** A plugin may carry Dashboard pages, each a
+> layout file of ADR-0057's format drawn by the app's own gauges (the
+> appendix "pages a plugin carries"). That is data, as its signals are:
+> the rule above holds.
+
 ### 10. What stays out of plugins
 
 - **Transports and buses** (K-line, J1850, DoIP): core work, since
@@ -720,3 +725,60 @@ research. A signing or trust-store feature may return in a later ADR for
 provenance, never as a precondition to run a plugin. Whether a public
 build carries the write services at all stays open (ADR-0066 "What stays
 open").
+
+## Appendix: pages a plugin carries (2026-11-18)
+
+A plugin may carry Dashboard pages ([ADR-0057](0057-dashboards.md)): a
+manufacturer's signals arrive with a page that shows them, ready to
+add, so a user doesn't build it one gauge at a time.
+
+- **The key:** the manifest's optional `pages` lists 1 to 16 paths in
+  the package, each once. Each is a layout file (ADR-0057's appendix
+  "the layout file") of one page for one form: `format` 2, `form`
+  `"phone"` or `"desktop"` (required here, where a user's own file may
+  leave it out), `pages` holding exactly one page, and `files` absent
+  or empty, since the plugin is the file its `key:` references need. A
+  page for both forms is two files.
+- **Where they live:** a folder holds them as files beside the data; a
+  packed plugin inlines each under `files` as it does a data file. A
+  file `pages` names is never a data file: a variant naming one is
+  refused, and a packed page no entry names is a file in no variant. A
+  packed `files` holds 64 data and binary files and the pages beside
+  them.
+- **Bounds:** each page at most 82,400 bytes, a layout file's bound,
+  both as read and as core writes it, two spaces a level with each item
+  on its own line: a compact page that fits as written by hand can
+  still be refused once indented, so an author keeps a page well inside
+  the bound. Core counts the writing's size before it writes, so a large
+  page costs no copy. Every page counts toward the package's 16 MiB.
+- **Core reads the envelope and nothing inside.** A page that isn't an
+  object, has another `format`, names no form or another one, holds
+  other than one page or lists `files` refuses the plugin whole, as a
+  bad data file does (section 4); core's JSON reader is stricter than
+  the app's (a repeated key, a byte order mark), and a page is refused
+  for those too. The page's name, cells and references are the
+  dashboard's rules, judged where every layout file is: the app's
+  reader and `havne-cli layout check`'s port of it. So a later
+  version's new gauge kind needs no core, and a page with a bad cell
+  still loads; section 8's check is the author's gate.
+- **The C ABI:** `ecuio_plugin_info_t.page_count` takes a reserved
+  word; `ecuio_plugin_page` gives a page's form, path and length,
+  `ecuio_plugin_page_text` its text as core writes it, the same bytes
+  for a folder and its packed form, valid until the plugin is freed.
+  Python's `Plugin.pages()` gives them as `(path, form, text)`.
+- **No new manifest format:** a core before 0.9.0 refuses the unknown
+  key, and a plugin with pages requires 0.9.0. A put and a drop keep
+  the pages as they are.
+- **`plugins check`** writes a `page` line for each page, after the
+  variants' lines: its file, form and name, the layout check's verdict
+  (`problem`, `cells`, `dropped_cells`), the variants that hold all of
+  its `key:` references, the keys no variant has, and `reads_plugin`,
+  false for a page of built-in signals alone. A page fails the check
+  (exit 1, as a failed fixture does) when it doesn't read whole, when a
+  `key:` reference is in no variant, or when another page of its form
+  has its name, since the list of pages would show two the same. A
+  plugin with pages whose `requires.core` is older than 0.9.0 gets a
+  `requires_core` line.
+- **The store** lists each loaded plugin's pages in its entry (`index`,
+  `form`, `path`, in the manifest's order) and gives a page's text by
+  plugin id and index; it judges nothing of a page.

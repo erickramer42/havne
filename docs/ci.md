@@ -10,7 +10,14 @@ Pushes to `dev` and feature branches get no run: a feature branch is
 checked locally (`scripts/verify.sh`, the cross-arch subset, WSL where
 it applies) and merged into `dev`, and a manual run on `dev` checks the
 platforms only CI has (macOS, iOS, Android, the sanitizers) between
-releases. `codeql.yml` follows the same PRs and pushes. A manual run
+releases. `codeql.yml` follows the same PRs and pushes. `repro-windows.yml`
+builds the Windows release targets twice, the second copy in another folder
+with every file a day newer, and fails when any `.exe` or `.dll` differs
+(`packaging/windows/repro-compare.ps1`; the zips are reported). It runs on a
+push to `build/**` or `dev` that changes `CMakeLists.txt`, `packaging/windows`
+or the workflow, on demand, or called by another workflow, takes about 30
+minutes, and is not part of `ci.yml`'s run
+([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)). A manual run
 leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone.

@@ -9,7 +9,9 @@ package from its folder or packed into one file, and each variant
 registers as the profile `plugin.<id>.<variant>`, which a URI's
 `?profile=` names.
 
-This folder holds only the example, `example-sim/`: made-up DIDs on two
+This folder holds the examples, `example-sim/` and `example-car/`.
+
+`example-sim/` has made-up DIDs on two
 modules (the engine at `7E8`, a transmission at `7E9`) that the
 simulated ECU answers from the plugin's own definitions, with no car.
 Its `base` variant extends `obd2` with five signals (one an
@@ -17,6 +19,8 @@ enumeration, one computed); `my2019` merges a second file on top,
 which replaces two of them and adds one. `fixtures/values.json`
 lists the value each signal should read back. A real make's plugin
 stays with its author, never here.
+
+`example-car/` is a whole car, made up: 18 modules (the engine ECU on its OBD pair, the rest on made-up addresses) in one variant, `whole`, with one data file for each module. Each module answers a name and a reading or two that the simulated ECU gives from the plugin's own definitions, and every number has a gauge. `plugins check --on <vcan>` reads all 18 at once; `SimCarBusTest` (Linux, on `vcan`) and `CliElm327RunTest` (the ELM327 emulator, every desktop platform) read them in CI.
 
 ## In the app
 

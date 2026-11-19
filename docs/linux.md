@@ -280,7 +280,10 @@ havne-cli stream socketcan://can0
 Under WSL a USB adapter reaches Linux through `usbipd-win`, run on
 Windows: `usbipd list`, `usbipd bind --busid <id>` (once, as
 administrator) and `usbipd attach --wsl --busid <id>`; the WSL kernel
-has `gs_usb`, `slcan`, `peak_usb` and `kvaser_usb`.
+has `gs_usb`, `slcan`, `peak_usb` and `kvaser_usb`. After the host sleeps,
+usbipd can still read "Attached" while the adapter delivers no frames: a
+`usbipd detach` and `attach` restores it
+([2026-11-18-session-close-car](bench-sessions/2026-11-18-session-close-car.md)).
 
 The tests: `test_socketcan` runs everywhere; `SocketCanBusTest` (in
 `test_vcan`) needs `vcan0` up and skips without it, and its
