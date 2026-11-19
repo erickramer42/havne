@@ -9,6 +9,7 @@
 #ifndef ECUIO_REQUEST_ENGINE_PACK_H
 #define ECUIO_REQUEST_ENGINE_PACK_H
 
+#include "isotp.h"
 #include "request_engine_rotation.h"
 
 /* Whether request i of channel c may go in a pack: packing on and not
@@ -31,8 +32,9 @@ inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
 
 /* Request i, due on channel c, alone or as the first of a pack: the
  * next requests of its class from that class's cursor join it while
- * each may (ecuio_engine_packable), up to ECUIO_ENGINE_PACK_MAX; the
- * first that may not stops the pack and goes next, alone. Returns i, or
+ * each may (ecuio_engine_packable) and the reply stays within
+ * e->pack_frames CAN frames (0 no limit), up to ECUIO_ENGINE_PACK_MAX;
+ * the first that may not stops the pack and goes next. Returns i, or
  * ECUIO_ENGINE_PACK with the pack in ch.pack, its cursor past the last
  * request it took. */
 inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
@@ -46,6 +48,8 @@ inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
     uint32_t& cursor = slow ? ch.slow_cursor : ch.cursor;
     ch.pack_rows[0] = static_cast<uint32_t>(i);
     ch.pack_count = 1;
+    /* 41, then each PID's record at the length its own reply showed */
+    uint32_t reply = 2u + ch.pid_len[e->requests[i].bytes[1]];
     for (uint32_t k = 0; k < e->count && ch.pack_count < ECUIO_ENGINE_PACK_MAX;
          ++k) {
         const uint32_t j = (cursor + k) % e->count;
@@ -57,6 +61,11 @@ inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
         if (j == static_cast<uint32_t>(i) || !ecuio_engine_packable(e, c, j)) {
             break;
         }
+        const uint32_t longer = reply + 1u + ch.pid_len[r.bytes[1]];
+        if (e->pack_frames != 0 && isotp_frames(longer) > e->pack_frames) {
+            break;
+        }
+        reply = longer;
         ch.pack_rows[ch.pack_count++] = j;
         cursor = (j + 1) % e->count;
         k = static_cast<uint32_t>(-1); /* the cursor moved: look from it */
@@ -66,11 +75,8 @@ inline int32_t ecuio_engine_gather(ecuio_request_engine* e, uint32_t c,
     }
     ch.pack = ecuio_request{};
     ch.pack.bytes[0] = 0x01;
-    uint32_t reply = 1;
     for (uint32_t k = 0; k < ch.pack_count; ++k) {
-        const uint8_t pid = e->requests[ch.pack_rows[k]].bytes[1];
-        ch.pack.bytes[1 + k] = pid;
-        reply += 1u + ch.pid_len[pid];
+        ch.pack.bytes[1 + k] = e->requests[ch.pack_rows[k]].bytes[1];
     }
     ch.pack.len = static_cast<uint8_t>(1 + ch.pack_count);
     ch.pack.channel = static_cast<uint8_t>(c);

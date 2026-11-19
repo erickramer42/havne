@@ -202,6 +202,31 @@ TEST(IsoTpTest, ALongestMessageFillsItsSlot)
     EXPECT_EQ(bytes_of(m), msg);
 }
 
+/* isotp_frames counts what the sender sends, at every length */
+TEST(IsoTpTest, TheFrameCountIsTheSendersFrames)
+{
+    EXPECT_EQ(isotp_frames(7), 1u);
+    EXPECT_EQ(isotp_frames(8), 2u);
+    EXPECT_EQ(isotp_frames(13), 2u);
+    EXPECT_EQ(isotp_frames(14), 3u);
+    EXPECT_EQ(isotp_frames(85), 13u) << "six PIDs of 13 data bytes";
+    const std::vector<uint8_t> msg = counting(ECUIO_ISOTP_MAX);
+    for (uint16_t len = 1; len <= ECUIO_ISOTP_MAX; ++len) {
+        isotp_tx& t = fresh_tx();
+        isotp_can f;
+        ASSERT_TRUE(isotp_tx_start(t, 0x7E8, msg.data(), len, 0, &f));
+        uint32_t frames = 1;
+        if (t.state != isotp_tx_state::idle) {
+            ASSERT_EQ(isotp_tx_flow(t, isotp_flow_control(0x7E0), 0),
+                      isotp_flow_result::go);
+            while (isotp_tx_next(t, 0, &f) == isotp_tx_step::frame) {
+                ++frames;
+            }
+        }
+        ASSERT_EQ(isotp_frames(len), frames) << len << " bytes";
+    }
+}
+
 TEST(IsoTpTest, AGapInTheSequenceDropsTheMessage)
 {
     isotp_rx& r = fresh_rx(true);
