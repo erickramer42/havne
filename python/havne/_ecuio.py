@@ -263,11 +263,15 @@ ECUIO_PLUGIN_MANIFEST_MAX = 0x100000
 ECUIO_PLUGIN_MAX_FILES = 64
 ECUIO_PLUGIN_MAX_FIXTURES = 16
 ECUIO_PLUGIN_MAX_LEVELS = 32
+ECUIO_PLUGIN_MAX_PAGES = 16
 ECUIO_PLUGIN_MAX_SERVICES = 16
 ECUIO_PLUGIN_MAX_SUBS = 14
 ECUIO_PLUGIN_MAX_VALUES = 0x1000
 ECUIO_PLUGIN_MAX_VARIANTS = 32
 ECUIO_PLUGIN_PACKAGE_MAX = 0x1000000
+ECUIO_PLUGIN_PAGE_DESKTOP = 2
+ECUIO_PLUGIN_PAGE_MAX_BYTES = 0x141e0
+ECUIO_PLUGIN_PAGE_PHONE = 1
 ECUIO_PLUGIN_PATH_MAX = 127
 ECUIO_PLUGIN_TIER_CONVERSATION = 2
 ECUIO_PLUGIN_TIER_DATA = 1
@@ -636,6 +640,9 @@ class ecuio_plugin_conversation_t(Structure):
     pass
 
 class ecuio_plugin_info_t(Structure):
+    pass
+
+class ecuio_plugin_page_t(Structure):
     pass
 
 class ecuio_plugin_security_level_t(Structure):
@@ -1200,9 +1207,18 @@ ecuio_plugin_info_t._fields_ = [
     ('name', (c_char * 64)),
     ('variant_count', c_uint32),
     ('fixture_count', c_uint32),
-    ('reserved', (c_uint32 * 2)),
+    ('page_count', c_uint32),
+    ('reserved', (c_uint32 * 1)),
+]
+ecuio_plugin_page_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('form', c_uint32),
+    ('text_bytes', c_uint32),
+    ('reserved', (c_uint32 * 3)),
+    ('path', (c_char * 128)),
 ]
 ecuio_plugin_security_level_t._fields_ = [
+    ('struct_size', c_uint32),
     ('rx_id', c_uint32),
     ('level', c_uint8),
     ('seed_bytes', c_uint8),
@@ -1210,12 +1226,15 @@ ecuio_plugin_security_level_t._fields_ = [
     ('reserved0', c_uint8),
     ('delay_ms', c_uint32),
     ('key_window_ms', c_uint32),
+    ('flags', c_uint32),
     ('reserved', (c_uint32 * 4)),
 ]
 ecuio_plugin_service_t._fields_ = [
+    ('struct_size', c_uint32),
     ('sid', c_uint8),
     ('sub_count', c_uint8),
     ('subs', (c_uint8 * 14)),
+    ('flags', c_uint32),
     ('reserved', (c_uint32 * 2)),
 ]
 ecuio_plugin_value_t._fields_ = [
@@ -1509,7 +1528,9 @@ ecuio_sim_reply_t._fields_ = [
     ('flags', c_uint32),
     ('delay_us', c_int64),
     ('length', c_uint32),
-    ('reserved', (c_uint32 * 5)),
+    ('fc_us', c_uint32),
+    ('cf_us', c_uint32),
+    ('reserved', (c_uint32 * 3)),
     ('data', (c_uint8 * 4096)),
 ]
 ecuio_sim_stats_t._fields_ = [
@@ -1643,6 +1664,8 @@ FUNCTIONS = {
     'ecuio_plugin_lineage': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_load': (c_int, [c_char_p, c_size_t, ecuio_plugin_read_t, c_void_p, POINTER(POINTER(ecuio_plugin_t))]),  # plugin.h
     'ecuio_plugin_match': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_vin_info_t), POINTER(c_uint32), c_uint32, POINTER(c_uint32)]),  # plugin.h
+    'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
+    'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
     'ecuio_plugin_put_variant': (c_int, [c_char_p, c_size_t, c_char_p, c_char_p, c_size_t, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_register': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_requires_core': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint16), POINTER(c_uint16), POINTER(c_uint16)]),  # plugin.h

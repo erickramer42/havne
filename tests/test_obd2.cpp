@@ -3199,11 +3199,13 @@ TEST_F(FakeEcuTest, AModuleAnswersItsOwnDidsAndRefusesTheRest)
             << "a bad spec empties it";
     }
     std::string many;
-    for (int i = 0; i < 17; ++i) {
-        many += "7E9:D8" + std::string(i < 16 ? "0" : "1") +
-                "0123456789ABCDEF"[i % 16] + "=01;";
+    for (uint32_t i = 0; i <= fake_ecu::kModuleRowsMax; ++i) {
+        char row[16];
+        std::snprintf(row, sizeof row, "7E9:D%03X=01;", i);
+        many += row;
     }
-    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str())) << "17 rows";
+    EXPECT_FALSE(fake_ecu::set_module_dids(many.c_str()))
+        << "kModuleRowsMax + 1 rows";
     ASSERT_TRUE(fake_ecu::set_module_dids(""));
     EXPECT_EQ(ask(0x7E9, {0x22, 0x1E, 0x1C}),
               (Bytes{0x62, 0x1E, 0x1C, 0x12, 0x34}))
@@ -6020,31 +6022,34 @@ TEST(SimEcuTest, TheUrisKeysAndRefusals)
 // the bitmaps never; the frame faults on segmented replies only
 TEST(SimEcuTest, FaultsBreakEveryNthReplyOfItsKind)
 {
-    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
-    e.config.faults.silent = 3;
-    e.config.faults.bad_sequence = 2;
+    ecuio_sim_faults f;
+    f.silent = 3;
+    f.bad_sequence = 2;
+    ecuio_sim_counts e;
     const uint8_t pid[2] = {0x01, 0x0C};
     const uint8_t bitmap[2] = {0x01, 0x00};
     std::vector<ecuio_sim_fate> singles;
     for (int i = 0; i < 6; ++i) {
-        EXPECT_EQ(ecuio_sim_next_fate(e, bitmap, 2, 6), ecuio_sim_fate::intact);
-        singles.push_back(ecuio_sim_next_fate(e, pid, 2, 4));
+        EXPECT_EQ(ecuio_sim_next_fate(f, e, bitmap, 2, 6),
+                  ecuio_sim_fate::intact);
+        singles.push_back(ecuio_sim_next_fate(f, e, pid, 2, 4));
     }
     EXPECT_EQ(singles, (std::vector<ecuio_sim_fate>{
                            ecuio_sim_fate::intact, ecuio_sim_fate::intact,
                            ecuio_sim_fate::silent, ecuio_sim_fate::intact,
                            ecuio_sim_fate::intact, ecuio_sim_fate::silent}));
     const uint8_t pack[4] = {0x01, 0x0C, 0x0D, 0x05};
-    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::intact);
-    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::bad_sequence);
-    EXPECT_EQ(ecuio_sim_next_fate(e, pack, 4, 9), ecuio_sim_fate::silent);
+    EXPECT_EQ(ecuio_sim_next_fate(f, e, pack, 4, 9), ecuio_sim_fate::intact);
+    EXPECT_EQ(ecuio_sim_next_fate(f, e, pack, 4, 9),
+              ecuio_sim_fate::bad_sequence);
+    EXPECT_EQ(ecuio_sim_next_fate(f, e, pack, 4, 9), ecuio_sim_fate::silent);
     EXPECT_EQ(e.singles, 6u);
     EXPECT_EQ(e.segmented, 3u);
 }
 
 // pending: a fault like the others, every Nth reply of its kind, never a
-// bitmap; the second module's replies counted apart from the engine
-// ECU's, so its period is its own
+// bitmap; a module's replies counted on its own counts, apart from the
+// engine ECU's, so its period is its own
 TEST(SimEcuTest, PendingIsEveryNthReplyAndEachModuleCountsItsOwn)
 {
     ecuio_sim_config c;
@@ -6058,19 +6063,21 @@ TEST(SimEcuTest, PendingIsEveryNthReplyAndEachModuleCountsItsOwn)
     EXPECT_EQ(
         ecuio_sim_parse_uri("mock://sim?faults=pending:0", &c, why, sizeof why),
         ecuio_sim_uri_result::bad);
-    ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
-    e.config.faults.pending = 3;
+    ecuio_sim_faults f;
+    f.pending = 3;
+    ecuio_sim_counts e, m;
     const uint8_t pid[2] = {0x01, 0x0C};
     const uint8_t bitmap[2] = {0x01, 0x20};
     const uint8_t did[3] = {0x22, 0xD1, 0x00};
     std::vector<ecuio_sim_fate> engine, module;
     for (int i = 0; i < 3; ++i) {
-        EXPECT_EQ(ecuio_sim_next_fate(e, bitmap, 2, 6), ecuio_sim_fate::intact);
-        engine.push_back(ecuio_sim_next_fate(e, pid, 2, 4));
+        EXPECT_EQ(ecuio_sim_next_fate(f, e, bitmap, 2, 6),
+                  ecuio_sim_fate::intact);
+        engine.push_back(ecuio_sim_next_fate(f, e, pid, 2, 4));
     }
-    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
-    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
-    module.push_back(ecuio_sim_next_fate(e, did, 3, 4, 1));
+    module.push_back(ecuio_sim_next_fate(f, m, did, 3, 4));
+    module.push_back(ecuio_sim_next_fate(f, m, did, 3, 4));
+    module.push_back(ecuio_sim_next_fate(f, m, did, 3, 4));
     const std::vector<ecuio_sim_fate> third = {ecuio_sim_fate::intact,
                                                ecuio_sim_fate::intact,
                                                ecuio_sim_fate::pending};
@@ -6078,7 +6085,7 @@ TEST(SimEcuTest, PendingIsEveryNthReplyAndEachModuleCountsItsOwn)
     EXPECT_EQ(module, third) << "the module's own third reply, not the "
                                 "engine ECU's sixth";
     EXPECT_EQ(e.singles, 3u);
-    EXPECT_EQ(e.module_singles, 3u);
+    EXPECT_EQ(m.singles, 3u);
 }
 
 namespace {
@@ -6807,8 +6814,10 @@ TEST(SimAskTest, AnUnboundSimAnswersAsTheEngineEcu)
         EXPECT_EQ(got[0].flags, 0u);
         EXPECT_EQ(got[0].delay_us, 0);
         EXPECT_EQ(reply_bytes(got[0]), Bytes(want, want + want_len));
-        for (uint32_t i = 0; i < 5; ++i) {
-            EXPECT_EQ(got[0].reserved[i], 0u);
+        EXPECT_EQ(got[0].fc_us, 0u);
+        EXPECT_EQ(got[0].cf_us, 0u);
+        for (const uint32_t word : got[0].reserved) {
+            EXPECT_EQ(word, 0u);
         }
     }
     const std::vector<ecuio_sim_reply_t> functional =

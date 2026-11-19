@@ -94,8 +94,8 @@ ApplicationWindow {
 
     // The drive view (ADR-0059) is the Dash page's state; the bars here
     // follow it, and in the view they slide in over the gauges
-    readonly property bool driving: dashboardView.driving
-    readonly property real barsShown: dashboardView.barsShown
+    readonly property bool driving: dashboardView.drivePart.driving
+    readonly property real barsShown: dashboardView.drivePart.barsShown
 
     // Page indices, in the order of the sidebar and the stack
     readonly property int homePage: 0
@@ -155,7 +155,7 @@ ApplicationWindow {
     // system, which goes to the launcher and keeps the session
     function goBack() {
         if (currentPage === dashboardPage)
-            return dashboardView.goBack()
+            return dashboardView.drivePart.goBack()
         if (currentPage === settingsPage) {
             if (!settingsView.backLeaves)
                 return settingsView.closeShown()
@@ -167,7 +167,7 @@ ApplicationWindow {
             return true
         }
         if (currentPage === recordingsPage && recordingsView.viewing) {
-            recordingsView.backToList()
+            recordingsView.openPart.backToList()
             return true
         }
         return false
@@ -226,7 +226,7 @@ ApplicationWindow {
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
         replayPending = uri
-        settingsView.requestConnect(uri)
+        settingsView.connectFromPart.requestConnect(uri)
     }
     Connections {
         target: Bridge
@@ -294,7 +294,7 @@ ApplicationWindow {
             if (!byUser || root.driving)
                 return
             root.gotoPage(root.recordingsPage)
-            recordingsView.openFolder(folder)
+            recordingsView.openPart.openFolder(folder)
         }
     }
 
@@ -379,7 +379,7 @@ ApplicationWindow {
     component BarTouch: MouseArea {
         enabled: root.driving
         onPressed: mouse => {
-            dashboardView.barTouched()
+            dashboardView.drivePart.barTouched()
             mouse.accepted = false
         }
     }
@@ -781,12 +781,12 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        recents: settingsView.connectUris
-                        vehicleUri: settingsView.vehicleUri
-                        adapters: settingsView.connectAdapters
-                        profileWords: settingsView.connectProfileWords
-                        profileNames: settingsView.profileNames
-                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        recents: settingsView.connectFromPart.connectUris
+                        vehicleUri: settingsView.connectFromPart.vehicleUri
+                        adapters: settingsView.connectFromPart.connectAdapters
+                        profileWords: settingsView.connectFromPart.connectProfileWords
+                        profileNames: settingsView.uriPart.profileNames
+                        onConnectToUri: uri => settingsView.connectFromPart.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
                         onListShown: root.listAdapters()
@@ -820,16 +820,16 @@ ApplicationWindow {
                             property: "pickGauges"
                             value: dashboardView.pickRefs
                         }
-                        offlineUri: settingsView.offlineUri
-                        pickedSets: settingsView.pickedSets
-                        profileNames: settingsView.profileNames
+                        offlineUri: settingsView.uriPart.offlineUri
+                        pickedSets: settingsView.uriPart.pickedSets
+                        profileNames: settingsView.uriPart.profileNames
                         vehicles: settingsView.vehicles
-                        connectUris: settingsView.connectUris
-                        connectVehicleUri: settingsView.vehicleUri
-                        connectAdapters: settingsView.connectAdapters
-                        connectProfileWords: settingsView.connectProfileWords
+                        connectUris: settingsView.connectFromPart.connectUris
+                        connectVehicleUri: settingsView.connectFromPart.vehicleUri
+                        connectAdapters: settingsView.connectFromPart.connectAdapters
+                        connectProfileWords: settingsView.connectFromPart.connectProfileWords
                         onConnectListShown: root.listAdapters()
-                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onConnectToUri: uri => settingsView.connectFromPart.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
                         onAlertRequested: condition => root.openAlertDraft(condition)
@@ -925,7 +925,7 @@ ApplicationWindow {
                             onClicked: {
                                 // A tab in the drive view's revealed bar is Exit drive
                                 if (root.driving)
-                                    dashboardView.leaveDrive(true)
+                                    dashboardView.drivePart.leaveDrive(true)
                                 root.gotoPage(modelData.page)
                             }
                             // A narrow bar (a small window, or a phone zoomed far

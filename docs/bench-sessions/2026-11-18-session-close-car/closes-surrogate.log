@@ -1,0 +1,104 @@
+# B1: ecuio-surrogate.20261118-193823-323.log
+[surrogate 19:38:23.294] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E0 22 <DID>
+[surrogate 19:38:23.294] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.061 ms
+[surrogate 19:38:23.294] OP_READ frame: status 0, rx 0x00000009, ts 2379704633, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:38:23.297] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 3.463 ms
+[surrogate 19:38:23.297] OP_READ frame: status 0, rx 0x00000002, ts 2379708252, len 0:  (indication, not delivered)
+[surrogate 19:38:23.306] OP_READ: status 16, frames 0
+[surrogate 19:38:23.306] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.129 ms
+[surrogate 19:38:23.306] OP_READ frame: status 0, rx 0x00000000, ts 2379716740, len 17: 00 00 07 E8 62 <DID> 00 03 00 00 00 00 00 00 00 00
+[surrogate 19:38:23.306] OP_READ: status 0, frames 1
+[surrogate 19:38:23.318] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:38:23.318] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.046 ms
+[surrogate 19:38:23.318] OP_READ frame: status 0, rx 0x00000000, ts 2379724154, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:38:23.318] OP_READ: status 0, frames 1
+[surrogate 19:38:23.321] OP_STOP_FILTER: fid 1, status 0
+[surrogate 19:38:23.323] OP_DISCONNECT: vendor status 0, channel=1
+# B2: ecuio-surrogate.20261118-193914-217.log
+[surrogate 19:39:14.191] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E0 22 <DID>
+[surrogate 19:39:14.191] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.066 ms
+[surrogate 19:39:14.191] OP_READ frame: status 0, rx 0x00000009, ts 2430601711, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:39:14.200] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 8.805 ms
+[surrogate 19:39:14.200] OP_READ frame: status 0, rx 0x00000002, ts 2430610674, len 0:  (indication, not delivered)
+[surrogate 19:39:14.205] OP_READ: status 16, frames 0
+[surrogate 19:39:14.205] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.063 ms
+[surrogate 19:39:14.205] OP_READ frame: status 0, rx 0x00000000, ts 2430615868, len 17: 00 00 07 E8 62 <DID> 00 03 00 00 00 00 00 00 00 00
+[surrogate 19:39:14.205] OP_READ: status 0, frames 1
+[surrogate 19:39:14.206] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:39:14.207] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.075 ms
+[surrogate 19:39:14.207] OP_READ frame: status 0, rx 0x00000009, ts 2430617167, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:39:14.210] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 3.631 ms
+[surrogate 19:39:14.210] OP_READ frame: status 0, rx 0x00000000, ts 2430620699, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:39:14.210] OP_READ: status 0, frames 1
+# B3: ecuio-surrogate.20261118-194109-791.log
+[surrogate 19:41:09.768] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E0 22 <DID>
+[surrogate 19:41:09.769] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.069 ms
+[surrogate 19:41:09.769] OP_READ frame: status 0, rx 0x00000009, ts 2546178595, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:41:09.775] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 6.107 ms
+[surrogate 19:41:09.775] OP_READ frame: status 0, rx 0x00000002, ts 2546184854, len 0:  (indication, not delivered)
+[surrogate 19:41:09.777] OP_READ call: timeout 4 ms, asked 1, got 1, status 0, held 2.342 ms
+[surrogate 19:41:09.777] OP_READ frame: status 0, rx 0x00000000, ts 2546187183, len 17: 00 00 07 E8 62 <DID> 00 03 00 00 00 00 00 00 00 00
+[surrogate 19:41:09.777] OP_READ: status 0, frames 1
+[surrogate 19:41:09.778] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:41:09.778] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.063 ms
+[surrogate 19:41:09.778] OP_READ frame: status 0, rx 0x00000009, ts 2546188369, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:41:09.782] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 4.043 ms
+[surrogate 19:41:09.783] OP_READ frame: status 0, rx 0x00000000, ts 2546192556, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:41:09.783] OP_READ: status 0, frames 1
+# B4: ecuio-surrogate.20261118-194200-679.log
+[surrogate 19:42:00.653] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E0 22 <DID>
+[surrogate 19:42:00.654] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.082 ms
+[surrogate 19:42:00.654] OP_READ frame: status 0, rx 0x00000009, ts 2597064265, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:42:00.660] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 5.787 ms
+[surrogate 19:42:00.660] OP_READ frame: status 0, rx 0x00000002, ts 2597070069, len 0:  (indication, not delivered)
+[surrogate 19:42:00.666] OP_READ: status 16, frames 0
+[surrogate 19:42:00.667] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.298 ms
+[surrogate 19:42:00.667] OP_READ frame: status 0, rx 0x00000000, ts 2597076756, len 17: 00 00 07 E8 62 <DID> 00 03 00 00 00 00 00 00 00 00
+[surrogate 19:42:00.667] OP_READ: status 0, frames 1
+[surrogate 19:42:00.667] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:42:00.668] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.050 ms
+[surrogate 19:42:00.668] OP_READ frame: status 0, rx 0x00000009, ts 2597078044, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:42:00.672] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 4.847 ms
+[surrogate 19:42:00.672] OP_READ frame: status 0, rx 0x00000000, ts 2597083007, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:42:00.672] OP_READ: status 0, frames 1
+# B5: ecuio-surrogate.20261118-194251-605.log
+[surrogate 19:42:51.584] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E0 22 <DID>
+[surrogate 19:42:51.584] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.055 ms
+[surrogate 19:42:51.584] OP_READ frame: status 0, rx 0x00000009, ts 2647994738, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:42:51.588] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 3.304 ms
+[surrogate 19:42:51.588] OP_READ frame: status 0, rx 0x00000002, ts 2647998201, len 0:  (indication, not delivered)
+[surrogate 19:42:51.592] OP_READ call: timeout 7 ms, asked 1, got 1, status 0, held 4.846 ms
+[surrogate 19:42:51.593] OP_READ frame: status 0, rx 0x00000000, ts 2648003157, len 17: 00 00 07 E8 62 <DID> 00 03 00 00 00 00 00 00 00 00
+[surrogate 19:42:51.593] OP_READ: status 0, frames 1
+[surrogate 19:42:51.593] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:42:51.594] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.073 ms
+[surrogate 19:42:51.594] OP_READ frame: status 0, rx 0x00000009, ts 2648004162, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:42:51.598] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 3.978 ms
+[surrogate 19:42:51.598] OP_READ frame: status 0, rx 0x00000000, ts 2648008258, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:42:51.598] OP_READ: status 0, frames 1
+# B6: ecuio-surrogate.20261118-194342-587.log
+[surrogate 19:43:39.754] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 3E 00
+[surrogate 19:43:39.754] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.078 ms
+[surrogate 19:43:39.754] OP_READ frame: status 0, rx 0x00000009, ts 2696164691, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:43:39.760] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 5.884 ms
+[surrogate 19:43:39.760] OP_READ frame: status 0, rx 0x00000000, ts 2696170758, len 6: 00 00 07 E8 7E 00
+[surrogate 19:43:39.760] OP_READ: status 0, frames 1
+[surrogate 19:43:42.576] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:43:42.576] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.068 ms
+[surrogate 19:43:42.576] OP_READ frame: status 0, rx 0x00000009, ts 2698986833, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:43:42.581] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 4.509 ms
+[surrogate 19:43:42.581] OP_READ frame: status 0, rx 0x00000000, ts 2698991390, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:43:42.581] OP_READ: status 0, frames 1
+# B7: ecuio-surrogate.log
+[surrogate 19:44:30.719] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 3E 00
+[surrogate 19:44:30.719] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.081 ms
+[surrogate 19:44:30.719] OP_READ frame: status 0, rx 0x00000009, ts 2747128695, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:44:30.719] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.092 ms
+[surrogate 19:44:30.719] OP_READ frame: status 0, rx 0x00000000, ts 2747128942, len 6: 00 00 07 E8 7E 00
+[surrogate 19:44:30.719] OP_READ: status 0, frames 1
+[surrogate 19:44:33.543] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E0 10 01
+[surrogate 19:44:33.543] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 0.076 ms
+[surrogate 19:44:33.543] OP_READ frame: status 0, rx 0x00000009, ts 2749953275, len 4: 00 00 07 E0 (indication, not delivered)
+[surrogate 19:44:33.544] OP_READ call: timeout 10 ms, asked 1, got 1, status 0, held 1.329 ms
+[surrogate 19:44:33.544] OP_READ frame: status 0, rx 0x00000000, ts 2749954776, len 10: 00 00 07 E8 50 01 00 32 01 F4
+[surrogate 19:44:33.544] OP_READ: status 0, frames 1

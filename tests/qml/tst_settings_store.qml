@@ -311,16 +311,16 @@ SettingsKit {
         verify(!find(page, "importVariantField").visible, "no variant asked before Into")
         into.clicked()
         verify(find(page, "importVariantField").visible)
-        compare(page.importVariantField.text, "track-day", "the id the file's name gives")
+        compare(page.signalsPart.importVariantField.text, "track-day", "the id the file's name gives")
         verify(!find(page, "importReplaces").visible)
-        page.importVariantField.text = "base"
+        page.signalsPart.importVariantField.text = "base"
         compare(find(page, "importReplaces").text, "replaces base")
-        page.importVariantField.text = "Bad Id"
+        page.signalsPart.importVariantField.text = "Bad Id"
         press(page, "importKeep")
         verify(find(page, "signalProblem").text !== "", "core refuses the id")
         verify(find(page, "importPanel").visible, "and the file still waits")
         compare(page.picksPart.pluginList[0].version, "1.0.0", "nothing changed")
-        page.importVariantField.text = "track"
+        page.signalsPart.importVariantField.text = "track"
         press(page, "importKeep")
         compare(find(page, "signalProblem").text, "")
         verify(!find(page, "importPanel").visible)
@@ -335,7 +335,7 @@ SettingsKit {
         // The same id again takes that variant's place; its pick stays
         verify(page.importPart.importFile(Harness.writeScratchFile("other.json", signalFileText("Other", "D102"))))
         find(page, "importInto_0").clicked()
-        page.importVariantField.text = "track"
+        page.signalsPart.importVariantField.text = "track"
         press(page, "importKeep")
         compare(find(page, "signalNote").text, "Extras 1.2.0: variant track replaced")
         compare(page.picksPart.picks.length, 2)
@@ -346,8 +346,8 @@ SettingsKit {
         compare(page.picksPart.picks, ["plugin.extras.track"])
         verify(page.importPart.importFile(Harness.writeScratchFile("base.json", signalFileText("Base", "D104"))))
         find(page, "importInto_0").clicked()
-        compare(page.importVariantField.text, "base")
-        page.importVariantField.text = ""
+        compare(page.signalsPart.importVariantField.text, "base")
+        page.signalsPart.importVariantField.text = ""
         compare(find(page, "importReplaces").text, "replaces base")
         press(page, "importKeep")
         compare(find(page, "signalNote").text, "Extras 1.3.0: variant base replaced: picked for Vehicle 1")

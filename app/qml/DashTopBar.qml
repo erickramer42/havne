@@ -17,7 +17,7 @@ ColumnLayout {
     required property DashboardPage host
     // The page strip's Loader, for the page
     readonly property Loader stripLoader: stripHost
-    visible: !topBar.host.driving
+    visible: !topBar.host.drivePart.driving
     // Over the pages, so the shown tab covers the panel's top line
     z: 1
     x: (topBar.host.width - width) / 2
@@ -58,11 +58,11 @@ ColumnLayout {
             visible: topBar.host.phoneForm
             enabled: Bridge.connected && !topBar.host.editing
             text: !Bridge.connected ? qsTr("Connect first")
-                : topBar.host.driving ? qsTr("Exit drive") : qsTr("Drive")
+                : topBar.host.drivePart.driving ? qsTr("Exit drive") : qsTr("Drive")
             Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
-                           : topBar.host.driving ? qsTr("Exit drive: leave the full-screen gauges")
+                           : topBar.host.drivePart.driving ? qsTr("Exit drive: leave the full-screen gauges")
                                           : qsTr("Drive: show the gauges full screen")
-            onClicked: topBar.host.driving ? topBar.host.leaveDrive(true) : topBar.host.drivePart.enterDrive()
+            onClicked: topBar.host.drivePart.driving ? topBar.host.drivePart.leaveDrive(true) : topBar.host.drivePart.enterDrive()
         }
         Item {
             objectName: "toolRowStart"
@@ -103,7 +103,7 @@ ColumnLayout {
             objectName: "dashEdit"
             compact: topBar.host.compact || topBar.host.phoneForm
             horizontalPadding: topBar.host.phoneForm ? 18 : (compact ? 6 : 8)
-            visible: !topBar.host.editing && !topBar.host.driving
+            visible: !topBar.host.editing && !topBar.host.drivePart.driving
             text: qsTr("Edit")
             onClicked: topBar.host.startEditing()
         }

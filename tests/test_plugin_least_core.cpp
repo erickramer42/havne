@@ -301,6 +301,13 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
          one_file(kFourPastTheBase, data(sig("oil", "F40D", "e1"), extends)),
          "0.9.0"},
         {"plugin format 2", format2(one_file(kPcm, data(oil))), "0.9.0"},
+        {"a page",
+         packed(
+             kPcm, R"({"id": "base", "files": ["a.json"]})",
+             "\"a.json\": " + data(oil) +
+                 R"(, "p.json": {"format": 2, "form": "phone", "pages": [{}]})",
+             "1.0.0", R"("pages": ["p.json"], )"),
+         "0.9.0"},
     };
     for (const row& r : rows) {
         EXPECT_EQ(least_of_package(r.package), r.least) << r.what;

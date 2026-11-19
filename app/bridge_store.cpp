@@ -6,6 +6,7 @@
 #include "storemigration.h"
 #include "urlwrite.h"
 #include "ecuio/obdb.h"
+#include "ecuio/plugin.h"
 
 #include <QByteArray>
 #include <QDate>
@@ -569,4 +570,14 @@ QStringList SessionBridge::unpickVariant(const QStringList& picks,
 QVariantList SessionBridge::pickFiles(const QStringList& picks)
 {
     return m_pluginStore.pickFiles(picks);
+}
+
+// A plugin's page is read as a layout file, so it fits the file's bound
+// (tst_dashboardbook's test_theBridgesFileBoundIsTheBooks pins the book's)
+static_assert(SessionBridge::layoutFileMaxBytes == ECUIO_PLUGIN_PAGE_MAX_BYTES,
+              "a plugin's page and a layout file share one bound");
+
+QString SessionBridge::pluginPageText(const QString& id, int index)
+{
+    return m_pluginStore.pageText(id, index);
 }

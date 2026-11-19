@@ -1,6 +1,7 @@
 // File/layer: core/src/request_setup.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: UNIT: CoreTest, PickOnlyTest, RecorderTest (test_core); HARNESS:
+// Testing: UNIT: CoreTest, PickOnlyTest, ReplyTimingTest, RecorderTest
+//          (test_core); HARNESS:
 //          J2534QueryParamTest, J2534AdoptionTest (test_j2534_stream);
 //          Elm327SessionTest (test_elm327); J2534HealthTest
 //          (test_j2534_health); SocketCanRequestTest (test_vcan)
@@ -430,14 +431,15 @@ inline void ecuio_publish_support(ecuio_session_t* session,
 
 /* Reply timing (ADR-0042) for a requesting session's rotation: the
  * figures in owner, the engine pointing at them, the intervals on clock
- * (ECUIO_TIMING_CLOCK_*). A session with no rotation gets none, and so
- * does one whose figures won't allocate: timing is a report, never a
+ * (ECUIO_TIMING_CLOCK_*). A session with no rotation and no scan to fill
+ * one gets none (a scan's found DIDs join the rotation after attach), and
+ * so does one whose figures won't allocate: timing is a report, never a
  * reason to refuse a connect. */
 inline void ecuio_attach_timing(ecuio_request_engine& e,
                                 std::unique_ptr<ecuio_timing_table>& owner,
                                 uint32_t clock)
 {
-    if (e.count == 0) {
+    if (e.count == 0 && e.scan_count == 0) {
         return;
     }
     owner.reset(new (std::nothrow) ecuio_timing_table());

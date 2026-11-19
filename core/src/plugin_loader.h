@@ -6,8 +6,9 @@
 // The plugin loader's parts (ADR-0052): what a loaded plugin holds, and
 // the loader that reads a manifest into one. plugin_manifest.cpp reads
 // the manifest's keys and the package's files, plugin_conversation.cpp
-// the conversation tier's keys and its module, plugin_merge.cpp merges a
-// variant's files into its set, and plugin.cpp holds the C API.
+// the conversation tier's keys and its module, plugin_pages.cpp the
+// Dashboard pages and their getters, plugin_merge.cpp merges a variant's
+// files into its set, and plugin.cpp holds the C API.
 
 #ifndef ECUIO_PLUGIN_LOADER_H
 #define ECUIO_PLUGIN_LOADER_H
@@ -82,6 +83,14 @@ struct binary_file {
     bool read = false;           /* something in the manifest names it */
 };
 
+/* A Dashboard page the manifest's "pages" names: its envelope checked,
+ * its text as core writes it */
+struct page {
+    std::string path;
+    uint32_t form = 0; /* ECUIO_PLUGIN_PAGE_* */
+    std::string text;
+};
+
 /* An ECU the conversation's module talks to: the manifest's, by its id */
 struct conversation_ecu {
     std::string id;
@@ -117,6 +126,7 @@ struct ecuio_plugin {
     std::vector<ecuio_plugin_loader::match_rule> match;
     std::vector<ecuio_plugin_loader::variant> variants;
     std::vector<std::string> fixtures;
+    std::vector<ecuio_plugin_loader::page> pages;
 };
 
 namespace ecuio_plugin_loader {
@@ -163,6 +173,10 @@ private:
     void read_match(const Value& root, ecuio_plugin& p);
     void read_fixtures(const Value& root, ecuio_plugin& p);
     void read_files(const Value& root, const ecuio_plugin& p);
+    void read_pages(const Value& root, ecuio_plugin& p);
+    const Value& page_root(const Value& at, const std::string& path);
+    static void check_page(const Value& root, page& out);
+    bool is_page(const std::string& path) const;
     void read_conversation(const Value& root, ecuio_plugin& p);
     void read_code(const Value& code, conversation& c);
     void packed_code(const Value& file, const std::string& path,
@@ -189,6 +203,8 @@ private:
     Value manifest_;
     std::deque<data_file> files_; /* a deque: chosen lists point into it */
     std::vector<binary_file> binaries_; /* a packed package's */
+    std::vector<std::string> page_paths_;
+    std::deque<Value> page_values_; /* a folder's pages, parsed */
 };
 
 } // namespace ecuio_plugin_loader

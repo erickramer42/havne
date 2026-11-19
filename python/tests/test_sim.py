@@ -4,7 +4,7 @@
 #
 # The engine ECU's answers to a script's requests: engine speed, the VIN
 # (the sim's made-up default), a functional request, an ID no ECU hears,
-# a refusal, and the request counts.
+# a refusal, and the request counts; a module's timing on each reply.
 
 import havne
 
@@ -23,6 +23,15 @@ def test_the_engine_ecu_answers_a_script_s_requests():
         (refused,) = sim.ask(b"\x22\x7f\x22")
         assert refused.data == b"\x7f\x22\x31"
         assert sim.stats.requests >= 4
+
+
+def test_each_reply_carries_its_module_s_timing():
+    with havne.Sim.unbound("mock://sim?delay=2000:2000&fc=4000&cf=5000") as sim:
+        (rpm,) = sim.ask(bytes([0x01, 0x0C]))
+        assert (rpm.delay_us, rpm.fc_us, rpm.cf_us) == (2000, 4000, 5000)
+    with havne.Sim.unbound() as sim:
+        (rpm,) = sim.ask(bytes([0x01, 0x0C]))
+        assert (rpm.delay_us, rpm.fc_us, rpm.cf_us) == (0, 0, 0)
 
 
 def test_a_bad_request_is_refused():

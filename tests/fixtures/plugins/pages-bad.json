@@ -1,0 +1,47 @@
+{
+  "havne_plugin": 1,
+  "id": "pages-bad",
+  "name": "Pages plugins check fails",
+  "version": "1.0.0",
+  "requires": { "core": "0.1.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [ { "id": "base", "files": ["a.json"] } ],
+  "pages": ["pages/unknown.json", "pages/wide.json", "pages/twice.json"],
+  "files": {
+    "a.json": {
+      "havne_signals": 1,
+      "signals": [
+        {
+          "key": "oil_temp",
+          "name": "Oil Temp",
+          "ecu": "pcm",
+          "read": { "service": "22", "number": "F40D" },
+          "field": { "byte": 0, "bits": 8 },
+          "scale": 1, "offset": -40,
+          "unit": "°C", "decimals": 0, "group": "engine"
+        }
+      ]
+    },
+    "pages/unknown.json": {
+      "format": 2, "form": "phone", "files": [],
+      "pages": [ { "name": "Exhaust", "cells": [
+        { "kind": "digital", "w": 3, "h": 9, "label": "EGT", "refs": ["key:egt"],
+          "unit": "°C", "options": { "from": 0, "to": 900 } } ] } ]
+    },
+    "pages/wide.json": {
+      "format": 2, "form": "phone", "files": [],
+      "pages": [ { "name": "Engine", "cells": [
+        { "kind": "digital", "w": 3, "h": 9, "label": "Oil temp", "refs": ["key:oil_temp"],
+          "unit": "°C", "options": { "from": 0, "to": 160 } },
+        { "kind": "digital", "w": 99, "h": 9, "label": "Too wide", "refs": ["key:oil_temp"] } ] } ]
+    },
+    "pages/twice.json": {
+      "format": 2, "form": "phone", "files": [],
+      "pages": [ { "name": "Engine", "cells": [
+        { "kind": "digital", "w": 3, "h": 9, "label": "Oil temp", "refs": ["key:oil_temp"],
+          "unit": "°C", "options": { "from": 0, "to": 160 } } ] } ]
+    }
+  }
+}

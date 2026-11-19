@@ -123,25 +123,25 @@ TestCase {
         setStoredViews(JSON.stringify({ "keyed-panes": { used: 1, assign: {
             "RPM": "own:1", "Vehicle Speed": "own:2", "7E8:410D:2.0:8": "own:3" } } }))
         const page = createPage()
-        page.open(keyedRecording("keyed-panes"))
+        page.openPart.open(keyedRecording("keyed-panes"))
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         const rpm = page.recording.signalList.find(s => s.name === "RPM")
         const speed = page.recording.signalList.find(s => s.name === "Vehicle Speed")
         compare(rpm.key, "7E8:410C:2.0:16")
-        compare(page.paneOf(rpm), "own:1", "by its name")
-        compare(page.paneOf(speed), "own:3", "its key before its name")
-        compare(page.assignRows()[rpm.index], "own:1")
-        compare(page.assignRows()[speed.index], "own:3")
+        compare(page.panesPart.paneOf(rpm), "own:1", "by its name")
+        compare(page.panesPart.paneOf(speed), "own:3", "its key before its name")
+        compare(page.panesPart.assignRows()[rpm.index], "own:1")
+        compare(page.panesPart.assignRows()[speed.index], "own:3")
         // A new pane from the signal's menu
-        page.openPaneMenu(rpm.index, find(page, "chart"))
-        page.choosePane("new")
+        page.panesPart.openPaneMenu(rpm.index, find(page, "chart"))
+        page.panesPart.choosePane("new")
         const mine = page.viewAssign["7E8:410C:2.0:16"]
         verify(mine !== undefined && mine.indexOf("own:") === 0, "by key: " + mine)
         compare(page.viewAssign.RPM, undefined, "the name's entry is gone")
         compare(page.viewAssign["Vehicle Speed"], "own:2", "another's entry stays")
         tryVerify(() => storedViews().indexOf("\"7E8:410C:2.0:16\":\"own:") >= 0, 3000,
                   "kept by key")
-        page.setPaneOf(speed, "")
+        page.panesPart.setPaneOf(speed, "")
         compare(page.viewAssign["7E8:410D:2.0:8"], undefined)
         compare(page.viewAssign["Vehicle Speed"], undefined, "By unit drops both")
     }
@@ -150,31 +150,31 @@ TestCase {
     // in its frames open, whose rows have keys, holds for its values too
     function test_anOlderRecordingsPaneIsKeptByNameInBothDecodes() {
         const page = createPage()
-        page.open(olderRecording("older-panes"))
+        page.openPart.open(olderRecording("older-panes"))
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         compare(page.recording.signalList.find(s => s.name === "RPM").key, "", "names alone")
-        page.decodeWith("obd2")
+        page.decodePart.decodeWith("obd2")
         tryVerify(() => page.recording.state === RecordingView.Open
                         && page.recording.decodedWith === "obd2", 10000, "its frames through obd2")
         const framed = page.recording.signalList.find(s => s.name === "RPM")
         compare(framed.key, "7E8:410C:2.0:16", "a frames open has keys")
-        page.setPaneOf(framed, "own:4")
+        page.panesPart.setPaneOf(framed, "own:4")
         compare(page.viewAssign.RPM, "own:4", "kept by name")
         compare(page.viewAssign["7E8:410C:2.0:16"], undefined, "not by key")
-        page.decodeWith("")
+        page.decodePart.decodeWith("")
         tryVerify(() => page.recording.state === RecordingView.Open
                         && page.recording.decodedWith === "", 10000, "values as recorded")
         const recorded = page.recording.signalList.find(s => s.name === "RPM")
         compare(recorded.key, "")
-        compare(page.paneOf(recorded), "own:4", "the pane is kept")
-        compare(page.assignRows()[recorded.index], "own:4")
+        compare(page.panesPart.paneOf(recorded), "own:4", "the pane is kept")
+        compare(page.panesPart.assignRows()[recorded.index], "own:4")
     }
 
     // The plotted export names its columns by key in a format 4 recording,
     // which core takes; by name in an older one
     function test_thePlottedColumnsAreKeysInAFormat4Recording() {
         const page = createPage()
-        page.open(keyedRecording("keyed-export"))
+        page.openPart.open(keyedRecording("keyed-export"))
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
         tryVerify(() => page.plottedNames.length === 2, 5000, "both plotted")
         compare(page.plottedNames.slice().sort(), ["7E8:410C:2.0:16", "7E8:410D:2.0:8"])
@@ -186,8 +186,8 @@ TestCase {
         sizesIn(panel)
         restoreExportChoices(panel)
 
-        page.backToList()
-        page.open(earlyRow)
+        page.openPart.backToList()
+        page.openPart.open(earlyRow)
         tryVerify(() => find(page, "signalRows").visible, 10000, "pull-early opens")
         verify(page.plottedNames.length > 0)
         const names = page.recording.signalList.map(s => s.name)
@@ -225,9 +225,9 @@ TestCase {
     // alignment, and none with an older recording's one RPM
     function test_compareGoesByKeyElseByANameEachHasOnce() {
         const page = createPage()
-        page.open(twoRpmRecording("pairs-here", 800, 900))
+        page.openPart.open(twoRpmRecording("pairs-here", 800, 900))
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
-        page.compareWith(twoRpmRecording("pairs-there", 780, 700))
+        page.comparePart.compareWith(twoRpmRecording("pairs-there", 780, 700))
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
         const sigs = page.recording.signalList
         const theirs = find(page, "compareView").signalList
@@ -236,42 +236,42 @@ TestCase {
         compare(theirs[ComparePairs.pairOf(page.comparePairs, e8.index)].key, e8.key)
         compare(theirs[ComparePairs.pairOf(page.comparePairs, e9.index)].key, e9.key)
 
-        const got = page.compareValuesAt(1000)
+        const got = page.comparePart.compareValuesAt(1000)
         compare(got[e8.index].text, "880", "7E8's own there")
         compare(got[e9.index].text, "800", "7E9's own there")
         const picks = {}
         picks[e8.index] = true
         picks[e9.index] = true
         page.plotted = picks
-        const pairs = page.differencePairs()
+        const pairs = page.seriesPart.differencePairs()
         compare(pairs.length, 2)
         for (const p of pairs)
             compare(theirs[p.theirs].key, sigs[p.mine].key)
 
         // Rising to 850: here at 0.5 s; there 7E8 at 0.7 s, 7E9 at 1.5 s
-        page.setAlignOn("rise")
+        page.comparePart.setAlignOn("rise")
         compare(page.alignSignal, e8.key, "the first number signal, by its key")
         page.alignLevel = 850
-        page.align()
+        page.comparePart.align()
         tryVerify(() => page.compareAligned, 5000, "aligned on the rise")
         fuzzyCompare(page.compareOffsetMs, -200, 1, "on 7E8's pair, not 7E9's")
         const box = find(page, "alignSignal")
         compare(box.count, 2, "both RPMs listed")
         box.activated(1)
         compare(page.alignSignal, e9.key, "the second, by its key")
-        page.setAlignOn("start")
-        page.align()
+        page.comparePart.setAlignOn("start")
+        page.comparePart.align()
 
-        page.compareWith(olderRecording("pairs-older"))
+        page.comparePart.compareWith(olderRecording("pairs-older"))
         tryVerify(() => page.compareAligned && find(page, "compareView").signalList.length === 1,
                   10000, "the older recording opens")
         compare(ComparePairs.pairOf(page.comparePairs, e8.index), undefined, "a name this recording has twice pairs nothing")
         compare(ComparePairs.pairOf(page.comparePairs, e9.index), undefined)
-        compare(page.differencePairs().length, 0)
+        compare(page.seriesPart.differencePairs().length, 0)
 
         // The first recording opened again through its frames while
         // comparing: its rows are made again, and their pairs with them
-        page.decodeWith("obd2")
+        page.decodePart.decodeWith("obd2")
         tryVerify(() => page.recording.state === RecordingView.Open
                         && page.recording.decodedWith === "obd2", 10000, "its frames through obd2")
         const paired = page.recording.signalList.filter(s => ComparePairs.pairOf(page.comparePairs, s.index) !== undefined)
@@ -284,14 +284,14 @@ TestCase {
     // name again
     function test_theAlignmentsSignalOutlivesADecodeSwitch() {
         const page = createPage()
-        page.open(olderRecording("align-older"))
+        page.openPart.open(olderRecording("align-older"))
         tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
-        page.compareWith(keyedRecording("align-keyed"))
+        page.comparePart.compareWith(keyedRecording("align-keyed"))
         tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
-        page.setAlignOn("rise")
+        page.comparePart.setAlignOn("rise")
         compare(page.alignSignal, "RPM", "by its name: the values have no key")
 
-        page.decodeWith("obd2")
+        page.decodePart.decodeWith("obd2")
         tryVerify(() => page.recording.state === RecordingView.Open
                         && page.recording.decodedWith === "obd2", 10000, "its frames through obd2")
         const rpm = page.recording.signalList.filter(s => s.name === "RPM")
@@ -299,10 +299,10 @@ TestCase {
         verify(rpm[0].key !== "", "obd2 gives RPM a key")
         compare(page.alignSignal, rpm[0].key, "the one row of its name, by its key")
 
-        page.decodeWith("")
+        page.decodePart.decodeWith("")
         tryVerify(() => page.recording.state === RecordingView.Open
                         && page.recording.decodedWith === "", 10000, "values as recorded")
         compare(page.alignSignal, "RPM", "by its name again")
-        page.setAlignOn("start")
+        page.comparePart.setAlignOn("start")
     }
 }

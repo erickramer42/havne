@@ -76,7 +76,8 @@ typedef struct ecuio_plugin_info {
     char name[64];
     uint32_t variant_count;
     uint32_t fixture_count; /* a folder's fixture files; 0 when packed */
-    uint32_t reserved[2];   /* zero; ABI growth space */
+    uint32_t page_count;    /* its Dashboard pages (ecuio_plugin_page) */
+    uint32_t reserved[1];   /* zero; ABI growth space */
 } ecuio_plugin_info_t;
 
 #if defined(__cplusplus)
@@ -84,6 +85,11 @@ static_assert(sizeof(ecuio_plugin_info_t) == 136,
               "ecuio_plugin_info_t size is ABI");
 static_assert(offsetof(ecuio_plugin_info_t, variant_count) == 120,
               "plugin info variant_count offset is ABI");
+static_assert(offsetof(ecuio_plugin_info_t, page_count) == 128,
+              "plugin info page_count offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_plugin_info_t, page_count) == 128,
+               "plugin info page_count offset is ABI");
 #endif
 
 /* ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct */
@@ -183,6 +189,55 @@ ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,
                                    ecuio_plugin_value_t* values, uint32_t cap,
                                    uint32_t* count);
 
+/*
+ * Dashboard pages (ADR-0052's appendix on pages): the manifest's optional
+ * "pages" lists 1 to ECUIO_PLUGIN_MAX_PAGES paths in the package, each an
+ * ADR-0057 layout file of one page for one form: "format" 2, "form"
+ * "phone" or "desktop", "pages" holding exactly one page, and no "files"
+ * but an empty list. A packed plugin inlines each under "files" as it
+ * does a data file; a file "pages" names is never a data file. Core reads
+ * that much and nothing inside the page: its cells are the dashboard's
+ * rules, which the app and havne-cli's layout check judge.
+ */
+#define ECUIO_PLUGIN_MAX_PAGES      16u
+#define ECUIO_PLUGIN_PAGE_MAX_BYTES 82400u /* read and as written */
+#define ECUIO_PLUGIN_PAGE_PHONE     1u
+#define ECUIO_PLUGIN_PAGE_DESKTOP   2u
+
+typedef struct ecuio_plugin_page {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t form;        /* ECUIO_PLUGIN_PAGE_PHONE or _DESKTOP */
+    uint32_t text_bytes;  /* the text's length, its NUL left out */
+    uint32_t reserved[3]; /* zero; ABI growth space */
+    char path[ECUIO_PLUGIN_PATH_MAX + 1]; /* its path in the package */
+} ecuio_plugin_page_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_page_t) == 152,
+              "ecuio_plugin_page_t size is ABI");
+static_assert(offsetof(ecuio_plugin_page_t, path) == 24,
+              "plugin page path offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_page_t) == 152,
+               "ecuio_plugin_page_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_page_t, path) == 24,
+               "plugin page path offset is ABI");
+#endif
+
+/* Page index's form, path and text length, in the manifest's order.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct or
+ * an index at or past info's page_count, out untouched. */
+ecuio_status_t ecuio_plugin_page(const ecuio_plugin_t* plugin, uint32_t index,
+                                 ecuio_plugin_page_t* out);
+
+/* Page index's layout file as core writes it (two spaces a level, UTF-8
+ * kept), the same for a folder and its packed form: NUL-terminated,
+ * text_bytes long, valid until the plugin is freed. NULL for a NULL
+ * plugin or an index at or past the count. */
+const char* ecuio_plugin_page_text(const ecuio_plugin_t* plugin,
+                                   uint32_t index);
+
 /* The variants the VIN's manufacturer code and model year fall in: one
  * of the manifest's "match" entries covers it and the variant's own
  * years do (a year range never covers model year 0). A proposal only:
@@ -243,24 +298,28 @@ typedef struct ecuio_plugin_conversation_ecu {
 
 /* A service the module may cause core to send */
 typedef struct ecuio_plugin_service {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
     uint8_t sid;
     uint8_t sub_count; /* 0: the service isn't declared by sub-function */
-    uint8_t subs[ECUIO_PLUGIN_MAX_SUBS]; /* those declared, in the manifest's
-                                            order */
-    uint32_t reserved[2];                /* zero */
+    /* the sub-functions declared, in the manifest's order */
+    uint8_t subs[ECUIO_PLUGIN_MAX_SUBS];
+    uint32_t flags;       /* zero */
+    uint32_t reserved[2]; /* zero; ABI growth space */
 } ecuio_plugin_service_t;
 
-/* A security-access level the module computes a key for */
+/* A security-access level the module computes a key for: level is the
+ * seed request's sub-function and the key's is the next */
 typedef struct ecuio_plugin_security_level {
+    uint32_t struct_size;   /* the caller's sizeof, at least this one's */
     uint32_t rx_id;         /* the ECU's response ID */
-    uint8_t level;          /* the seed request's sub-function, odd; the key's
-                           is the next */
+    uint8_t level;          /* the seed request's sub-function, odd */
     uint8_t seed_bytes;     /* the seed's length */
     uint8_t key_bytes;      /* the key's, 1 to ECUIO_PLUGIN_KEY_MAX */
     uint8_t reserved0;      /* zero */
     uint32_t delay_ms;      /* the least wait after a refused key */
     uint32_t key_window_ms; /* how long the module has to give the key */
-    uint32_t reserved[4];   /* zero */
+    uint32_t flags;         /* zero */
+    uint32_t reserved[4];   /* zero; ABI growth space */
 } ecuio_plugin_security_level_t;
 
 #if defined(__cplusplus)
@@ -274,12 +333,20 @@ static_assert(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12,
               "plugin conversation ecu id offset is ABI");
 static_assert(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44,
               "plugin conversation ecu flags offset is ABI");
-static_assert(sizeof(ecuio_plugin_service_t) == 24,
+static_assert(sizeof(ecuio_plugin_service_t) == 32,
               "ecuio_plugin_service_t size is ABI");
-static_assert(sizeof(ecuio_plugin_security_level_t) == 32,
+static_assert(offsetof(ecuio_plugin_service_t, subs) == 6,
+              "plugin service subs offset is ABI");
+static_assert(offsetof(ecuio_plugin_service_t, flags) == 20,
+              "plugin service flags offset is ABI");
+static_assert(sizeof(ecuio_plugin_security_level_t) == 40,
               "ecuio_plugin_security_level_t size is ABI");
-static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 8,
+static_assert(offsetof(ecuio_plugin_security_level_t, level) == 8,
+              "plugin security level level offset is ABI");
+static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
               "plugin security level delay_ms offset is ABI");
+static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
+              "plugin security level flags offset is ABI");
 #endif
 
 /* The conversation tier's part of plugin. ECUIO_ERR_NULL_ARGUMENT for a
@@ -298,7 +365,8 @@ ecuio_plugin_conversation_ecu(const ecuio_plugin_t* plugin, uint32_t index,
                               ecuio_plugin_conversation_ecu_t* out);
 
 /* The index-th declared service, and the index-th security level: getters
- * by index against service_count and level_count, as above. */
+ * by index against service_count and level_count, with the ECU getter's
+ * refusals, a struct_size smaller than the struct among them. */
 ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
                                     uint32_t index,
                                     ecuio_plugin_service_t* out);

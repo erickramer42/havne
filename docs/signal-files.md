@@ -152,7 +152,7 @@ place, and a gauge or layout that named `obd2`'s signal reads yours. So does a c
 
 ### `ecus`
 
-Each module the file reads from, at most four, the base set's counted
+Each module the file reads from, at most 32, the base set's counted
 when the file extends one:
 
 ```json
@@ -487,7 +487,7 @@ A file is refused for:
   Recordings are CSV, often opened in a spreadsheet
   ([ADR-0049](adr/0049-recordings-in-core.md) section 8).
 - **Its modules:** a `tx` left out where the standard doesn't give one
-  (above); a `tx` of another width than its `rx`; more than four; and
+  (above); a `tx` of another width than its `rx`; more than 32; and
   **11-bit and 29-bit IDs in one file**, the base set's counted. One
   connection carries one width (a J2534 or ELM327 session refuses the
   mix before it opens the adapter), and `obd2`'s modules are 11-bit, so

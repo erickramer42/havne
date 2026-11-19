@@ -1,0 +1,14 @@
+{
+  "havne_signals": 1,
+  "signals": [
+    {
+      "key": "oil_temp",
+      "name": "Oil Temp",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "F40D" },
+      "field": { "byte": 0, "bits": 8 },
+      "scale": 1, "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine"
+    }
+  ]
+}

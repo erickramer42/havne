@@ -1,0 +1,28 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its cam",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up cam at 52E",
+  "signals": [
+    {
+      "key": "cam_name",
+      "name": "Camera Module Name",
+      "kind": "text",
+      "ecu": "cam",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "cam_temp",
+      "name": "Camera Temp",
+      "ecu": "cam",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "offset": -40,
+      "unit": "°C",
+      "decimals": 0,
+      "group": "electrical",
+      "gauge": {"min": -40, "max": 105, "warn_high": 85}
+    }
+  ]
+}

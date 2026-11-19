@@ -1,0 +1,30 @@
+ecuio session recording, format 4 (ADR-0049)
+started  2026-11-18 18:46:51.148 (local time)
+utc  2026-11-19T00:46:51.148Z
+core  0.8.0
+uri  elm327://COM5?profile=<2ch plugin profile>
+profile  <2ch plugin profile>
+plugin  <2ch plugin>
+frame flags  complete
+caller  Havne 0.8.0
+caller  surrogate frame logging  on, set by this recording
+caller  vehicle  <2ch vehicle>
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+18:46:51.192  +0.044  note  Recording: Documents\Havne\recordings\20261118-184651 <2ch vehicle>
+18:46:51.440  +0.292  note  Connected: elm327://COM5?profile=<2ch plugin profile>
+18:46:51.441  +0.293  note  Session: ELM327 adapter (ELM327 v1.4b, STN2255 v5.12.2); ISO 15765 at 500000 baud; profile <2ch plugin profile>, channels 0x7E8/0x7E0, 0x7E9/0x7E1 (rx/tx); battery 13.6 V
+18:46:51.513  +0.365  note  ECU 0x7E8: supports 53 PIDs; 97 requests, 49 dropped: 01 5C (not in its supported PIDs), 01 08 (not in its supported PIDs), 01 09 (not in its supported PIDs), 01 14 (not in its supported PIDs), 01 16 (not in its supported PIDs), 01 17 (not in its supported PIDs), 01 18 (not in its supported PIDs), 01 19 (not in its supported PIDs), and 41 more
+18:46:51.515  +0.367  note  VIN: <model year>; <manufacturer>; check digit matches
+18:46:51.557  +0.409  note  Vehicle: <4ch vehicle> (picked; <2ch vehicle> was)
+18:46:52.415  +1.267  note  ECU 0x7E8 identity: <VIN>; <CALID>; ...
+18:46:53.215  +2.067  note  ECU 0x7E8: supports 53 PIDs; 97 requests, 49 dropped: 01 5C (not in its supported PIDs), 01 08 (not in its supported PIDs), 01 09 (not in its supported PIDs), 01 14 (not in its supported PIDs), 01 16 (not in its supported PIDs), 01 17 (not in its supported PIDs), 01 18 (not in its supported PIDs), 01 19 (not in its supported PIDs), and 41 more; several PIDs per request
+18:46:53.217  +2.069  note  ECU 0x7E8 diagnostics: MIL off; stored none; pending none; permanent none; readiness 5 of 7 complete (EVAP, EGR/VVT incomplete); no freeze frame
+18:46:56.320  +5.172  note  ECU 0x7E9 identity: <VIN>; <CALID>; ...
+18:46:58.516  +7.368  note  ECU 0x7E9 diagnostics: MIL off; stored none; pending none; permanent none; readiness 1 of 1 complete; no freeze frame
+18:50:03.160  +192.012  note  Disconnecting: elm327://COM5?profile=<2ch plugin profile>
+18:50:03.167  +192.019  note  Delivery: 6709 frames, none dropped; to the GUI thread in median 319 µs, p99 31 ms, max 246 ms; 19211 values, to the model in median 53 ms, p99 106 ms, max 235 ms
+18:50:03.219  +192.071  note  Reply timing: 23 requests, 16995 answered, none refused, none timed out; latency P50 11 ms to 23 ms; intervals on the host's clock; ISO-TP: 6709 messages, 2966 segmented, 4 dropped, none unusable
+18:50:03.220  +192.072  note  Disconnected: elm327://COM5?profile=<2ch plugin profile>
+
+18:50:03.220  +192.072  end  disconnected: 6709 frames, 19211 values, 0 records dropped, 0 notes dropped

@@ -27,12 +27,18 @@ add_library(ecuio-core STATIC
     src/recorder_writer.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/recording_reader_events.cpp
+    src/recording_reader_source.cpp
+    src/recording_reader_rows.cpp
+    src/recording_reader_stats.cpp
+    src/recording_reader_search.cpp
     src/scrub.cpp
     src/scrub_frames.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp
+    src/j2534_worker.cpp
     src/elm327_transport.cpp
     src/elm327_worker.cpp
     src/elm327_setup.cpp
@@ -44,12 +50,16 @@ add_library(ecuio-core STATIC
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/sim.cpp
+    src/sim_bus.cpp
     src/socketcan_interfaces.cpp
     src/socketcan_request.cpp
     src/socketcan_transport.cpp
     src/talk_seam.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/signal_file_parts.cpp
+    src/signal_file_rules.cpp
+    src/signal_file_source.cpp
     src/signal_expr.cpp
     src/signal_file_expr.cpp
     src/signal_keys.cpp
@@ -60,6 +70,7 @@ add_library(ecuio-core STATIC
     src/plugin_manifest.cpp
     src/plugin_conversation.cpp
     src/plugin_merge.cpp
+    src/plugin_pages.cpp
     src/plugin_wrap.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp

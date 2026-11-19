@@ -27,9 +27,11 @@
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"
 #include "sim_canned.h"
+#include "sim_faults.h"
 #include "recording_stretch.h"
 #include "sim_recording.h"
 #include "sim_security.h"
+#include "sim_timing.h"
 #include "uri_query.h"
 
 #include "absolute_path.h"
@@ -40,37 +42,6 @@
 
 enum class ecuio_sim_source : uint8_t { mock, replay };
 enum class ecuio_sim_values : uint8_t { drive, canned };
-
-/* Every Nth reply of its kind, 0 = never (ADR-0041 section 4) */
-struct ecuio_sim_faults {
-    uint32_t silent = 0;
-    uint32_t late = 0;
-    uint32_t bad_sequence = 0; /* segmented replies only */
-    uint32_t stalled = 0;      /* segmented replies only */
-    uint32_t pending = 0;      /* 7F <service> 78 first, the reply later */
-};
-
-constexpr uint32_t ECUIO_SIM_FAULT_MAX = 10000;
-
-/* A reply's fate */
-enum class ecuio_sim_fate : uint8_t {
-    intact,
-    silent,
-    late,
-    bad_sequence,
-    stalled,
-    pending
-};
-
-/* Past the request engine's wait (100 ms), before the next request's */
-constexpr int64_t ECUIO_SIM_LATE_US = 130000;
-/* Past N_Cr (150 ms) after the frame before */
-constexpr int64_t ECUIO_SIM_STALLED_US = 160000;
-/* "Response pending": the reply this long after its 7F <service> 78,
- * past the request engine's 100 ms wait and an ELM327's AT ST timeout
- * (ATST19, 100 ms), well inside P2* (5 s), so only a tester that keeps
- * waiting after the 78 gets it */
-constexpr int64_t ECUIO_SIM_PENDING_US = 300000;
 
 /* A VIN of the VIN alphabet that decodes (model year 2021, its check
  * digit right) under a manufacturer code NHTSA doesn't list, so the
@@ -132,7 +103,9 @@ struct ecuio_sim_config {
     ecuio_sim_values values = ecuio_sim_values::drive;
     char vin[ECUIO_VIN_LEN + 1] = {};
     bool vin_given = false; /* replay: 09 02 answers it, not the car's */
-    ecuio_sim_faults faults;
+    ecuio_sim_faults faults;    /* every module's, each on its own count */
+    ecuio_sim_aims aimed;       /* faults aimed at one module each */
+    ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
@@ -155,10 +128,6 @@ struct ecuio_sim_ecu {
     ecuio_mock::DriveCycle car; /* values=drive: stepped by the bus side */
     float engine_s = 0.0f;      /* time since the engine last started */
     bool cleared = false;       /* a 04 was obeyed */
-    uint32_t singles = 0;       /* replies counted for the faults */
-    uint32_t segmented = 0;
-    uint32_t module_singles = 0; /* the second module's, counted apart */
-    uint32_t module_segmented = 0;
 };
 
 /* One tick (kTickS of the ECU's time): its clock runs; the mock's drive
@@ -610,24 +579,20 @@ inline uint32_t ecuio_sim_module_answer(const uint8_t* req, uint32_t len,
     return n;
 }
 
-/* The fate of the next reply, counting it: bitmaps are never broken,
- * single-frame and segmented replies are counted apart (and each
- * module's apart from the other's: module 1 is the second), and the two
- * frame faults take segmented replies only */
-inline ecuio_sim_fate ecuio_sim_next_fate(ecuio_sim_ecu& e, const uint8_t* req,
-                                          uint32_t req_len, uint32_t reply_len,
-                                          int module = 0)
+/* The fate of a module's next reply from its periods f, counting it in
+ * c: bitmaps are never broken, single-frame and segmented replies are
+ * counted apart, and the two frame faults take segmented replies only */
+inline ecuio_sim_fate ecuio_sim_next_fate(const ecuio_sim_faults& f,
+                                          ecuio_sim_counts& c,
+                                          const uint8_t* req, uint32_t req_len,
+                                          uint32_t reply_len)
 {
     if (req_len == 2 && req[0] == 0x01 &&
         ecuio_sim_detail::bitmap_pid(req[1])) {
         return ecuio_sim_fate::intact;
     }
     const bool segmented = reply_len > 7;
-    uint32_t& count = module == 0
-                          ? (segmented ? e.segmented : e.singles)
-                          : (segmented ? e.module_segmented : e.module_singles);
-    const uint32_t k = ++count;
-    const ecuio_sim_faults& f = e.config.faults;
+    const uint32_t k = ++(segmented ? c.segmented : c.singles);
     const auto every = [k](uint32_t n) { return n != 0 && k % n == 0; };
     if (every(f.silent)) {
         return ecuio_sim_fate::silent;
@@ -649,92 +614,32 @@ inline ecuio_sim_fate ecuio_sim_next_fate(ecuio_sim_ecu& e, const uint8_t* req,
 
 /* ---- The URI ---------------------------------------------------------- */
 
-/* faults=<name>:<n>[,...] into *out; false with why (a line) */
-inline bool ecuio_sim_parse_faults(const char* text, size_t len,
-                                   ecuio_sim_faults* out, char* why,
-                                   size_t why_cap)
-{
-    *out = ecuio_sim_faults{};
-    size_t at = 0;
-    while (at < len) {
-        size_t end = at;
-        while (end < len && text[end] != ',') {
-            ++end;
-        }
-        const char* item = text + at;
-        const size_t item_len = end - at;
-        size_t colon = 0;
-        while (colon < item_len && item[colon] != ':') {
-            ++colon;
-        }
-        uint32_t* slot = nullptr;
-        const auto named = [&](const char* name) {
-            return colon == std::strlen(name) &&
-                   std::strncmp(item, name, colon) == 0;
-        };
-        if (named("silent")) {
-            slot = &out->silent;
-        } else if (named("late")) {
-            slot = &out->late;
-        } else if (named("bad_sequence")) {
-            slot = &out->bad_sequence;
-        } else if (named("stalled")) {
-            slot = &out->stalled;
-        } else if (named("pending")) {
-            slot = &out->pending;
-        }
-        uint32_t n = 0;
-        bool digits = colon + 1 < item_len;
-        for (size_t i = colon + 1; digits && i < item_len; ++i) {
-            const char c = item[i];
-            if (c < '0' || c > '9' || n > ECUIO_SIM_FAULT_MAX) {
-                digits = false;
-            } else {
-                n = n * 10 + static_cast<uint32_t>(c - '0');
-            }
-        }
-        if (slot == nullptr || colon == item_len || !digits || n == 0 ||
-            n > ECUIO_SIM_FAULT_MAX) {
-            std::snprintf(why, why_cap,
-                          "faults: '%.*s' isn't <fault>:<n>, the fault one of "
-                          "silent, late, pending, bad_sequence or stalled and "
-                          "n from 1 to %u",
-                          static_cast<int>(item_len < 40 ? item_len : 40), item,
-                          ECUIO_SIM_FAULT_MAX);
-            return false;
-        }
-        *slot = n;
-        at = end + 1;
-    }
-    if (len == 0 || text[len - 1] == ',') {
-        std::snprintf(why, why_cap, "faults: names none");
-        return false;
-    }
-    return true;
-}
-
 enum class ecuio_sim_uri_result : uint8_t { ok, bad };
 
-/* The simulated ECU's URI into *out:
- *   mock://<label>[?values][&modules][&profile][&vin][&faults]
- *   replay://<absolute path>[?loop][&from][&to][&vin][&faults]
- * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
- * says what's wrong (a line). */
-inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
-                                                ecuio_sim_config* out,
-                                                char* why, size_t why_cap)
+namespace ecuio_sim_uri_detail {
+
+/* A key's reading: not this group's key, taken, or refused with why */
+enum class taken : uint8_t { other, ok, bad };
+
+inline bool value_is(const ecuio_uri::param& p, const char* v)
 {
-    *out = ecuio_sim_config{};
-    std::memcpy(out->vin, ECUIO_SIM_DEFAULT_VIN, sizeof ECUIO_SIM_DEFAULT_VIN);
-    const char* body = nullptr;
+    return p.val_len == std::strlen(v) &&
+           std::strncmp(p.val, v, p.val_len) == 0;
+}
+
+/* The scheme and, for replay://, the recording's path: *body is what
+ * follows the scheme */
+inline bool take_source(const char* uri, ecuio_sim_config* out,
+                        const char** body, char* why, size_t why_cap)
+{
     if (std::strncmp(uri, "replay://", 9) == 0) {
         out->source = ecuio_sim_source::replay;
-        body = uri + 9;
-        const char* q = std::strchr(body, '?');
-        out->path = body;
+        *body = uri + 9;
+        const char* q = std::strchr(*body, '?');
+        out->path = *body;
         out->path_len =
-            q != nullptr ? static_cast<size_t>(q - body) : std::strlen(body);
-        const std::string path(body, out->path_len);
+            q != nullptr ? static_cast<size_t>(q - *body) : std::strlen(*body);
+        const std::string path(*body, out->path_len);
 #ifdef _WIN32
         const bool absolute = ecuio_is_absolute_path(path.c_str());
 #else
@@ -744,18 +649,195 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
             std::snprintf(why, why_cap,
                           "replay:// needs a recording's "
                           "folder or its frames.csv");
-            return ecuio_sim_uri_result::bad;
+            return false;
         }
         if (!absolute) {
             std::snprintf(why, why_cap,
                           "the recording's path must be absolute");
-            return ecuio_sim_uri_result::bad;
+            return false;
         }
     } else if (std::strncmp(uri, "mock://", 7) == 0) {
-        body = uri + 7;
+        *body = uri + 7;
     } else {
         std::snprintf(why, why_cap,
                       "the simulated ECU takes mock:// or replay://");
+        return false;
+    }
+    return true;
+}
+
+/* values= and modules= */
+inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
+                             char* why, size_t why_cap)
+{
+    if (p.is("values")) {
+        if (value_is(p, "drive")) {
+            out->values = ecuio_sim_values::drive;
+        } else if (value_is(p, "canned")) {
+            out->values = ecuio_sim_values::canned;
+        } else {
+            std::snprintf(why, why_cap, "values: drive or canned");
+            return taken::bad;
+        }
+        return taken::ok;
+    }
+    if (p.is("modules")) {
+        if (!value_is(p, "1") && !value_is(p, "2")) {
+            std::snprintf(why, why_cap,
+                          "modules: 1 (the engine ECU) or 2 (and a "
+                          "second module on 0x7E1/0x7E9)");
+            return taken::bad;
+        }
+        out->second_module = value_is(p, "2");
+        return taken::ok;
+    }
+    return taken::other;
+}
+
+/* profile= */
+inline taken take_profile(const ecuio_uri::param& p, ecuio_sim_config* out,
+                          char* why, size_t why_cap)
+{
+    if (!p.is("profile")) {
+        return taken::other;
+    }
+    /* The registry's grammar (profile.h): 1-63 of [a-z0-9._-] */
+    bool ok = p.val_len >= 1 && p.val_len <= ECUIO_PROFILE_NAME_MAX;
+    for (size_t k = 0; ok && k < p.val_len; ++k) {
+        const char c = p.val[k];
+        ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' ||
+             c == '_' || c == '-';
+    }
+    if (!ok) {
+        std::snprintf(why, why_cap,
+                      "profile: a registered profile's name, 1 to "
+                      "%d of a-z, 0-9, '.', '_' and '-'",
+                      ECUIO_PROFILE_NAME_MAX);
+        return taken::bad;
+    }
+    out->profile = p.val;
+    out->profile_len = p.val_len;
+    return taken::ok;
+}
+
+/* vin= */
+inline taken take_vin(const ecuio_uri::param& p, ecuio_sim_config* out,
+                      char* why, size_t why_cap)
+{
+    if (!p.is("vin")) {
+        return taken::other;
+    }
+    char vin[ECUIO_VIN_LEN + 1] = {};
+    ecuio_vin_info_t info;
+    if (p.val_len == ECUIO_VIN_LEN) {
+        std::memcpy(vin, p.val, ECUIO_VIN_LEN);
+    }
+    if (vin[0] == '\0' || ecuio_vin_decode(vin, 0, &info) != ECUIO_OK) {
+        std::snprintf(why, why_cap,
+                      "vin: 17 digits and capital letters, never I, "
+                      "O or Q");
+        return taken::bad;
+    }
+    std::memcpy(out->vin, vin, sizeof vin);
+    out->vin_given = true;
+    return taken::ok;
+}
+
+/* loop=, from= and to= */
+inline taken take_replay_span(const ecuio_uri::param& p, ecuio_sim_config* out,
+                              char* why, size_t why_cap)
+{
+    if (p.is("loop")) {
+        if (!value_is(p, "0") && !value_is(p, "1")) {
+            std::snprintf(why, why_cap, "loop: 0 or 1");
+            return taken::bad;
+        }
+        out->loop = value_is(p, "1");
+        return taken::ok;
+    }
+    if (p.is("from") || p.is("to")) {
+        if (!ecuio_stretch::take(p, &out->stretch)) {
+            std::snprintf(why, why_cap,
+                          "from and to: the recording's seconds, as the "
+                          "viewer and havne-cli view show them, with at "
+                          "most three decimals");
+            return taken::bad;
+        }
+        return taken::ok;
+    }
+    return taken::other;
+}
+
+/* faults= */
+inline taken take_faults(const ecuio_uri::param& p, ecuio_sim_config* out,
+                         char* why, size_t why_cap)
+{
+    if (!p.is("faults")) {
+        return taken::other;
+    }
+    return ecuio_sim_parse_faults(p.val, p.val_len, &out->faults, &out->aimed,
+                                  why, why_cap)
+               ? taken::ok
+               : taken::bad;
+}
+
+/* delay=, fc=, cf= and seed= (sim_timing.h) */
+inline taken take_timing(const ecuio_uri::param& p, ecuio_sim_config* out,
+                         char* why, size_t why_cap)
+{
+    using ecuio_sim_timing::knob;
+    bool ok = true;
+    if (p.is("delay") || p.is("fc") || p.is("cf")) {
+        const knob what = p.is("delay") ? knob::delay
+                          : p.is("fc")  ? knob::fc
+                                        : knob::cf;
+        ok = ecuio_sim_timing::parse_key(what, p.val, p.val_len, &out->timing,
+                                         why, why_cap);
+    } else if (p.is("seed")) {
+        ok = ecuio_sim_timing::parse_seed(p.val, p.val_len, &out->timing, why,
+                                          why_cap);
+    } else {
+        return taken::other;
+    }
+    return ok ? taken::ok : taken::bad;
+}
+
+/* One key, through each group in turn: a key belongs to one group only,
+ * so their order changes nothing */
+inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
+                     char* why, size_t why_cap)
+{
+    using reader =
+        taken (*)(const ecuio_uri::param&, ecuio_sim_config*, char*, size_t);
+    static const reader kReaders[] = {take_mock_shape, take_profile,
+                                      take_vin,        take_replay_span,
+                                      take_faults,     take_timing};
+    for (const reader r : kReaders) {
+        const taken t = r(p, out, why, why_cap);
+        if (t != taken::other) {
+            return t == taken::ok;
+        }
+    }
+    return true; /* the key list was checked first */
+}
+
+} // namespace ecuio_sim_uri_detail
+
+/* The simulated ECU's URI into *out:
+ *   mock://<label>[?values][&modules][&profile][&vin][&faults][&timing]
+ *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
+ * where timing is delay=, fc=, cf= and seed= (sim_timing.h)
+ * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
+ * says what's wrong (a line). */
+inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
+                                                ecuio_sim_config* out,
+                                                char* why, size_t why_cap)
+{
+    using namespace ecuio_sim_uri_detail;
+    *out = ecuio_sim_config{};
+    std::memcpy(out->vin, ECUIO_SIM_DEFAULT_VIN, sizeof ECUIO_SIM_DEFAULT_VIN);
+    const char* body = nullptr;
+    if (!take_source(uri, out, &body, why, why_cap)) {
         return ecuio_sim_uri_result::bad;
     }
     ecuio_uri_query q;
@@ -766,93 +848,25 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         return ecuio_sim_uri_result::bad;
     }
     const bool replay = out->source == ecuio_sim_source::replay;
-    static const char* const kMockKeys[] = {"values", "modules", "profile",
-                                            "vin",    "faults",  nullptr};
-    static const char* const kReplayKeys[] = {"loop", "from",   "to",
-                                              "vin",  "faults", nullptr};
+    static const char* const kMockKeys[] = {
+        "values", "modules", "profile", "vin",  "faults",
+        "delay",  "fc",      "cf",      "seed", nullptr};
+    static const char* const kReplayKeys[] = {"loop",   "from",  "to", "vin",
+                                              "faults", "delay", "fc", "cf",
+                                              "seed",   nullptr};
     if (const ecuio_uri::param* p =
             ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys)) {
         std::snprintf(why, why_cap,
                       "the simulated ECU takes no query key '%.*s' for %s, "
-                      "only %s, vin and faults",
+                      "only %s, vin, faults, delay, fc, cf and seed",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to" : "values, modules, profile");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
-        const ecuio_uri::param& p = q.params[i];
-        const auto value_is = [&p](const char* v) {
-            return p.val_len == std::strlen(v) &&
-                   std::strncmp(p.val, v, p.val_len) == 0;
-        };
-        if (p.is("values")) {
-            if (value_is("drive")) {
-                out->values = ecuio_sim_values::drive;
-            } else if (value_is("canned")) {
-                out->values = ecuio_sim_values::canned;
-            } else {
-                std::snprintf(why, why_cap, "values: drive or canned");
-                return ecuio_sim_uri_result::bad;
-            }
-        } else if (p.is("modules")) {
-            if (!value_is("1") && !value_is("2")) {
-                std::snprintf(why, why_cap,
-                              "modules: 1 (the engine ECU) or 2 (and a "
-                              "second module on 0x7E1/0x7E9)");
-                return ecuio_sim_uri_result::bad;
-            }
-            out->second_module = value_is("2");
-        } else if (p.is("profile")) {
-            /* The registry's grammar (profile.h): 1-63 of [a-z0-9._-] */
-            bool ok = p.val_len >= 1 && p.val_len <= ECUIO_PROFILE_NAME_MAX;
-            for (size_t k = 0; ok && k < p.val_len; ++k) {
-                const char c = p.val[k];
-                ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                     c == '.' || c == '_' || c == '-';
-            }
-            if (!ok) {
-                std::snprintf(why, why_cap,
-                              "profile: a registered profile's name, 1 to "
-                              "%d of a-z, 0-9, '.', '_' and '-'",
-                              ECUIO_PROFILE_NAME_MAX);
-                return ecuio_sim_uri_result::bad;
-            }
-            out->profile = p.val;
-            out->profile_len = p.val_len;
-        } else if (p.is("vin")) {
-            char vin[ECUIO_VIN_LEN + 1] = {};
-            ecuio_vin_info_t info;
-            if (p.val_len == ECUIO_VIN_LEN) {
-                std::memcpy(vin, p.val, ECUIO_VIN_LEN);
-            }
-            if (vin[0] == '\0' || ecuio_vin_decode(vin, 0, &info) != ECUIO_OK) {
-                std::snprintf(why, why_cap,
-                              "vin: 17 digits and capital letters, never I, "
-                              "O or Q");
-                return ecuio_sim_uri_result::bad;
-            }
-            std::memcpy(out->vin, vin, sizeof vin);
-            out->vin_given = true;
-        } else if (p.is("loop")) {
-            if (!value_is("0") && !value_is("1")) {
-                std::snprintf(why, why_cap, "loop: 0 or 1");
-                return ecuio_sim_uri_result::bad;
-            }
-            out->loop = value_is("1");
-        } else if (p.is("from") || p.is("to")) {
-            if (!ecuio_stretch::take(p, &out->stretch)) {
-                std::snprintf(why, why_cap,
-                              "from and to: the recording's seconds, as the "
-                              "viewer and havne-cli view show them, with at "
-                              "most three decimals");
-                return ecuio_sim_uri_result::bad;
-            }
-        } else if (p.is("faults")) {
-            if (!ecuio_sim_parse_faults(p.val, p.val_len, &out->faults, why,
-                                        why_cap)) {
-                return ecuio_sim_uri_result::bad;
-            }
+        if (!take_key(q.params[i], out, why, why_cap)) {
+            return ecuio_sim_uri_result::bad;
         }
     }
     if (out->profile_len != 0 && out->second_module) {

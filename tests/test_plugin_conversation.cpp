@@ -30,12 +30,37 @@ using conversation_test::conversation_of;
 using conversation_test::ecu_of;
 using conversation_test::Folder;
 using conversation_test::folder_of;
+using conversation_test::level_of;
 using conversation_test::load_folder;
 using conversation_test::load_packed;
 using conversation_test::Made;
+using conversation_test::packed_refusal;
 using conversation_test::Plugin;
+using conversation_test::service_of;
 using conversation_test::sha_of;
 using wasm_builder::bytes;
+
+/* The ECUs of the plugin Made's defaults describe, read back */
+void expect_the_default_ecus(const ecuio_plugin_t* p)
+{
+    /* the ECUs in the group's order, each by its reply ID */
+    const ecuio_plugin_conversation_ecu_t tcm = ecu_of(p, 0);
+    EXPECT_EQ(tcm.struct_size, sizeof tcm);
+    EXPECT_STREQ(tcm.id, "tcm");
+    for (size_t k = 3; k < sizeof tcm.id; ++k) {
+        EXPECT_EQ(tcm.id[k], '\0') << k;
+    }
+    EXPECT_EQ(tcm.rx_id, 0x7E9u);
+    EXPECT_EQ(tcm.tx_id, 0x7E1u) << "the standard's request ID for 7E9";
+    EXPECT_EQ(tcm.flags, 0u);
+    for (const uint32_t r : tcm.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+    const ecuio_plugin_conversation_ecu_t pcm = ecu_of(p, 1);
+    EXPECT_STREQ(pcm.id, "pcm");
+    EXPECT_EQ(pcm.rx_id, 0x7E8u);
+    EXPECT_EQ(pcm.tx_id, 0x7E0u);
+}
 
 /* What the plugin Made's defaults describe holds, read back */
 void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
@@ -61,23 +86,7 @@ void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
     EXPECT_EQ(c.reserved[0], 0u);
     EXPECT_EQ(c.reserved[1], 0u);
 
-    /* the ECUs in the group's order, each by its reply ID */
-    const ecuio_plugin_conversation_ecu_t tcm = ecu_of(p, 0);
-    EXPECT_EQ(tcm.struct_size, sizeof tcm);
-    EXPECT_STREQ(tcm.id, "tcm");
-    for (size_t k = 3; k < sizeof tcm.id; ++k) {
-        EXPECT_EQ(tcm.id[k], '\0') << k;
-    }
-    EXPECT_EQ(tcm.rx_id, 0x7E9u);
-    EXPECT_EQ(tcm.tx_id, 0x7E1u) << "the standard's request ID for 7E9";
-    EXPECT_EQ(tcm.flags, 0u);
-    for (const uint32_t r : tcm.reserved) {
-        EXPECT_EQ(r, 0u);
-    }
-    const ecuio_plugin_conversation_ecu_t pcm = ecu_of(p, 1);
-    EXPECT_STREQ(pcm.id, "pcm");
-    EXPECT_EQ(pcm.rx_id, 0x7E8u);
-    EXPECT_EQ(pcm.tx_id, 0x7E0u);
+    expect_the_default_ecus(p);
 
     const struct {
         uint8_t sid;
@@ -87,9 +96,8 @@ void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
                     {0x27, {0x01, 0x02, 0x03, 0x04}},
                     {0x3E, {0x00}}};
     for (uint32_t i = 0; i < 4; ++i) {
-        ecuio_plugin_service_t s;
-        std::memset(&s, 0xA5, sizeof s);
-        ASSERT_EQ(ecuio_plugin_service(p, i, &s), ECUIO_OK);
+        const ecuio_plugin_service_t s = service_of(p, i);
+        EXPECT_EQ(s.struct_size, sizeof s);
         EXPECT_EQ(s.sid, services[i].sid);
         ASSERT_EQ(s.sub_count, services[i].subs.size()) << "service " << i;
         for (size_t k = 0; k < sizeof s.subs; ++k) {
@@ -97,13 +105,13 @@ void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
                       k < services[i].subs.size() ? services[i].subs[k] : 0)
                 << "service " << i << ", sub " << k;
         }
+        EXPECT_EQ(s.flags, 0u);
         EXPECT_EQ(s.reserved[0], 0u);
         EXPECT_EQ(s.reserved[1], 0u);
     }
 
-    ecuio_plugin_security_level_t l;
-    std::memset(&l, 0xA5, sizeof l);
-    ASSERT_EQ(ecuio_plugin_security_level(p, 0, &l), ECUIO_OK);
+    ecuio_plugin_security_level_t l = level_of(p, 0);
+    EXPECT_EQ(l.struct_size, sizeof l);
     EXPECT_EQ(l.rx_id, 0x7E8u);
     EXPECT_EQ(l.level, 0x01);
     EXPECT_EQ(l.seed_bytes, 4);
@@ -111,10 +119,11 @@ void expect_the_default(const ecuio_plugin_t* p, const bytes& module)
     EXPECT_EQ(l.reserved0, 0);
     EXPECT_EQ(l.delay_ms, 10000u) << "the default";
     EXPECT_EQ(l.key_window_ms, 1000u) << "the default";
+    EXPECT_EQ(l.flags, 0u);
     for (const uint32_t r : l.reserved) {
         EXPECT_EQ(r, 0u);
     }
-    ASSERT_EQ(ecuio_plugin_security_level(p, 1, &l), ECUIO_OK);
+    l = level_of(p, 1);
     EXPECT_EQ(l.rx_id, 0x7E9u);
     EXPECT_EQ(l.level, 0x03);
     EXPECT_EQ(l.seed_bytes, 16);
@@ -206,27 +215,26 @@ TEST(PluginConversationTest, EachBoundsOwnValueLoads)
     EXPECT_EQ(std::string(longest.id, sizeof longest.id),
               std::string(31, 'x') + std::string(1, '\0'))
         << "an id of 31 characters, whole and ended";
-    ecuio_plugin_service_t s{};
-    ASSERT_EQ(ecuio_plugin_service(p.get(), 4, &s), ECUIO_OK);
+    ecuio_plugin_service_t s = service_of(p.get(), 4);
     EXPECT_EQ(s.sid, 0x27);
     ASSERT_EQ(s.sub_count, 14);
     EXPECT_EQ(s.subs[0], 0x01);
     EXPECT_EQ(s.subs[13], 0x0E);
-    ASSERT_EQ(ecuio_plugin_service(p.get(), 6, &s), ECUIO_OK);
+    EXPECT_EQ(s.flags, 0u) << "the last sub-function ends at the flags";
+    s = service_of(p.get(), 6);
     EXPECT_EQ(s.sid, 0x3E);
 
-    ecuio_plugin_security_level_t l{};
-    ASSERT_EQ(ecuio_plugin_security_level(p.get(), 0, &l), ECUIO_OK);
+    ecuio_plugin_security_level_t l = level_of(p.get(), 0);
     EXPECT_EQ(l.rx_id, 0x700u);
     EXPECT_EQ(l.level, 0x01);
     EXPECT_EQ(l.seed_bytes, 1);
     EXPECT_EQ(l.key_bytes, 1);
     EXPECT_EQ(l.delay_ms, 1000u);
     EXPECT_EQ(l.key_window_ms, 50u);
-    ASSERT_EQ(ecuio_plugin_security_level(p.get(), 1, &l), ECUIO_OK);
+    l = level_of(p.get(), 1);
     EXPECT_EQ(l.rx_id, 0x700u) << "a second level of one ECU";
     EXPECT_EQ(l.level, 0x03);
-    ASSERT_EQ(ecuio_plugin_security_level(p.get(), 31, &l), ECUIO_OK);
+    l = level_of(p.get(), 31);
     EXPECT_EQ(l.rx_id, 0x70Fu);
     EXPECT_EQ(l.level, 0x07) << "a level number other ECUs have too";
     EXPECT_EQ(l.seed_bytes, 255);
@@ -255,17 +263,23 @@ TEST(PluginConversationTest, Format2WithTheDataTierAloneIsAPluginAsBefore)
     EXPECT_EQ(info.variant_count, 1u);
 }
 
-TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
+/* A format 1 plugin of the data tier alone: what the getters refuse */
+Plugin load_data_only()
 {
-    const Made m;
-    Plugin p = load_packed(m.json());
-    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
     Made plain;
     plain.format = "1";
     plain.tiers = R"(["data"])";
     plain.has_group = false;
     plain.has_binary = false;
-    Plugin data_only = load_packed(plain.json());
+    return load_packed(plain.json());
+}
+
+TEST(PluginConversationTest, TheConversationAndEcuGettersRefuseWhatTheyCantFill)
+{
+    const Made m;
+    Plugin p = load_packed(m.json());
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    Plugin data_only = load_data_only();
     ASSERT_NE(data_only, nullptr) << ecuio_last_error_detail();
 
     ecuio_plugin_conversation_t c;
@@ -313,10 +327,20 @@ TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
     e.struct_size = sizeof e + 8; /* a later caller's larger struct */
     EXPECT_EQ(ecuio_plugin_conversation_ecu(p.get(), 0, &e), ECUIO_OK);
     EXPECT_EQ(e.struct_size, sizeof e);
+}
+
+TEST(PluginConversationTest, TheServiceAndLevelGettersRefuseWhatTheyCantFill)
+{
+    const Made m;
+    Plugin p = load_packed(m.json());
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    Plugin data_only = load_data_only();
+    ASSERT_NE(data_only, nullptr) << ecuio_last_error_detail();
 
     ecuio_plugin_service_t s;
     ecuio_plugin_service_t s_untouched;
     std::memset(&s, 0xA5, sizeof s);
+    s.struct_size = sizeof s;
     s_untouched = s;
     EXPECT_EQ(ecuio_plugin_service(nullptr, 0, &s), ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_plugin_service(p.get(), 0, nullptr),
@@ -325,10 +349,19 @@ TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
     EXPECT_EQ(ecuio_plugin_service(data_only.get(), 0, &s),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(std::memcmp(&s, &s_untouched, sizeof s), 0);
+    s.struct_size = sizeof s - 1;
+    s_untouched = s;
+    EXPECT_EQ(ecuio_plugin_service(p.get(), 0, &s), ECUIO_ERR_INVALID_ARGUMENT)
+        << "a struct smaller than this core's";
+    EXPECT_EQ(std::memcmp(&s, &s_untouched, sizeof s), 0);
+    s.struct_size = sizeof s + 8; /* a later caller's larger struct */
+    EXPECT_EQ(ecuio_plugin_service(p.get(), 0, &s), ECUIO_OK);
+    EXPECT_EQ(s.struct_size, sizeof s);
 
     ecuio_plugin_security_level_t l;
     ecuio_plugin_security_level_t l_untouched;
     std::memset(&l, 0xA5, sizeof l);
+    l.struct_size = sizeof l;
     l_untouched = l;
     EXPECT_EQ(ecuio_plugin_security_level(nullptr, 0, &l),
               ECUIO_ERR_NULL_ARGUMENT);
@@ -339,6 +372,27 @@ TEST(PluginConversationTest, TheGettersRefuseWhatTheyCantFill)
     EXPECT_EQ(ecuio_plugin_security_level(data_only.get(), 0, &l),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(std::memcmp(&l, &l_untouched, sizeof l), 0);
+    l.struct_size = sizeof l - 1;
+    l_untouched = l;
+    EXPECT_EQ(ecuio_plugin_security_level(p.get(), 0, &l),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a struct smaller than this core's";
+    EXPECT_EQ(std::memcmp(&l, &l_untouched, sizeof l), 0);
+    l.struct_size = sizeof l + 8; /* a later caller's larger struct */
+    EXPECT_EQ(ecuio_plugin_security_level(p.get(), 0, &l), ECUIO_OK);
+    EXPECT_EQ(l.struct_size, sizeof l);
+}
+
+TEST(PluginConversationTest, OneEcuAnswersAtAReplyId)
+{
+    /* a level names its ECU by rx_id alone, so no two ECUs share one */
+    Made m;
+    m.ecus = R"([{"id": "pcm", "rx": "7E8"}, {"id": "tcm", "rx": "7E9"}, )"
+             R"({"id": "abs", "rx": "7E9"}])";
+    const std::string why = packed_refusal(m);
+    EXPECT_NE(why.find("ecu 'abs' shares its rx with ecu 'tcm'"),
+              std::string::npos)
+        << why;
 }
 
 TEST(PluginConversationTest, AFoldersModuleIsReadCountedAndJudged)
@@ -389,6 +443,11 @@ TEST(PluginConversationTest, AFoldersModuleIsReadCountedAndJudged)
         Plugin p = load_folder(f);
         EXPECT_NE(p, nullptr) << ecuio_last_error_detail();
     }
+}
+
+TEST(PluginConversationTest, AFoldersModuleCountsTowardThePackage)
+{
+    const Made m;
     {
         /* the module's bytes count toward the package's 16 MiB: 16 data
          * files that with the manifest and the module come to it exactly,

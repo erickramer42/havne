@@ -10,6 +10,7 @@
 # as its bytes), and:
 # - plugins check writes the same conversation line for both, after the
 #   plugin line, with the module's size and SHA-256;
+# - each security level's "ecu" is its manifest id, one of the line's ecus;
 # - plugins list writes it too;
 # - a folder whose module lost a byte is refused at the hash, exit 3;
 # - plugins put and plugins drop refuse the packed file, exit 3, and
@@ -86,6 +87,11 @@ def main():
             line = conv_p[0]
             check(line["ecus"][0] == {"id": "pcm", "rx": "0x7E8", "tx": "0x7E0"},
                   f"an ECU by its id and both IDs: {line['ecus']}")
+            check([s["ecu"] for s in line["security"]]
+                  == [s["ecu"] for s in packed["conversation"]["security"]],
+                  f"each level's ecu is the manifest's id: {line['security']}")
+            check({s["ecu"] for s in line["security"]} <= {e["id"] for e in line["ecus"]},
+                  f"each level's ecu is one of the line's ecus: {line['security']}")
             check(line["code"] == {"bytes": len(code), "sha256": hashlib.sha256(code).hexdigest()},
                   f"the code's size and hash: {line['code']}")
             types = [l.get("type") for l in lines_p]
@@ -150,7 +156,8 @@ def main():
         line = [l for l in lines_x if l.get("type") == "conversation"]
         check(code_x == 0 and len(line) == 1 and len(line[0]["ecus"]) == 32
               and len(line[0]["security"]) == 32 and len(line[0]["services"]) == 7
-              and line[0]["security"][31]["delay_ms"] == 3600000,
+              and line[0]["security"][31]["delay_ms"] == 3600000
+              and [s["ecu"] for s in line[0]["security"]] == [e["id"] for e in wide["ecus"]],
               f"the widest plugin: exit {code_x}, {[l for l in lines_x if l.get('type') == 'error']}"
               f", {len(line)} conversation lines")
 

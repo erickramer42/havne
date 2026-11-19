@@ -669,12 +669,12 @@ DashEditKit {
         tryVerify(() => Bridge.connected, 5000)
         wait(100)
         page.drivePart.enterDrive()
-        verify(!page.driving, "editing is an editor")
+        verify(!page.drivePart.driving, "editing is an editor")
         // The gate's own term: the frame still on with editing already off
         page.editing = false
         verify(page.phoneEdit)
         page.drivePart.enterDrive()
-        verify(!page.driving, "the frame is an editor")
+        verify(!page.drivePart.driving, "the frame is an editor")
         page.editing = true
         page.stopEditing()
     }

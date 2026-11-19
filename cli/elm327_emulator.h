@@ -49,7 +49,8 @@ public:
     static constexpr uint8_t kTimeoutDefault = 0x32;
     /* P2*: how long an ECU's 7F <service> 78 has the adapter wait on */
     static constexpr int64_t kPendingWaitUs = 5000000;
-    /* Consecutive Frames one after another at STmin 0 */
+    /* Consecutive Frames one after another at STmin 0, unless the
+     * module's own fc or cf (ecuio_sim_reply_t) is longer */
     static constexpr int64_t kFrameGapUs = 500;
     /* The stalled fault's gap before the last Consecutive Frame */
     static constexpr int64_t kStalledGapUs = 160000;
@@ -507,7 +508,10 @@ private:
                      wait);
     }
 
-    /* The CAN frames the replies put on the bus, in time order */
+    /* The CAN frames the replies put on the bus, in time order: the
+     * first Consecutive Frame fc after the adapter's Flow Control (sent
+     * as the First Frame comes), the rest cf apart, each at least
+     * kFrameGapUs */
     static std::vector<Frame> frames_of(const ecuio_sim_reply_t* replies,
                                         uint32_t count, int64_t now)
     {
@@ -540,9 +544,11 @@ private:
                 Frame cf{};
                 cf.id = r.reply_id;
                 cf.message = m;
+                /* fc before the first, cf before each after it */
+                const int64_t pace = i == 6 ? r.fc_us : r.cf_us;
                 at += (last && (r.flags & ECUIO_SIM_REPLY_STALLED) != 0)
                           ? kStalledGapUs
-                          : kFrameGapUs;
+                          : std::max<int64_t>(kFrameGapUs, pace);
                 cf.at = at;
                 const uint8_t s =
                     (last && (r.flags & ECUIO_SIM_REPLY_BAD_SEQUENCE) != 0)

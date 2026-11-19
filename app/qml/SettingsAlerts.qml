@@ -53,7 +53,7 @@ ColumnLayout {
         return o
     }
     function refreshRows() {
-        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.offlineUri),
+        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.uriPart.offlineUri),
                           r => root.plainRow(r))
                    .filter(r => r.ref !== "" && !r.isText)
     }

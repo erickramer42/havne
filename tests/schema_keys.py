@@ -9,7 +9,8 @@
 # exactly those keys plus "notes", with "^x-" free and nothing else
 # (additionalProperties false), as only_keys allows. A call the table
 # doesn't map, an entry no call matches, and a schema object no call maps
-# all fail, so a key added on either side alone fails. The loaders' word
+# all fail, so a key added on either side alone fails, but for an OPEN
+# object, whose loader checks no keys on purpose. The loaders' word
 # lists that a schema spells as an enum (kinds, groups, services, byte
 # orders, extends, tiers) are compared too, and a schema's request count
 # with profile.h's ECUIO_PROFILE_MAX_REQUESTS.
@@ -19,22 +20,25 @@ import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin_manifest.cpp",
+LOADERS = ("core/src/signal_file.cpp", "core/src/signal_file_parts.cpp",
+           "core/src/signal_file_source.cpp", "core/src/plugin_manifest.cpp",
            "core/src/plugin_conversation.cpp", "core/src/plugin.cpp",
            "core/src/condition_file.cpp")
+# Where only_keys itself is defined
+RULES = "core/src/signal_file_rules.cpp"
 SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
 # (loader, the call's context argument as written, its place among the
 # calls with that context in that file, from 1) -> (schema, JSON pointer)
 CALLS = {
-    ("signal_file.cpp", '"an ECU"', 1): ("signal-file", "/$defs/ecu"),
-    ("signal_file.cpp", "what + \"'s read\"", 1): ("signal-file", "/$defs/read"),
+    ("signal_file_parts.cpp", '"an ECU"', 1): ("signal-file", "/$defs/ecu"),
+    ("signal_file_parts.cpp", "what + \"'s read\"", 1): ("signal-file", "/$defs/read"),
     # read_field: text and hex, then enum, then number
-    ("signal_file.cpp", "what + \"'s field\"", 1): ("signal-file", "/$defs/textField"),
-    ("signal_file.cpp", "what + \"'s field\"", 2): ("signal-file", "/$defs/enumField"),
-    ("signal_file.cpp", "what + \"'s field\"", 3): ("signal-file", "/$defs/numberField"),
-    ("signal_file.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
-    ("signal_file.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 1): ("signal-file", "/$defs/textField"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 2): ("signal-file", "/$defs/enumField"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 3): ("signal-file", "/$defs/numberField"),
+    ("signal_file_parts.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
+    ("signal_file_source.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
     ("signal_file.cpp", '"the file"', 1): ("signal-file", ""),
     # build: computed, then text and hex, then enum, then number
     ("signal_file.cpp", "what", 1): ("signal-file", "/$defs/computedSignal"),
@@ -67,14 +71,20 @@ CALLS = {
     ("condition_file.cpp", "r", 1): ("condition-file", "/$defs/record"),
 }
 
+# Objects whose loader takes keys it doesn't know, on purpose -> why
+OPEN = {
+    ("plugin-manifest", "/$defs/pageFile"):
+        "a page is a layout file, which keeps keys it doesn't know (ADR-0057)",
+}
+
 # (source, a pattern whose group 1 is one word of the list) -> (schema,
 # pointer to the enum or const that spells it)
 WORDS = [
     ("core/src/signal_file.cpp", r'e\.kind != "([a-z]+)"',
      ("signal-file", "/$defs/signal/allOf/0/properties/kind/enum")),
-    ("core/src/signal_file.cpp", r'service->text == "([0-9A-F]+)"',
+    ("core/src/signal_file_parts.cpp", r'service->text == "([0-9A-F]+)"',
      ("signal-file", "/$defs/read/properties/service/enum")),
-    ("core/src/signal_file.cpp", r'order->text [!=]= "([a-z]+)"',
+    ("core/src/signal_file_parts.cpp", r'order->text [!=]= "([a-z]+)"',
      ("signal-file", "/$defs/order/enum")),
     ("core/src/signal_file.cpp", r'extends->text != "([a-z0-9]+)"',
      ("signal-file", "/$defs/extends/enum")),
@@ -247,7 +257,7 @@ def main():
             failures.append(f"CALLS maps {key} to {schema}.schema.json#{ptr}, "
                             f"but no only_keys call has that context and place")
 
-    mapped = {(s, p) for s, p in CALLS.values()}
+    mapped = {(s, p) for s, p in CALLS.values()} | set(OPEN)
     for s in SCHEMAS:
         for ptr in object_schemas(schemas[s]):
             if (s, ptr) not in mapped:
@@ -255,7 +265,7 @@ def main():
                                 f"properties that no only_keys call maps to")
 
     # only_keys's own rule: "notes" a string, "x-" keys skipped
-    with open(os.path.join(root, LOADERS[0]), encoding="utf-8") as f:
+    with open(os.path.join(root, RULES), encoding="utf-8") as f:
         sf = f.read()
     body = re.search(r"void only_keys\(.*?\n\}", sf, re.S)
     if body is None or 'm.key == "notes"' not in body.group(0) \

@@ -405,6 +405,27 @@ otherwise near idle), packing on, 92 requests in the rotation:
   too, and the Windows rows' 60 s run (2026-11-01, a sweep through the
   phone's relay running beside it) dropped none and timed none out.
 
+### The pacing model (virtual time)
+
+`tests/bench_pacing.cpp` (target `bench_pacing`, built with the tests,
+never run by ctest) drives the request engine on a simulated clock
+against the simulated car: each transport's worker is modeled by its
+own calls (`tests/pacing_bench.h`), each module's reply timing is drawn
+from the test car's (request to first frame P50 3.46 ms, P99 10.93 ms;
+[2026-11-03-socketcan-car](bench-sessions/2026-11-03-socketcan-car.md)),
+the replies share one 500 kbit/s bus, and the replies are counted by
+`log`'s own tally. A run gives the same figures on every machine.
+`PacingTest` (`test_pacing`) pins the engine's pacing against it in
+CI. The constants are not yet fitted to a car run, so the figures are
+the model's, not the car's.
+
+```sh
+build/tests/Release/bench_pacing.exe [seconds, default 70]
+```
+
+[ADR-0042](adr/0042-reply-timing.md)'s appendix of 2026-11-18 says what
+the model includes and when a pacing change ships on its figures.
+
 ### Connect cost: a surrogate per session
 
 Result: a create and close takes 18 to 28 ms against the x64 fake.

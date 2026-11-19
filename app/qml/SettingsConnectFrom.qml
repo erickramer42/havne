@@ -124,7 +124,7 @@ Item {
     // is kept: the profile added is the vehicle's pick of this moment
     function connectFromList(uri) {
         const composed = listConnectUri(uri)
-        host.uriField.text = composed
+        host.connectPart.uriField.text = composed
         requestConnect(composed, listAddress(uri))
     }
 }

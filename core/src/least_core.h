@@ -65,6 +65,8 @@ inline constexpr version kSetSignals = {{0, 9, 0}};
 /* A variant's written copy past one file's ECUIO_SIGNAL_FILE_MAX_BYTES
  * (v0.9.0, ADR-0065) */
 inline constexpr version kSetBytes = {{0, 9, 0}};
+/* A manifest's "pages", the Dashboard pages it carries (v0.9.0) */
+inline constexpr version kPages = {{0, 9, 0}};
 
 /* Each "havne_signals" by its number: [0] stands for none */
 inline constexpr version kSignalFormatSince[] = {kSignalFile, kSignalFile,
@@ -108,6 +110,9 @@ static_assert(ECUIO_PLUGIN_PACKAGE_MAX == 16777216 &&
                   ECUIO_PLUGIN_MAX_VARIANTS == 32 &&
                   ECUIO_PLUGIN_MAX_FIXTURES == 16,
               "a plugin bound moved: add a row for it beside kPackage");
+static_assert(ECUIO_PLUGIN_MAX_PAGES == 16 &&
+                  ECUIO_PLUGIN_PAGE_MAX_BYTES == 82400,
+              "a page bound moved: add a row for it beside kPages");
 static_assert(ECUIO_ENUM_MAX_ENTRIES == 256 && ECUIO_ENUM_LABEL_MAX == 27 &&
                   ECUIO_SET_MAX_TABLE == 65536,
               "an enum or table bound moved: add a row for it");

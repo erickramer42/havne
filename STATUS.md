@@ -114,7 +114,11 @@ an issue is resolved it is removed, and its number is not reused.
     ([2026-11-11-monitor-car](docs/bench-sessions/2026-11-11-monitor-car.md)).
     The request goes out again on its next turn, so a
     signal still updates, less often. For a session that asks two
-    modules through the VX, `?pack=0` keeps the losses near 1%.
+    modules through the VX, `?pack=0` keeps the losses near 1%. On
+    2026-11-18, with the engine's DID asked 84 times a second, the VX
+    delivered 55% of the second module's replies (596 of 1,082 on the
+    bus), against 76% on 2026-11-11
+    ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
 - **#43. On a phone with gesture navigation, leaving the drive view
     takes three back swipes.** The view hides Android's bars, and
     Android spends the first swipe from the edge showing them; the
@@ -123,22 +127,37 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#44. The extended session's close is fixed against the fakes; the
-    car re-run is owed (BENCH prep #36).** Through an ELM327 adapter the
-    close finishes a reply the stop cut off, then sends `10 01`, again
-    if the adapter answers `STOPPED`; through J2534 it reads the
-    module's answer before the filters stop, so the module isn't left
-    repeating it ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s
-    appendix "the close waits for the module"). Through SocketCAN the
-    close waits for a read still out before `10 01`, with J2534's bound
-    (the appendix of 2026-11-12), against the simulated bus only: a
-    SocketCAN session that asks needs an adapter whose driver offers
-    one-shot mode (BENCH prep #32). The car runs of
-    2026-11-11 found the earlier closes short
-    ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
-    [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
-    The number closes with a parked car run, a listener on the bus,
-    that reads one `50 01`.
+- **#45. A scan DID whose reply was lost is never asked again.**
+    Through the OBDX Pro VX, 0x7E8's single-frame reply to one DID of a
+    scan block was on the bus while 0x7E9's segmented reply was coming in,
+    and the VX did not deliver it. The DID went out once, and the scan sat
+    at 511 of 512 for the 84 s that remained
+    ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
+    The same block through the MX+ found all 43. In the poll after a scan a
+    lost reply's request goes out again on its next turn.
+- **#46. The VIN can switch the picked vehicle without changing the
+    session's profile.** Connected with a two-channel vehicle picked, the
+    VIN switched the pick to the four-channel vehicle the VIN was
+    recognized for, and the session kept the two-channel profile, so the
+    log names one vehicle and the session reads the other's channels
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#47. With an adapter's address, the "Default" profile reads plain
+    `obd2`, not the picked vehicle's plugin.** A user who picks a plugin's
+    vehicle and connects on Default reads `obd2` without the plugin's
+    signals; only picking the plugin's profile in Settings forms the URI
+    with it. A wording issue: the row names "Default" without saying what
+    it is for an adapter
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#48. A connect may log "no answer to the supported-PID query" before
+    the support line.** The walk's first `01 00` met a stray single frame,
+    asked again 0.4 s later, and the log shows the first line, then the
+    right one 0.3 s after, which a user reads as a fault. Low
+    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
+- **#49. The ELM327 worker's 5 s watchdog does not fire across a host's
+    sleep.** It counts the host's clock, so it fired only on the wake: a
+    session stood stalled for 19 minutes until the laptop woke, then
+    closed with a hard-failure line
+    ([2026-11-18-session-close-car](docs/bench-sessions/2026-11-18-session-close-car.md)).
 
 ## Roadmap
 
