@@ -369,6 +369,15 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?gap=1.5",
         "?gap=5ms",
         "?gap= 5",
+        "?packframes=",
+        "?packframes=0",
+        "?packframes=16",
+        "?packframes=0x2",
+        "?packframes=+1",
+        "?packframes=-1",
+        "?packframes=1.5",
+        "?packframes= 1",
+        "?pack=0&packframes=1",
         /* uds-generic (ADR-0020): its DIDs come from ?did=, which no
          * other profile takes */
         "?did=1E1C",
@@ -421,7 +430,7 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
                  "j2534:// takes no query key 'band', only baud, flags, "
                  "filter, txid, poll, probe, identify, diagnose, pack, scan, "
                  "gap, profile, did, "
-                 "session and keepalive_ms");
+                 "session, keepalive_ms and packframes");
     snprintf(uri, sizeof(uri), "j2534://%s?probe=yes", FAKE_J2534_DLL_PATH);
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(), "?probe= needs 0 or 1, not 'yes'");
@@ -436,6 +445,16 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
     EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "?gap= needs a time in ms from 0 to 1000, not '1001'");
+    snprintf(uri, sizeof(uri), "j2534://%s?packframes=16", FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?packframes= needs a frame count from 1 to 15, not '16'");
+    snprintf(uri, sizeof(uri), "j2534://%s?pack=0&packframes=1",
+             FAKE_J2534_DLL_PATH);
+    EXPECT_EQ(ecuio_session_create(uri, &session), ECUIO_ERR_BAD_URI);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "?packframes= sizes Service 01 packs: it can't go with "
+                 "?pack=0");
 
     /* Both values are taken, with any profile, and every gap from 0 to
      * the most. */
@@ -443,7 +462,8 @@ TEST_F(J2534QueryParamTest, RefusedQueriesNameTheirCause)
          {"?profile=raw&probe=0", "?probe=1", "?probe=0&probe=1",
           "?profile=raw&identify=0", "?identify=1&probe=0",
           "?profile=raw&diagnose=0", "?diagnose=1", "?gap=0", "?gap=1000",
-          "?profile=raw&gap=20"}) {
+          "?profile=raw&gap=20", "?packframes=1", "?packframes=15",
+          "?probe=0&packframes=2"}) {
         snprintf(uri, sizeof(uri), "j2534://%s%s", FAKE_J2534_DLL_PATH, q);
         EXPECT_EQ(start_session_with_uri(uri), ECUIO_OK) << "query: " << q;
     }

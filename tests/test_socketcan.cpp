@@ -893,6 +893,16 @@ TEST(SocketCanTest, TheUriIsCheckedBeforeAnyInterface)
     EXPECT_NE(c.detail.find("?gap= belongs to a profile that asks an ECU"),
               std::string::npos)
         << c.detail;
+    c = create("socketcan://vcan0?packframes=1");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(
+        c.detail.find("?packframes= belongs to a profile that asks an ECU"),
+        std::string::npos)
+        << c.detail;
+    c = create("socketcan://vcan0?profile=obd2&packframes=16");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("a frame count from 1 to 15"), std::string::npos)
+        << c.detail;
     c = create("socketcan://vcan0?profile=obd2&gap=1001");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
     EXPECT_NE(c.detail.find("a time in ms from 0 to 1000"), std::string::npos)

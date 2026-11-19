@@ -298,6 +298,11 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                          "it needs ?session=03");
         return ECUIO_ERR_BAD_URI;
     }
+    if (params.pack_frames != 0 && !params.pack) {
+        ecuio_detail_set("?packframes= sizes Service 01 packs: it can't go "
+                         "with ?pack=0");
+        return ECUIO_ERR_BAD_URI;
+    }
     if (params.session == ECUIO_SESSION_EXTENDED) {
         const int64_t keepalive_us =
             params.keepalive_ms != 0
@@ -341,6 +346,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     *probe = params.probe && !params.has_poll;
     /* Packing needs the bitmaps: it packs only the PIDs they list */
     e->pack = params.pack && *probe;
+    e->pack_frames = params.pack_frames;
     const bool requests = e->count > 0 || e->scan_count > 0;
     *identify = params.identify && !params.has_poll && requests;
     if (*identify) {
