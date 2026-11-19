@@ -28,6 +28,7 @@
 
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _WIN32
@@ -46,6 +47,9 @@ namespace {
 /* The scratch folder, one per process (libFuzzer's -jobs run several):
  * the recording in rec/, each output beside it */
 std::string g_folder;
+/* The input holds the scratch folder's path, so a detail quoting the
+ * recording's own text can hold it too */
+bool g_input_holds_folder = false;
 
 void remove_folder()
 {
@@ -152,7 +156,8 @@ void remove_out(const std::string& p)
 }
 
 /* A refusal or a check's failure: LOAD_FAILED, one line that never
- * names the scratch folder; success writes the output and nothing else */
+ * names the scratch folder (by its whole path: a detail may quote the
+ * input's own text); success writes the output and nothing else */
 void judge(ecuio_status_t rc, uint32_t failed_class, const std::string& out,
            bool may_be_invalid = false)
 {
@@ -163,7 +168,8 @@ void judge(ecuio_status_t rc, uint32_t failed_class, const std::string& out,
     const char* detail = ecuio_last_error_detail();
     if (detail == nullptr || strlen(detail) >= 512 ||
         strchr(detail, '\n') != nullptr ||
-        strstr(detail, "ecuio-fuzz-export") != nullptr) {
+        (!g_input_holds_folder &&
+         strstr(detail, g_folder.c_str()) != nullptr)) {
         abort();
     }
     if (rc == ECUIO_OK && failed_class != 0) {
@@ -376,6 +382,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         (data[0] != 'F' && data[0] != '3' && data[0] != '4')) {
         return 0;
     }
+    g_input_holds_folder =
+        std::string_view(reinterpret_cast<const char*>(data), size)
+            .find(folder()) != std::string_view::npos;
     const uint8_t* parts[5] = {};
     size_t lens[5] = {};
     size_t count = 0;
