@@ -423,6 +423,19 @@ struct package {
         return i;
     }
 
+    /* Whether path is one of the manifest's "pages", which no variant reads */
+    bool is_page(const std::string& path)
+    {
+        if (const Value* list = at(doc, "pages")) {
+            for (const Value& f : list->items) {
+                if (f.text == path) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     bool listed_elsewhere(const std::string& path, size_t but)
     {
         Value& list = variants();
@@ -440,7 +453,7 @@ struct package {
     }
 
     /* Takes out the data files only variant index lists, and the ECUs
-     * only those files read */
+     * only those files read; the pages stay */
     void detach(size_t index)
     {
         const Value* list = at(doc, "ecus");
@@ -451,6 +464,10 @@ struct package {
         std::set<std::string> kept;
         std::vector<Member> staying;
         for (Member& m : files().members) {
+            if (is_page(m.key)) {
+                staying.push_back(std::move(m));
+                continue;
+            }
             bool own = false;
             for (const Value& f :
                  variants().items[index].find("files")->items) {
@@ -540,6 +557,9 @@ public:
         }
         if (!(before == after)) {
             for (Member& m : p_.files().members) {
+                if (p_.is_page(m.key)) {
+                    continue;
+                }
                 for (Value& s : at(m.value, "signals")->items) {
                     if (unnamed(s)) {
                         add(s, "ecu", text_value(id_at(before)));

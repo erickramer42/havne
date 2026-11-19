@@ -16,8 +16,9 @@
 # compile. It reads C++ only: the headers that compile as C keep their C
 # casts behind a NOLINTBEGIN with that reason.
 #
-# Two size checks run as warnings that never fail (WarningsAsErrors
-# excludes them, and scripts/tidy.sh counts their lines apart):
+# Two size checks run as warnings clang-tidy itself never fails on
+# (WarningsAsErrors excludes them); scripts/tidy.sh judges their lines
+# against scripts/tidy-size-baseline.txt, which only shrinks:
 # readability-function-size at 80 lines, since a function that long is
 # read and rebuilt as one unit, and readability-function-cognitive-complexity
 # at 40, which also names short functions that branch deeply. The size

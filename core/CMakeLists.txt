@@ -27,6 +27,11 @@ add_library(ecuio-core STATIC
     src/recorder_writer.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/recording_reader_events.cpp
+    src/recording_reader_source.cpp
+    src/recording_reader_rows.cpp
+    src/recording_reader_stats.cpp
+    src/recording_reader_search.cpp
     src/scrub.cpp
     src/scrub_frames.cpp
     src/mock_transport.cpp
@@ -61,6 +66,7 @@ add_library(ecuio-core STATIC
     src/plugin_manifest.cpp
     src/plugin_conversation.cpp
     src/plugin_merge.cpp
+    src/plugin_pages.cpp
     src/plugin_wrap.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp

@@ -1,0 +1,15 @@
+{
+  "havne_plugin": 1,
+  "id": "pages",
+  "name": "A Dashboard page for each form",
+  "version": "1.0.0",
+  "requires": { "core": "0.1.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [
+    { "id": "base", "files": ["data/base.json"] },
+    { "id": "turbo", "files": ["data/base.json", "data/turbo.json"] }
+  ],
+  "pages": ["pages/engine-phone.json", "pages/engine-desktop.json"]
+}

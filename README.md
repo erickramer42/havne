@@ -96,7 +96,7 @@ it, a frame's path from transport to screen included.
 
 | File | What it shows |
 |---|---|
-| [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine: pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
+| [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine (its parts are the `request_engine_*.h` beside it): pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
 | [`core/src/isotp.h`](core/src/isotp.h) | ISO-TP on classic CAN, shared by ELM327 and SocketCAN: reassembly, Flow Control, the timers, with no I/O and no clock; fuzzed |
 | [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
 | [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |

@@ -139,6 +139,12 @@ std::string loader::place(const refused& r) const
                 break;
             }
         }
+        for (size_t i = 0; i < page_values_.size(); ++i) {
+            if (holds(page_values_[i], r.at)) {
+                where = page_paths_[i] + ", ";
+                break;
+            }
+        }
     }
     return where + "line " + std::to_string(r.line) + ", column " +
            std::to_string(r.column) + ": " + r.words;
@@ -156,6 +162,7 @@ void loader::read_manifest(ecuio_plugin& p)
     read_match(root, p);
     read_fixtures(root, p);
     read_files(root, p);
+    read_pages(root, p);
     const std::vector<std::vector<const data_file*>> lists =
         read_variants(root, p);
     const Value* variants = root.find("variants");
@@ -205,7 +212,7 @@ void loader::read_format(const Value& root, ecuio_plugin& p)
     only_keys(root,
               {"havne_plugin", "id", "name", "version", "requires", "lineage",
                "source", "tiers", "match", "ecus", "variants", "fixtures",
-               "files", "conversation"},
+               "files", "conversation", "pages"},
               "the manifest");
 }
 
@@ -424,8 +431,10 @@ void loader::read_files(const Value& root, const ecuio_plugin& p)
                    "path");
         }
         expect(*files, Type::object, "\"files\"");
-        if (files->members.size() > ECUIO_PLUGIN_MAX_FILES) {
-            refuse(*files, "\"files\" holds more than 64");
+        /* The pages' room beside the data and binary files' 64 */
+        if (files->members.size() >
+            ECUIO_PLUGIN_MAX_FILES + ECUIO_PLUGIN_MAX_PAGES) {
+            refuse(*files, "\"files\" holds more than 80");
         }
         for (const Member& m : files->members) {
             if (!path_ok(m.key)) {
@@ -534,6 +543,9 @@ const data_file* loader::file_at(const Value& at, const std::string& path)
         if (f.path == path) {
             return &f;
         }
+    }
+    if (is_page(path)) {
+        refuse(at, "file " + q(path) + " is a page, which no variant reads");
     }
     if (packed()) {
         refuse(at, "file " + q(path) + " isn't in \"files\"");

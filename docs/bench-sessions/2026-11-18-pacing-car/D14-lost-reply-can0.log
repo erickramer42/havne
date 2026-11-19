@@ -1,0 +1,12 @@
+# D14 on can0: 0x7E8's single-frame reply to one scan DID, due while 0x7E9's segmented reply comes in
+# (the scan DID is written <scan DID>); its requests on can0 in D14's 90 s: 1
+(1795051636.400339) can0 7E1#0322F18800000000
+(1795051636.402046) can0 7E0#0322<scan DID>00000000
+(1795051636.402735) can0 7E9#101B<identification>
+(1795051636.402766) can0 7E1#3000000000000000
+(1795051636.406963) can0 7E8#0462<scan DID>00000000
+(1795051636.407667) can0 7E9#21<identification>
+(1795051636.412591) can0 7E9#22<identification>
+(1795051636.418244) can0 7E9#23<identification>
+(1795051636.419591) can0 7E1#0322F18900000000
+(1795051636.422768) can0 7E9#037F223100000000

@@ -499,3 +499,53 @@ TEST(PluginWrapTest, ADropTakesAVariantOutAndRaisesTheMinor)
         << "the file base still lists stays";
     EXPECT_EQ(files_of(ok(drop(hand, "base"))), (Strings{"a.json", "b.json"}));
 }
+
+// A put and a drop keep the plugin's pages as they were: a page is never
+// a variant's file, so neither moves nor reads it
+TEST(PluginWrapTest, APutAndADropKeepThePages)
+{
+    const std::string page =
+        R"({"format": 2, "form": "phone", "pages": [{"name": "Engine", "cells": []}]})";
+    /* The page sits where the put's file would go, so the file takes the
+     * next name */
+    const std::string base =
+        packed(kPcm, R"({"id": "base", "files": ["a.json"]})",
+               "\"a.json\": " + data(sig("oil", "F40D", "pcm")) +
+                   ", \"data/track.json\": " + page,
+               "1.0.0", R"("pages": ["data/track.json"], )");
+    Plugin b = load(base);
+    ASSERT_TRUE(b);
+    const std::string text = ecuio_plugin_page_text(b.get(), 0);
+    const auto keeps = [&](const std::string& made) {
+        Plugin p = load(made);
+        ASSERT_TRUE(p);
+        EXPECT_EQ(info_of(p.get()).page_count, 1u);
+        EXPECT_EQ(std::string(ecuio_plugin_page_text(p.get(), 0)), text);
+    };
+    const std::string two = ok(put(base, "track", file_b()));
+    keeps(two);
+    EXPECT_EQ(files_of(two),
+              (Strings{"a.json", "data/track.json", "data/track-2.json"}));
+    const std::string one = ok(drop(two, "base"));
+    keeps(one);
+    EXPECT_EQ(files_of(one), (Strings{"data/track.json", "data/track-2.json"}));
+    const std::string replaced = ok(put(base, "base", file_b()));
+    keeps(replaced);
+    EXPECT_EQ(files_of(replaced),
+              (Strings{"data/track.json", "data/base.json"}));
+
+    /* A file bringing the manifest its first ECU names the plugin's own
+     * signals that named none, and leaves the page alone */
+    const std::string no_ecus = packed(
+        "", R"({"id": "base", "files": ["a.json"]})",
+        "\"a.json\": " + data(sig("egt", "F40E", ""), R"("extends": "obd2")") +
+            ", \"p.json\": " + page,
+        "1.0.0", R"("pages": ["p.json"], )");
+    const std::string grown =
+        ok(put(no_ecus, "v", file("V", "S", kTcm, sig("tft", "1E1C", ""))));
+    EXPECT_EQ(ecus_of(grown), (Strings{"tcm@7E9", "obd2@7E8/7E0"}));
+    Plugin g = load(grown);
+    ASSERT_TRUE(g);
+    EXPECT_EQ(info_of(g.get()).page_count, 1u);
+    EXPECT_EQ(std::string(ecuio_plugin_page_text(g.get(), 0)), text);
+}

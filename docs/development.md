@@ -128,6 +128,11 @@ run post-build). The Visual Studio generator is multi-config, so
 both builds in this order, then the whole suite and the cross-arch
 subset ([Running tests](#running-tests)).
 
+**Reproducible Release builds.** `HAVNE_REPRODUCIBLE` (on by default, MSVC
+Release) adds `/Brepro` and `/d1trimfile`, so two builds of one commit
+match byte for byte ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)).
+Turn it off only to compare against a build made without it.
+
 **How the app tree finds the surrogates (automatic).** The x64 one
 is the app tree's own `ecuio-j2534-surrogate` target
 (`ecuio-j2534-surrogate-x64.exe`), built and copied with the app. For
@@ -624,6 +629,12 @@ build-tidy-venv/Scripts/pip install --require-hashes -r .github/clang-tidy-requi
 scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 scripts/tidy.sh --qt C:/Qt/6.12.0/msvc2022_64   # app/ too, in build-tidy-qt
 ```
+
+A function past 80 lines or cognitive complexity 40 fails the run unless
+`scripts/tidy-size-baseline.txt` lists it (one `file<TAB>function` line), and
+a listed line that no longer applies fails too, so the list only shrinks:
+`scripts/tidy.sh --update-size-baseline` drops those lines, and a line is
+added by hand only. CI's three shards each judge their own sources.
 
 On Windows outside a Developer prompt, the script enters one (vswhere's
 newest VC tools), so clang-tidy and the tree see one MSVC's headers, and

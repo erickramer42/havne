@@ -255,7 +255,12 @@ provenance over every file.
   `havne.exe` isn't still running
   10 s after it starts (QML that fails to load exits at once; the
   check was confirmed against a package with `qml/QtQuick/Controls`
-  removed, 2026-10-25). It writes the zip to `dist/` (git-ignored).
+  removed, 2026-10-25). It writes the zip to `dist/` (git-ignored), with
+`New-ReproducibleZip`: entries in name order, each dated
+`SOURCE_DATE_EPOCH`, so two builds of one commit give the same bytes
+([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)).
+`packaging/windows/repro-compare.ps1 <rootA> <rootB>` compares two trees
+that each hold `build`, `build-win32` and `dist`.
   Beside it goes `havne-X.Y.Z-windows-x64-symbols.zip`, the four
   executables' PDBs from the trees that built them
   ([ADR-0034](adr/0034-debug-symbols-and-probes.md)). The release fails

@@ -428,6 +428,9 @@ public:
     // The picks the store has as a layout file names what it needs
     // (PluginStore::pickFiles): { profile, name, sha256, from }
     Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
+    // A page's text from the loaded plugin with the id, by its entry's
+    // pages index (PluginStore::pageText): "" for no such plugin or page
+    Q_INVOKABLE QString pluginPageText(const QString& id, int index);
     // The profiles a recording's frames can decode through in the viewer
     // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
     // built-in obd2 and mock, each signal file the vehicles' book has
@@ -1197,6 +1200,9 @@ private:
     // or a copy missing, changed or refused, comes back as given, with a
     // log line saying why. GUI thread, before the connect.
     QString replayUriWithOwnSignals(const QString& uri);
+    // The log line naming the profile a replayed recording was made under,
+    // and saying so when it holds no signal values (never its path)
+    void logReplayMadeUnder(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     std::thread m_connectThread;

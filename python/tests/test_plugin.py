@@ -14,7 +14,8 @@
 # goes in and comes out (ADR-0064), each as havne-cli writes it, the
 # lineage kept and an ECU's rename said; each variant names its source,
 # and its text reads back as its set. A variant says the key each of its
-# signals is kept under (ADR-0065 section 9).
+# signals is kept under (ADR-0065 section 9). A plugin's Dashboard pages
+# come in the manifest's order, the same from its folder and packed.
 
 import json
 import os
@@ -348,3 +349,23 @@ def test_a_variants_text_reads_back_and_moves_into_another_plugin(tmp_path):
     assert mine.variants == ["base", "copied"]
     assert mine.gauge("coolant", "copied") == p.gauge("coolant", "gauged-extras")
     assert p.variant_text() == p.variant_text("base")
+
+
+def test_a_plugins_pages_are_its_manifests_the_same_packed(tmp_path):
+    folder = os.path.join(ROOT, "tests", "fixtures", "plugins", "pages")
+    p = havne.Plugin(folder)
+    pages = p.pages()
+    assert [(path, form) for path, form, _ in pages] == [
+        ("pages/engine-phone.json", "phone"), ("pages/engine-desktop.json", "desktop")]
+    phone = json.loads(pages[0][2])
+    assert phone["form"] == "phone" and phone["pages"][0]["name"] == "Engine"
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    manifest["files"] = {}
+    for rel in ["data/base.json", "data/turbo.json"] + manifest["pages"]:
+        with open(os.path.join(folder, rel), encoding="utf-8") as f:
+            manifest["files"][rel] = json.load(f)
+    packed = tmp_path / "pages.havne-plugin.json"
+    packed.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    assert havne.Plugin(str(packed)).pages() == pages
+    assert havne.Plugin(os.path.join(PLUGINS, "example-sim")).pages() == []
