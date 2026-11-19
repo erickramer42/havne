@@ -1524,7 +1524,9 @@ ecuio_sim_reply_t._fields_ = [
     ('flags', c_uint32),
     ('delay_us', c_int64),
     ('length', c_uint32),
-    ('reserved', (c_uint32 * 5)),
+    ('fc_us', c_uint32),
+    ('cf_us', c_uint32),
+    ('reserved', (c_uint32 * 3)),
     ('data', (c_uint8 * 4096)),
 ]
 ecuio_sim_stats_t._fields_ = [

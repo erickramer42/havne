@@ -221,6 +221,12 @@ typedef char abi_sim_reply_delay_check
     [(offsetof(ecuio_sim_reply_t, delay_us) == 8) ? 1 : -1];
 typedef char abi_sim_reply_length_check
     [(offsetof(ecuio_sim_reply_t, length) == 16) ? 1 : -1];
+typedef char
+    abi_sim_reply_fc_check[(offsetof(ecuio_sim_reply_t, fc_us) == 20) ? 1 : -1];
+typedef char
+    abi_sim_reply_cf_check[(offsetof(ecuio_sim_reply_t, cf_us) == 24) ? 1 : -1];
+typedef char abi_sim_reply_reserved_check
+    [(offsetof(ecuio_sim_reply_t, reserved) == 28) ? 1 : -1];
 typedef char abi_sim_reply_data_check[(offsetof(ecuio_sim_reply_t, data) == 40)
                                           ? 1
                                           : -1];

@@ -95,7 +95,7 @@ app_enable_warnings(bench_recording)
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
     test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_base64.cpp
     test_condition_file.cpp test_condition_eval.cpp)
@@ -127,7 +127,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp)
+    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp
+    test_sim_car.cpp test_sim_timing.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -229,9 +230,10 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
                    test_vcan_requests.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -306,7 +308,7 @@ if(TARGET havne-cli)
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
-        test_cli_summary.cpp)
+        test_cli_summary.cpp test_cli_emulator.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -414,6 +416,9 @@ if(TARGET havne-cli)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
+        app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
+        set_tests_properties(CliElm327RunTest.TheMadeUpCarsModulesAllAnswer PROPERTIES TIMEOUT 180)
         app_cli_elm327(PythonObdReadsIt python-obd)
         set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
@@ -2546,12 +2551,13 @@ endif()
 # J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
 # session through the surrogate: in this tree the x64 one beside the
 # test, in the cross-arch run the Win32 tree's. test_j2534_talk.cpp's
-# cases (a request longer than a frame, through the test seam) run the
-# same way.
+# cases (a request longer than a frame, through the test seam) and
+# test_j2534_car.cpp's (18 modules on the fake) run the same way.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
         test_j2534_talk.cpp
+        test_j2534_car.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core

@@ -12,6 +12,48 @@
 
 namespace {
 
+/* A timing the URI took: within its bounds, and every module's draw
+ * (each aim's too) from 0 to the ceiling */
+void check_one(const ecuio_sim_timing::sim_timing& t)
+{
+    using namespace ecuio_sim_timing;
+    if (t.fc_us > GAP_MAX_US || t.cf_us > GAP_MAX_US || t.p50_us < 0 ||
+        t.p99_us > DELAY_MAX_US || (t.p50_us > 0 && t.p50_us > t.p99_us)) {
+        abort();
+    }
+    std::mt19937_64 rng = sim_timing_rng(t.seed, 0x7E8);
+    for (int i = 0; i < 4; ++i) {
+        const int64_t d = sim_timing_draw(t, rng);
+        if (d < 0 || d > static_cast<int64_t>(DRAW_MAX_US) ||
+            (t.p50_us == 0 && d != 0)) {
+            abort();
+        }
+    }
+}
+
+void check_timing(const ecuio_sim_timing::timings& t)
+{
+    using ecuio_sim_timing::AIMED_KEYS;
+    using ecuio_sim_timing::AIMED_MAX;
+    uint32_t aimed = 0;
+    for (uint32_t k = 0; k < AIMED_KEYS; ++k) {
+        if (t.aimed[k] > AIMED_MAX) {
+            abort();
+        }
+        aimed += t.aimed[k];
+    }
+    if (t.count != aimed) {
+        abort();
+    }
+    check_one(t.all);
+    for (uint32_t i = 0; i < t.count; ++i) {
+        if (t.items[i].reply_id > 0x7FFu) {
+            abort();
+        }
+        check_one(ecuio_sim_timing::for_node(t, t.items[i].reply_id));
+    }
+}
+
 /* What the node's session and security access must hold after a reply
  * to req: a key is accepted only when it is its level's own, in the
  * extended session, and the gated DID answers only while unlocked */
@@ -53,6 +95,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
     e.config = config;
     e.recording = rec;
     ecuio_sim_session session;
+    ecuio_sim_counts counts;
     size_t at = 0;
     while (at < size) {
         const size_t len = (data[at] & 0x0F) + ((data[at] & 0x20) ? 16u : 0u);
@@ -86,8 +129,9 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
                          : reply[0] != (data[at] | 0x40)) {
                 abort();
             }
-            const ecuio_sim_fate fate = ecuio_sim_next_fate(
-                e, data + at, static_cast<uint32_t>(len), n);
+            const ecuio_sim_fate fate =
+                ecuio_sim_next_fate(e.config.faults, counts, data + at,
+                                    static_cast<uint32_t>(len), n);
             if (static_cast<uint8_t>(fate) >
                 static_cast<uint8_t>(ecuio_sim_fate::stalled)) {
                 abort();
@@ -127,8 +171,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
              config.faults.silent > ECUIO_SIM_FAULT_MAX ||
              config.faults.late > ECUIO_SIM_FAULT_MAX ||
              config.faults.bad_sequence > ECUIO_SIM_FAULT_MAX ||
-             config.faults.stalled > ECUIO_SIM_FAULT_MAX)) {
+             config.faults.stalled > ECUIO_SIM_FAULT_MAX ||
+             config.aimed.count > ECUIO_SIM_AIMED_MAX)) {
             abort();
+        }
+        if (r == ecuio_sim_uri_result::ok) {
+            check_timing(config.timing);
+        }
+        /* Each aim one 11-bit module's, its period as a fault's */
+        for (uint32_t i = 0;
+             r == ecuio_sim_uri_result::ok && i < config.aimed.count; ++i) {
+            const ecuio_sim_aim& a = config.aimed.items[i];
+            if (a.reply_id > 0x7FFu || a.every == 0 ||
+                a.every > ECUIO_SIM_FAULT_MAX) {
+                abort();
+            }
         }
         return 0;
     }

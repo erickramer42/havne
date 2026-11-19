@@ -131,7 +131,7 @@
 #include <cstdlib>
 
 #define FAKE_QUEUE_DEPTH 32   /* a read's indication cap and more */
-#define FAKE_FILTER_DEPTH 8
+#define FAKE_FILTER_DEPTH 32
 #define FAKE_CONFIG_DEPTH 16
 #define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
 #define STATUS_FAILED  ECUIO_PT_STATUS_FAILED
@@ -915,7 +915,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     {
         /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecus.h's
          * set_module_dids); unset or malformed, none */
-        char spec[512] = {};
+        char spec[2048] = {};
         if (!fake_j2534::read_knob("ECUIO_FAKE_MODULE_DIDS", spec,
                                    sizeof(spec)) ||
             !fake_ecu::set_module_dids(spec)) {
