@@ -2042,6 +2042,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_one_store.cpp
         test_bridge_variantshape.cpp
         test_bridge_plugincopies.cpp
+        test_bridge_pluginpages.cpp
         test_store_migration.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
@@ -2057,6 +2058,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/exprcheck.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
@@ -2136,6 +2138,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
+        ../app/pluginstore_pages.cpp
         ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp

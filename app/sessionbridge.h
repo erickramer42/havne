@@ -428,6 +428,9 @@ public:
     // The picks the store has as a layout file names what it needs
     // (PluginStore::pickFiles): { profile, name, sha256, from }
     Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
+    // A page's text from the loaded plugin with the id, by its entry's
+    // pages index (PluginStore::pageText): "" for no such plugin or page
+    Q_INVOKABLE QString pluginPageText(const QString& id, int index);
     // The profiles a recording's frames can decode through in the viewer
     // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
     // built-in obd2 and mock, each signal file the vehicles' book has
