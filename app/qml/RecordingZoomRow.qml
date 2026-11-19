@@ -72,7 +72,7 @@ ColumnLayout {
             enabled: !root.host.frameTesting
             text: qsTr("Frame test")
             Layout.maximumWidth: 120
-            onClicked: root.host.startFrameTest()
+            onClicked: root.host.frameTestPart.startFrameTest()
         }
         // On a phone the hint wraps onto two caption lines where the
         // row leaves it little width, instead of eliding to "Tap for …"

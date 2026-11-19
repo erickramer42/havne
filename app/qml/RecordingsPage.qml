@@ -28,6 +28,8 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias frameTestPart: frameTestPart
+    readonly property var frameTestSignals: frameTestPart.frameTestSignals
     property alias spanStatsHome: spanStatsHome
     property alias recording: recording
     property alias spanRowDesktop: zoomBlock.spanRowDesktop
@@ -722,72 +724,7 @@ Page {
     property var frameTest: null
     readonly property bool frameTesting: frameTest !== null
 
-    // Four signals of four panes where the recording has them, so the test
-    // draws the most panes the chart shows, then the first others
-    function frameTestSignals(list) {
-        const numbers = list.filter(s => !s.isText && s.samples > 0)
-        const keys = []
-        const picked = []
-        for (const s of numbers) {
-            const key = ChartLayout.paneKey(s.unit)
-            if (keys.indexOf(key) < 0 && picked.length < 4) {
-                keys.push(key)
-                picked.push(s)
-            }
-        }
-        for (const s of numbers) {
-            if (picked.length < 4 && picked.indexOf(s) < 0)
-                picked.push(s)
-        }
-        return picked
-    }
-
-    function startFrameTest() {
-        const four = {}
-        for (const s of frameTestSignals(recording.signalList))
-            four[s.index] = true
-        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length,
-                      panes: 0 }
-        plotted = four
-        chart.paints = 0
-        chart.paintMs = 0
-        chart.paintMaxMs = 0
-        setView(0, durationMs() / 10)
-        frameTestResult = qsTr("Measuring…")
-    }
-
-    function frameStep(elapsedS) {
-        const whole = durationMs()
-        const span = viewT1 - viewT0
-        if (elapsedS < frameTestSeconds / 2) {
-            // A tenth of the recording a second, back to the start at its end
-            let t0 = whole / 10 * elapsedS
-            t0 = t0 % Math.max(1, whole - span)
-            setView(t0, t0 + span)
-        } else {
-            // In for 0.75 s, out for 0.75 s, about the middle
-            const inward = Math.floor((elapsedS - frameTestSeconds / 2) / 0.75) % 2 === 0
-            zoomAt((viewT0 + viewT1) / 2, inward ? 0.97 : 1 / 0.97)
-        }
-    }
-
-    function finishFrameTest() {
-        const t = frameTest
-        const seconds = (Date.now() - t.begun) / 1000
-        const panes = chart.drawn ? chart.drawn.panes.length : 0
-        frameTest = null
-        plotted = t.plotted
-        showAll()
-        // Frames shown in each half, panning then zooming
-        const half = seconds / 2
-        frameTestResult = qsTr("Frame test, %1 plotted in %8 at %2 px: %3 frames/s shown panning, "
-                               + "%4 zooming; %5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
-            .arg(t.signals).arg(Math.round(chart.shownW))
-            .arg((t.frames[0] / half).toFixed(1)).arg((t.frames[1] / half).toFixed(1))
-            .arg((chart.paints / seconds).toFixed(1))
-            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs).arg(panes === 1 ? qsTr("1 pane") : qsTr("%1 panes").arg(panes))
-        Bridge.logEvent(frameTestResult)
-    }
+    RecordingFrameTest { id: frameTestPart; host: root }
 
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
@@ -2231,9 +2168,9 @@ Page {
         onTriggered: {
             const elapsed = (Date.now() - root.frameTest.begun) / 1000
             if (elapsed >= root.frameTestSeconds)
-                root.finishFrameTest()
+                frameTestPart.finishFrameTest()
             else
-                root.frameStep(elapsed)
+                frameTestPart.frameStep(elapsed)
         }
     }
     Connections {
