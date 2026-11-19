@@ -126,7 +126,9 @@ Units follow **Settings, Display, Units** (metric or imperial).
    a long press on a gauge opens the same panel. It holds the label,
    the signal (**Change signal**), its kind (**Change kind**: the signal,
    range, zones and size stay, and settings only the old kind used come
-   back if you change back), the range (**From** and **To**), the zones
+   back if you change back), the range (**From** and **To**; a new gauge
+   for a signal with no range of its own says "Range guessed: set From and
+   To." until you set one), the zones
    (**Cold below**, **Warning below**, **Danger below**, **Warning from**,
    **Danger from**), decimals, **Color**, its size (**Columns** and
    **Rows**; on a phone, **Columns** and **Height**, both counted in

@@ -1308,3 +1308,14 @@ would put more than `ECUIO_PROFILE_MAX_REQUESTS` requests in the rotation,
 with the attached conditions', is refused with nothing changed. Core maps
 each def to its table row once at attach (`focus_rows`), so judging a
 focus is linear in the defs.
+
+## Appendix: what a log reached (2026-11-18)
+
+`havne-cli log` ends with one `interval` line for each signal in the window and a `summary` line, after the recording's closed line and before `end` (schema 1 growth: two new types, no line changed).
+
+- **The signals counted:** the picks when there are any (a passive bus or the mock decodes signals nobody picked, which would swell a pick's figures), else every def of the set.
+- **Counted on the worker, written after the close.** A values callback and the frame callback count into tables sized from the set before the start (a slot for each def, found through a table from the def's id, so ids needn't be dense): no allocation on the worker. The lines are built after `ecuio_session_close` joins the worker and before the destroy frees the set.
+- **The window** starts at the last first value: the time of the frame that brought the last signal's first value (a frame holding several first values, a pack's, starts it once, all of them in it) and ends at the last value. Values before it are set aside, each signal's tally starts again at its first value in it, and an interval spanning its start isn't counted. A late first value (a slow DID, a DID a scan finds late) shortens it: `short_window` is said when it is under half the time from the first value to the last. An armed log's summary covers the whole session, not each window.
+- **Times** are the batches' `timestamp_us`, the clock `frames.csv`'s `timestamp_us` gives (each channel's monotonic; the first value's time is the least over channels).
+- **Percentiles** read at a bucket's top: eighth octaves from 2^10 us (1 ms) to 2^26 us (67 s), so at most 12.5% above the true interval and never above the signal's maximum; the minimum and maximum are exact. The same bound as the reply timing report's (ADR-0042).
+- **The lines:** `{"type":"interval", signal, key, values, p50_ms, p99_ms, min_ms, max_ms}` (the times null for a signal with one value in the window); `{"type":"summary", from_s, span_s, from_us, to_us, short_window, signals, single, silent, values, values_per_s, sweeps_per_s, frames_per_s, p50_ms, worst_p50_ms, worst: {signal, key}, worst_p99_ms}`. `from_s` is seconds after the first value; `from_us` and `to_us` are on `frames.csv`'s clock, so a reader can line the window up with the recording or a bus capture. `signals` answered in the window, `single` of them with one value (left out of the interval figures), `silent` (with picks only) the picks that never answered. `sweeps_per_s` is `values_per_s` over `signals`; `p50_ms` the median of the signals' P50s (the lower of two middles). Rates and seconds to a thousandth; a rate is null for a window of no time.

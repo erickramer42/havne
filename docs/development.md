@@ -128,6 +128,11 @@ run post-build). The Visual Studio generator is multi-config, so
 both builds in this order, then the whole suite and the cross-arch
 subset ([Running tests](#running-tests)).
 
+**Reproducible Release builds.** `HAVNE_REPRODUCIBLE` (on by default, MSVC
+Release) adds `/Brepro` and `/d1trimfile`, so two builds of one commit
+match byte for byte ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)).
+Turn it off only to compare against a build made without it.
+
 **How the app tree finds the surrogates (automatic).** The x64 one
 is the app tree's own `ecuio-j2534-surrogate` target
 (`ecuio-j2534-surrogate-x64.exe`), built and copied with the app. For
