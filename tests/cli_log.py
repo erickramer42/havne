@@ -6,6 +6,7 @@
 #   python tests/cli_log.py fails <havne-cli>
 #   python tests/cli_log.py replay <havne-cli> <fixture folder>
 #   python tests/cli_log.py armed <havne-cli> <fixture folder>
+#   python tests/cli_log.py summary <havne-cli> <fixture folder>
 #   python tests/cli_log.py interrupt <havne-cli>
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
@@ -18,13 +19,20 @@
 # period shortened through HAVNE_CLI_LOG_EVERY_MS (set here): the lines
 # are start, session, focus (the two picks in order), recording started,
 # log lines (seconds climbing, bytes and values growing), recording closed
-# whole and end (reason seconds, the folder); events.log carries the picks on its
+# whole, an interval line for each pick and the summary, and end (reason
+# seconds, the folder); events.log carries the picks on its
 # focus line; an export of the folder with no --signal picks exactly
 # those two columns, in order, through that line; --layout long still
 # writes every number signal.
 # fails: a folder that can't be made ends the log before any frame, with
 # the reason (never the path) and exit 1. replay: a replay at max ends at
-# its last frame, reason replay-end, the recording whole. armed: --armed
+# its last frame, reason replay-end, the recording whole. summary: the
+# same replay's closing lines, an interval line for each signal then the
+# summary before the end, checked against the recording it wrote: the
+# interval lines' values add to the summary's, its rate is them over the
+# window, and RPM's line agrees with RPM's replies in frames.csv inside
+# the window (the count, the exact minimum and maximum, the P50 at its
+# bucket's top, at most an eighth above the true one). armed: --armed
 # over the replay at max with a condition on engine speed: an armed line,
 # window lines whose count climbs to two with each folder there, the
 # closed and end lines saying two windows, the end naming the newest
@@ -54,6 +62,7 @@
 
 import csv
 import json
+import math
 import os
 import signal
 import subprocess
@@ -152,6 +161,12 @@ def pace(cli):
     return 0
 
 
+def without_summary(rows):
+    """The lines but the interval and summary lines a log writes between
+    its recording's closed line and the end"""
+    return [r for r in rows if r.get("type") not in ("interval", "summary")]
+
+
 def the_folder(root):
     found = [p for p in Path(root).iterdir() if p.is_dir()]
     if len(found) != 1:
@@ -170,6 +185,11 @@ def demo(cli):
         if code != 0:
             print(f"FAIL  exit {code}\n{err}")
             return 1
+        said = [r.get("signal") for r in rows if r.get("type") == "interval"]
+        if sorted(said) != sorted(PICKS) or rows[-2].get("type") != "summary":
+            print(f"FAIL  interval lines for {said!r} and a summary, want {PICKS!r}")
+            return 1
+        rows = without_summary(rows)
         types = [r.get("type") for r in rows]
         head, tail = types[:4], types[4:]
         if head != ["start", "session", "focus", "recording"]:
@@ -336,6 +356,64 @@ def replay(cli, fixture):
     return 0
 
 
+def rpm_stamps(folder, start, stop):
+    """frames.csv's timestamp_us of each RPM reply (41 0C on 0x7E8) from
+    start to stop, the recording's own"""
+    with open(folder / "frames.csv", newline="", encoding="utf-8") as f:
+        return [int(r["timestamp_us"]) for r in csv.DictReader(f)
+                if r["id"] == "0x7E8" and r["data"].startswith("41 0C")
+                and start <= int(r["timestamp_us"]) <= stop]
+
+
+def summary_agrees(summary, intervals, folder):
+    """None when the lines agree with each other and with frames.csv, else
+    why not"""
+    if len(intervals) != summary["signals"] or not intervals:
+        return f"{len(intervals)} interval lines for {summary['signals']} signals"
+    if sum(i["values"] for i in intervals) != summary["values"]:
+        return "the interval lines' values don't add to the summary's"
+    span = (summary["to_us"] - summary["from_us"]) / 1e6
+    if abs(summary["values"] / span - summary["values_per_s"]) > 0.0015:
+        return f"values_per_s {summary['values_per_s']}, want {summary['values'] / span}"
+    rpm = [i for i in intervals if i["signal"] == "RPM"]
+    if len(rpm) != 1:
+        return "no RPM interval line"
+    rpm = rpm[0]
+    stamps = rpm_stamps(folder, summary["from_us"], summary["to_us"])
+    gaps = sorted(b - a for a, b in zip(stamps, stamps[1:]))
+    if rpm["values"] != len(stamps) or not gaps:
+        return f"RPM's {rpm['values']} values, frames.csv's {len(stamps)}"
+    if rpm["min_ms"] != gaps[0] / 1000 or rpm["max_ms"] != gaps[-1] / 1000:
+        return f"RPM's min and max {rpm['min_ms']}, {rpm['max_ms']} ms, want {gaps[0]}, {gaps[-1]} us"
+    true_p50 = gaps[math.ceil(len(gaps) / 2) - 1]
+    p50 = rpm["p50_ms"] * 1000
+    if not true_p50 <= p50 <= min(true_p50 * 1.125, gaps[-1]):
+        return f"RPM's P50 {rpm['p50_ms']} ms against a true {true_p50} us"
+    return None
+
+
+def summary(cli, fixture):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-log-summary-") as root:
+        uri = f"replay://{Path(fixture).as_posix()}?profile=obd2&speed=max"
+        code, rows, err = run(cli, ["log", uri, root, "--seconds", "20"])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        closed = [n for n, r in enumerate(rows)
+                  if r.get("type") == "recording" and r.get("state") == "closed"]
+        tail = [r.get("type") for r in rows[closed[-1] + 1:]] if closed else []
+        k = len(tail) - 2
+        if k < 1 or tail != ["interval"] * k + ["summary", "end"]:
+            print(f"FAIL  the lines after closed {tail!r}")
+            return 1
+        why = summary_agrees(rows[-2], rows[-2 - k:-2], the_folder(root))
+        if why is not None:
+            print(f"FAIL  {why}\n{json.dumps(rows[-2])}")
+            return 1
+    print(f"ok    {k} interval lines and a summary agree with the recording")
+    return 0
+
+
 ARMED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
          '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},'
          '"record":{"before":2,"after":1}}]}')
@@ -440,7 +518,7 @@ def interrupt(cli):
             p.communicate()
             print("FAIL  still running 15 s after the interrupt")
             return 1
-        rows = lines_of(out)
+        rows = without_summary(lines_of(out))
         if p.returncode != 0 or not rows or rows[-1].get("type") != "end" or \
                 rows[-1].get("reason") != "interrupted":
             print(f"FAIL  exit {p.returncode}, last line {rows[-1:] !r}\n"
@@ -861,6 +939,8 @@ def main(argv):
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":
         return replay(argv[2], argv[3])
+    if len(argv) >= 4 and argv[1] == "summary":
+        return summary(argv[2], argv[3])
     if len(argv) >= 4 and argv[1] == "armed":
         return armed(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == "interrupt":

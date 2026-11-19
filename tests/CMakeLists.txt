@@ -303,7 +303,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp test_cli_pairs.cpp)
+        test_cli_expr.cpp test_cli_pairs.cpp test_cli_summary.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -716,6 +716,9 @@ if(TARGET havne-cli)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} replay $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        add_test(NAME CliLogRunTest.TheSummaryAgreesWithTheRecording
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} summary $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         add_test(NAME CliLogRunTest.AnArmedLogWritesAFolderPerWindow
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} armed $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
@@ -726,6 +729,7 @@ if(TARGET havne-cli)
         set_tests_properties(CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
             CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            CliLogRunTest.TheSummaryAgreesWithTheRecording
             CliLogRunTest.AnArmedLogWritesAFolderPerWindow
             CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
             PROPERTIES TIMEOUT 60)
