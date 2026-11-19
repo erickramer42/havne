@@ -73,6 +73,11 @@ qt_add_library(app_ui STATIC
     recordingframes.cpp
     recordingframes.h
     recordingview.cpp
+    recordingview_asks.cpp
+    recordingview_queries.cpp
+    recordingview_stretches.cpp
+    recordingview_conditions.cpp
+    recordingview_internal.h
     recordingview.h
     ${APP_BRIDGE_SOURCES}
     signalfilter.cpp
