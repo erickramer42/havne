@@ -96,7 +96,7 @@ ListView {
                     }
                     Label {
                         objectName: "cursorValue"
-                        text: root.host.atText(signalRow.at, signalRow.modelData)
+                        text: root.host.textsPart.atText(signalRow.at, signalRow.modelData)
                         Layout.maximumWidth: Math.round(signalRow.width * (root.host.compareAligned ? 0.3 : 0.5))
                         elide: Text.ElideRight
                         color: Theme.text
@@ -108,7 +108,7 @@ ListView {
                 Label {
                     objectName: "cursorSpanLine"
                     visible: root.host.phoneShape && root.host.hasSpan
-                    text: visible ? root.host.spanCaption(signalRow.modelData) : ""
+                    text: visible ? root.host.textsPart.spanCaption(signalRow.modelData) : ""
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideLeft
@@ -122,7 +122,7 @@ ListView {
             Label {
                 objectName: "cursorBValue"
                 visible: !root.host.phoneShape && root.host.hasSpan
-                text: visible ? root.host.atText(root.host.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
+                text: visible ? root.host.textsPart.atText(root.host.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
                 Layout.preferredWidth: Math.round(signalRow.width * 0.18)
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
@@ -134,7 +134,7 @@ ListView {
                 objectName: "cursorDelta"
                 visible: !root.host.phoneShape && root.host.hasSpan
                 text: visible && !signalRow.modelData.isText
-                      ? root.host.statChange(root.host.spanStats[signalRow.signalIndex]) : ""
+                      ? root.host.textsPart.statChange(root.host.spanStats[signalRow.signalIndex]) : ""
                 Layout.preferredWidth: Math.round(signalRow.width * 0.18)
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight

@@ -28,6 +28,8 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias textsPart: textsPart
+    readonly property var changeText: textsPart.changeText
     property alias seriesPart: seriesPart
     readonly property var differencePairs: seriesPart.differencePairs
     readonly property var series: seriesPart.series
@@ -583,6 +585,8 @@ Page {
 
     RecordingSeries { id: seriesPart; host: root }
 
+    RecordingTexts { id: textsPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -592,46 +596,12 @@ Page {
                                         || importMap.toString() !== ""
                                         || (importUsesGuess && guessPreview.ready)
 
-    // Seconds to the ms with no trailing zeros, as core's replay takes them
-    function secondsText(ms) {
-        return String(Number((ms / 1000).toFixed(3)))
-    }
-
     // The view, kept inside the axis and no narrower than minSpanMs.
     // A change within settleMs of the last is the view moving (a drag, a
     // pinch, the wheel): the chart draws it without antialiasing until the
     // view rests
     readonly property int settleMs: 150
     readonly property real handleDropPx: 4
-    // A change, signed, in a signal's decimals
-    function changeText(v, decimals, unit) {
-        return v > 0 ? "+" + valueText(v, decimals, unit) : valueText(v, decimals, unit)
-    }
-    // A statistic of a row, or a dash with none
-    function statText(v, s) {
-        return isFinite(v) ? valueText(v, s.decimals, s.unit) : qsTr("—")
-    }
-    function statChange(s) {
-        return s && isFinite(s.change) ? changeText(s.change, s.decimals, s.unit) : qsTr("—")
-    }
-    function statRate(s) {
-        return s && isFinite(s.rate)
-               ? changeText(s.rate, s.decimals + 1, s.unit !== "" ? s.unit + "/s" : "/s") : qsTr("—")
-    }
-    // A value at one of the span's ends, as the rows show it
-    function atText(at, s) {
-        return !at || at.atMs < 0 ? qsTr("—")
-               : s.isText ? at.text
-               : at.label ? at.label
-               : valueText(Number(at.text), s.decimals, at.unit)
-    }
-    // The second line a row and a strip's cell show with a span
-    function spanCaption(s) {
-        const stat = spanStats[s.index]
-        return s.isText ? qsTr("B %1").arg(atText(readoutTo[s.index], s))
-                        : qsTr("B %1 · Δ %2").arg(atText(readoutTo[s.index], s)).arg(statChange(stat))
-    }
-
     // The compared recording's values at axis time t, by the first's
     // signal index, each signal's pair
     function compareValuesAt(t) {

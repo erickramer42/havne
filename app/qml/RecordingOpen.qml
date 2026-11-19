@@ -184,6 +184,6 @@ Item {
         if (from <= 0 && to >= part.host.cursorsPart.durationMs())
             return part.host.openedUri
         return part.host.openedUri + (part.host.openedUri.indexOf("?") >= 0 ? "&" : "?")
-               + "from=" + part.host.secondsText(from) + "&to=" + part.host.secondsText(to)
+               + "from=" + part.host.textsPart.secondsText(from) + "&to=" + part.host.textsPart.secondsText(to)
     }
 }

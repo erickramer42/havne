@@ -576,7 +576,7 @@ Rectangle {
                 x: 12
                 y: 34
                 width: parent.width - 12
-                text: visible ? root.host.spanCaption(stripRow.modelData) : ""
+                text: visible ? root.host.textsPart.spanCaption(stripRow.modelData) : ""
                 color: Theme.textDim
                 font.pixelSize: Theme.fontCaption
                 font.family: Theme.valueFamily
