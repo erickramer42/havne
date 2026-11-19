@@ -124,6 +124,13 @@ struct ecuio_j2534_transport {
     std::thread worker;
 };
 
+namespace ecuio_j2534 {
+
+/* The worker thread's body (j2534_worker.cpp): runs until stop_requested. */
+void j2534_worker(ecuio_j2534_transport* t);
+
+} // namespace ecuio_j2534
+
 #endif /* _WIN32 */
 
 #endif // ECUIO_J2534_TRANSPORT_H
