@@ -11,13 +11,37 @@
 # so the refusal is the one the case means. A command line that streams
 # instead of ending is killed after 20 s and fails, so a usage check that
 # stops refusing can't hang the run.
+#
+# An empty element ("a||b", a trailing '|') reaches the program as an
+# empty argument: the arguments are split by hand and each goes into the
+# call as a bracket argument, since an unquoted list expansion drops
+# empty elements. An ARGS of "" is no arguments at all.
 
-string(REPLACE "|" ";" ARGS "${ARGS}")
-execute_process(COMMAND ${CLI} ${ARGS}
+set(quoted "")
+set(rest "${ARGS}")
+while(NOT rest STREQUAL "")
+    string(FIND "${rest}" "|" bar)
+    if(bar EQUAL -1)
+        set(piece "${rest}")
+        set(rest "")
+    else()
+        string(SUBSTRING "${rest}" 0 ${bar} piece)
+        math(EXPR after "${bar} + 1")
+        string(SUBSTRING "${rest}" ${after} -1 rest)
+        if(rest STREQUAL "")
+            # a trailing '|' ends on an empty argument
+            string(APPEND quoted " [==[${piece}]==]")
+            set(piece "")
+        endif()
+    endif()
+    string(APPEND quoted " [==[${piece}]==]")
+endwhile()
+string(REPLACE "|" " " ARGS "${ARGS}")
+cmake_language(EVAL CODE "execute_process(COMMAND [==[${CLI}]==]${quoted}
     TIMEOUT 20
     RESULT_VARIABLE code
     OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
+    ERROR_VARIABLE err)")
 if(NOT code STREQUAL EXPECT)
     message(FATAL_ERROR "havne-cli ${ARGS} exited ${code}, not ${EXPECT}\n${err}")
 endif()

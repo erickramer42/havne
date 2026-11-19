@@ -1389,7 +1389,8 @@ if(TARGET havne-cli)
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
-    app_cli_usage(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|")
+    app_cli_usage_says(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|"
+        "--signal takes a signal's name")
     # The names are checked against the session's set after the connect,
     # before any line: a typo and a repeat are usage with nothing written
     app_cli_usage(LogAnUnknownSignalIsUsage "log|mock://x|f|--signal|Nothing")
