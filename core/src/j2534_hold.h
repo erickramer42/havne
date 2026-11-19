@@ -23,15 +23,21 @@
 // while it waits, and ecuio_engine_sent records it once it is written. A
 // row the focus parked while it waited is dropped, not written.
 //
-// What holds no one: a channel gone silent (its last request timed out,
-// with no frame and no recovery since: j2534_hold_answered and
-// j2534_hold_recovered clear it), whose requests neither hold the others
-// nor keep their chosen requests waiting, or a silent module would cost
-// them its whole wait on every lap; and a request in a pending wait (7F
-// xx 78, up to 5 s a time), or the others' data and sessions would stop
-// for it. A channel's due session request (10 03, 3E 00) goes through the
-// hold, so no session ages past S3; a keep-alive due waits with a talk
-// offered first, as due puts it behind one.
+// What holds no one: a silent channel, whose requests neither hold the
+// others nor keep their chosen requests waiting, or an absent module
+// would cost them its whole wait on every lap; and a request in a pending
+// wait (7F xx 78, up to 5 s a time), or the others' data and sessions
+// would stop for it. A channel is silent from its second wait in a row
+// that runs out (j2534_hold_answered and j2534_hold_recovered end the
+// run), so one lost reply leaves it protected; and the request after
+// every eighth is asked under the hold all the same, so a module that
+// answers late, inside another's segmented reply, is found again.
+//
+// A session request (10 03, 3E 00) waits for the hold like any request,
+// since its reply can be lost too, except in its session with S3 a second
+// or less away (or past): then it goes through, so no session ages past
+// S3 (behind a talk offered first while S3 hasn't passed, as due puts
+// it).
 //
 // A hold's chosen rows are its engine's table rows, so a hold lives no
 // longer than the ecuio_engine_init it follows. The hold applies with two
@@ -52,7 +58,7 @@ struct j2534_hold {
     int32_t chosen[ECUIO_MAX_CHANNELS]; /* due's request kept, or NONE */
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
-    uint32_t silent = 0; /* a bit for each channel gone silent */
+    uint32_t misses[ECUIO_MAX_CHANNELS] = {}; /* waits run out in a row */
 
     j2534_hold()
     {
@@ -61,6 +67,10 @@ struct j2534_hold {
         }
     }
 };
+
+constexpr uint32_t J2534_HOLD_SILENT_MISSES = 2; /* waits in a row */
+constexpr uint32_t J2534_HOLD_PROBE_EVERY = 8;   /* a silent channel's */
+constexpr int64_t J2534_HOLD_S3_MARGIN_US = 1000000;
 
 inline bool j2534_hold_applies(const j2534_hold& h,
                                const ecuio_request_engine* e)
@@ -76,14 +86,22 @@ inline bool j2534_hold_on_bus(const ecuio_request_engine* e, uint32_t k)
            ch.deadline_us - ch.sent_us <= ECUIO_ENGINE_WAIT_US;
 }
 
-/* Whether a channel but c, not gone silent, has a request on the bus, or
+/* Whether channel k is silent: its waits run out in a row from the
+ * second, but for the request after every eighth */
+inline bool j2534_hold_silent(const j2534_hold& h, uint32_t k)
+{
+    const uint32_t m = h.misses[k];
+    return m >= J2534_HOLD_SILENT_MISSES && m % J2534_HOLD_PROBE_EVERY != 0;
+}
+
+/* Whether a channel but c, not silent, has a request on the bus, or
  * (segmented) one whose reply is expected segmented */
 inline bool j2534_hold_other_out(const j2534_hold& h,
                                  const ecuio_request_engine* e, uint32_t c,
                                  bool segmented)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
-        if (k != c && ((h.silent >> k) & 1u) == 0 && j2534_hold_on_bus(e, k) &&
+        if (k != c && !j2534_hold_silent(h, k) && j2534_hold_on_bus(e, k) &&
             (!segmented ||
              ecuio_engine_reply_segmented(e, k, e->chans[k].outstanding))) {
             return true;
@@ -120,13 +138,19 @@ inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
     }
 }
 
-/* Whether channel c's session request is due at now: taken already, or
- * due with nothing due hands out first (another one-shot taken, or a talk
- * offered first while the session needs only its keep-alive) */
+/* Whether channel c's session request goes through the hold at now: in
+ * its session with S3 near or past, and due's next request (a session
+ * request taken already, or one due with nothing due hands out first:
+ * another one-shot taken, or a talk offered first while S3 hasn't passed) */
 inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
                                    int64_t now_us)
 {
     const ecuio_engine_channel& ch = e->chans[c];
+    const int64_t since = now_us - ch.last_sent_us;
+    if (ch.session_step != ECUIO_SESSION_STATE_ENTERED ||
+        since < ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US) {
+        return false;
+    }
     if (ch.sessioning) {
         return true;
     }
@@ -134,26 +158,28 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
         ch.talk.out) {
         return false;
     }
-    const bool entering = ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
-                          now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US;
-    if (ch.talk.offered && ch.talk.first && !entering) {
+    if (ch.talk.offered && ch.talk.first && since < ECUIO_ENGINE_S3_US) {
         return false;
     }
     return ecuio_engine_session_next_us(e, ch) <= now_us;
 }
 
-/* What channel c writes this pass at now: its chosen request once no other
- * channel has one on the bus (a row the focus parked meanwhile dropped);
- * else its due session request; else, unless another's segmented reply is
- * due or another's chosen request waits (c is then held, a bit in
- * *held_now), due's request, kept chosen instead when its reply is
- * expected segmented while another channel has one on the bus and c hasn't
- * gone silent. NONE: nothing to write. */
+/* What channel c writes this pass at now: nothing while its own request
+ * is out (and it isn't held); its chosen request once no other channel
+ * has one on the bus (a row the focus parked meanwhile dropped); else its
+ * session request near S3; else, unless another's segmented reply is due
+ * or another's chosen request waits (c is then held, a bit in *held_now),
+ * due's request, kept chosen instead when its reply is expected segmented
+ * while another channel has one on the bus and c isn't silent. NONE:
+ * nothing to write. */
 inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
                                uint32_t c, int64_t now_us, uint32_t* held_now)
 {
     if (!j2534_hold_applies(h, e)) {
         return ecuio_engine_due(e, c, now_us);
+    }
+    if (e->chans[c].outstanding != ECUIO_ENGINE_NONE) {
+        return ECUIO_ENGINE_NONE;
     }
     if (h.chosen[c] != ECUIO_ENGINE_NONE) {
         if (j2534_hold_other_out(h, e, c, false)) {
@@ -175,7 +201,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         return ECUIO_ENGINE_NONE;
     }
     const int32_t r = ecuio_engine_due(e, c, now_us);
-    if (r == ECUIO_ENGINE_NONE || ((h.silent >> c) & 1u) != 0 ||
+    if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, c) ||
         !ecuio_engine_reply_segmented(e, c, r) ||
         !j2534_hold_other_out(h, e, c, false)) {
         return r;
@@ -191,16 +217,18 @@ inline void j2534_hold_pass_end(j2534_hold& h, uint32_t held_now)
     h.held = held_now;
 }
 
-/* A frame matched on channel c: it isn't silent */
+/* A frame matched on channel c: its run of waits run out ends */
 inline void j2534_hold_answered(j2534_hold& h, uint32_t c)
 {
-    h.silent &= ~(1u << c);
+    h.misses[c] = 0;
 }
 
 /* The link recovered: every channel is asked again, none silent */
 inline void j2534_hold_recovered(j2534_hold& h)
 {
-    h.silent = 0;
+    for (uint32_t& m : h.misses) {
+        m = 0;
+    }
 }
 
 /* The worker's pass at now: timed_out(c) for each channel whose wait ran
@@ -226,7 +254,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
     }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         if (ecuio_engine_expire(e, c, now_us)) {
-            h.silent |= 1u << c;
+            ++h.misses[c];
             timed_out(c);
         }
     }

@@ -276,12 +276,14 @@ TEST_F(J2534HealthTest, VxHoldOffLosesUnderSegments)
 
 /* A held module, or one whose chosen request waits, waits on the other's
  * reply: the worker reads on the slice, not 1 ms after 1 ms for a floor
- * long past. The fake's default mode answers an empty read at once, so
- * the reads the page counts follow the read timeouts the worker asks. */
+ * long past, over passes too (each reply 40 ms, four of the 10 ms
+ * slices: about 5 reads for each write, 14 with each pass reading 1 ms).
+ * The fake's default mode answers an empty read at once, so the reads the
+ * page counts follow the read timeouts the worker asks. */
 TEST_F(J2534HealthTest, AHeldModuleWaitsOnTheOthersReplyNotItsFloor)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_MODULE_DIDS", kModules));
-    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "4"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "40"));
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_LONG_REPLY_DELAY_MS", "6"));
     ASSERT_NO_FATAL_FAILURE(start_session(kTwoModules));
     ASSERT_TRUE(wait_for_frames(10, 5000)) << "replies didn't arrive";
@@ -291,6 +293,6 @@ TEST_F(J2534HealthTest, AHeldModuleWaitsOnTheOthersReplyNotItsFloor)
     const uint32_t reads = fake_control::reads(page) - reads0;
     const uint32_t writes = fake_control::writes(page) - writes0;
     close_session();
-    ASSERT_GE(writes, 20u);
-    EXPECT_LE(reads, 4 * writes) << reads << " reads for " << writes;
+    ASSERT_GE(writes, 10u);
+    EXPECT_LE(reads, 9 * writes) << reads << " reads for " << writes;
 }
