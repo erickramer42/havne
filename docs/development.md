@@ -625,6 +625,12 @@ scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 scripts/tidy.sh --qt C:/Qt/6.12.0/msvc2022_64   # app/ too, in build-tidy-qt
 ```
 
+A function past 80 lines or cognitive complexity 40 fails the run unless
+`scripts/tidy-size-baseline.txt` lists it (one `file<TAB>function` line), and
+a listed line that no longer applies fails too, so the list only shrinks:
+`scripts/tidy.sh --update-size-baseline` drops those lines, and a line is
+added by hand only. CI's three shards each judge their own sources.
+
 On Windows outside a Developer prompt, the script enters one (vswhere's
 newest VC tools), so clang-tidy and the tree see one MSVC's headers, and
 it configures `build-tidy` (Ninja: the Visual Studio generator writes no

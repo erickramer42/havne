@@ -34,3 +34,4 @@ third_party/wamr/** -text
 # The patches the script applies to them: git apply needs their line
 # ends as written
 third_party/wamr-patches/** -text
+scripts/tidy-size-baseline.txt text eol=lf
