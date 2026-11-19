@@ -180,8 +180,8 @@ Item {
     // recording's own seconds, none while the whole recording is in view
     function stretchUri() {
         const from = Math.max(0, Math.floor(part.host.viewT0))
-        const to = Math.min(part.host.durationMs(), Math.ceil(part.host.viewT1))
-        if (from <= 0 && to >= part.host.durationMs())
+        const to = Math.min(part.host.cursorsPart.durationMs(), Math.ceil(part.host.viewT1))
+        if (from <= 0 && to >= part.host.cursorsPart.durationMs())
             return part.host.openedUri
         return part.host.openedUri + (part.host.openedUri.indexOf("?") >= 0 ? "&" : "?")
                + "from=" + part.host.secondsText(from) + "&to=" + part.host.secondsText(to)

@@ -28,6 +28,20 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias settle: settle
+    property alias framesRefill: framesRefill
+    property alias cursorsPart: cursorsPart
+    readonly property var setView: cursorsPart.setView
+    readonly property var zoomAt: cursorsPart.zoomAt
+    readonly property var showAll: cursorsPart.showAll
+    readonly property var snapped: cursorsPart.snapped
+    readonly property var setCursor: cursorsPart.setCursor
+    readonly property var setCursorB: cursorsPart.setCursorB
+    readonly property var clearCursorB: cursorsPart.clearCursorB
+    readonly property var askSpanStats: cursorsPart.askSpanStats
+    readonly property var togglePlotted: cursorsPart.togglePlotted
+    readonly property var plotWidth: cursorsPart.plotWidth
+    readonly property var timeAt: cursorsPart.timeAt
     property alias signalFilter: signalFilter
     property alias openPart: openPart
     readonly property var chooseImportFile: openPart.chooseImportFile
@@ -195,22 +209,22 @@ Page {
     Shortcut {
         sequence: "Left"
         enabled: root.cursorKeys
-        onActivated: root.stepCursor(false)
+        onActivated: cursorsPart.stepCursor(false)
     }
     Shortcut {
         sequence: "Right"
         enabled: root.cursorKeys
-        onActivated: root.stepCursor(true)
+        onActivated: cursorsPart.stepCursor(true)
     }
     Shortcut {
         sequence: "Home"
         enabled: root.editKeys
-        onActivated: root.cursorToEnd(false)
+        onActivated: cursorsPart.cursorToEnd(false)
     }
     Shortcut {
         sequence: "End"
         enabled: root.editKeys
-        onActivated: root.cursorToEnd(true)
+        onActivated: cursorsPart.cursorToEnd(true)
     }
     Shortcut {
         sequence: "B"
@@ -308,11 +322,11 @@ Page {
     // The Frames view's By ID table and filter panel
     property bool framesById: false
     property bool framesFilterOpen: false
-    onViewT0Changed: refillFramesSoon()
-    onViewT1Changed: refillFramesSoon()
+    onViewT0Changed: cursorsPart.refillFramesSoon()
+    onViewT1Changed: cursorsPart.refillFramesSoon()
     onFramesShownChanged: {
         if (framesShown)
-            refillFrames()
+            cursorsPart.refillFrames()
         else
             viewFrames.clear()
     }
@@ -562,6 +576,8 @@ Page {
 
     RecordingOpen { id: openPart; host: root }
 
+    RecordingCursors { id: cursorsPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
         openPart.checkBaseline()
@@ -576,226 +592,12 @@ Page {
         return String(Number((ms / 1000).toFixed(3)))
     }
 
-    function durationMs() {
-        return recording.durationMs > 0 ? recording.durationMs : 1000
-    }
-
-    // The axis: the recording, and an aligned compared one on it
-    function axisStart() {
-        return compareAligned ? Math.min(0, compareOffsetMs) : 0
-    }
-    function axisEnd() {
-        return compareAligned ? Math.max(durationMs(), compareOffsetMs + compare.durationMs)
-                              : durationMs()
-    }
-
-    // The Frames view's rows again for the part in view, once it has rested
-    // for settleMs: a drag or a pinch asks for none until it stops
-    function refillFramesSoon() {
-        if (framesShown)
-            framesRefill.restart()
-    }
-    function refillFrames() {
-        framesRefill.stop()
-        if (framesShown)
-            viewFrames.load(recording.folder, viewT0, viewT1)
-    }
-
     // The view, kept inside the axis and no narrower than minSpanMs.
     // A change within settleMs of the last is the view moving (a drag, a
     // pinch, the wheel): the chart draws it without antialiasing until the
     // view rests
     readonly property int settleMs: 150
-    function setView(t0, t1) {
-        const lo = axisStart()
-        const hi = axisEnd()
-        const span = Math.min(hi - lo, Math.max(minSpanMs, t1 - t0))
-        const start = Math.min(Math.max(lo, t0), hi - span)
-        viewT0 = start
-        viewT1 = start + span
-        if (settle.running)
-            chart.moving = true
-        settle.restart()
-        chart.requestPaint()
-    }
-    function zoomAt(t, factor) {
-        setView(t - (t - viewT0) * factor, t + (viewT1 - t) * factor)
-    }
-    function showAll() {
-        setView(axisStart(), axisEnd())
-    }
-    // A time placed in the middle of the view, the view's span kept
-    function centerOn(t) {
-        const half = (viewT1 - viewT0) / 2
-        setView(t - half, t + half)
-    }
-    // A Conditions row: the view centered on its entry and the cursor at its
-    // start, as a finding's row; a phone's panel gives the chart back
-    function showCondition(i) {
-        const s = conditionList[i]
-        if (s === undefined)
-            return
-        conditionPick = i
-        centerOn((s.fromMs + s.toMs) / 2)
-        setCursor(s.fromMs)
-        if (Theme.compact)
-            conditionsOpen = false
-    }
-
-    // The cursors' time tags on the axis row, for the layout to keep its
-    // captions out from under them: the time and the tag's width
-    function cursorTags() {
-        const out = []
-        for (const ms of [cursorMs, cursorBMs]) {
-            if (isFinite(ms) && ms >= viewT0 && ms <= viewT1)
-                out.push({ ms: ms, width: Math.max(phoneShape ? Theme.touchTarget : 24,
-                                                   timeTextWidth(ms) + 8) })
-        }
-        return out
-    }
-    FontMetrics { id: tagMetrics; font.pixelSize: ChartLayout.labelPx; font.family: Theme.valueFamily }
-    function timeTextWidth(ms) {
-        return tagMetrics.advanceWidth(timeText(ms, true))
-    }
-
-    // A tapped time moved to the nearest sample of the first signal
-    // plotted, so the cursor stands where the line has a sample and reads
-    // the value drawn there; as it is with nothing plotted
-    function snapSignal() {
-        return recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
-    }
-    function snapped(t) {
-        const first = snapSignal()
-        if (!first)
-            return t
-        const at = recording.nearestSampleMs(first.index, t)
-        return at >= 0 ? at : t
-    }
-    function valuesAtTime(t) {
-        const values = {}
-        if (t >= 0) {
-            for (const v of recording.valuesAt(recording.signalList.map(s => s.index), t))
-                values[v.index] = v
-        }
-        return values
-    }
-    function setCursor(t) {
-        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
-        readout = valuesAtTime(cursorMs)
-        refreshCompareReadout()
-        if (!hasCursorB && !spanHintSeen) {
-            spanHintSeen = true
-            spanHintUp = true
-        }
-        askSpanStats()
-        chart.requestPaint()
-    }
-    function setCursorB(t) {
-        cursorBMs = Math.min(Math.max(axisStart(), t), axisEnd())
-        readoutB = valuesAtTime(cursorBMs)
-        refreshCompareReadout()
-        spanHintUp = false
-        askSpanStats()
-        chart.requestPaint()
-    }
-    // The compared recording's values at the cursor the rows read: the first,
-    // or the earlier of two
-    function refreshCompareReadout() {
-        compareReadout = compareValuesAt(hasSpan ? spanFromMs : cursorMs)
-    }
-    function clearCursorB() {
-        cursorBMs = NaN
-        readoutB = ({})
-        refreshCompareReadout()
-        spanStats = ({})
-        statsAsk = 0
-        arrowsMoveB = false
-        chart.requestPaint()
-    }
-    // The second gesture at time t: with no first cursor yet it places that
-    function placeSecond(t) {
-        if (hasCursor)
-            setCursorB(t)
-        else
-            setCursor(t)
-    }
-    function askSpanStats() {
-        if (!hasSpan) {
-            statsAsk = 0
-            spanStats = ({})
-            return
-        }
-        statsAsk = recording.stats(recording.signalList.map(s => s.index), spanFromMs, spanToMs)
-        if (statsAsk === 0)
-            spanStats = ({})
-    }
-    function zoomToSpan() {
-        const pad = (spanToMs - spanFromMs) * 0.05
-        setView(spanFromMs - pad, spanToMs + pad)
-    }
-    // Keeps a cursor a key moved in the view
-    function bringIntoView(t) {
-        if (t < viewT0 || t > viewT1)
-            centerOn(t)
-    }
-    function moveKeyed(t, isB) {
-        if (isB)
-            setCursorB(t)
-        else
-            setCursor(t)
-        bringIntoView(t)
-    }
-    function stepCursor(forward) {
-        const s = snapSignal()
-        const from = arrowsMoveB ? cursorBMs : cursorMs
-        if (!s || isNaN(from))
-            return
-        stepsB = arrowsMoveB
-        recording.step(s.index, from, forward)
-    }
-    function cursorToEnd(last) {
-        moveKeyed(snapped(last ? durationMs() : 0), arrowsMoveB)
-    }
-    // A cursor's handle let go: on a sample, and one dropped on the other
-    // leaves a single cursor
-    // The nearest sample can lie past the view's end by half a sample when the
-    // end is off the grid (a wheel zoom): then the one in force at the end,
-    // so the handle never drops out of view
-    function snappedInView(t) {
-        const s = snapped(t)
-        if (s < viewT0)
-            return viewT0
-        const first = snapSignal()
-        if (s <= viewT1 || !first)
-            return Math.min(s, viewT1)
-        const at = recording.valuesAt([first.index], viewT1)
-        return at.length > 0 && at[0].atMs >= 0 ? at[0].atMs : viewT1
-    }
-    function dropHandle(isB) {
-        const t = snappedInView(isB ? cursorBMs : cursorMs)
-        if (isB)
-            setCursorB(t)
-        else
-            setCursor(t)
-        if (hasCursorB && Math.abs(xOfTime(cursorMs) - xOfTime(cursorBMs)) <= handleDropPx)
-            clearCursorB()
-    }
     readonly property real handleDropPx: 4
-    // A time's x in the chart's frame
-    function xOfTime(t) {
-        return chart.x + plotLeft() + (t - viewT0) / (viewT1 - viewT0) * Math.max(1, plotWidth() - 1)
-    }
-    function finishBox() {
-        const a = snapped(Math.min(boxFromMs, boxToMs))
-        const b = snapped(Math.max(boxFromMs, boxToMs))
-        boxFromMs = NaN
-        boxToMs = NaN
-        setCursor(a)
-        if (b !== a)
-            setCursorB(b)
-        else if (hasCursorB)
-            clearCursorB()
-    }
     // A change, signed, in a signal's decimals
     function changeText(v, decimals, unit) {
         return v > 0 ? "+" + valueText(v, decimals, unit) : valueText(v, decimals, unit)
@@ -823,25 +625,6 @@ Page {
         const stat = spanStats[s.index]
         return s.isText ? qsTr("B %1").arg(atText(readoutTo[s.index], s))
                         : qsTr("B %1 · Δ %2").arg(atText(readoutTo[s.index], s)).arg(statChange(stat))
-    }
-
-    function togglePlotted(index) {
-        const next = Object.assign({}, plotted)
-        next[index] = !next[index]
-        plotted = next
-        chart.requestPaint()
-    }
-
-    // The plot's width as last drawn, or the chart's before its first
-    function plotWidth() {
-        return chart.drawn ? chart.drawn.plotW : chart.shownW
-    }
-    // The plot's left edge in the chart: the panes' axes are left of it
-    function plotLeft() {
-        return chart.drawn ? chart.drawn.left : 0
-    }
-    function timeAt(x) {
-        return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
     // What a difference is taken between: a plotted number here and its
@@ -963,7 +746,7 @@ Page {
                                   && theirs[p.theirs].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
-        const drawn = rowsEachSecond(sigs, indexes, durationMs())
+        const drawn = rowsEachSecond(sigs, indexes, cursorsPart.durationMs())
                       + rowsEachSecond(theirs, pairs.map(p => p.theirs), compare.durationMs)
         const held = Math.max(rowsPerSecond, compareAligned ? compareRowsPerSecond : 0)
         if (spanS * drawn > rawRowsPerFrame || spanS * held > rawRowsCached)
@@ -1065,7 +848,7 @@ Page {
         differenceShown = false
         forgetDifference()
         if (recording.state === RecordingView.Open)
-            showAll()
+            cursorsPart.showAll()
     }
 
     // The first recording's markers' labels, each once, and its number
@@ -1192,8 +975,8 @@ Page {
             return
         const s = stretchesOf(kind)[i]
         const margin = Math.max(minSpanMs, (s.toMs - s.fromMs) / 4)
-        setView(s.fromMs - margin, s.toMs + margin)
-        setCursor(s.fromMs)
+        cursorsPart.setView(s.fromMs - margin, s.toMs + margin)
+        cursorsPart.setCursor(s.fromMs)
         jumpKind = kind
         jumpIndex = i
     }
@@ -1261,9 +1044,9 @@ Page {
             alignOpen()
         if (recording.state !== RecordingView.Open)
             return
-        showAll()
+        cursorsPart.showAll()
         if (hasCursor)
-            setCursor(cursorMs)
+            cursorsPart.setCursor(cursorMs)
     }
     function alignOpen() {
         let here = 0
@@ -1608,7 +1391,7 @@ Page {
         }
         onStepReady: (request, atMs) => {
             if (atMs >= 0)
-                root.moveKeyed(atMs, root.stepsB)
+                cursorsPart.moveKeyed(atMs, root.stepsB)
         }
         onStretchesReady: (request, found, ok) => {
             if (request !== root.stretchAsk)
@@ -1651,17 +1434,17 @@ Page {
             let rows = 0
             for (const s of recording.signalList)
                 rows += s.samples
-            root.rowsPerSecond = rows / (root.durationMs() / 1000)
+            root.rowsPerSecond = rows / (cursorsPart.durationMs() / 1000)
             root.cursorMs = NaN
             root.spanHintUp = false
-            root.clearCursorB()
+            cursorsPart.clearCursorB()
             // A decode chosen in the pinned form's About reopens into About
             root.detailView = root.decodeReopen && root.detailView === "about" ? "about" : "values"
             root.decodeReopen = false
             root.framesById = false
             root.framesFilterOpen = false
             framesFilterPanel.clear()
-            root.showAll()
+            cursorsPart.showAll()
             root.askStretches()
         }
         onSignalListChanged: {
@@ -1670,9 +1453,9 @@ Page {
             // An open, a close or new units: a range set before means nothing
             root.paneRanges = ({})
             if (root.hasCursor)
-                root.setCursor(root.cursorMs)
+                cursorsPart.setCursor(root.cursorMs)
             if (root.hasCursorB)
-                root.setCursorB(root.cursorBMs)
+                cursorsPart.setCursorB(root.cursorBMs)
             if (recording.state === RecordingView.Open && root.stretchUnits !== Bridge.unitSystem)
                 root.reaskStretches()
             chart.requestPaint()
@@ -1712,7 +1495,7 @@ Page {
         onSignalListChanged: {
             root.comparePairs = ComparePairs.made(recording, compare)
             if (root.hasCursor)
-                root.setCursor(root.cursorMs)
+                cursorsPart.setCursor(root.cursorMs)
         }
     }
 
@@ -1772,7 +1555,7 @@ Page {
     Timer {
         id: framesRefill
         interval: root.settleMs
-        onTriggered: root.refillFrames()
+        onTriggered: cursorsPart.refillFrames()
     }
 
     FrameAnimation {
@@ -2065,7 +1848,7 @@ Page {
             timeText: ms => root.timeText(ms, true)
             lengthText: ms => root.lengthText(ms)
             picked: root.conditionPick
-            onShowRequested: i => root.showCondition(i)
+            onShowRequested: i => cursorsPart.showCondition(i)
             onCloseRequested: root.conditionsOpen = false
         }
 
@@ -2212,7 +1995,7 @@ Page {
                 compact: true
                 text: root.phoneShape ? qsTr("Zoom") : qsTr("Zoom to span")
                 Accessible.name: qsTr("Zoom to the span")
-                onClicked: root.zoomToSpan()
+                onClicked: cursorsPart.zoomToSpan()
             }
             ThemedButton {
                 objectName: "clearSpan"
@@ -2220,7 +2003,7 @@ Page {
                 flat: true
                 text: qsTr("Clear")
                 Accessible.name: qsTr("Remove the second cursor")
-                onClicked: root.clearCursorB()
+                onClicked: cursorsPart.clearCursorB()
             }
         }
 

@@ -78,7 +78,7 @@ Rectangle {
             gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.valueText,
             span: { t0: root.host.viewT0, t1: root.host.viewT1 }, absolute: true,
             caption: root.host.captionOf,
-            tags: root.host.cursorTags(),
+            tags: root.host.cursorsPart.cursorTags(),
             axisH: root.host.phoneShape && root.host.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
             panes: { max: root.host.paneLimit, minH: ChartLayout.paneMinH,
                      shares: root.host.paneShares, ranges: root.host.paneRanges,
@@ -219,7 +219,7 @@ Rectangle {
         onActiveChanged: {
             if (!active) {
                 if (boxing)
-                    root.host.finishBox()
+                    root.host.cursorsPart.finishBox()
                 boxing = false
                 return
             }
@@ -227,20 +227,20 @@ Rectangle {
             fromPinch = pinch.active || Date.now() - pinch.endedAt < 300
             boxing = !fromPinch && (chartTap.held || (centroid.modifiers & Qt.ShiftModifier) !== 0)
             if (boxing) {
-                root.host.boxFromMs = root.host.timeAt(centroid.pressPosition.x)
+                root.host.boxFromMs = root.host.cursorsPart.timeAt(centroid.pressPosition.x)
                 root.host.boxToMs = root.host.boxFromMs
             }
         }
         onActiveTranslationChanged: {
             if (!active || fromPinch) return
             if (boxing) {
-                root.host.boxToMs = Math.min(root.host.viewT1, Math.max(root.host.viewT0, root.host.timeAt(centroid.position.x)))
+                root.host.boxToMs = Math.min(root.host.viewT1, Math.max(root.host.viewT0, root.host.cursorsPart.timeAt(centroid.position.x)))
                 chart.repaintMarks()
                 return
             }
             const span = root.host.viewT1 - root.host.viewT0
-            const t0 = startT0 - activeTranslation.x / Math.max(1, root.host.plotWidth() - 1) * span
-            root.host.setView(t0, t0 + span)
+            const t0 = startT0 - activeTranslation.x / Math.max(1, root.host.cursorsPart.plotWidth() - 1) * span
+            root.host.cursorsPart.setView(t0, t0 + span)
         }
     }
     // A pinch zooms the time about its middle; one whose fingers
@@ -282,7 +282,7 @@ Rectangle {
                                   ChartLayout.scaledRange(startPane, startY, 1 / activeScale))
                 return
             }
-            root.host.zoomAt(root.host.timeAt(centroid.position.x), lastScale / activeScale)
+            root.host.cursorsPart.zoomAt(root.host.cursorsPart.timeAt(centroid.position.x), lastScale / activeScale)
             lastScale = activeScale
         }
     }
@@ -315,7 +315,7 @@ Rectangle {
                                       ChartLayout.scaledRange(l.panes[i], event.y - chart.y, factor))
                 return
             }
-            root.host.zoomAt(root.host.timeAt(event.x), factor)
+            root.host.cursorsPart.zoomAt(root.host.cursorsPart.timeAt(event.x), factor)
         }
     }
     DoubleTapHandler {
@@ -339,21 +339,21 @@ Rectangle {
                 root.host.panesPart.openPaneMenu(labeled, chart)
                 return
             }
-            if (!root.host.phoneShape || at.x - chart.x < root.host.plotLeft())
+            if (!root.host.phoneShape || at.x - chart.x < root.host.cursorsPart.plotLeft())
                 return
             held = true
-            root.host.placeSecond(root.host.snapped(root.host.timeAt(at.x)))
+            root.host.cursorsPart.placeSecond(root.host.cursorsPart.snapped(root.host.cursorsPart.timeAt(at.x)))
         }
         onTapped: (eventPoint, button) => {
             lastAt = eventPoint.position
             // A tap on the axes' column places no cursor
-            if (eventPoint.position.x - chart.x < root.host.plotLeft())
+            if (eventPoint.position.x - chart.x < root.host.cursorsPart.plotLeft())
                 return
-            const t = root.host.snapped(root.host.timeAt(eventPoint.position.x))
+            const t = root.host.cursorsPart.snapped(root.host.cursorsPart.timeAt(eventPoint.position.x))
             if ((chartTap.point.modifiers & Qt.ShiftModifier) !== 0)
-                root.host.placeSecond(t)
+                root.host.cursorsPart.placeSecond(t)
             else
-                root.host.setCursor(t)
+                root.host.cursorsPart.setCursor(t)
         }
         // A double-click or double-tap maximizes it, or gives the
         // signals back (on an axis or a seam, root.doubleTapAt);
@@ -444,7 +444,7 @@ Rectangle {
         visible: chart.drawn !== null && at >= root.host.viewT0 && at <= root.host.viewT1
         width: Math.max(minWidth, handleText.implicitWidth + 8)
         height: root.host.phoneShape ? Theme.touchTarget : 24
-        x: Math.min(Math.max(0, root.host.xOfTime(at) - width / 2), root.width - width)
+        x: Math.min(Math.max(0, root.host.cursorsPart.xOfTime(at) - width / 2), root.width - width)
         y: chart.y + (chart.drawn ? chart.drawn.top + chart.drawn.plotH + tabH : 0) - height
         Accessible.role: Accessible.Slider
         Accessible.name: qsTr("Cursor at %1").arg(handleText.text)
@@ -490,14 +490,14 @@ Rectangle {
                 dragging = true
                 // Past the plot's edge the handle would leave the view,
                 // hide, and lose the grab before the drop
-                const t = Math.min(Math.max(root.host.timeAt(x), root.host.viewT0), root.host.viewT1)
+                const t = Math.min(Math.max(root.host.cursorsPart.timeAt(x), root.host.viewT0), root.host.viewT1)
                 if (handle.isB)
-                    root.host.setCursorB(t)
+                    root.host.cursorsPart.setCursorB(t)
                 else
-                    root.host.setCursor(t)
+                    root.host.cursorsPart.setCursor(t)
             }
-            onReleased: if (dragging) root.host.dropHandle(handle.isB)
-            onCanceled: if (dragging) root.host.dropHandle(handle.isB)
+            onReleased: if (dragging) root.host.cursorsPart.dropHandle(handle.isB)
+            onCanceled: if (dragging) root.host.cursorsPart.dropHandle(handle.isB)
         }
     }
     CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }

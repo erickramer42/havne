@@ -115,7 +115,7 @@ ColumnLayout {
                  : qsTr("No frame in view")
         // A tap puts the chart's cursor at the frame's time, whether
         // or not a signal has a sample there
-        onRowClicked: (index, modifiers, timestampUs) => root.host.setCursor(timestampUs / 1000)
+        onRowClicked: (index, modifiers, timestampUs) => root.host.cursorsPart.setCursor(timestampUs / 1000)
     }
     FrameIdList {
         id: viewerFrameIds

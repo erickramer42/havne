@@ -43,22 +43,22 @@ Item {
         part.host.chart.paints = 0
         part.host.chart.paintMs = 0
         part.host.chart.paintMaxMs = 0
-        part.host.setView(0, part.host.durationMs() / 10)
+        part.host.cursorsPart.setView(0, part.host.cursorsPart.durationMs() / 10)
         part.host.frameTestResult = qsTr("Measuring…")
     }
 
     function frameStep(elapsedS) {
-        const whole = part.host.durationMs()
+        const whole = part.host.cursorsPart.durationMs()
         const span = part.host.viewT1 - part.host.viewT0
         if (elapsedS < part.host.frameTestSeconds / 2) {
             // A tenth of the recording a second, back to the start at its end
             let t0 = whole / 10 * elapsedS
             t0 = t0 % Math.max(1, whole - span)
-            part.host.setView(t0, t0 + span)
+            part.host.cursorsPart.setView(t0, t0 + span)
         } else {
             // In for 0.75 s, out for 0.75 s, about the middle
             const inward = Math.floor((elapsedS - part.host.frameTestSeconds / 2) / 0.75) % 2 === 0
-            part.host.zoomAt((part.host.viewT0 + part.host.viewT1) / 2, inward ? 0.97 : 1 / 0.97)
+            part.host.cursorsPart.zoomAt((part.host.viewT0 + part.host.viewT1) / 2, inward ? 0.97 : 1 / 0.97)
         }
     }
 
@@ -68,7 +68,7 @@ Item {
         const panes = part.host.chart.drawn ? part.host.chart.drawn.panes.length : 0
         part.host.frameTest = null
         part.host.plotted = t.plotted
-        part.host.showAll()
+        part.host.cursorsPart.showAll()
         // Frames shown in each half, panning then zooming
         const half = seconds / 2
         part.host.frameTestResult = qsTr("Frame test, %1 plotted in %8 at %2 px: %3 frames/s shown panning, "

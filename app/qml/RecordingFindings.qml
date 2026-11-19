@@ -52,8 +52,8 @@ ListView {
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             onClicked: {
                 const f = findingRow.modelData
-                root.host.centerOn(f.atMs + f.lengthMs / 2)
-                root.host.setCursor(f.atMs)
+                root.host.cursorsPart.centerOn(f.atMs + f.lengthMs / 2)
+                root.host.cursorsPart.setCursor(f.atMs)
             }
         }
         RowLayout {

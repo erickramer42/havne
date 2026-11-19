@@ -69,7 +69,7 @@ ListView {
                 objectName: "plotCheck"
                 checked: root.host.plotted[signalRow.signalIndex] === true
                 enabled: !signalRow.modelData.isText
-                onToggled: root.host.togglePlotted(signalRow.signalIndex)
+                onToggled: root.host.cursorsPart.togglePlotted(signalRow.signalIndex)
                 Accessible.name: qsTr("Plot %1").arg(signalRow.modelData.name)
             }
             Rectangle {

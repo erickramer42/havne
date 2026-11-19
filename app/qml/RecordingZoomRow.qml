@@ -47,7 +47,7 @@ ColumnLayout {
             compact: Theme.dense
             text: qsTr("All")
             Layout.maximumWidth: 72
-            onClicked: root.host.showAll()
+            onClicked: root.host.cursorsPart.showAll()
         }
         ThemedButton {
             objectName: "zoomOut"
@@ -55,7 +55,7 @@ ColumnLayout {
             text: "−"
             Layout.maximumWidth: 48
             Accessible.name: qsTr("Zoom out")
-            onClicked: root.host.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 2)
+            onClicked: root.host.cursorsPart.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 2)
         }
         ThemedButton {
             objectName: "zoomIn"
@@ -63,7 +63,7 @@ ColumnLayout {
             text: "+"
             Layout.maximumWidth: 48
             Accessible.name: qsTr("Zoom in")
-            onClicked: root.host.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 0.5)
+            onClicked: root.host.cursorsPart.zoomAt((root.host.viewT0 + root.host.viewT1) / 2, 0.5)
         }
         ThemedButton {
             objectName: "frameTest"
