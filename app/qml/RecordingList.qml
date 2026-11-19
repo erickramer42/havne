@@ -40,7 +40,7 @@ ListView {
             anchors.fill: parent
             hoverEnabled: true
             Accessible.name: qsTr("Open %1").arg(recordingRow.modelData.title)
-            onClicked: root.host.open(recordingRow.modelData)
+            onClicked: root.host.openPart.open(recordingRow.modelData)
             HoverHandler { cursorShape: Qt.PointingHandCursor }
         }
 

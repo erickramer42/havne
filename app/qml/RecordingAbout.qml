@@ -93,7 +93,7 @@ ColumnLayout {
             width: Math.min(implicitWidth, baselineFlow.width)
             text: qsTr("Use as %1's baseline").arg(root.host.pickedVehicle !== null
                                                     ? root.host.pickedVehicle.label : "")
-            onClicked: root.host.useAsBaseline()
+            onClicked: root.host.openPart.useAsBaseline()
         }
         Label {
             objectName: "isBaseline"
@@ -113,7 +113,7 @@ ColumnLayout {
             text: qsTr("Compare with the baseline")
             Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
                                  .arg(root.host.pickedVehicle !== null ? root.host.pickedVehicle.label : "")
-            onClicked: root.host.compareWithBaseline()
+            onClicked: root.host.openPart.compareWithBaseline()
         }
     }
 

@@ -28,6 +28,14 @@ Page {
     background: Rectangle { color: Theme.bg }
 
     // The parts' ids the page reads, and the page's ids the parts read
+    property alias signalFilter: signalFilter
+    property alias openPart: openPart
+    readonly property var chooseImportFile: openPart.chooseImportFile
+    readonly property var chooseImportMap: openPart.chooseImportMap
+    readonly property var clearBaseline: openPart.clearBaseline
+    readonly property var open: openPart.open
+    readonly property var openFolder: openPart.openFolder
+    readonly property var backToList: openPart.backToList
     property alias paneMenu: paneMenu
     property alias panesPart: panesPart
     readonly property var paneOf: panesPart.paneOf
@@ -97,7 +105,7 @@ Page {
     property var baselineRow: null
     readonly property bool baselineGone: baselineFolder !== "" && baselineRow === null
     readonly property bool isBaseline: baselineFolder !== "" && recording.folder === baselineFolder
-    onBaselineFolderChanged: checkBaseline()
+    onBaselineFolderChanged: openPart.checkBaseline()
 
     readonly property int recordingsListed: 20
 
@@ -552,192 +560,20 @@ Page {
 
     RecordingPanes { id: panesPart; host: root }
 
+    RecordingOpen { id: openPart; host: root }
+
     function refresh() {
         recordings = Bridge.recentRecordings(recordingsListed)
-        checkBaseline()
-    }
-
-    // A URL's last part, as the picker named it (a content:// URI's too)
-    function fileNameOf(url) {
-        const text = decodeURIComponent(url.toString())
-        return text.substring(text.lastIndexOf("/") + 1)
-    }
-
-    // A file picked to import: its kind guessed, the rest asked for. name is
-    // the picker's for it, else the URL's last part
-    function chooseImportFile(url, name) {
-        importFile = url
-        importFileName = name || fileNameOf(url)
-        importKind = Bridge.recordingImport.guessKind(url)
-        importMap = ""
-        importAsksInterface = false
-        importInterface.text = ""
-        importLabel.text = ""
-        importNote = ""
-        importFailed = false
-        importOpen = true
-        savedMaps = Bridge.recordingImport.savedMaps()
-        guessImportFile()
-    }
-
-    // A CSV's map guessed from its header, unless a map file is chosen
-    function guessImportFile() {
-        guessPreview.clear()
-        if (importKind !== RecordingImport.Csv || importMap.toString() !== "")
-            return
-        importGuessing = Bridge.recordingImport.guess(importFile, "")
-        if (!importGuessing) {
-            importFailed = true
-            importNote = qsTr("The file couldn't be read. Column map... picks a map instead.")
-        }
-    }
-
-    // A map file chosen (the dialog, or one saved earlier) instead of the
-    // guess
-    function chooseImportMap(url, name) {
-        importMap = url
-        importMapFileName = name || fileNameOf(url)
-        importNote = ""
-        importFailed = false
-        guessPreview.clear()
-    }
-
-    // The picker couldn't give a file or a map
-    function importPickFailed(words) {
-        importNote = words
-        importFailed = true
-    }
-
-    // Back to the guess after a map file was chosen
-    function useTheGuess() {
-        importMap = ""
-        importNote = ""
-        importFailed = false
-        guessImportFile()
+        openPart.checkBaseline()
     }
 
     readonly property bool importReady: importKind === RecordingImport.Candump
                                         || importMap.toString() !== ""
                                         || (importUsesGuess && guessPreview.ready)
 
-    function startImport() {
-        importNote = ""
-        importFailed = false
-        const started = importUsesGuess
-            ? Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
-            : Bridge.recordingImport.start(importFile, importKind, importMap,
-                                           importKind === RecordingImport.Candump
-                                           ? importInterface.text : "")
-        if (!started) {
-            importFailed = true
-            importNote = qsTr("Not imported: the import couldn't start")
-        }
-    }
-
-    // What an import made, in words
-    function importedWords(result) {
-        if (importKind === RecordingImport.Candump)
-            return qsTr("Imported %1 frames over %2 s")
-                       .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
-        const words = result.columnsIgnored > 0
-                      ? qsTr("Imported %1 values; columns ignored: %2")
-                            .arg(result.values).arg(result.columnsIgnored)
-                      : qsTr("Imported %1 values").arg(result.values)
-        if (!(result.rowsNoTime > 0))
-            return words
-        // A row with no time has nowhere to go: core leaves it out, counted.
-        // havne-cli's words; after a count of columns a comma would read as its
-        const left = result.rowsNoTime === 1
-                     ? qsTr("1 row with no time left out")
-                     : qsTr("%1 rows with no time left out").arg(result.rowsNoTime)
-        return words + (result.columnsIgnored > 0 ? "; " : ", ") + left
-    }
-
-    function checkBaseline() {
-        // Not a ternary of the map and ({}): qmlcachegen 6.12.0 crashes on it
-        if (baselineFolder === "") {
-            baselineRow = null
-            return
-        }
-        const row = Bridge.recordingRow(baselineFolder)
-        baselineRow = row.folder !== undefined ? row : null
-    }
-    function useAsBaseline() {
-        vehiclesEdited(VehicleBook.setBaseline(vehicles, recording.folder))
-    }
-    function clearBaseline() {
-        vehiclesEdited(VehicleBook.clearBaseline(vehicles))
-    }
-    // The baseline overlaid on the open recording, lined up on their
-    // engine starts
-    function compareWithBaseline() {
-        checkBaseline()
-        if (baselineRow === null)
-            return
-        alignChoice.currentIndex = alignChoice.indexOfValue("engine")
-        setAlignOn("engine")
-        compareWith(baselineRow)
-    }
-
-    function open(row) {
-        checkBaseline()
-        // An import's words belong to the import, not to the recording opened next
-        importNote = ""
-        importFailed = false
-        openedTitle = row.title
-        openedUri = row.uri !== undefined ? row.uri : ""
-        recording.open(row.folder)
-    }
-
-    // A folder just recorded (a stopped log), opened from the list as a
-    // tap on its row would; one the list can't show stays on the list
-    function openFolder(folder) {
-        if (viewing)
-            backToList()
-        else
-            refresh()
-        const row = Bridge.recordingRow(folder)
-        if (row.folder !== undefined)
-            open(row)
-    }
-
     // Seconds to the ms with no trailing zeros, as core's replay takes them
     function secondsText(ms) {
         return String(Number((ms / 1000).toFixed(3)))
-    }
-
-    // The opened recording's replay:// URI for the part in view
-    // (ADR-0023's appendix "a stretch replayed"): from and to in the
-    // recording's own seconds, none while the whole recording is in view
-    function stretchUri() {
-        const from = Math.max(0, Math.floor(viewT0))
-        const to = Math.min(durationMs(), Math.ceil(viewT1))
-        if (from <= 0 && to >= durationMs())
-            return openedUri
-        return openedUri + (openedUri.indexOf("?") >= 0 ? "&" : "?")
-               + "from=" + secondsText(from) + "&to=" + secondsText(to)
-    }
-
-    function backToList() {
-        importNote = ""
-        reportPart.closeExport()
-        stretchesOpen = false
-        recording.close()
-        viewFrames.clear()
-        detailView = "values"
-        decodeReopen = false
-        stopComparing()
-        alignChoice.currentIndex = 0
-        alignOn = "start"
-        alignLabel = ""
-        alignSignal = ""
-        alignSignalName = ""
-        alignLevel = NaN
-        alignHysteresis = 0
-        openedTitle = ""
-        openedUri = ""
-        signalFilter.clear()
-        refresh()
     }
 
     function durationMs() {
@@ -1702,8 +1538,8 @@ Page {
         title: qsTr("Import a log")
         nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.chooseImportFile(importDialog.selectedFile, importDialog.selectedName)
-        onFailed: words => root.importPickFailed(words)
+        onAccepted: openPart.chooseImportFile(importDialog.selectedFile, importDialog.selectedName)
+        onFailed: words => openPart.importPickFailed(words)
     }
     DocumentOpenDialog {
         id: mapDialog
@@ -1711,8 +1547,8 @@ Page {
         title: qsTr("The logger's column map")
         nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.chooseImportMap(mapDialog.selectedFile, mapDialog.selectedName)
-        onFailed: words => root.importPickFailed(words)
+        onAccepted: openPart.chooseImportMap(mapDialog.selectedFile, mapDialog.selectedName)
+        onFailed: words => openPart.importPickFailed(words)
     }
 
     // Save report's file: text first, the one a shop or a buyer reads
@@ -1901,8 +1737,8 @@ Page {
             root.importFailed = !result.ok && !root.importCanceled
             if (result.ok) {
                 root.importOpen = false
-                root.openFolder(result.folder)
-                root.importNote = root.importedWords(result)
+                openPart.openFolder(result.folder)
+                root.importNote = openPart.importedWords(result)
             } else if (root.importCanceled) {
                 // The panel stays, its choices kept, for another try
                 root.importNote = qsTr("Import canceled: nothing was imported")
@@ -2051,7 +1887,7 @@ Page {
                 text: qsTr("Clear it")
                 Accessible.name: qsTr("Clear %1's baseline").arg(root.pickedVehicle !== null
                                                                  ? root.pickedVehicle.label : "")
-                onClicked: root.clearBaseline()
+                onClicked: openPart.clearBaseline()
             }
         }
 
@@ -2075,7 +1911,7 @@ Page {
                 text: Theme.compact ? "←" : qsTr("All recordings")   // a left arrow
                 Accessible.name: qsTr("All recordings")
                 Layout.preferredWidth: Theme.compact ? Theme.touchTarget : -1
-                onClicked: root.backToList()
+                onClicked: openPart.backToList()
             }
             Label {
                 objectName: "openedTitle"
@@ -2109,7 +1945,7 @@ Page {
                         enabled: root.sessionIdle
                         text: root.replayText
                         Accessible.name: root.replayName(qsTr("Replay the part in view as a session"))
-                        onClicked: root.replayRequested(root.stretchUri())
+                        onClicked: root.replayRequested(openPart.stretchUri())
                     }
                     ThemedButton {
                         objectName: "saveReport"
@@ -2167,7 +2003,7 @@ Page {
             ThemedButton {
                 objectName: "cancelOpen"
                 text: qsTr("Cancel")
-                onClicked: root.backToList()
+                onClicked: openPart.backToList()
             }
         }
 
