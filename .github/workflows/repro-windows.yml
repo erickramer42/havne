@@ -1,0 +1,114 @@
+name: Reproducible Windows build
+
+# Builds the Windows release's executables and DLLs twice from one commit,
+# the second time in another folder with every file dated a day later,
+# and requires every .exe and .dll to match byte for byte (ADR-0035). The
+# release zip and the symbols zip are compared and reported. About 30
+# minutes of runner, so a push runs it only when a file it checks changed,
+# on build/** branches and dev. A manual run needs the file on main
+# (GitHub dispatches only workflows the default branch has):
+#   gh workflow run repro-windows.yml --ref <branch>
+# release.yml may call it with `uses: ./.github/workflows/repro-windows.yml`.
+on:
+  push:
+    branches: ['build/**', dev]
+    paths:
+      - CMakeLists.txt
+      - packaging/windows/**
+      - .github/workflows/repro-windows.yml
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build, empty for the caller's
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The same Qt install as release.yml's windows job (the kit main's
+      # CI saved, else aqtinstall); Qt's DLLs are the build's pinned inputs
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}\Qt
+          key: qt-windows-6.12.0-win64_msvc2022_64-aqt-076e1659
+
+      - name: Install aqtinstall (pinned master commit)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+
+      - name: Install Qt 6.12.0
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 10
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+          python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
+
+      - name: Point the build at Qt
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          if (-not (Test-Path "$prefix\bin\qmake.exe")) { Write-Error "no Qt at $prefix"; exit 1 }
+          "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # The commit's time dates rcc's embedded files and the zips, as in
+      # release.yml; the second tree's files are a day newer, so a build
+      # that read a file time would differ
+      - name: Date the build by the commit
+        run: |
+          $t = git log -1 --format=%ct
+          "SOURCE_DATE_EPOCH=$t" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "QT_RCC_SOURCE_DATE_OVERRIDE=$t" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $v = (Get-Content CMakeLists.txt -Raw) -replace '(?s).*?project\(Havne\s+VERSION\s+([0-9.]+).*', '$1'
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # Two copies of the checkout, in folders of different lengths and names
+      - name: Copy the source twice
+        run: |
+          foreach ($pair in @(@('C:\r1\havne-first', 0), @('C:\r2\second', 1))) {
+            robocopy . $pair[0] /MIR /XD .git Qt /NFL /NDL /NJH /NJS /NP | Out-Null
+            if ($LASTEXITCODE -ge 8) { exit $LASTEXITCODE }
+            if ($pair[1]) {
+              $later = (Get-Date).AddDays(1)
+              Get-ChildItem -LiteralPath $pair[0] -Recurse -File | ForEach-Object { $_.LastWriteTime = $later }
+            }
+          }
+          $global:LASTEXITCODE = 0
+
+      # As release.yml: build-win32 first (the app's configure finds its
+      # x86 surrogate), LINK so each PE records only its PDB's file name,
+      # then the app, then stage.ps1's checks and zips
+      - name: Build, stage and zip both copies
+        run: |
+          $env:LINK = '/PDBALTPATH:%_PDB%'
+          foreach ($root in 'C:\r1\havne-first', 'C:\r2\second') {
+            Push-Location $root
+            cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake --build build-win32 --config Release --target ecuio-j2534-surrogate
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DBUILD_TESTING=OFF
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake --build build --config Release --target havne ecuio
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            pwsh -NoProfile -File packaging/windows/stage.ps1 -Version $env:VERSION -SmokeSeconds 3
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            Pop-Location
+          }
+
+      - name: Compare
+        run: |
+          pwsh -NoProfile -File packaging/windows/repro-compare.ps1 C:\r1\havne-first C:\r2\second
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
