@@ -49,8 +49,8 @@ Page {
     property alias seriesPart: seriesPart
     readonly property var differencePairs: seriesPart.differencePairs
     readonly property var series: seriesPart.series
-    property alias settle: settle
-    property alias framesRefill: framesRefill
+    property alias settle: recordingWatchers.settle
+    property alias framesRefill: recordingWatchers.framesRefill
     property alias cursorsPart: cursorsPart
     readonly property var setView: cursorsPart.setView
     readonly property var zoomAt: cursorsPart.zoomAt
@@ -108,7 +108,7 @@ Page {
     property alias viewerFrameTable: viewerFrames.viewerFrameTable
     property alias framesHeadComponent: framesHeadComponent
     property alias idsHeadComponent: idsHeadComponent
-    property alias viewFrames: viewFrames
+    property alias viewFrames: recordingWatchers.viewFrames
     property alias aboutActions: aboutBlock.aboutActions
     property alias alignChoice: aboutBlock.alignChoice
     property alias aboutHome: aboutHome
@@ -742,83 +742,12 @@ Page {
 
     RecordingViews { id: recordingViews; host: root }
 
-    Connections {
-        target: Bridge.recordingImport
-        function onGuessFinished(result) {
-            root.importGuessing = false
-            // The panel was closed, or a map file chosen, meanwhile
-            if (!root.importOpen || root.importMap.toString() !== ""
-                    || root.importKind !== RecordingImport.Csv)
-                return
-            if (result.ok) {
-                guessPreview.load(result)
-            } else {
-                root.importFailed = true
-                root.importNote = qsTr("%1. Column map... picks a map instead.").arg(result.words)
-            }
-        }
-        function onFinished(result) {
-            root.importStopping = false
-            root.importCanceled = result.canceled === true
-            root.importFailed = !result.ok && !root.importCanceled
-            if (result.ok) {
-                root.importOpen = false
-                openPart.openFolder(result.folder)
-                root.importNote = openPart.importedWords(result)
-            } else if (root.importCanceled) {
-                // The panel stays, its choices kept, for another try
-                root.importNote = qsTr("Import canceled: nothing was imported")
-            } else {
-                root.importNote = result.words
-                if (root.importKind === RecordingImport.Candump)
-                    root.importAsksInterface = true
-            }
-        }
-    }
+    RecordingEvents { id: recordingEvents; host: root }
 
-    Connections {
-        target: Bridge
-        // A recording that ended joins the list
-        function onRecordingStateChanged() {
-            if (!Bridge.recordingActive)
-                root.refresh()
-        }
-    }
     onVisibleChanged: if (visible && !viewing) refresh()
     Component.onCompleted: refresh()
 
-    Timer {
-        id: settle
-        interval: root.settleMs
-        onTriggered: chart.moving = false
-    }
-
-    // The part in view's frames (ADR-0049's appendix "frames read back")
-    RecordingFrames { id: viewFrames }
-    Timer {
-        id: framesRefill
-        interval: root.settleMs
-        onTriggered: cursorsPart.refillFrames()
-    }
-
-    FrameAnimation {
-        running: root.frameTesting
-        onTriggered: {
-            const elapsed = (Date.now() - root.frameTest.begun) / 1000
-            if (elapsed >= root.frameTestSeconds)
-                frameTestPart.finishFrameTest()
-            else
-                frameTestPart.frameStep(elapsed)
-        }
-    }
-    Connections {
-        target: root.Window.window
-        enabled: root.frameTesting
-        function onFrameSwapped() {
-            const zooming = (Date.now() - root.frameTest.begun) / 1000 >= root.frameTestSeconds / 2
-            root.frameTest.frames[zooming ? 1 : 0] += 1
-        }
-    }
+    RecordingWatchers { id: recordingWatchers; host: root }
 
     // The page scrolls when its column needs more height than it has: a
     // phone upright, or any screen turned on its side. Up and down only, and
