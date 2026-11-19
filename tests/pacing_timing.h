@@ -114,8 +114,12 @@ inline double inverse_normal(double p)
     return q < 0 ? -v : v;
 }
 
+// The longest draw: past it llround's result is undefined (a P99 far
+// above its P50 reaches about 4e24 us at the farthest u)
+constexpr double DRAW_MAX_US = 60000000.0;
+
 // One request's first-frame delay from the module's generator: 0 with no
-// P50 set (no draw), the P50 itself when P99 equals it
+// P50 set (no draw), the P50 itself when P99 equals it, at most 60 s
 inline int64_t sim_timing_draw(const sim_timing& t, std::mt19937_64& rng)
 {
     if (t.p50_us == 0) {
@@ -129,7 +133,8 @@ inline int64_t sim_timing_draw(const sim_timing& t, std::mt19937_64& rng)
                                         static_cast<double>(t.p50_us)) /
                                    2.3263478740
                              : 0.0;
-    return std::llround(std::exp(mu + sigma * inverse_normal(u)));
+    const double v = std::exp(mu + sigma * inverse_normal(u));
+    return std::llround(v < DRAW_MAX_US ? v : DRAW_MAX_US);
 }
 
 } // namespace pacing

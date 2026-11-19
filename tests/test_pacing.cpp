@@ -98,6 +98,18 @@ TEST(PacingTest, TheDrawIsTheSimulatedCarsOwn)
     pacing::sim_timing none;
     auto r = pacing::sim_timing_rng(none.seed, 0x7E8);
     EXPECT_EQ(pacing::sim_timing_draw(none, r), 0);
+
+    /* A P99 far above its P50 reaches the 60 s cap (z past about 2.6,
+     * about 1 draw in 200) and never passes it, as the simulated car's */
+    pacing::sim_timing wide;
+    wide.p50_us = 1;
+    wide.p99_us = 10000000;
+    auto w = pacing::sim_timing_rng(wide.seed, 0x7E8);
+    int64_t most = 0;
+    for (int i = 0; i < 20000; ++i) {
+        most = std::max(most, pacing::sim_timing_draw(wide, w));
+    }
+    EXPECT_EQ(most, 60000000);
 }
 
 /* A run repeats exactly; another seed moves it */
