@@ -154,6 +154,17 @@ TEST(SimTimingTest, TheDrawsFixedNumbers)
     }
 }
 
+// The uniform stays inside (0, 1) at a generator's two extremes, where
+// the top 53 bits would round to 1 and the quantile to NaN
+TEST(SimTimingTest, TheUniformNeverReachesEitherEnd)
+{
+    EXPECT_LT(sim_timing_uniform(UINT64_MAX), 1.0);
+    EXPECT_GT(sim_timing_uniform(0), 0.0);
+    EXPECT_TRUE(std::isfinite(inverse_normal(sim_timing_uniform(UINT64_MAX))));
+    EXPECT_TRUE(std::isfinite(inverse_normal(sim_timing_uniform(0))));
+    EXPECT_GT(inverse_normal(sim_timing_uniform(UINT64_MAX)), 8.0);
+}
+
 // AS241's quantiles at points in its central region and its tails
 TEST(SimTimingTest, TheInverseNormalHoldsAS241sPoints)
 {

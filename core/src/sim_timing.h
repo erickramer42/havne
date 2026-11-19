@@ -205,6 +205,14 @@ inline double inverse_normal(double p)
     return q < 0 ? -v : v;
 }
 
+/* A generator's output as a uniform in (0, 1): its top 52 bits and a
+ * half, each sum exact in a double, so neither end is reached (53 bits
+ * would round the largest to 1) */
+inline double sim_timing_uniform(uint64_t x)
+{
+    return (static_cast<double>(x >> 12) + 0.5) * 0x1.0p-52;
+}
+
 /* The next delay from request to first frame, in microseconds: 0, and
  * nothing drawn, with no delay set; at most DRAW_MAX_US */
 inline int64_t sim_timing_draw(const sim_timing& t, std::mt19937_64& rng)
@@ -212,9 +220,7 @@ inline int64_t sim_timing_draw(const sim_timing& t, std::mt19937_64& rng)
     if (t.p50_us <= 0) {
         return 0;
     }
-    const uint64_t x = rng();
-    const double u = (static_cast<double>(x >> 11) + 0.5) * 0x1.0p-53;
-    const double z = inverse_normal(u);
+    const double z = inverse_normal(sim_timing_uniform(rng()));
     const double mu = std::log(static_cast<double>(t.p50_us));
     const double sigma = t.p99_us == t.p50_us
                              ? 0.0
