@@ -31,14 +31,15 @@
 //      where they stopped, so the next turn goes on from there;
 //   4. another channel's session entry or keep-alive is due (ADR-0060), so
 //      a lap never runs past S3;
-//   5. another channel has a key offered (request_talk.h): the key's
-//      window can be shorter than a turn, and a key that waits one out is
-//      never sent.
+//   5. another channel has a key offered in its window (request_talk.h):
+//      the window can be shorter than a turn, and a key that waits one
+//      out is never sent.
 // Then the next channel in order with something due takes it, starting
 // at a channel with a key offered. A channel the driver holds (held, a
 // bit for each channel) is passed over. The walk keeps the turn until it
-// ends by rule 1, 4 or 5, so its budget (each channel's own second)
-// holds only its own exchanges.
+// ends or rule 4 or 5 takes it. Its budget (each channel's own second)
+// stands still from a turn's end to the channel's next request, so it
+// holds only the channel's own exchanges, whoever asks in between.
 //
 // SocketCAN and J2534 don't use this: their channels' exchanges overlap
 // (each channel's one outstanding request), so a busy channel's pace never
@@ -61,6 +62,10 @@ struct ecuio_engine_turns {
     uint32_t limit = 0;   /* its rotation's rows when the turn began */
     uint32_t asked = 0;   /* rotation rows asked in the turn */
     int64_t since_us = 0; /* when the turn began */
+    /* A bit for each channel whose turn ended while it walked, and since
+     * when: the walk's budget stands still until the channel asks again */
+    uint32_t walk_away = 0;
+    int64_t walk_away_us[ECUIO_MAX_CHANNELS] = {};
 };
 
 /* Whether channel ch is asking its walk: walking, with no other one-shot
@@ -123,17 +128,54 @@ inline int64_t ecuio_engine_turn_floor_us(const ecuio_request_engine* e,
     return at - now_us;
 }
 
-/* The first channel not held whose key is offered (rule 5); the channel
- * count for none */
+/* The first channel not held whose key is offered with its window open
+ * at now_us (rule 5); the channel count for none. A key past its window
+ * can't go any more: its channel's next turn settles it unsent. */
 inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
-                                      uint32_t held)
+                                      uint32_t held, int64_t now_us)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
-        if ((held & (1u << k)) == 0 && ecuio_talk_key_waits(e->chans[k].talk)) {
+        const ecuio_engine_channel& ch = e->chans[k];
+        if ((held & (1u << k)) == 0 && ecuio_talk_key_waits(ch.talk) &&
+            ecuio_key_window_open(ch.key, now_us)) {
             return k;
         }
     }
     return e->chan_count;
+}
+
+/* Channel k's turn ended at now_us: a walk it was asking is away from
+ * then */
+inline void ecuio_engine_turn_left(const ecuio_request_engine* e,
+                                   ecuio_engine_turns& t, uint32_t k,
+                                   int64_t now_us)
+{
+    if (e->chans[k].walking) {
+        t.walk_away |= 1u << k;
+        t.walk_away_us[k] = now_us;
+    }
+}
+
+/* ecuio_engine_due for a channel that doesn't hold the turn. The time
+ * since k's turn ended mid-walk isn't the walk's: its budget moves on by
+ * it before due reads it, each stretch once, and k is away no more once
+ * it asks. */
+inline int32_t ecuio_engine_turn_due(ecuio_request_engine* e,
+                                     ecuio_engine_turns& t, uint32_t k,
+                                     int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[k];
+    if ((t.walk_away & (1u << k)) != 0) {
+        if (ch.walking && ch.walk_timed) {
+            ch.walk_until_us += now_us - t.walk_away_us[k];
+        }
+        t.walk_away_us[k] = now_us;
+    }
+    const int32_t r = ecuio_engine_due(e, k, now_us);
+    if (r != ECUIO_ENGINE_NONE) {
+        t.walk_away &= ~(1u << k);
+    }
+    return r;
 }
 
 /* Whether the turn on channel c is over by rule 1, 3, 4 or 5 at now_us */
@@ -149,7 +191,7 @@ inline bool ecuio_engine_turn_over(const ecuio_request_engine* e,
         now_us - t.since_us >= ECUIO_ENGINE_TURN_US) {
         return true;
     }
-    const uint32_t keyed = ecuio_engine_turn_key(e, held);
+    const uint32_t keyed = ecuio_engine_turn_key(e, held, now_us);
     if (keyed < e->chan_count && keyed != c) {
         return true;
     }
@@ -208,10 +250,11 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
                 return r;
             }
         }
+        ecuio_engine_turn_left(e, t, k, now_us);
         t.on = false;
         t.chan = (k + 1) % n;
     }
-    const uint32_t keyed = ecuio_engine_turn_key(e, held);
+    const uint32_t keyed = ecuio_engine_turn_key(e, held, now_us);
     const uint32_t from = keyed < n ? keyed : t.chan;
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t k = (from + i) % n;
@@ -219,7 +262,7 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
             continue;
         }
         const uint32_t limit = e->chans[k].requests;
-        const int32_t r = ecuio_engine_due(e, k, now_us);
+        const int32_t r = ecuio_engine_turn_due(e, t, k, now_us);
         if (r != ECUIO_ENGINE_NONE) {
             t.chan = k;
             t.on = true;

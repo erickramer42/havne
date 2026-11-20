@@ -67,7 +67,10 @@ enum class ecuio_talk_offer : uint8_t {
     too_long, /* past the transport's bound */
     refused,  /* outside the ceiling, not what its kind says (a 27 that
                  is no seed or key, a key with no window open or for
-                 another seed than the window's), or no request at all */
+                 another seed than the window's), or no request at all;
+                 from the engine's offer also a seed or key to a
+                 functional address, and a seed while a functional
+                 channel has a session (ecuio_engine_offer_talk) */
 };
 
 /* How a talk ended */

@@ -1,6 +1,7 @@
 // File/layer: tests/test_request_turns_key.cpp | test_obd2, Qt-free
 // Testing: UNIT: RequestTurnsTest (request_turns.h and a key's window:
-//          whose turn an offered key takes, with the time passed in)
+//          whose turn an offered key takes, and what a turn taken from
+//          a walk leaves of its budget, with the time passed in)
 
 #include "request_turns_support.h"
 
@@ -120,6 +121,200 @@ TEST(RequestTurnsTest, AHeldChannelsKeyEndsNoTurn)
     EXPECT_EQ(a->sent[from + 1].bytes, kKeyEcho);
 }
 
+/* A key past its window can't go any more, so it ends no turn; its
+ * channel's own turn settles it unsent */
+TEST(RequestTurnsTest, AKeyPastItsWindowEndsNoTurn)
+{
+    auto a = key_turn();
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    ASSERT_EQ(offer_key(a.get()), ecuio_talk_offer::taken);
+    a->held = 1u << 2;
+    const int64_t until = a->e.chans[2].key.until_us;
+    const int64_t since = a->turns.since_us;
+    while (a->now < until) {
+        a->pass();
+    }
+    a->held = 0;
+    ASSERT_TRUE(a->turns.on);
+    ASSERT_EQ(a->turns.chan, 0u);
+    ASSERT_EQ(a->turns.since_us, since) << "channel 0's turn, under a second";
+    const size_t from = a->sent.size();
+    a->pass();
+    ASSERT_EQ(a->sent.size(), from + 1);
+    EXPECT_EQ(a->sent[from].c, 0u);
+    EXPECT_EQ(a->turns.since_us, since) << "the same turn";
+    ecuio_talk_result settled;
+    for (int i = 0;
+         i < 400 && !ecuio_engine_talk_take(a->e.chans[2].talk, &settled);
+         ++i) {
+        a->pass();
+    }
+    EXPECT_EQ(settled.end, ecuio_talk_end::unsent);
+    for (size_t i = from; i < a->sent.size(); ++i) {
+        EXPECT_NE(a->sent[i].bytes, kKeyEcho) << "request " << i;
+    }
+}
+
+namespace {
+
+/* The bitmaps channel 0 was asked, from the from-th request on */
+std::vector<uint8_t> bitmaps(const Adapter& a, size_t from)
+{
+    std::vector<uint8_t> out;
+    for (size_t i = from; i < a.sent.size(); ++i) {
+        const Sent& x = a.sent[i];
+        if (x.c == 0 && x.bytes.size() == 2 && x.bytes[0] == 0x01 &&
+            x.bytes[1] % 0x20 == 0) {
+            out.push_back(x.bytes[1]);
+        }
+    }
+    return out;
+}
+
+const std::vector<uint8_t> kWholeWalk = {0x00, 0x20, 0x40, 0x60,
+                                         0x80, 0xA0, 0xC0, 0xE0};
+
+} // namespace
+
+/* A walk's second holds its channel's own exchanges only. A key on
+ * another channel takes the turn two bitmaps in (rule 5), and that
+ * channel then asks its forty rows for a second: the walk goes on from
+ * its third bitmap with the rest of its second, and walks the table. */
+TEST(RequestTurnsTest, AWalkInterruptedByAKeyStillWalksItsTable)
+{
+    auto a = adapter(2);
+    add(&a->e, 0, {0x01, 0x0C});
+    dids(&a->e, 1, 40);
+    a->ecus = key_ecu;
+    a->until(500 * kMs);
+    seed_on(a.get(), 1);
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    ecuio_engine_probe(&a->e);
+    ASSERT_TRUE(a->e.chans[0].walking);
+    const size_t from = a->sent.size();
+    a->pass();
+    a->pass();
+    ASSERT_EQ(bitmaps(*a, from), (std::vector<uint8_t>{0x00, 0x20}));
+    ASSERT_EQ(offer_key(a.get(), 1), ecuio_talk_offer::taken);
+    a->pass();
+    ASSERT_EQ(a->sent.back().c, 1u);
+    ASSERT_EQ(a->sent.back().bytes, kKeyEcho);
+    const size_t keyed = a->sent.size();
+    a->until(a->now + 3000 * kMs);
+    size_t rows = 0;
+    while (keyed + rows < a->sent.size() && a->sent[keyed + rows].c == 1) {
+        ++rows;
+    }
+    EXPECT_GE(static_cast<int64_t>(rows) * a->exchange_us,
+              ECUIO_ENGINE_PROBE_BUDGET_US - 2 * a->exchange_us)
+        << "channel 1 kept the turn past the rest of the walk's second";
+    EXPECT_EQ(bitmaps(*a, from), kWholeWalk);
+    EXPECT_FALSE(a->e.chans[0].walking);
+}
+
+/* The same when a keep-alive takes the turn (rule 4): channel 1's falls
+ * due while channel 0 walks, and its forty rows follow it */
+TEST(RequestTurnsTest, AWalkInterruptedByAKeepAliveStillWalksItsTable)
+{
+    auto a = adapter(2);
+    add(&a->e, 0, {0x01, 0x0C});
+    dids(&a->e, 1, 40);
+    ASSERT_TRUE(
+        ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MIN_US));
+    a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
+    a->until(2000 * kMs);
+    /* channel 0 takes the turn from channel 1, whose last request is then
+     * an exchange old: its keep-alive comes due inside the walk */
+    for (int i = 0; i < 400; ++i) {
+        const size_t n = a->sent.size();
+        a->pass();
+        if (a->sent.size() > n && n > 0 && a->sent[n].c == 0 &&
+            a->sent[n - 1].c == 1) {
+            break;
+        }
+    }
+    ASSERT_EQ(a->sent.back().c, 0u);
+    ecuio_engine_probe(&a->e);
+    ASSERT_TRUE(a->e.chans[0].walking);
+    const size_t from = a->sent.size();
+    a->until(a->now + 4000 * kMs);
+    size_t first_other = 0;
+    size_t last_bitmap = 0;
+    for (size_t i = from; i < a->sent.size(); ++i) {
+        const Sent& x = a->sent[i];
+        if (x.c == 1 && first_other == 0) {
+            first_other = i;
+            EXPECT_EQ(x.bytes, (Bytes{0x3E, 0x00}));
+        }
+        if (x.c == 0 && x.bytes == Bytes{0x01, 0xE0}) {
+            last_bitmap = i;
+        }
+    }
+    ASSERT_NE(first_other, 0u);
+    EXPECT_LT(first_other, last_bitmap) << "the walk was interrupted";
+    EXPECT_EQ(bitmaps(*a, from), kWholeWalk);
+    EXPECT_EQ(a->e.chans[1].session_lost, 0u);
+}
+
+/* The budget's bookkeeping by itself: a walk is away from its turn's end
+ * to its channel's next request, each stretch counted once, and a channel
+ * that isn't walking is never away */
+TEST(RequestTurnsTest, AWalksSecondStandsStillWhileItsChannelIsAway)
+{
+    auto a = adapter(2);
+    add(&a->e, 0, {0x01, 0x0C});
+    dids(&a->e, 1, 1);
+    ecuio_engine_probe(&a->e);
+    ecuio_engine_turns t;
+    ecuio_engine_channel& ch = a->e.chans[0];
+    int64_t now = 100 * kMs;
+    ASSERT_EQ(ecuio_engine_turn_due(&a->e, t, 0, now), ECUIO_ENGINE_ONCE);
+    ecuio_engine_sent(&a->e, 0, ECUIO_ENGINE_ONCE, true, now);
+    const int64_t until = ch.walk_until_us;
+    ASSERT_EQ(until, now + ECUIO_ENGINE_PROBE_BUDGET_US);
+    const Bytes r = answer({0x01, 0x00});
+    now += 90 * kMs;
+    ASSERT_EQ(ecuio_engine_on_frame(&a->e, 0, r.data(),
+                                    static_cast<uint16_t>(r.size()), now,
+                                    nullptr),
+              ecuio_reply::positive);
+    ASSERT_TRUE(ch.walking);
+    EXPECT_EQ(t.walk_away, 0u);
+
+    ecuio_engine_turn_left(&a->e, t, 1, now);
+    EXPECT_EQ(t.walk_away, 0u) << "channel 1 isn't walking";
+    ecuio_engine_turn_left(&a->e, t, 0, now);
+    EXPECT_EQ(t.walk_away, 1u);
+    /* asked twice before its floor has passed: nothing, and away still */
+    ch.next_send_us = now + 400 * kMs;
+    EXPECT_EQ(ecuio_engine_turn_due(&a->e, t, 0, now + 100 * kMs),
+              ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ch.walk_until_us, until + 100 * kMs);
+    EXPECT_EQ(ecuio_engine_turn_due(&a->e, t, 0, now + 300 * kMs),
+              ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ch.walk_until_us, until + 300 * kMs) << "each stretch once";
+    EXPECT_EQ(t.walk_away, 1u);
+    ASSERT_EQ(ecuio_engine_turn_due(&a->e, t, 0, now + 400 * kMs),
+              ECUIO_ENGINE_ONCE);
+    EXPECT_EQ(ch.once.bytes[1], 0x20u);
+    EXPECT_EQ(ch.walk_until_us, until + 400 * kMs);
+    EXPECT_EQ(t.walk_away, 0u) << "it asks: away no more";
+    ecuio_engine_sent(&a->e, 0, ECUIO_ENGINE_ONCE, true, now + 400 * kMs);
+    EXPECT_EQ(ecuio_engine_turn_due(&a->e, t, 0, now + 450 * kMs),
+              ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ch.walk_until_us, until + 400 * kMs)
+        << "its own exchange is its second's";
+
+    /* a walk the driver's recovery started again takes a new second */
+    ecuio_engine_turn_left(&a->e, t, 0, now + 450 * kMs);
+    ecuio_engine_probe(&a->e);
+    ASSERT_FALSE(ch.walk_timed);
+    const int64_t before = ch.walk_until_us;
+    (void)ecuio_engine_turn_due(&a->e, t, 0, now + 900 * kMs);
+    EXPECT_EQ(ch.walk_until_us, before)
+        << "nothing added to a second not begun";
+}
+
 /* Rule 5 is another channel's key alone: a talk that is no key waits
  * for its channel's turn, and a key on the channel that holds the turn
  * goes in that turn */
@@ -162,4 +357,25 @@ TEST(RequestTurnsTest, OnlyAnotherChannelsKeyEndsATurn)
     EXPECT_EQ(a->sent[from].c, 0u);
     EXPECT_EQ(a->sent[from].bytes, kKeyEcho);
     EXPECT_EQ(a->turns.since_us, since) << "its own key ends no turn";
+}
+
+/* A talk that is no key ends no turn inside its channel's window either:
+ * nothing but the key goes there */
+TEST(RequestTurnsTest, APlainTalkInsideAWindowEndsNoTurn)
+{
+    auto a = key_turn();
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    const Bytes read = {0x22, 0x1E, 0x90};
+    ecuio_talk_request q;
+    q.pdu = read.data();
+    q.len = 3;
+    q.echo = 3;
+    ASSERT_EQ(ecuio_engine_offer_talk(&a->e, 2, q, a->now),
+              ecuio_talk_offer::taken);
+    const int64_t since = a->turns.since_us;
+    const size_t from = a->sent.size();
+    a->pass();
+    ASSERT_EQ(a->sent.size(), from + 1);
+    EXPECT_EQ(a->sent[from].c, 0u);
+    EXPECT_EQ(a->turns.since_us, since) << "channel 0's turn goes on";
 }
