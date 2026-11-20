@@ -23,7 +23,9 @@ endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp
+    test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
+    test_recorder_attach.cpp test_recorder_file.cpp test_recording.cpp
+    test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
