@@ -1,6 +1,7 @@
 // File/layer: tests/j2534_hold_support.h | test_obd2, Qt-free
-// Testing: UNIT: J2534HoldTest's bus (tests/test_j2534_hold.cpp): modules
-//          answering a J2534 worker's pass with the time passed in
+// Testing: UNIT: J2534HoldTest's bus (tests/test_j2534_hold.cpp,
+//          tests/test_j2534_hold_key.cpp): modules answering a J2534
+//          worker's pass with the time passed in
 
 #ifndef ECUIO_TESTS_J2534_HOLD_SUPPORT_H
 #define ECUIO_TESTS_J2534_HOLD_SUPPORT_H

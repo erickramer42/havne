@@ -121,8 +121,8 @@ TEST(RequestTurnsTest, AHeldChannelsKeyEndsNoTurn)
     EXPECT_EQ(a->sent[from + 1].bytes, kKeyEcho);
 }
 
-/* A key past its window can't go any more, so it ends no turn; its
- * channel's own turn settles it unsent */
+/* A key past its window can't go any more, so it ends no turn and is
+ * settled unsent */
 TEST(RequestTurnsTest, AKeyPastItsWindowEndsNoTurn)
 {
     auto a = key_turn();
@@ -153,6 +153,33 @@ TEST(RequestTurnsTest, AKeyPastItsWindowEndsNoTurn)
     for (size_t i = from; i < a->sent.size(); ++i) {
         EXPECT_NE(a->sent[i].bytes, kKeyEcho) << "request " << i;
     }
+}
+
+/* A key past its window is settled at the next pass, whoever holds the
+ * turn and though the driver holds its channel: its own channel may not
+ * ask for a second, and the caller waits on the end */
+TEST(RequestTurnsTest, AKeyPastItsWindowIsSettledAtTheNextPass)
+{
+    auto a = key_turn();
+    ASSERT_FALSE(::testing::Test::HasFailure());
+    ASSERT_EQ(offer_key(a.get()), ecuio_talk_offer::taken);
+    a->held = 1u << 2;
+    const int64_t until = a->e.chans[2].key.until_us;
+    const int64_t since = a->turns.since_us;
+    while (a->now < until) {
+        a->pass();
+    }
+    ecuio_talk_result settled;
+    EXPECT_FALSE(ecuio_engine_talk_take(a->e.chans[2].talk, &settled))
+        << "inside its window it waits";
+    a->pass();
+    ASSERT_TRUE(ecuio_engine_talk_take(a->e.chans[2].talk, &settled))
+        << "at the first pass past the window, not at channel 2's turn";
+    EXPECT_EQ(settled.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(a->e.chans[2].key.until_us, 0);
+    EXPECT_TRUE(a->turns.on);
+    EXPECT_EQ(a->turns.chan, 0u);
+    EXPECT_EQ(a->turns.since_us, since) << "channel 0's turn goes on";
 }
 
 namespace {

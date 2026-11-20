@@ -33,7 +33,8 @@
 //      a lap never runs past S3;
 //   5. another channel has a key offered in its window (request_talk.h):
 //      the window can be shorter than a turn, and a key that waits one
-//      out is never sent.
+//      out is never sent. One past its window is settled unsent at the
+//      next pass, whoever holds the turn.
 // Then the next channel in order with something due takes it, starting
 // at a channel with a key offered. A channel the driver holds (held, a
 // bit for each channel) is passed over. The walk keeps the turn until it
@@ -128,16 +129,23 @@ inline int64_t ecuio_engine_turn_floor_us(const ecuio_request_engine* e,
     return at - now_us;
 }
 
-/* The first channel not held whose key is offered with its window open
- * at now_us (rule 5); the channel count for none. A key past its window
- * can't go any more: its channel's next turn settles it unsent. */
-inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
-                                      uint32_t held, int64_t now_us)
+/* Every channel's key that is past its window at now_us is settled
+ * unsent: take_turn's first step, whoever holds the turn, since the
+ * key's own channel may not ask for a second or more */
+inline void ecuio_engine_turn_lapse(ecuio_request_engine* e, int64_t now_us)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
-        const ecuio_engine_channel& ch = e->chans[k];
-        if ((held & (1u << k)) == 0 && ecuio_talk_key_waits(ch.talk) &&
-            ecuio_key_window_open(ch.key, now_us)) {
+        (void)ecuio_talk_key_lapsed(e->chans[k].talk, e->chans[k].key, now_us);
+    }
+}
+
+/* The first channel not held whose key is offered (rule 5); the channel
+ * count for none. Its window is open: take_turn settled the rest. */
+inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
+                                      uint32_t held)
+{
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        if ((held & (1u << k)) == 0 && ecuio_talk_key_waits(e->chans[k].talk)) {
             return k;
         }
     }
@@ -191,7 +199,7 @@ inline bool ecuio_engine_turn_over(const ecuio_request_engine* e,
         now_us - t.since_us >= ECUIO_ENGINE_TURN_US) {
         return true;
     }
-    const uint32_t keyed = ecuio_engine_turn_key(e, held, now_us);
+    const uint32_t keyed = ecuio_engine_turn_key(e, held);
     if (keyed < e->chan_count && keyed != c) {
         return true;
     }
@@ -233,6 +241,7 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
 {
     *wait_us = 0;
     const uint32_t n = e->chan_count;
+    ecuio_engine_turn_lapse(e, now_us);
     if (t.on) {
         const uint32_t k = t.chan;
         if ((held & (1u << k)) == 0 &&
@@ -254,7 +263,7 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
         t.on = false;
         t.chan = (k + 1) % n;
     }
-    const uint32_t keyed = ecuio_engine_turn_key(e, held, now_us);
+    const uint32_t keyed = ecuio_engine_turn_key(e, held);
     const uint32_t from = keyed < n ? keyed : t.chan;
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t k = (from + i) % n;

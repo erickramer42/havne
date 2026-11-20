@@ -36,9 +36,16 @@
 // A session request (10 03, 3E 00) waits for the hold like any request,
 // since its reply can be lost too, except in its session with S3 300 ms
 // or less away (or past): then it goes through, so no session ages past
-// S3. A key (request_talk.h) waits for the hold like any request too: its
-// window is over before that gate opens, so a key still offered then is
-// settled unsent by due, which hands out the session's request.
+// S3.
+//
+// A key (request_talk.h) has a window to go in, so it goes ahead of every
+// other channel's next request: while one is offered with its window
+// open no other channel starts a request, a chosen one waits on too, and
+// the key itself waits only for a segmented exchange already on the bus
+// (its Single Frame reply could be lost beside it), so for one exchange at
+// most. A key whose window passes while it waits is settled unsent at
+// that pass and never written. The window is over before the session
+// gate opens, so no key is offered when a session request goes through.
 //
 // A hold's chosen rows are its engine's table rows, so a hold lives no
 // longer than the ecuio_engine_init it follows. The hold applies with two
@@ -119,16 +126,39 @@ inline bool j2534_hold_other_out(const j2534_hold& h,
     return false;
 }
 
-/* Whether a channel but c has a chosen request waiting */
+/* Whether channel k's key is offered with its window open at now */
+inline bool j2534_hold_key_waits(const ecuio_request_engine* e, uint32_t k,
+                                 int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[k];
+    return ecuio_talk_key_waits(ch.talk) &&
+           ecuio_key_window_open(ch.key, now_us);
+}
+
+/* Whether a channel but c has a key waiting at now */
+inline bool j2534_hold_other_key(const ecuio_request_engine* e, uint32_t c,
+                                 int64_t now_us)
+{
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        if (k != c && j2534_hold_key_waits(e, k, now_us)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether a channel but c has a chosen request or a key waiting at now:
+ * what keeps c from starting a request */
 inline bool j2534_hold_other_chosen(const j2534_hold& h,
-                                    const ecuio_request_engine* e, uint32_t c)
+                                    const ecuio_request_engine* e, uint32_t c,
+                                    int64_t now_us)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         if (k != c && h.chosen[k] != ECUIO_ENGINE_NONE) {
             return true;
         }
     }
-    return false;
+    return j2534_hold_other_key(e, c, now_us);
 }
 
 /* The pass's order into order[] (e->chan_count entries): the channels the
@@ -150,8 +180,8 @@ inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
 /* Whether channel c's session request goes through the hold at now: in
  * its session with S3 near or past, and due's next request (a session
  * request taken already, or one due with nothing due hands out first:
- * another one-shot taken). A key offered isn't ahead of it: its window
- * ended before the gate opened, and due settles it unsent. */
+ * another one-shot taken). No key is offered then: its window ended
+ * before the gate opened, and the pass settled it unsent. */
 inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
                                    int64_t now_us)
 {
@@ -173,23 +203,27 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
 
 /* What channel c writes this pass at now: nothing while its own request
  * is out (and it isn't held); its chosen request once no other channel
- * has one on the bus (a row the focus parked meanwhile dropped); else its
- * session request near S3; else, unless another's segmented reply is due
- * or another's chosen request waits (c is then held, a bit in *held_now),
- * due's request, kept chosen instead when its reply is expected segmented
- * while another channel has one on the bus and c isn't silent. NONE:
- * nothing to write. */
+ * has one on the bus and no other's key waits (a row the focus parked
+ * meanwhile dropped); else its session request near S3; else, unless
+ * another's segmented reply is due or another's chosen request or key
+ * waits (c is then held, a bit in *held_now), due's request, kept chosen
+ * instead when its reply is expected segmented while another channel has
+ * one on the bus and c isn't silent. c's own key waits only for another's
+ * segmented reply, and one past its window is settled unsent first.
+ * NONE: nothing to write. */
 inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
                                uint32_t c, int64_t now_us, uint32_t* held_now)
 {
     if (!j2534_hold_applies(h, e)) {
         return ecuio_engine_due(e, c, now_us);
     }
+    (void)ecuio_talk_key_lapsed(e->chans[c].talk, e->chans[c].key, now_us);
     if (e->chans[c].outstanding != ECUIO_ENGINE_NONE) {
         return ECUIO_ENGINE_NONE;
     }
     if (h.chosen[c] != ECUIO_ENGINE_NONE) {
-        if (j2534_hold_other_out(h, e, c, false)) {
+        if (j2534_hold_other_out(h, e, c, false) ||
+            j2534_hold_other_key(e, c, now_us)) {
             return ECUIO_ENGINE_NONE;
         }
         const int32_t r = h.chosen[c];
@@ -203,7 +237,8 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         return ecuio_engine_due(e, c, now_us);
     }
     if (j2534_hold_other_out(h, e, c, true) ||
-        j2534_hold_other_chosen(h, e, c)) {
+        (!j2534_hold_key_waits(e, c, now_us) &&
+         j2534_hold_other_chosen(h, e, c, now_us))) {
         *held_now |= 1u << c;
         return ECUIO_ENGINE_NONE;
     }
@@ -281,7 +316,8 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
 /* The engine's next event, with the held channels and those whose chosen
  * request waits left out while the hold applies: they wait on another
  * channel's reply, which is in the figure. The whole figure when nothing
- * else is left. */
+ * else is left. A held channel's waiting key keeps one event of its own,
+ * its window's end, where the pass settles it. */
 inline int64_t j2534_hold_next_event_us(const j2534_hold& h,
                                         const ecuio_request_engine* e,
                                         int64_t now_us)
@@ -293,8 +329,17 @@ inline int64_t j2534_hold_next_event_us(const j2534_hold& h,
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         skip |= h.chosen[c] != ECUIO_ENGINE_NONE ? 1u << c : 0u;
     }
-    const int64_t next = ecuio_engine_next_event_us(e, now_us, skip);
-    return next != INT64_MAX ? next : ecuio_engine_next_event_us(e, now_us);
+    int64_t next = ecuio_engine_next_event_us(e, now_us, skip);
+    if (next == INT64_MAX) {
+        next = ecuio_engine_next_event_us(e, now_us);
+    }
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (((h.held >> c) & 1u) != 0 && j2534_hold_key_waits(e, c, now_us) &&
+            e->chans[c].key.until_us - now_us < next) {
+            next = e->chans[c].key.until_us - now_us;
+        }
+    }
+    return next;
 }
 
 #endif
