@@ -2040,6 +2040,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge.cpp
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
+        test_bridge_frames_filter.cpp
         test_bridge_readonce.cpp
         test_bridge_expr.cpp
         test_bridge_obdb.cpp
