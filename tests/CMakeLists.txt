@@ -2070,6 +2070,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_pluginpages.cpp
         test_bridge_gate.cpp
         test_store_migration.cpp
+        test_store_migration_marks.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
         ../app/recordingview_asks.cpp
