@@ -15,8 +15,9 @@
 //     request until no other channel has a request out, and while it
 //     waits no other channel starts one (a Single Frame asked first can
 //     land inside a segmented reply asked a moment later);
-//   - the channels a pass held go first in the next pass, so a channel
-//     whose segmented exchanges keep coming never starves the rest.
+//   - the channels a pass held go first in the next pass, taken in turn
+//     from the channel past the last one written, so two channels whose
+//     segmented exchanges keep coming never starve the others.
 //
 // A chosen request is due's own: the engine moved past it and left the
 // channel with nothing outstanding, so nothing changes in the engine
@@ -63,6 +64,7 @@
 struct j2534_hold {
     bool on = true;    /* ?hold= */
     uint32_t held = 0; /* a bit for each channel the last pass held */
+    uint32_t from = 0; /* past the channel last written: the held go from it */
     int32_t chosen[ECUIO_MAX_CHANNELS]; /* due's request kept, or NONE */
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
@@ -162,17 +164,23 @@ inline bool j2534_hold_other_chosen(const j2534_hold& h,
 }
 
 /* The pass's order into order[] (e->chan_count entries): the channels the
- * last pass held, then the rest, each in channel order */
+ * last pass held, from h.from on around the channels, then the rest in
+ * channel order (with two channels at most one is held, so the order is
+ * channel order's but for it) */
 inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
                              uint32_t* order)
 {
     const uint32_t first = j2534_hold_applies(h, e) ? h.held : 0u;
     uint32_t n = 0;
-    for (uint32_t pass = 0; pass < 2; ++pass) {
-        for (uint32_t c = 0; c < e->chan_count; ++c) {
-            if (((first >> c) & 1u) == (pass == 0 ? 1u : 0u)) {
-                order[n++] = c;
-            }
+    for (uint32_t i = 0; i < e->chan_count; ++i) {
+        const uint32_t c = (h.from + i) % e->chan_count;
+        if (((first >> c) & 1u) != 0) {
+            order[n++] = c;
+        }
+    }
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (((first >> c) & 1u) == 0) {
+            order[n++] = c;
         }
     }
 }
@@ -308,6 +316,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         const int32_t r = j2534_hold_next(h, e, c, now_us, &held_now);
         if (r != ECUIO_ENGINE_NONE) {
             write(c, r);
+            h.from = (c + 1) % e->chan_count;
         }
     }
     j2534_hold_pass_end(h, held_now);
