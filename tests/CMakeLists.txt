@@ -163,12 +163,19 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # request_engine.h, which it also includes to hand it the replies.
 # test_elm327_session.cpp: the transport against the fake ELM327 behind
 # internal.h's port opener, and on POSIX the OS's port over a
-# pseudo-terminal (elm327_port.h); it holds the binary's new_counter.h.
+# pseudo-terminal (elm327_port.h); it is in parts by theme
+# (test_elm327_session_*.cpp, helpers in test_elm327_support.h), and
+# test_elm327_session_alloc.cpp holds the binary's new_counter.h.
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
 # test_elm327_talk.cpp: a talk through the test seam, against the fake.
 # test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
 # test_elm327_pack.cpp: packs sized by their reply's frames, against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
+    test_elm327_session_diag.cpp test_elm327_session_close.cpp
+    test_elm327_session_scan.cpp test_elm327_session_listen.cpp
+    test_elm327_session_uri.cpp test_elm327_session_ports.cpp
+    test_elm327_session_stream.cpp test_elm327_session_links.cpp
+    test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp)
 target_include_directories(test_elm327 PRIVATE
