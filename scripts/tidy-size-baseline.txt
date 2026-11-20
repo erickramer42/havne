@@ -87,7 +87,6 @@ core/src/plugin.cpp	read_values
 core/src/plugin_wrap.cpp	wrapped
 core/src/recorder.cpp	ecuio_recorder_put_frame
 core/src/recorder_armed.cpp	advance_tail
-core/src/recorder_attach.cpp	ecuio_recorder_open
 core/src/recorder_control.cpp	ecuio_recorder_close
 core/src/recorder_writer.cpp	take_timing
 core/src/recording_reader_events.cpp	read_events
