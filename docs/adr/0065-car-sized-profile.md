@@ -1120,3 +1120,29 @@ sections 2, 3, 6 and 8, each with its reason:
   values. A health report read from a recording's values by name (before
   format 4, no frames) gives no value to a name two of the set's defs
   share, since nothing says whose rows they are.
+
+## Appendix: the hold for Known Issue #42 (2026-11-18)
+
+Section 11's back-off answers a lost reply by slowing down. Through the
+VX, two or more modules lose replies while a segmented reply is on the
+bus, and slowing down doesn't remove the loss, so the engine holds: with
+two or more channels, no other channel is asked while one channel's
+segmented request is on the bus (`core/src/j2534_hold.h`). Section 11's
+back-off clause stays as the fallback for a loss the hold doesn't cover.
+
+- **The window and its evidence:** a Single Frame reply that ends while
+  another module's segmented reply is on the bus, from its First Frame to
+  its last Consecutive Frame, is lost
+  ([2026-11-11-monitor-car](../bench-sessions/2026-11-11-monitor-car.md),
+  R1 and R2; D11 of
+  [2026-11-18-pacing-car](../bench-sessions/2026-11-18-pacing-car.md): the
+  window is 47% of the time and 45% of the second module's replies were
+  lost).
+- **The rules:** a request expected segmented (`ecuio_engine_reply_segmented`)
+  is kept chosen until no other channel has one on the bus; a request in a
+  pending wait, and a silent module's, hold no one; a session request goes
+  through only near S3, and a key goes first. `?hold=0` switches it off.
+- **Not yet measured on the car:** the hold's prediction (the second
+  module loses next to nothing, the first keeps about 0.64 of its rate) is
+  the pacing model's. Known Issue #42 stays open until a car run confirms
+  it.

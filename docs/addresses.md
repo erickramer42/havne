@@ -336,7 +336,15 @@ plays, not a session to read one with.
   tester's Flow Control to the first Consecutive Frame, and `cf=` a
   module's least gap between Consecutive Frames (each at most 1 s).
   `seed=<n>` repeats a run. Each takes `@<reply ID>` to aim at one
-  module. With none of them the car answers as before.
+  module.
+- `busy=ignore` or `busy=21` says what a module does with a request that
+  comes while it is still answering: ignore it, or answer `7F <service> 21`
+  at once (and nothing while its reply's frames are under way); it takes
+  `@<reply ID>` too. `bus=<kbit/s>` (1-1000) makes the simulated modules'
+  frames share the bus one at a time, each 111 bits; `havne-cli sim
+  --elm327` refuses it, since the emulator times its own frames. With none
+  of these keys a reply starts at once, its frames go at the tester's pace,
+  and on a bus a busy module ignores another request.
 
 `havne-cli --help` gives the command's own flags (`--on`, `--elm327`,
 `--desk-bus` and the rest).
