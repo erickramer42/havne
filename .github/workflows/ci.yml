@@ -44,6 +44,12 @@ on:
           other platform jobs
         type: boolean
         default: false
+      coverage:
+        description: >-
+          Also run win-coverage on a branch other than dev or main (a lane
+          branch's run skips it otherwise)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -584,7 +590,9 @@ jobs:
   # leaves no report, or none was made.
   win-coverage:
     needs: scope
-    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only && github.event_name != 'pull_request' }}
+    # main's pushes and dev's runs; a lane branch's run only when asked
+    # (-f coverage=true): its coverage is dev's once it merges
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || inputs.coverage) }}
     runs-on: windows-latest
     timeout-minutes: 30
     # Three runners share the run, each with its own build: the gtest
