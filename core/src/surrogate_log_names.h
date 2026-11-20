@@ -1,5 +1,5 @@
 // File/layer: core/src/surrogate_log_names.h | internal, not ABI-exported;
-//             included by j2534_surrogate_log.cpp, test_core.cpp and
+//             included by j2534_surrogate_log.cpp, test_core_link.cpp and
 //             test_j2534_connect.cpp
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: CoreTest.SurrogateLog* (test_core); the client's use of
