@@ -79,8 +79,10 @@ enum class ecuio_talk_end : uint8_t {
     answered,   /* its positive reply came */
     refused,    /* a negative reply: nrc is its code */
     unanswered, /* its wait ran out */
-    unsent,     /* its write failed (not confirmed on the bus, whole or
-                   part), or a key's window ended before its turn */
+    unsent,     /* its write failed: not confirmed on the bus, whole or
+                   part, so it may have reached the module */
+    lapsed,     /* a key's window ended before its turn: it never
+                   touched the bus */
 };
 
 /* What a talk is to the key's window */
@@ -216,7 +218,7 @@ inline bool ecuio_talk_key_waits(const ecuio_engine_talk_state& t)
 }
 
 /* An offered key whose window ended before its turn (the time, the
- * session, the link): true, and it is settled unsent */
+ * session, the link): true, and it is settled lapsed */
 inline bool ecuio_talk_key_lapsed(ecuio_engine_talk_state& t,
                                   ecuio_key_window& w, int64_t now_us)
 {
@@ -225,7 +227,7 @@ inline bool ecuio_talk_key_lapsed(ecuio_engine_talk_state& t,
     }
     w.until_us = 0;
     t.offered = false;
-    t.result.end = ecuio_talk_end::unsent;
+    t.result.end = ecuio_talk_end::lapsed;
     t.result.nrc = 0;
     return true;
 }

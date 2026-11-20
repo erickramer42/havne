@@ -142,6 +142,44 @@ inline FILE* open_file(const std::string& utf8, bool write, std::string* why)
     return f;
 }
 
+/* A file that is there, opened to read. nullptr with *none true when
+ * there is no such file (its name, or a folder on the way to it, isn't
+ * there), else with *none false and *why: it is there, or may be, and
+ * can't be opened. Windows judges by its own code: the C library reads
+ * an unreachable share as no such file too. */
+inline FILE* open_existing(const std::string& utf8, bool* none,
+                           std::string* why)
+{
+    *none = false;
+#ifdef _WIN32
+    const std::wstring w = wide(utf8);
+    if (w.empty()) {
+        *why = "the name isn't valid UTF-8";
+        return nullptr;
+    }
+    FILE* f = _wfsopen(w.c_str(), L"rb", _SH_DENYNO);
+    if (f == nullptr) {
+        const int err = errno;
+        unsigned long code = 0;
+        _get_doserrno(&code);
+        *none = code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND;
+        if (!*none) {
+            *why = errno_words(err);
+        }
+    }
+#else
+    FILE* f = std::fopen(utf8.c_str(), "rb");
+    if (f == nullptr) {
+        const int err = errno;
+        *none = err == ENOENT;
+        if (!*none) {
+            *why = errno_words(err);
+        }
+    }
+#endif
+    return f;
+}
+
 inline bool exists(const std::string& utf8)
 {
 #ifdef _WIN32
@@ -341,6 +379,77 @@ inline bool rename_to(const std::string& from, const std::string& to,
     }
     *why = os_words(errno);
     return false;
+#endif
+}
+
+#ifdef _WIN32
+/* How often replace_with tries a move Windows refuses because another
+ * program has the file open (a scanner, a backup), and the wait between */
+constexpr int kReplaceTries = 4;
+constexpr DWORD kReplaceWaitMs = 10;
+
+/* TEST-ONLY: called before each further try of replace_with's move */
+inline std::atomic<void (*)()> replace_test_before_retry{nullptr};
+#endif
+
+/* Puts from where to is, replacing a file there: for a store core owns
+ * and rewrites whole, the one file a rename may replace. The change is
+ * asked through to the disk: Windows writes the move through, and
+ * elsewhere the folder holding to is flushed after the rename (a file
+ * system that can't flush a folder passes). A move Windows refuses for
+ * a file in use is tried kReplaceTries times. False with *why; from is
+ * left where it was unless the rename itself went through; once it
+ * has, only a failure's words allocate. */
+inline bool replace_with(const std::string& from, const std::string& to,
+                         std::string* why)
+{
+#ifdef _WIN32
+    const std::wstring a = wide(from);
+    const std::wstring b = wide(to);
+    if (a.empty() || b.empty()) {
+        *why = "the name isn't valid UTF-8";
+        return false;
+    }
+    DWORD code = 0;
+    for (int tries = 0; tries < kReplaceTries; ++tries) {
+        if (tries != 0) {
+            if (void (*hook)() = replace_test_before_retry.load()) {
+                hook();
+            }
+            Sleep(kReplaceWaitMs);
+        }
+        if (MoveFileExW(a.c_str(), b.c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            return true;
+        }
+        code = GetLastError();
+        if (code != ERROR_SHARING_VIOLATION && code != ERROR_ACCESS_DENIED) {
+            break;
+        }
+    }
+    *why = os_words(code);
+    return false;
+#else
+    const size_t slash = to.find_last_of('/');
+    const std::string folder = slash == std::string::npos ? "."
+                               : slash == 0               ? "/"
+                                                          : to.substr(0, slash);
+    if (std::rename(from.c_str(), to.c_str()) != 0) {
+        *why = os_words(errno);
+        return false;
+    }
+    const int fd = open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) {
+        *why = "its folder can't be flushed: " + os_words(errno);
+        return false;
+    }
+    const bool flushed = fsync(fd) == 0 || not_supported(errno);
+    const int err = errno;
+    close(fd);
+    if (!flushed) {
+        *why = "its folder can't be flushed: " + os_words(err);
+    }
+    return flushed;
 #endif
 }
 

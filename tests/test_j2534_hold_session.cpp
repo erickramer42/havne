@@ -89,7 +89,7 @@ void next_beside_a_segmented_reply(const Variant& v, int32_t* r, uint8_t* sid,
         const bool lapsed = ecuio_engine_talk_take(ch.talk, &settled);
         EXPECT_EQ(lapsed, v.since >= near_s3) << v.name;
         if (lapsed) {
-            EXPECT_EQ(settled.end, ecuio_talk_end::unsent) << v.name;
+            EXPECT_EQ(settled.end, ecuio_talk_end::lapsed) << v.name;
         }
     }
 }
@@ -103,7 +103,7 @@ void next_beside_a_segmented_reply(const Variant& v, int32_t* r, uint8_t* sid,
  * any request (on the VX its reply could be lost beside a segmented one).
  * Through, it follows due's order: a one-shot taken goes first. A key
  * waits for the hold as any request inside its window, and with S3 near
- * its window is over: due settles it unsent and the keep-alive goes. */
+ * its window is over: due settles it lapsed and the keep-alive goes. */
 TEST(J2534HoldTest, AHeldChannelsSessionRequestGoesThroughOnlyNearS3)
 {
     const int64_t longest = ECUIO_ENGINE_KEEPALIVE_MAX_US;

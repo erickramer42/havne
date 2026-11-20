@@ -222,9 +222,9 @@ ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
 /* TEST-ONLY: the request above, once it has ended: 1, with *offer (0
  * taken, 1 busy, 2 too long for the transport, 3 refused) and, when
  * taken, *end (1 answered, 2 refused with its code in *nrc, 3
- * unanswered, 4 unsent: its write failed, or a key's window ended before
- * its turn); read once. 0 while it is on its way, or there
- * is none. */
+ * unanswered, 4 unsent: its write failed, 5 lapsed: a key's window
+ * ended before its turn, so it never touched the bus); read once. 0
+ * while it is on its way, or there is none. */
 int ecuio_session_test_talk_result(ecuio_session_t* session, int* offer,
                                    int* end, uint8_t* nrc);
 

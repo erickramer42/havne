@@ -72,6 +72,7 @@ add_library(ecuio-core STATIC
     src/plugin_merge.cpp
     src/plugin_pages.cpp
     src/plugin_wrap.cpp
+    src/security_store.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp

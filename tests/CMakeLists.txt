@@ -30,7 +30,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
-    test_key_window_setup.cpp)
+    test_key_window_setup.cpp test_security_store.cpp
+    test_security_store_file.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -131,7 +132,8 @@ add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
-    test_sim_car.cpp test_sim_timing.cpp test_scan_retry.cpp)
+    test_sim_car.cpp test_sim_timing.cpp test_scan_retry.cpp
+    test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

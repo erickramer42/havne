@@ -122,7 +122,7 @@ TEST(RequestTurnsTest, AHeldChannelsKeyEndsNoTurn)
 }
 
 /* A key past its window can't go any more, so it ends no turn and is
- * settled unsent */
+ * settled lapsed */
 TEST(RequestTurnsTest, AKeyPastItsWindowEndsNoTurn)
 {
     auto a = key_turn();
@@ -149,7 +149,7 @@ TEST(RequestTurnsTest, AKeyPastItsWindowEndsNoTurn)
          ++i) {
         a->pass();
     }
-    EXPECT_EQ(settled.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(settled.end, ecuio_talk_end::lapsed);
     for (size_t i = from; i < a->sent.size(); ++i) {
         EXPECT_NE(a->sent[i].bytes, kKeyEcho) << "request " << i;
     }
@@ -175,7 +175,7 @@ TEST(RequestTurnsTest, AKeyPastItsWindowIsSettledAtTheNextPass)
     a->pass();
     ASSERT_TRUE(ecuio_engine_talk_take(a->e.chans[2].talk, &settled))
         << "at the first pass past the window, not at channel 2's turn";
-    EXPECT_EQ(settled.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(settled.end, ecuio_talk_end::lapsed);
     EXPECT_EQ(a->e.chans[2].key.until_us, 0);
     EXPECT_TRUE(a->turns.on);
     EXPECT_EQ(a->turns.chan, 0u);

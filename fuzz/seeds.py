@@ -26,6 +26,9 @@
 # fuzz_sim's are runs of requests that enter the simulated ECU's extended
 # session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
 # would have to guess; and URIs whose faults aim at one module.
+# fuzz_security_store's are stores with an entry of each kind, the
+# vehicles, addresses, levels and seconds made up, and a store of as
+# many of the longest entry as one holds, and of one more.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -565,6 +568,32 @@ def main(argv):
         "uri-busy-bus": "mock://sim?modules=2&busy=ignore,21@7E9&bus=500",
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
+
+    # The security store (security_store.h): no entry, a failure kept, a
+    # delay with no failure, an attempt marked and never ended, another
+    # vehicle's entry of the same address and level, each value at its
+    # top, an entry twice, and the longest entry 256 times (a full store)
+    # and 257 (one past it)
+    kept = {"vehicle": "0123456789ABCDEF", "rx": "7E8", "level": 1,
+            "failed": 2, "last_utc": 1795132800, "pending_utc": 0}
+    top = {"vehicle": "FFFFFFFFFFFFFFFF", "rx": "1FFFFFFF", "level": 125,
+           "failed": 2147483647, "last_utc": 253402300799,
+           "pending_utc": 253402300799}
+    longest = [dict(top, rx="%X" % (0x1FFFFFFF - k)) for k in range(257)]
+    for name, entries in {
+        "empty": [],
+        "kept": [kept],
+        "delayed": [dict(kept, level=3, failed=0)],
+        "pending": [kept, dict(kept, rx="7E9", pending_utc=1795132860)],
+        "vehicles": [kept, dict(kept, vehicle="FEDCBA9876543210")],
+        "top": [top],
+        "twice": [kept, kept],
+        "full": longest[:256],
+        "past_full": longest,
+    }.items():
+        store = {"havne_security_store": 1, "entries": entries}
+        write(out, "fuzz_security_store", name + ".json",
+              json.dumps(store, indent=2).encode())
     return 0
 
 

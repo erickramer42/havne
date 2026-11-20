@@ -33,7 +33,7 @@
 //      a lap never runs past S3;
 //   5. another channel has a key offered in its window (request_talk.h):
 //      the window can be shorter than a turn, and a key that waits one
-//      out is never sent. One past its window is settled unsent at the
+//      out is never sent. One past its window is settled lapsed at the
 //      next pass, whoever holds the turn.
 // Then the next channel in order with something due takes it, starting
 // at a channel with a key offered. A channel the driver holds (held, a
@@ -130,7 +130,7 @@ inline int64_t ecuio_engine_turn_floor_us(const ecuio_request_engine* e,
 }
 
 /* Every channel's key that is past its window at now_us is settled
- * unsent: take_turn's first step, whoever holds the turn, since the
+ * lapsed: take_turn's first step, whoever holds the turn, since the
  * key's own channel may not ask for a second or more */
 inline void ecuio_engine_turn_lapse(ecuio_request_engine* e, int64_t now_us)
 {

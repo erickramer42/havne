@@ -34,6 +34,12 @@ ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
     return ECUIO_OK;
 }
 
+/* internal.h names an offer and an end by these numbers */
+static_assert(static_cast<int>(ecuio_talk_offer::refused) == 3 &&
+                  static_cast<int>(ecuio_talk_end::unsent) == 4 &&
+                  static_cast<int>(ecuio_talk_end::lapsed) == 5,
+              "the seam's numbers are the enums' own");
+
 int ecuio_session_test_talk_result(ecuio_session_t* session, int* offer,
                                    int* end, uint8_t* nrc)
 {

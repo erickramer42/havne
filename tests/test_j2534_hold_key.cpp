@@ -301,7 +301,7 @@ TEST(J2534HoldTest, AKeyPastItsWindowHoldsNoOne)
 /* A key whose channel's floor (?gap=) falls past its window can never
  * go: it holds no one, so channel 0 asks at its own floor inside the
  * window, and the window's end is the next event, where the key is
- * settled unsent, ahead of the key's floor */
+ * settled lapsed, ahead of the key's floor */
 TEST(J2534HoldTest, AKeyThatCantGoInItsWindowHoldsNoOne)
 {
     Bus b;
@@ -332,7 +332,7 @@ TEST(J2534HoldTest, AKeyThatCantGoInItsWindowHoldsNoOne)
     b.pass();
     ASSERT_TRUE(ecuio_engine_talk_take(b.e.chans[1].talk, &r))
         << "settled at the window's end";
-    EXPECT_EQ(r.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(r.end, ecuio_talk_end::lapsed);
     b.until(b.now + 300 * kMs);
     for (size_t i = from; i < b.exchanges.size(); ++i) {
         EXPECT_NE(b.exchanges[i].bytes, kKeyEcho) << "request " << i;
@@ -362,14 +362,14 @@ TEST(J2534HoldTest, AKeyThatCantGoIsSettledAtItsWindowsEnd)
     b.pass();
     ecuio_talk_result r;
     ASSERT_TRUE(ecuio_engine_talk_take(b.e.chans[1].talk, &r));
-    EXPECT_EQ(r.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(r.end, ecuio_talk_end::lapsed);
 }
 
 /* A key held behind a segmented exchange past its window is settled
- * unsent at the window's end, which is the hold's next event, and is
+ * lapsed at the window's end, which is the hold's next event, and is
  * never written: late is worse than not at all, for a seed the module
  * has dropped */
-TEST(J2534HoldTest, AKeyHeldPastItsWindowIsSettledUnsentAndNeverWritten)
+TEST(J2534HoldTest, AKeyHeldPastItsWindowLapsesAndIsNeverWritten)
 {
     Bus b;
     ASSERT_NO_FATAL_FAILURE(key_modules(b, 2, 1u << 1));
@@ -399,7 +399,7 @@ TEST(J2534HoldTest, AKeyHeldPastItsWindowIsSettledUnsentAndNeverWritten)
     b.pass();
     ASSERT_TRUE(ecuio_engine_talk_take(b.e.chans[0].talk, &r))
         << "settled at the window's end, not at the hold's";
-    EXPECT_EQ(r.end, ecuio_talk_end::unsent);
+    EXPECT_EQ(r.end, ecuio_talk_end::lapsed);
     EXPECT_EQ(b.exchanges[flight].ended_us, INT64_MAX)
         << "the exchange it waited for is still out";
     EXPECT_EQ(b.exchanges.size(), from) << "nothing was written meanwhile";
