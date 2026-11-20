@@ -429,3 +429,14 @@ Frame, and the ECU's Flow Control is the first thing it answers with.
 Section 3 counts that Flow Control, like a reply, as an ECU's answer that
 proves the rate, so the send goes on at the pace the ECU set.
 `SocketCanTalkTest.AFlowControlProvesTheRateSoTheSendGoesOn`.
+
+## Appendix: a long request's failure and link health (2026-11-19)
+
+Why a request longer than a frame failed to send decides what link health
+counts, so one module's silence can't latch "requests failing" for the
+session: a refused write or an unechoed frame is a failed write; no Flow
+Control within N_Bs is a request that timed out, one module's silence; an
+overflow or a Flow Control that can't be followed is the module's answer
+and counts nothing. One function, `socketcan_send_failed`, applies it.
+`SocketCanSendTest.AFailedSendSaysWhy`, `.AFailedSendCountsByItsReason`,
+`SocketCanTalkTest.NoFlowControlFromOneModuleLeavesTheLinkOk`.

@@ -614,3 +614,19 @@ the test car's four channels among them; `Elm327TurnsTest` (test_elm327)
 the order and the walk through the fake ELM327;
 `SocketCanTurnsTest` (test_vcan) the overlap that makes SocketCAN need
 none of this.
+
+## Note: a key and a walk's budget across a turn (2026-11-19)
+
+Two rules join the turns of the appendix of 2026-11-18.
+
+- **Rule 5, a key:** a talk's key (ADR-0066 section 2.4) offered on a
+  channel that doesn't hold the turn ends the turn and is the adapter's
+  next request, since its window can be shorter than a turn. A key on the
+  turn's own channel goes in the turn, and a talk that is no key ends none.
+  A key past its window is settled unsent at the next pass and ends no
+  turn.
+- **A walk's budget stands still while its channel is away:** a channel
+  whose turn ended while it walked keeps its second of walk, so a key or a
+  keep-alive taking the turn costs the walk nothing.
+
+`RequestTurnsTest` (test_obd2) pins both.

@@ -58,13 +58,14 @@ run has more jobs than the account's concurrent runners, and the short
 job frees its runner first. So a run takes as long as its longest job. The long suites are shared between runners,
 each with a build of its own: `win-build`, `macos-build` and
 `linux-build` run alternate halves of ctest (`-I k,,2`, every case once
-across the two), `clang-tidy` three shares of the files, and
+across the two; `linux-build`'s halves are of the Qt tests, `-L qt`), `clang-tidy` three shares of the files, and
 `win-coverage` three legs. The steps that aren't the suite (the caches'
 saves, the load test, the probes) run on the first shard. Every build and every ctest run
 (`coverage.sh`'s too) runs four jobs at once, the hosted runners' core
 count (`CMAKE_BUILD_PARALLEL_LEVEL` and `CTEST_PARALLEL_LEVEL` in the
 workflow's `env`); the cases that share a fixed resource are
-`RUN_SERIAL`. Every job that uses Qt uses 6.12.0, and each kit comes
+`RUN_SERIAL`, and the cases that use `vcan0` take `RESOURCE_LOCK vcan0`
+(apart from each other, beside the rest). Every job that uses Qt uses 6.12.0, and each kit comes
 from the Actions cache under a key of the workflow's own, which names
 what decides the install's bytes (the version, the arch, any module,
 `--autodesktop`, and aqtinstall's version or, for the Windows kit, its
@@ -79,28 +80,43 @@ with a 504 come from the cache the same way: Gradle's distribution and
 the Android build's dependencies (keyed on the Qt version, whose
 template pins them) and linuxdeploy's pinned files (keyed on
 `make-appimage.sh`). The compiler caches (sccache in `win-build`,
-`win-coverage`, `macos-build` and `linux-build`; the two Windows jobs
-build with Ninja for it) are keyed by the ISO week and saved on `dev`
-and `main`. A
-week's first run saves its entry, and each later run that week restores
-that entry and saves nothing, so a commit's objects reach the cache the
-next week and the week's later commits compile cold from the week's
-start. That costs build time only, and keeps the entries (one for each
-job and week) inside the 10 GB; GitHub drops an entry unread for 7
-days.
-Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
+`win-coverage`, `macos-build` and `linux-build`; the Windows jobs and
+`linux-build` build with Ninja for it) save the same way:
+
+- **Each job's first shard** (`win-coverage`'s gtest leg) saves its
+  cache right after the build, before the tests, under the run's own
+  key (`sccache-<job>-2-<run id>`), on every ref, when the build
+  compiled 20 or more objects: a warm rerun adds no entry.
+- **A run restores the newest entry it may read:** its branch's own,
+  else `main`'s, since GitHub lets a branch read only its own caches and
+  the default branch's. A lane branch's first run therefore compiles
+  against `main`'s last entry, and its reruns and later commits against
+  its own.
+- **Each cache is capped** at 500 MB (600 MB for `win-build`).
+- **Why:** an entry for each job and week, frozen once saved and read
+  by a lane branch only as `main`'s, left the hit rate at 0% on Linux
+  and 15-18% on Windows and macOS.
+
+GitHub drops an entry unread for 7 days, and evicts the least recently
+used past 10 GB. `win-build`, `macos-build` and `linux-build` also cache
+ctest's cost data (`CTestCostData.txt`, for each shard), so the cases
+that took longest last time start first.
+
+Every job has a `timeout-minutes` of roughly 3-5x its usual duration
+(`linux-build`'s and `macos-build`'s are 25: each ran up to 13-14
+minutes cold on a busy runner, and less with a warm cache):
 
 | Job | Runner | Does |
 |---|---|---|
 | `scope` | Ubuntu | Judges whether the change is docs alone (above), and when it is checks the docs' relative links. Every other job needs it and skips on a docs-only change. |
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
-| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
+| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, and it runs `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo (CI's one run of it) and `CliTransferRunTest.candump` (`can-utils` gives it `candump`). Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
 | `clang-tidy` (1/3 to 3/3) | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app, each runner a third of the files (`HAVNE_TIDY_SHARD=<k>/3`). Any warning fails it. Only the app's moc output is built. |
 | `win-build` (1/2, 2/2) | Windows, MSVC 2022 | Builds the full app with Ninja and sccache, then runs its half of ctest (the bridge, J2534 and QML suites included). The second shard also builds core, the shared library and the surrogate with the Visual Studio generator, which `release.yml` builds with. The first runs the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](performance.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `macos-build` (1/2, 2/2) | macOS (arm64), AppleClang | Builds the full app, then runs its half of ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `win-coverage` (gtest, ctest-1, ctest-2) | Windows, MSVC 2022 | On pushes to `main` and manual runs, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs its leg of `scripts/coverage.sh` (`--part`: the gtest binaries, or one of two slices of ctest's other cases) and uploads the report to Codecov, which merges the three ([testing.md](testing.md#coverage)). |
-| `linux-build` (1/2, 2/2) | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs its half of ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo, then core's USDT probes under bpftrace (`tests/probe_trace.sh`), then the load test as on Windows. `can-utils` gives `CliTransferRunTest.candump` its `candump`. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
+| `win-coverage` (gtest, ctest-1, ctest-2) | Windows, MSVC 2022 | On pushes to `main` and on `dev`'s runs, and on another branch only with `-f coverage=true`, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs its leg of `scripts/coverage.sh` (`--part`: the gtest binaries, or one of two slices of ctest's other cases) and uploads the report to Codecov, which merges the three ([testing.md](testing.md#coverage)). |
+| `linux-build` (1/2, 2/2) | Ubuntu, GCC | Builds the app, the bridge's and QML's tests (the `qt` label), `havne-cli` and the shared core, with Ninja and the mold linker, and runs its half of the Qt tests. The second shard brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners) and runs the Python package's vcan0 cases (`PythonTest.test_vcan`, `test_did_scan`, `test_isotp_fuzz`) with `ECUIO_VCAN_REQUIRED=1` and `ECUIO_PYTEST_REQUIRED=1`, which no other job has both pytest and `vcan0` for; the first runs core's USDT probes under bpftrace (`tests/probe_trace.sh`) and the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. The Qt-free suites run in `core-and-tests` and `core-sanitizers`. |
 | `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](packaging.md#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](packaging.md#linux-the-core-packages)). |
 | `android-build` | Ubuntu to Android arm64-v8a | Starts when `core-and-tests` ends (`needs`, for a runner slot, not its result). Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |

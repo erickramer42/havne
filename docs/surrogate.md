@@ -218,7 +218,8 @@ names every missing export, so the log alone identifies the gap;
   reply behind. `RequestIdMismatchMakesTheChildUnresponsive` uses it.
 - `ECUIO_SUR_TEST_SKEW=<opcode>`: the child's first reply to that
   opcode claims more than the wire carries, as a child built against
-  other limits would: an `OP_READ` one frame past the batch's 16, an
+  other limits would: an `OP_READ` claiming two frames, one past
+  `ECUIO_SUR_MAX_FRAMES_PER_READ`, an
   `OP_IOCTL` a `data_len` past `ECUIO_SUR_IOCTL_DATA_MAX`, any other
   opcode a frame on a reply that takes none (never `OP_OPEN` or
   `OP_SHUTDOWN`). The frames claimed are never sent. The three
@@ -339,15 +340,17 @@ names every missing export, so the log alone identifies the gap;
 | 10 | `STOP_FILTER` | |
 
 **Data plane.** Reads travel over the pipe as `OP_READ`. The child
-asks the vendor for up to `ECUIO_SUR_MAX_FRAMES_PER_READ` (16)
-messages with the caller's timeout, skips indications (reading again
-with what's left of the timeout when a batch held nothing else),
-copies each message whole (`ecuio_pt_rx_t`: `RxStatus`, the stamp and
-`Data` with the CAN ID in front, up to `PASSTHRU_MSG`'s 4128 bytes),
-and writes the batch after the response, so a reply costs the
-messages it carries. The client reads a reply exactly, in as many
-pieces as the pipe hands over, caches the batch and hands out one
-message per `read_msg` call, sending a new `OP_READ` only when the
+asks the vendor for one message a call with the caller's timeout (another
+after a call that brought only indications, with what's left of the
+timeout), copies the message whole (`ecuio_pt_rx_t`: `RxStatus`, the
+stamp and `Data` with the CAN ID in front, up to `PASSTHRU_MSG`'s 4128
+bytes) and writes it after the response, so a reply carries at most one
+frame (`ECUIO_SUR_MAX_FRAMES_PER_READ`, 1) and costs the frame it holds.
+The child's vendor buffer keeps room for 16 messages, so a vendor that
+returns more than it asked writes into room of its own (the rest
+counted lost). The client reads a reply exactly, in as many
+pieces as the pipe hands over, caches the frame and hands it to the
+next `read_msg` call, sending a new `OP_READ` only when the
 cache is empty; the transport makes each message a frame (`pump_one`),
 cut at `ECUIO_FRAME_DATA_MAX` and marked `ECUIO_FRAME_FLAG_TRUNCATED`
 when longer. Its transaction timeout is the read timeout plus 500 ms.

@@ -7,8 +7,9 @@ Each section names its bench or test and how to run it.
 
 Result: the worker's lookup and decode cost about 0.13 microseconds a frame at any profile size, and the GUI thread's tick grows linearly with it (about 19 microseconds at 1000 defs).
 
-`tests/bench_bridge.cpp` (target `bench_bridge`, built with the tests,
-never run by ctest) measures each thread's work per frame through the
+`tests/bench_bridge.cpp` and the headers beside it,
+`tests/bench_bridge_*.h` (target `bench_bridge`, built with the tests,
+never run by ctest) measure each thread's work per frame through the
 bridge, by the size of the session's profile:
 - **On the worker** ([ADR-0024](adr/0024-decode-on-the-worker.md)):
   `onFrame` (the frame's 4 KB copy and the queued call), core's lookup
@@ -300,6 +301,14 @@ The open and the check run off the GUI thread, which answered within
 35 ms throughout; with 12,900 findings from the check, within 190 ms. A
 replay of the same files at 100x kept it within 20 ms on the Dashboard.
 
+### Dashboard: a plugin's pages in the Add page list
+
+`DashEdits.loadPluginPages` reads each page of each loaded plugin at
+the list's open, one `DashboardBook.importProblem` for each, so a page's
+name is known before it is shown. 3 plugins x 16 pages x 24 cells (the
+bounds' worst case) opened the list in 92 ms in `test_qml` (2026-11-19,
+offscreen, software renderer, Release).
+
 ### Drawing a recording
 
 Result: charts drawn a second are 141 and 124 on the laptop and 61-62 on the phone, its ceiling.
@@ -416,8 +425,11 @@ from the test car's (request to first frame P50 3.46 ms, P99 10.93 ms;
 the replies share one 500 kbit/s bus, and the replies are counted by
 `log`'s own tally. A run gives the same figures on every machine.
 `PacingTest` (`test_pacing`) pins the engine's pacing against it in
-CI. The constants are not yet fitted to a car run, so the figures are
-the model's, not the car's.
+CI. The J2534 model (the OBDX Pro VX) and the MX+ model are fitted to
+the car's runs of
+[2026-11-18-pacing-car](bench-sessions/2026-11-18-pacing-car.md); the VX
+in ELM mode and SocketCAN keep their earlier constants. `bench_pacing`
+prints the car's runs against the model after its main table.
 
 ```sh
 build/tests/Release/bench_pacing.exe [seconds, default 70]
@@ -425,6 +437,79 @@ build/tests/Release/bench_pacing.exe [seconds, default 70]
 
 [ADR-0042](adr/0042-reply-timing.md)'s appendix of 2026-11-18 says what
 the model includes and when a pacing change ships on its figures.
+
+#### Fitted to the car (2026-11-18)
+
+The J2534 model's write through the surrogate takes 1.5 ms and its
+delivery of a reply's last frame 1 ms; the MX+ model's Bluetooth link
+takes 2 ms each way, a character 87 us and a command 2 ms. Replies a
+second from the engine ECU, 60 s each:
+
+| Run | Car | Model | Off by |
+|---|---|---|---|
+| D1, VX, obd2 packed | 58.7 | 56.6 | -3.5% |
+| D2, VX, `pack=0` | 140.8 | 144.1 | +2.3% |
+| D4, VX, `gap=0` | 52.7 | 56.6 | +7.5% |
+| D5, VX, `gap=20` | 48.2 | 49.5 | +2.6% |
+| D6, VX, `pack=0`, RPM | 140.3 | 144.0 | +2.7% |
+| D7, VX, `pack=0`, eight signals | 138.4 | 144.1 | +4.1% |
+| D9, VX, one DID, a Single Frame on 0x7E9 | 147 | 143.6 | -2.3% |
+| D10, VX, one DID, segmented, on 0x7E8 | 80 | 81.1 | +1.4% |
+| D3, MX+, obd2 | 40.9 | 40.8 | -0.2% |
+| D8, MX+, `gap=0` | 41.9 | 40.8 | -2.5% |
+
+`PacingTest` holds D1, D2, D6, D9 and D10 within 10% of the car and D3
+within 5% (the car's own D3 and D8 differ by 2.4%). Every pinned run
+asked one module, so each is also checked to be the same run with
+`?hold=0`.
+
+What the model doesn't cover:
+
+- **The VX at `gap=0` (D4).** On the car the ECU's first frame came
+  later at `gap=0` (P50 5.05 against 3.80 ms), so D4 ran slower than
+  D1; the model's reply timing doesn't follow the pace, and it runs D4
+  as D1.
+- **How the MX+'s exchange splits.** The car's MX+ figures fix the
+  exchange's total time, not its parts: a longer link with shorter
+  characters fits as well.
+- **One reply timing for every module.** Each module draws from the
+  engine ECU's timing at idle; the car's second module (D9's) answered
+  faster.
+- **The worker's timing jitter.** The model's worker passes come at
+  exact times. At a fixed floor two modules can lock into one phase: at
+  `gap=27` (core 0.7.1's pace in
+  [2026-11-11-monitor-car](bench-sessions/2026-11-11-monitor-car.md)'s
+  R1 and R2, D11's shape) the second module loses 1.4% in the model
+  against 24% and 19% on the car, where the loss is near the segmented
+  window's share of the period (about 5.5 of 27 ms). At the default
+  floor each module asks as its reply lands, no phase forms, and the
+  model matches D11.
+
+#### Two modules through the VX (Known Issue #42)
+
+With `lost_under_segments` on (the bench's model of Known Issue #42: a
+Single Frame reply that ends while another module's segmented reply is
+on the bus, from its First Frame's end to its last Consecutive Frame's
+end, is lost), D11's shape (a segmented DID on 0x7E8, a one-frame DID
+on 0x7E9, `?hold=0` as the car ran it) gives:
+
+| | Car | Model |
+|---|---|---|
+| 0x7E8 answered a second | 83.7 | 81.1 |
+| 0x7E9 asked a second | 18.0 | 17.0 |
+| 0x7E9's share answered | 0.551 | 0.453 |
+
+`PacingTest` pins the two rates within 10% and the share within 0.15.
+The share's gap comes from the one reply timing: the car's second
+module answered faster than the engine ECU, so fewer of its replies
+ended under a segmented one. The model loses more than the car did.
+
+**The hold's prediction (no car run has measured it):** with `?hold=`
+on, 0x7E9 loses next to nothing and 0x7E8 keeps about 0.64 of its rate
+without the hold, as each segmented reply waits out the other module's.
+Since the model loses more than the car, the prediction overstates what
+the hold wins for 0x7E9; its cost to 0x7E8 doesn't depend on the loss. A
+car run with the hold replaces both figures.
 
 ### Connect cost: a surrogate per session
 

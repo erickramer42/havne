@@ -436,3 +436,28 @@ ECU a whole car, up to 32 modules. Two things follow in the URI.
 `SimTimingTest` pins the draws and the keys' grammar, `SimAskTest` the
 ask's fields and `SimCarBusTest` (on `vcan`) a fault aimed at one
 module.
+
+## Appendix: busy= and bus= (2026-11-18)
+
+[ADR-0065](0065-car-sized-profile.md) step 6 gives the simulated car two
+more keys, in the grammar of "a car's pace" above.
+
+- **`busy=ignore|21[@<reply ID>]`:** a module is busy from a request until
+  its reply's last frame. `ignore` (and no key, on a bus) drops another
+  request; `21` answers it `7F <service> 21` at once while the reply waits,
+  and stays silent while its frames are under way, since a Single Frame on
+  the reply ID would cut its own message. The refusal draws nothing and
+  moves no fault count. In the unbound ask a busy window is
+  `t + delay + fc + (CFs - 1) x cf`, and the ask's time is kept monotonic.
+- **`bus=<kbit/s>`, 1 to 1000:** each frame of the simulated modules is 111
+  bits (an 8-byte classic frame, bit stuffing left out) and the frames take
+  the bus one at a time across every module, each held from when its write
+  returned, so the worker's own lateness never shortens a frame. A reply's
+  start and a due Consecutive Frame wait for the bus; the sim's Flow
+  Control, the pending `7F 78` and the busy `7F 21` go at once, even while
+  another module's frame holds the bus, and hold it after. Only the sim's
+  own frames are counted: the tester's arrive on `vcan` at once and take
+  no bus time, since a sim can't hold the tester's frames back. An unbound
+  sim refuses `bus=` (`BAD_URI`), since its caller times its frames. The
+  worker waits with `ppoll`, to the microsecond, as a frame's time is under
+  a millisecond.
