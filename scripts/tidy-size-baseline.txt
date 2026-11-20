@@ -7,8 +7,8 @@
 app/bridge_connect.cpp	applyConnectedState
 app/bridge_connect.cpp	disconnectSession
 app/bridge_diagnostics.cpp	clearDiagnostics
-app/bridge_diagnostics.cpp	diagnosticsEntry
-app/bridge_diagnostics.cpp	inspectionEntry
+app/bridge_diagnostics_entries.cpp	diagnosticsEntry
+app/bridge_diagnostics_entries.cpp	inspectionEntry
 app/bridge_diagnostics_text.cpp	channelDiagnosticsText
 app/bridge_recordings.cpp	recordingRowOf
 app/bridge_sessioninfo.cpp	sessionInfoText
