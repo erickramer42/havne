@@ -2053,6 +2053,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_ticks.cpp
         test_bridge_recorder.cpp
         test_bridge_conditions.cpp
+        test_bridge_conditions_firing.cpp
+        test_bridge_conditions_stale.cpp
+        test_bridge_conditions_tones.cpp
+        test_bridge_conditions_alloc.cpp
         test_recording_view.cpp
         test_recording_view_keys.cpp
         test_viewer_frames.cpp
