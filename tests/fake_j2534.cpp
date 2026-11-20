@@ -98,7 +98,7 @@
 //    reports nearly every response that way). ECUIO_FAKE_OVER_REPORT=1,
 //    in a batch mode, hands a call one message more than it asked when
 //    one more has arrived (J2534-1 forbids it; only into the surrogate's
-//    16-message batch, so the asked count is under 16).
+//    read buffer, room for 16, so the asked count is under 16).
 //    ECUIO_FAKE_READ_OVERFLOW=1 answers each delivered message with
 //    ERR_BUFFER_OVERFLOW (v04.04's form of frames lost).
 //    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
@@ -631,8 +631,8 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         }
         /* ECUIO_FAKE_OVER_REPORT=1: one message past the count, when one
          * more has arrived. The caller must have room for it: only the
-         * surrogate's 16-message batch is read this way, and its calls
-         * ask for one */
+         * surrogate's read buffer, room for 16, is read this way, and its
+         * calls ask for one */
         const unsigned long cap =
             (fake_j2534::knob_on("ECUIO_FAKE_OVER_REPORT") && requested < 16)
                 ? requested + 1
