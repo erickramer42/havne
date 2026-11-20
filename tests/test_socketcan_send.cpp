@@ -6,8 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstring>
 #include <initializer_list>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -260,6 +262,130 @@ TEST(SocketCanSendTest, AnOverflowOrAFlowControlItCantFollowFailsIt)
         EXPECT_EQ(w.flow({0x3F, 0x00, 0x00}, 100), kFailed)
             << "a flow status ISO 15765-2 reserves";
         EXPECT_FALSE(w.s.active);
+    }
+}
+
+/* A failed send says why, since each cause is something else to link
+ * health: no Flow Control within N_Bs is one ECU's silence, an overflow
+ * or a Flow Control that can't be followed its answer, and neither is a
+ * write that failed. A new send starts with no cause of the last. */
+TEST(SocketCanSendTest, AFailedSendSaysWhy)
+{
+    const Bytes pdu = counting(18);
+    const socketcan_send_why kWrite = socketcan_send_why::write;
+    const socketcan_send_why kNBs = socketcan_send_why::n_bs;
+    const socketcan_send_why kFlow = socketcan_send_why::flow;
+    Wire w;
+    EXPECT_EQ(w.s.why, kWrite);
+    ASSERT_EQ(w.start(pdu, 0), kFrame);
+    ASSERT_EQ(w.next(false, ECUIO_ISOTP_N_BS_US + 1), kFailed);
+    EXPECT_EQ(w.s.why, kNBs);
+    socketcan_send_end(w.s, w.tx);
+    ASSERT_EQ(w.start(pdu, 0), kFrame);
+    EXPECT_EQ(w.s.why, kWrite) << "a new send";
+    ASSERT_EQ(w.flow({0x32, 0x00, 0x00}, 100), kFailed);
+    EXPECT_EQ(w.s.why, kFlow) << "overflow";
+    socketcan_send_end(w.s, w.tx);
+    ASSERT_EQ(w.start(pdu, 0), kFrame);
+    ASSERT_EQ(w.flow({0x3F, 0x00, 0x00}, 100), kFailed);
+    EXPECT_EQ(w.s.why, kFlow) << "a flow status that can't be followed";
+    /* the tenth wait frame in a row: the ECU's answer too */
+    Wire waits;
+    int64_t now = 0;
+    ASSERT_EQ(waits.start(pdu, now), kFrame);
+    for (uint32_t i = 1; i < ECUIO_ISOTP_WAIT_MAX; ++i) {
+        now += ECUIO_ISOTP_N_BS_US;
+        ASSERT_EQ(waits.flow({0x31, 0x00, 0x00}, now), kNone) << i;
+    }
+    ASSERT_EQ(waits.flow({0x31, 0x00, 0x00}, now), kFailed);
+    EXPECT_EQ(waits.s.why, kFlow);
+    /* a send with nothing under way: no cause but the caller's own */
+    Wire idle;
+    ASSERT_EQ(idle.start(pdu, 0), kFrame);
+    idle.tx.state = isotp_tx_state::idle;
+    idle.s.why = kFlow; /* whatever a send before left */
+    ASSERT_EQ(idle.next(false, 10), kFailed);
+    EXPECT_EQ(idle.s.why, kWrite);
+}
+
+namespace {
+
+/* A long talk whose send fails for why, as the worker fails it, a second
+ * after the one before: the engine's talk offered, taken and its First
+ * Frame sent, then socketcan_send_failed. The sender is free and the
+ * talk settled unsent whatever the reason. */
+void fail_a_talk(ecuio_request_engine* e, link_health& h,
+                 socketcan_send_why why)
+{
+    static int64_t now = 0;
+    now += 1000000;
+    Bytes pdu = counting(18);
+    pdu[0] = 0x2C;
+    pdu[1] = 0x01;
+    ecuio_talk_request q;
+    q.pdu = pdu.data();
+    q.len = 18;
+    q.echo = 2;
+    ASSERT_EQ(ecuio_engine_offer_talk(e, 0, q, now), ecuio_talk_offer::taken);
+    ASSERT_EQ(ecuio_engine_due(e, 0, now), ECUIO_ENGINE_ONCE);
+    Wire w;
+    ASSERT_EQ(w.start(pdu, now), kFrame);
+    ecuio_engine_sent(e, 0, ECUIO_ENGINE_ONCE, true, now);
+    socketcan_send_failed(w.s, w.tx, e, 0, ECUIO_ENGINE_ONCE, why, h,
+                          now + 100);
+    EXPECT_FALSE(w.s.active);
+    EXPECT_EQ(w.tx.state, isotp_tx_state::idle);
+    EXPECT_EQ(e->chans[0].outstanding, ECUIO_ENGINE_NONE);
+    ecuio_talk_result settled;
+    ASSERT_TRUE(ecuio_engine_talk_take(e->chans[0].talk, &settled));
+    EXPECT_EQ(settled.end, ecuio_talk_end::unsent);
+}
+
+} // namespace
+
+/* What a failed send counts for link health, by its reason: N_Bs is one
+ * request unanswered (ten in a row a vehicle not responding, with no
+ * episode), an overflow nothing at all, and a write a failed write with
+ * its episode. */
+TEST(SocketCanSendTest, AFailedSendCountsByItsReason)
+{
+    auto e = std::make_unique<ecuio_request_engine>();
+    ASSERT_TRUE(ecuio_engine_init(e.get(), 1));
+    e->pdu_max = ECUIO_ENGINE_PDU_MAX;
+    {
+        std::atomic<int32_t> published{ECUIO_OK};
+        std::atomic<uint32_t> episodes{0};
+        link_health h(published, episodes);
+        ASSERT_NO_FATAL_FAILURE(
+            fail_a_talk(e.get(), h, socketcan_send_why::flow));
+        EXPECT_FALSE(h.unanswered);
+        EXPECT_EQ(h.quiet_runs, 0u) << "the ECU's answer counts nothing";
+        EXPECT_FALSE(h.write_failed);
+        ASSERT_NO_FATAL_FAILURE(
+            fail_a_talk(e.get(), h, socketcan_send_why::n_bs));
+        EXPECT_TRUE(h.unanswered);
+        EXPECT_EQ(h.quiet_runs, 1u) << "one request unanswered";
+        EXPECT_FALSE(h.write_failed);
+        for (uint32_t i = 1; i < LINK_HEALTH_QUIET_RUN; ++i) {
+            EXPECT_EQ(published.load(), ECUIO_OK) << i;
+            ASSERT_NO_FATAL_FAILURE(
+                fail_a_talk(e.get(), h, socketcan_send_why::flow));
+            ASSERT_NO_FATAL_FAILURE(
+                fail_a_talk(e.get(), h, socketcan_send_why::n_bs));
+        }
+        EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+        EXPECT_EQ(episodes.load(), 0u) << "no failed write among them";
+    }
+    {
+        std::atomic<int32_t> published{ECUIO_OK};
+        std::atomic<uint32_t> episodes{0};
+        link_health h(published, episodes);
+        ASSERT_NO_FATAL_FAILURE(
+            fail_a_talk(e.get(), h, socketcan_send_why::write));
+        EXPECT_TRUE(h.write_failed);
+        EXPECT_FALSE(h.unanswered);
+        EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED);
+        EXPECT_EQ(episodes.load(), 1u);
     }
 }
 

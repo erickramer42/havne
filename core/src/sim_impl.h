@@ -82,6 +82,7 @@ struct ecuio_sim {
     std::atomic<uint64_t> clears{0};
     std::atomic<uint64_t> pending{0};
     std::atomic<uint32_t> flags{0};
+    std::atomic<bool> strict{false}; /* ecuio_sim_test_set_strict */
     /* profile=: the set whose DIDs the ECUs answer (the registry's
      * pointer, valid while the sim is), and each def's physical value,
      * set from any thread (ecuio_sim_set_value) and read by the worker */

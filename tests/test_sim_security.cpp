@@ -7,6 +7,7 @@
 // hand), then in the engine ECU's session (sim_ecu.h), through the
 // unbound sim, and as the fakes' ECU answers it (tests/fake_ecus.h).
 
+#include "ecuio/internal.h"
 #include "ecuio/sim.h"
 #include "fake_ecus.h"
 #include "sim_ecu.h"
@@ -345,6 +346,59 @@ TEST(SimSecurityTest, TheSessionAnswers27WhereANodeHasAnExtendedSession)
     EXPECT_EQ(none.s.security.seed_out, 0);
 }
 
+/* A strict ECU wants its key straight after its seed: any request but a
+ * 27 in between spends the seed, and the key answers 24, counted as no
+ * wrong key. Off, the ECU lets requests in between. */
+TEST(SimSecurityTest, AStrictEcuWantsItsKeyStraightAfterItsSeed)
+{
+    Ecu e;
+    e.ask({0x27, 0x01});
+    ecuio_sim_security_between(e.s);
+    EXPECT_EQ(e.ask(Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+        << "not strict: the seed stands";
+
+    Ecu strict;
+    strict.s.strict = true;
+    strict.ask({0x27, 0x01});
+    ASSERT_EQ(strict.s.seed_out, 0x01);
+    ecuio_sim_security_between(strict.s);
+    EXPECT_EQ(strict.s.seed_out, 0);
+    EXPECT_EQ(strict.ask(Ecu::key_for(0x01)), kNrc24);
+    EXPECT_EQ(strict.s.wrong, 0) << "a sequence error is no wrong key";
+    EXPECT_EQ(strict.s.unlocked, 0);
+    strict.ask({0x27, 0x01});
+    EXPECT_EQ(strict.ask(Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+        << "straight after its seed";
+    ecuio_sim_security_between(strict.s);
+    EXPECT_EQ(strict.s.unlocked, 0x01) << "an unlock isn't a seed out";
+    ecuio_sim_security_lock(strict.s);
+    EXPECT_TRUE(strict.s.strict) << "a session entered leaves it strict";
+
+    /* A node: tester present, a read, a session request each come between;
+     * another 27 doesn't */
+    for (const Bytes& between : {Bytes{0x3E, 0x00}, Bytes{0x3E, 0x80}, kD210,
+                                 Bytes{0x01, 0x0C}, Bytes{0x10, 0x02}}) {
+        Node n;
+        n.s.security.strict = true;
+        n.ask({0x10, 0x03});
+        n.ask({0x27, 0x01});
+        n.ask(between);
+        EXPECT_EQ(n.ask(Ecu::key_for(0x01)), kNrc24) << int{between[0]};
+        Node easy;
+        easy.ask({0x10, 0x03});
+        easy.ask({0x27, 0x01});
+        easy.ask(between);
+        EXPECT_EQ(easy.ask(Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+            << int{between[0]};
+    }
+    Node n;
+    n.s.security.strict = true;
+    n.ask({0x10, 0x03});
+    n.ask({0x27, 0x03});
+    n.ask({0x27, 0x01}); /* the seed asked for last is the one out */
+    EXPECT_EQ(n.ask(Ecu::key_for(0x01)), (Bytes{0x67, 0x02}));
+}
+
 TEST(SimSecurityTest, TheGatedDidFollowsTheSessionAndTheUnlock)
 {
     Node n;
@@ -511,6 +565,43 @@ TEST(SimSecurityTest, AnUnboundSimsLockoutRunsOnTheCallersClock)
     EXPECT_EQ(u.ask(0x7E0, kD210), kD210Data);
 }
 
+/* The test-only switch (internal.h) makes a simulated ECU strict, bound
+ * or not. A functional request is heard by every module, so it comes
+ * between a strict one's seed and its key as any other does, though it
+ * never reaches a node's session. */
+TEST(SimSecurityTest, ASimIsMadeStrictByItsTestSwitch)
+{
+    Unbound u("mock://ask?values=canned");
+    ASSERT_NE(u.sim, nullptr);
+    ecuio_sim_test_set_strict(nullptr, 1); /* changes nothing */
+    EXPECT_EQ(u.ask(0x7E0, {0x10, 0x03}), kEntered);
+    u.ask(0x7E0, {0x27, 0x01});
+    EXPECT_EQ(u.ask(0x7E0, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_EQ(u.ask(0x7E0, Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+        << "off by default";
+
+    ecuio_sim_test_set_strict(u.sim, 1);
+    EXPECT_EQ(u.ask(0x7E0, {0x10, 0x03}), kEntered);
+    u.ask(0x7E0, {0x27, 0x01});
+    EXPECT_EQ(u.ask(0x7E0, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+    EXPECT_EQ(u.ask(0x7E0, Ecu::key_for(0x01)), kNrc24);
+    u.ask(0x7E0, {0x27, 0x01});
+    (void)u.ask(0x7DF, {0x01, 0x0C});
+    EXPECT_EQ(u.ask(0x7E0, Ecu::key_for(0x01)), kNrc24)
+        << "a functional request spends the seed too";
+    u.ask(0x7E0, {0x27, 0x01});
+    EXPECT_EQ(u.ask(0x7E0, Ecu::key_for(0x01)), (Bytes{0x67, 0x02}));
+    EXPECT_EQ(u.ask(0x7E0, kD210), kD210Data);
+
+    ecuio_sim_test_set_strict(u.sim, 0);
+    EXPECT_EQ(u.ask(0x7E0, {0x10, 0x03}), kEntered);
+    u.ask(0x7E0, {0x27, 0x01});
+    EXPECT_EQ(u.ask(0x7E0, kD210), kDenied);
+    (void)u.ask(0x7DF, {0x01, 0x0C});
+    EXPECT_EQ(u.ask(0x7E0, Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+        << "and off again";
+}
+
 /* ---------- the fakes' ECU (tests/fake_ecus.h) ---------- */
 
 /* The fakes' state is the process's: each case starts and ends clean */
@@ -524,6 +615,7 @@ struct FakeSecurityTest : ::testing::Test {
         fake_ecu::reset_sessions();
         fake_ecu::reset_security();
         fake_ecu::security_delay_ms() = 0;
+        fake_ecu::security_strict() = false;
     }
 
     static Bytes ask(uint32_t rx, const Bytes& req)
@@ -570,6 +662,31 @@ TEST_F(FakeSecurityTest, TheEngineEcuUnlocksInItsSessionByItsReplyId)
     ask(0x7E8, Ecu::key_for(0x01));
     fake_ecu::reset_security();
     EXPECT_EQ(ask(0x7E8, kD210), kDenied) << "reset_security locks every ECU";
+}
+
+/* The fakes' knob: the engine ECU on a reply ID is strict, and only a
+ * request to that ECU comes between its seed and its key */
+TEST_F(FakeSecurityTest, TheStrictKnobSpendsASeedOnAnyRequestBetween)
+{
+    ask(0x7E8, {0x10, 0x03});
+    ask(0x7E8, {0x27, 0x01});
+    ask(0x7E8, {0x3E, 0x00});
+    EXPECT_EQ(ask(0x7E8, Ecu::key_for(0x01)), (Bytes{0x67, 0x02}))
+        << "off by default";
+
+    fake_ecu::security_strict() = true;
+    ask(0x7E8, {0x10, 0x03});
+    for (const Bytes& between : {Bytes{0x3E, 0x00}, Bytes{0x22, 0xD2, 0x00},
+                                 Bytes{0x01, 0x0C}, kD210}) {
+        ask(0x7E8, {0x27, 0x01});
+        ask(0x7E8, between);
+        EXPECT_EQ(ask(0x7E8, Ecu::key_for(0x01)), kNrc24) << int{between[0]};
+    }
+    ask(0x7E8, {0x27, 0x01});
+    ask(0x7E9, {0x3E, 0x00}); /* another ECU's request */
+    ask(0x7E8, {0x27, 0x01}); /* and a 27 of its own */
+    EXPECT_EQ(ask(0x7E8, Ecu::key_for(0x01)), (Bytes{0x67, 0x02}));
+    EXPECT_EQ(ask(0x7E8, kD210), kD210Data);
 }
 
 TEST_F(FakeSecurityTest, AModuleHasNoSecurityAccess)

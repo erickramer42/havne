@@ -30,10 +30,14 @@
 //      identification for that long at most. The engine's cursors stay
 //      where they stopped, so the next turn goes on from there;
 //   4. another channel's session entry or keep-alive is due (ADR-0060), so
-//      a lap never runs past S3.
-// Then the next channel in order with something due takes it. A channel
-// the driver holds (held, a bit for each channel) is passed over. The walk
-// keeps the turn until it ends, so its budget (each channel's own second)
+//      a lap never runs past S3;
+//   5. another channel has a key offered (request_talk.h): the key's
+//      window can be shorter than a turn, and a key that waits one out is
+//      never sent.
+// Then the next channel in order with something due takes it, starting
+// at a channel with a key offered. A channel the driver holds (held, a
+// bit for each channel) is passed over. The walk keeps the turn until it
+// ends by rule 1, 4 or 5, so its budget (each channel's own second)
 // holds only its own exchanges.
 //
 // SocketCAN and J2534 don't use this: their channels' exchanges overlap
@@ -68,8 +72,9 @@ inline bool ecuio_engine_turn_walking(const ecuio_engine_channel& ch)
 }
 
 /* When channel ch next has something to ask, by its floor, a focus's gap
- * between sweeps and its session; INT64_MAX while a request is out or
- * with nothing to ask */
+ * between sweeps, its session and a key's window that holds it (none
+ * holds a key offered); INT64_MAX while a request is out or with nothing
+ * to ask */
 inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
                                          const ecuio_engine_channel& ch)
 {
@@ -85,7 +90,12 @@ inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
                  : ch.next_send_us;
     }
     const int64_t s = ecuio_engine_session_next_us(e, ch);
-    return s < at ? s : at;
+    at = s < at ? s : at;
+    if (at != INT64_MAX && !ecuio_talk_key_waits(ch.talk)) {
+        const int64_t held = ecuio_engine_key_held_until(e, ch);
+        at = held > at ? held : at;
+    }
+    return at;
 }
 
 /* Microseconds the turn on channel c waits for its own floor (rule 2), 0
@@ -113,7 +123,20 @@ inline int64_t ecuio_engine_turn_floor_us(const ecuio_request_engine* e,
     return at - now_us;
 }
 
-/* Whether the turn on channel c is over by rule 1, 3 or 4 at now_us */
+/* The first channel not held whose key is offered (rule 5); the channel
+ * count for none */
+inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
+                                      uint32_t held)
+{
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        if ((held & (1u << k)) == 0 && ecuio_talk_key_waits(e->chans[k].talk)) {
+            return k;
+        }
+    }
+    return e->chan_count;
+}
+
+/* Whether the turn on channel c is over by rule 1, 3, 4 or 5 at now_us */
 inline bool ecuio_engine_turn_over(const ecuio_request_engine* e,
                                    const ecuio_engine_turns& t, uint32_t c,
                                    uint32_t held, int64_t now_us)
@@ -124,6 +147,10 @@ inline bool ecuio_engine_turn_over(const ecuio_request_engine* e,
     }
     if (!ecuio_engine_turn_walking(ch) &&
         now_us - t.since_us >= ECUIO_ENGINE_TURN_US) {
+        return true;
+    }
+    const uint32_t keyed = ecuio_engine_turn_key(e, held);
+    if (keyed < e->chan_count && keyed != c) {
         return true;
     }
     for (uint32_t k = 0; k < e->chan_count; ++k) {
@@ -151,7 +178,8 @@ inline void ecuio_engine_turn_count(const ecuio_request_engine* e,
 
 /* What goes out next and on which channel (*c), at now_us: the turn's
  * channel's next request while its turn lasts, else the first of the
- * channels after it with something due, which takes the turn. NONE when
+ * channels after it with something due, which takes the turn; a channel
+ * with a key offered is asked ahead of that order. NONE when
  * nothing is due; *wait_us is then the time until the turn's channel's
  * floor passes when the turn waits it out (rule 2), else 0, and the driver
  * waits for the engine's next event. Like ecuio_engine_due, it moves the
@@ -183,8 +211,10 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
         t.on = false;
         t.chan = (k + 1) % n;
     }
+    const uint32_t keyed = ecuio_engine_turn_key(e, held);
+    const uint32_t from = keyed < n ? keyed : t.chan;
     for (uint32_t i = 0; i < n; ++i) {
-        const uint32_t k = (t.chan + i) % n;
+        const uint32_t k = (from + i) % n;
         if ((held & (1u << k)) != 0) {
             continue;
         }

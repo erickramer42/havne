@@ -372,8 +372,9 @@ inline uint32_t refuse(uint8_t service, uint8_t nrc, uint8_t* out)
  * extended session when has_extended (else 7F 10 12), 10 01 leaves it,
  * any other 10 is 7F 10 12; 3E 00 is 7E 00, 3E 80 is silent, any other
  * 3E 7F 3E 12; a wrong length 7F <service> 13. A node with an extended
- * session answers 27 here too (sim_security.h), and every session
- * entered or left locks it. Another service: handled false, the
+ * session answers 27 here too (sim_security.h), every session entered
+ * or left locks it, and any other request comes between a strict one's
+ * seed and its key. Another service: handled false, the
  * caller's answer. A functional request never reaches this: session
  * control and security access to 0x7DF go unanswered and change
  * nothing. */
@@ -394,6 +395,7 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
                                          ECUIO_SIM_SECURITY_DELAY_US, now_us,
                                          req, len, out);
     }
+    ecuio_sim_security_between(s.security);
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);
     if (!*handled) {
         return 0;

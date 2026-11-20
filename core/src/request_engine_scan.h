@@ -134,7 +134,7 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             if (ch.session_step == ECUIO_SESSION_STATE_ENTERED) {
                 ecuio_engine_count16(ch.session_lost);
             }
-            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+            ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
             ++ch.generation;
         }
         for (uint32_t i = 0; i < ch.ident_count; ++i) {

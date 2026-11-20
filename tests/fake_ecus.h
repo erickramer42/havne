@@ -219,6 +219,16 @@ inline std::atomic<unsigned>& security_delay_ms()
     return ms;
 }
 
+/* Strict security access, a knob (ecuio_sim_security::strict): any
+ * request but a 27 between a seed and its key spends the seed. The fake
+ * DLL sets it from ECUIO_FAKE_SECURITY_STRICT on each write, the
+ * in-process fakes' tests with this, and put it back. */
+inline std::atomic<bool>& security_strict()
+{
+    static std::atomic<bool> strict{false};
+    return strict;
+}
+
 struct SecuritySlot {
     uint32_t rx = 0;
     ecuio_sim_security state;
@@ -260,6 +270,22 @@ inline void reset_security()
     const std::lock_guard<std::mutex> lock(t.m);
     for (SecuritySlot& s : t.slots) {
         s = SecuritySlot{};
+    }
+}
+
+/* A request that is no 27 reached the engine ECU on rx: it comes
+ * between a strict ECU's seed and its key */
+inline void security_between(uint32_t rx)
+{
+    if (!security_strict().load()) {
+        return;
+    }
+    SecurityTable& t = security_table();
+    const std::lock_guard<std::mutex> guard(t.m);
+    ecuio_sim_security* s = security_of(t, rx, false);
+    if (s != nullptr) {
+        s->strict = true;
+        ecuio_sim_security_between(*s);
     }
 }
 
@@ -305,8 +331,8 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
  * keeps a module's codes (31 for a DID, 11 for a service), 0 answers
  * nothing, any other value is the code. 10 and 3E (two bytes) are the
  * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
- * 27 and kGatedDid are the engine ECU's security access; a module
- * refuses 27 as any service it lacks.
+ * 27 and kGatedDid are the engine ECU's security access, strict under
+ * security_strict(); a module refuses 27 as any service it lacks.
  * False when nothing answers, as for every request to absent_ecu(). */
 inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
                        long unsupported_nrc, unsigned char* out,
@@ -334,6 +360,9 @@ inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
             *out_len = 3u + r.len;
             return true;
         }
+    }
+    if (!module && !(req_len >= 1 && req[0] == 0x27)) {
+        security_between(rx);
     }
     if (req_len == 2 && req[0] == 0x3E) {
         if (req[1] != 0x00) {

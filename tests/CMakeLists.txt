@@ -29,7 +29,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
+    test_key_window_setup.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -127,8 +128,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp
-    test_sim_car.cpp test_sim_timing.cpp)
+    test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
+    test_request_pack.cpp test_sim_car.cpp test_sim_timing.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

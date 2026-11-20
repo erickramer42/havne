@@ -11,7 +11,8 @@
 
 ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
                                        uint32_t channel, const uint8_t* pdu,
-                                       uint32_t len, uint8_t echo, int first)
+                                       uint32_t len, uint8_t echo, int kind,
+                                       uint32_t window_ms)
 {
     if (session == nullptr || pdu == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
@@ -19,13 +20,15 @@ ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
     ecuio_test_talk_slot& slot = session->test_talk;
     if ((session->info.flags & ECUIO_SESSION_INFO_REQUESTS) == 0 ||
         channel >= session->info.module_count || len == 0 ||
-        len > sizeof slot.pdu || slot.state.load() != ECUIO_TEST_TALK_IDLE) {
+        len > sizeof slot.pdu || kind < 0 || kind > 2 ||
+        slot.state.load() != ECUIO_TEST_TALK_IDLE) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     slot.channel = channel;
     slot.len = len;
     slot.echo = echo;
-    slot.first = first != 0;
+    slot.kind = static_cast<ecuio_talk_kind>(kind);
+    slot.window_ms = window_ms;
     std::memcpy(slot.pdu, pdu, len);
     slot.state.store(ECUIO_TEST_TALK_ASKED);
     return ECUIO_OK;

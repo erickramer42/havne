@@ -85,6 +85,12 @@ inline isotp_can isotp_flow_control(uint32_t to_id)
     return f;
 }
 
+/* Whether tx is a functional request ID, which every module hears */
+constexpr bool isotp_functional_id(uint32_t tx)
+{
+    return tx == 0x7DFu || tx == 0x18DB33F1u;
+}
+
 /* The ID a Flow Control frame goes out on for a reply from rx to a
  * request on tx: tx, unless tx is the functional request ID (0x7DF,
  * 0x18DB33F1), when it's the physical request ID paired with rx (8 below
@@ -94,7 +100,7 @@ inline isotp_can isotp_flow_control(uint32_t to_id)
  * functional request waits for its Flow Control there (6.3.1). */
 inline uint32_t isotp_flow_control_id(uint32_t rx, uint32_t tx)
 {
-    if (tx != 0x7DFu && tx != 0x18DB33F1u) {
+    if (!isotp_functional_id(tx)) {
         return tx;
     }
     if (rx >= 9 && rx <= 0x7FFu) {
