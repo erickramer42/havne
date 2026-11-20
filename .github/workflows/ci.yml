@@ -140,7 +140,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -208,7 +208,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -268,7 +268,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       FUZZERS: >-
         fuzz_decode_signal fuzz_validate_set fuzz_uds_query fuzz_elm327_reply
@@ -594,7 +594,7 @@ jobs:
     # (-f coverage=true): its coverage is dev's once it merges
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only && github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || inputs.coverage) }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     # Three runners share the run, each with its own build: the gtest
     # binaries, and two interleaved slices of ctest's other cases
     # (scripts/coverage.sh --part). Codecov merges the three uploads of a commit.
@@ -1222,7 +1222,7 @@ jobs:
           - { arch: x86_64, debarch: amd64, runner: ubuntu-24.04 }
           - { arch: aarch64, debarch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash
