@@ -2059,6 +2059,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_import.cpp
         test_recording_export.cpp
         test_one_store.cpp
+        test_one_store_update.cpp
+        test_one_store_index.cpp
+        test_one_store_wrap.cpp
         test_bridge_variantshape.cpp
         test_bridge_plugincopies.cpp
         test_bridge_pluginpages.cpp
