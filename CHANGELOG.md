@@ -72,6 +72,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Fixed
 
 - Through the OBDX Pro VX, which loses a second module's single-frame reply that arrives beside another module's long one, Havne now waits out a long reply before asking the other modules (not yet confirmed on a car). `j2534://...?hold=0` turns this off.
+- With three or more modules through J2534, two modules answering in long replies no longer leave a third one barely updating: the modules waiting for the bus take turns.
 - A DID scan whose reply was lost on a healthy link asks that DID once more after the rest, so the scan completes instead of stopping one or two short (`?did=` ranges).
 - An expression refused at a character outside ASCII (such as "a + é") shows the character in the refusal's words, not '?'.
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
