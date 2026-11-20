@@ -22,7 +22,11 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
+add_executable(test_core test_core.cpp test_core_dispatch.cpp
+    test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
+    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
+    test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
+    test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_recording_keys.cpp
