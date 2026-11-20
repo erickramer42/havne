@@ -55,9 +55,9 @@ core/src/core.cpp	ecuio_session_set_focus_with
 core/src/csv_guess.h	decide_signals
 core/src/csv_guess.h	decide_time
 core/src/csv_guess.h	sample
-core/src/csv_import.h	next
-core/src/csv_import.h	parse_map
 core/src/csv_import.h	run
+core/src/csv_map.h	parse_map
+core/src/csv_reader.h	next
 core/src/elm327_listen.cpp	listen
 core/src/elm327_transport.cpp	elm327_attach
 core/src/elm327_worker.cpp	ask
@@ -82,11 +82,11 @@ core/src/j2534_worker.cpp	j2534_worker
 core/src/json.cpp	number
 core/src/mock_drive_cycle.h	drive_script
 core/src/mock_drive_cycle.h	update_vehicle
-core/src/obdb_import.cpp	command
-core/src/obdb_import.cpp	enum_values
-core/src/obdb_import.cpp	number_fields
-core/src/obdb_import.cpp	signal
-core/src/obdb_import.cpp	synthetic
+core/src/obdb_importer.h	command
+core/src/obdb_importer.h	enum_values
+core/src/obdb_importer.h	number_fields
+core/src/obdb_importer.h	signal
+core/src/obdb_importer.h	synthetic
 core/src/plugin.cpp	read_values
 core/src/plugin_wrap.cpp	wrapped
 core/src/recorder.cpp	ecuio_recorder_put_frame
@@ -118,7 +118,7 @@ core/src/signals.cpp	ecuio_decode_signal
 core/src/signals.cpp	ecuio_validate_signal
 core/src/sim_ecu.h	ecuio_sim_answer
 core/src/sim_ecu.h	pid_data
-core/src/socketcan_wire.h	socketcan_send_refusal
+core/src/socketcan_link.h	socketcan_send_refusal
 core/src/uds_generic.cpp	ecuio_uds_build
 surrogate/surrogate_main.cpp	handle_op_read
 surrogate/surrogate_main.cpp	wmain
