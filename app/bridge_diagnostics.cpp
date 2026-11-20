@@ -20,24 +20,6 @@
 
 using namespace bridgetext;
 
-namespace {
-
-// A clear's vehicle speed in the unit system, converted by core
-// (ADR-0022): "48 km/h", "30 mph"; "" if core can't convert it.
-QString clearSpeedText(uint32_t kmh, uint32_t units)
-{
-    ecuio_display_value_t out{};
-    if (ecuio_display_convert("km/h", 0, kmh, units, &out) !=
-        ECUIO_DISPLAY_OK) {
-        return {};
-    }
-    return QStringLiteral("%1 %2")
-        .arg(qRound(out.value))
-        .arg(QString::fromUtf8(out.unit));
-}
-
-} // namespace
-
 /* What each channel's ECU said it is (ADR-0021), in the activity log
  * once the whole list has an outcome, and again when a recovery re-asks
  * the unanswered items and they settle. One line per ECU, so the VIN
