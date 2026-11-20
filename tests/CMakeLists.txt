@@ -312,7 +312,8 @@ endif()
 # too, which is the host's clock). Rewrite one after a deliberate change
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
-    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
+    add_executable(test_cli test_cli.cpp test_cli_view.cpp test_cli_files.cpp
+        test_cli_signals.cpp test_cli_elm327.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
