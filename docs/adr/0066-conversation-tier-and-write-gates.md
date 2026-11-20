@@ -1763,6 +1763,53 @@ don't say:
     - **Moved to commit 11:** a session whose only work is a conversation
       (attach counts a bound module as asking).
 
+### Step 1, the attempts' machine and its store as built (2026-11-20)
+
+Both are built and inert: nothing calls them until a module binds
+(`core/src/security_access.h`, `core/src/security_store.{h,cpp}`).
+
+> **Amended 2026-11-20:** a key whose window ends before its turn, offered
+> in time, settles `lapsed`, an end of its own: it never touched the bus,
+> so the attempts' machine counts nothing for it. `unsent` means only a
+> failed write. The appendix of 2026-11-17 above says "unsent" for both.
+
+- **The pending mark is on the disk before the seed is asked,** not
+  between the seed and the key. A flush on a slow disk takes tens of
+  milliseconds and a manifest's key window can be 50 ms, so no file write
+  may sit inside a window. A crash between the seed and the key counts
+  one failed attempt though no key was sent: the safe direction, since
+  the next ask waits one delay. The mark is `pending_utc`, the second the
+  attempt began (0: none), and a read dates the counted failure's delay
+  from it.
+- **Every end of an offered key but its positive reply counts one failed
+  attempt:** a refusal of any code, no answer, and a failed write. `7F 27
+  36` to a seed starts the delay as `37` does.
+- **The delay across sessions** is rebuilt from the store's UTC second and
+  is never over one whole delay, so a clock set back costs one delay at
+  most. A clock set forward ends it, and no core rule stops that on the
+  user's own machine.
+- **An entry is one vehicle's:** its key is (vehicle, address, level),
+  with the vehicle 64 bits of the SHA-256 of an identity the host gives.
+  A module's count lives in the car, so an address and level alone would
+  share one count across cars. The text is always hashed, so core never
+  judges whether it is personal. The hash is no secret (a VIN can be
+  found by trying each), which bears on the identity's source.
+- **The store holds 256 entries in 64 KiB:** the longest 1,024 would not
+  fit.
+- **A store that doesn't read is refused, never taken as empty,** and its
+  words say that removing the file forgets the counts. So is one that
+  can't be opened: only "no such file" is an empty store.
+- **One owner for a path, and a second writer is merged:** a save that
+  finds the file changed keeps every entry there and the larger of each
+  number. A right key's zero can be lost to the file's older count, the
+  safe side. No lock is held between the read and the replace.
+- **The store is the first file core renames over an existing one**
+  (`ecuio_files::replace_with`): the partial is flushed to the disk, then
+  replaced, and a failure at any step leaves the old file whole.
+- **Moved to commit 11:** which thread loads and saves the store, the
+  identity's source, one store for a path in the process, and a lock file
+  across processes.
+
 ### Appendix: the write plan's shape beyond one download (2026-11-18)
 
 Section 3.4 builds the declarative UDS plan first and leaves the

@@ -174,6 +174,8 @@ Dates are commit dates.
 | 2026-11-13 | A recording keeps its session's conditions (`04b07303`, `7a4dfd14`), core wraps a signal file into a plugin (`090dea32`), and the VIN is flagged as soon as it is in (`fc88f87b`) |
 | 2026-11-14 | The armed recorder writes a window for each firing (`d2429ae5`), link terms are judged where the transport publishes link health (`80e05d46`), every import is a plugin in one store ([ADR-0064](adr/0064-one-store.md); `4e1882bc`), and the vehicles' signal files move into it at the first start (`3afbe243`) |
 | 2026-11-15 | The app's alerts: the Alerts page and a gauge's Alert (`b6d97e63`), the banner and colored values (`53d5e774`, `e4031b57`), Armed (`ea626eec`), the viewer's condition bars (`180422a8`), and the one Signals list (`676fa2de`); the review's fixes merged into `dev` |
+| 2026-11-20 | The conversation tier's attempts machine and its store ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)'s appendix of 2026-11-20): a pure count of failed security-access attempts with the delay across sessions, a store file read and replaced whole, and a harness for its reader, all inert until a module binds (`e0f3acc6`) |
+| 2026-11-20 | The long-files wave: test files split by theme with each QML test file one ctest entry (`7f9d974d`, `38fc2046`, `a6a3c043`), `core.cpp` and `test_plugin.cpp` (`08a46bbd`), the longest functions of the recorder, ELM327 worker and CLI (`9a53dfb9`), and three flaky tests made steady (`c1511bd0`) |
 
 ## Lessons learned
 
