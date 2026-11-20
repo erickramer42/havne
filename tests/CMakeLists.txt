@@ -472,7 +472,7 @@ if(TARGET havne-cli)
         # candump log and of a CSV, each interrupted mid-run: an interrupted
         # end, nothing left behind
         add_test(NAME CliTransferRunTest.interrupt
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
@@ -481,7 +481,7 @@ if(TARGET havne-cli)
         # import and a recording's health report at once: the end line,
         # exit 1
         add_test(NAME CliTransferRunTest.interrupt-twice
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-twice $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
@@ -489,7 +489,7 @@ if(TARGET havne-cli)
         # Interrupts once core's call has returned change nothing: the
         # result line whole, exit 0, the file in place
         add_test(NAME CliTransferRunTest.interrupt-late
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-late $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-late PROPERTIES
@@ -497,14 +497,14 @@ if(TARGET havne-cli)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-import $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
         # The same CSVs with no map: guessed, printed as committed, imported;
         # a time with no unit and a file with no header refused
         add_test(NAME CliTransferRunTest.csv-guess
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-guess $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-guess PROPERTIES TIMEOUT 60)
