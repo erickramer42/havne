@@ -264,6 +264,52 @@ TEST_F(Elm327SessionTest, AResetWhileListeningGetsItsSetupAgain)
         wait_for([&] { return s.cap.count("41 0C 1A F8") == 1; }, 3000));
 }
 
+/* The adapter resets as the check stops its monitor (its banner and
+ * prompt in place of STOPPED): the setup runs again before the monitor,
+ * with no failure */
+TEST_F(Elm327SessionTest, AResetAtTheMonitorsCheckGetsItsSetupAgain)
+{
+    Session s;
+    listen_on(s);
+    set_knobs([](fake_elm327::knobs& k) { k.stop_resets = true; });
+    const ShortTimeouts timeouts(0, 300);
+    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 3000));
+    EXPECT_EQ(fake_count("ATH1"), 2u) << "the setup ran again";
+    ASSERT_TRUE(wait_for(fake_monitoring, 2000));
+    on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+    EXPECT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C 1A F8") == 1; }, 3000));
+    uint32_t episodes = 99;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 0u);
+}
+
+/* The link drops while the monitor runs: its read fails, a hard failure
+ * at once rather than at the check 5 s on, and the link's return runs the
+ * setup and the monitor again */
+TEST_F(Elm327SessionTest, ADroppedLinkWhileListeningRecovers)
+{
+    Session s;
+    listen_on(s);
+    on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 2000));
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 2000));
+    set_knobs([](fake_elm327::knobs& k) { k.dropped = false; });
+    ASSERT_TRUE(wait_for([] { return fake_count("ATMA") >= 2; }, 8000));
+    EXPECT_GE(fake_count("ATZ"), 2u) << "the setup ran again";
+    ASSERT_TRUE(wait_for(
+        [&] {
+            on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+            return s.state() == ECUIO_OK;
+        },
+        3000));
+    uint32_t episodes = 0;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
 /* Closing the session stops the monitor with a space and waits for its
  * prompt, so the adapter is left at its prompt */
 TEST_F(Elm327SessionTest, ClosingStopsTheMonitor)

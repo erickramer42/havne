@@ -1565,11 +1565,16 @@ if(TARGET havne-cli)
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
-    app_cli_usage(PluginsAnUnknownWordIsUsage "plugins|lint|x")
+    app_cli_usage_says(PluginsAnUnknownWordIsUsage "plugins|lint|x"
+        "plugins takes list <pkg>")
     app_cli_usage(PluginsListWithoutAPackageIsUsage "plugins|list")
-    app_cli_usage(PluginsListAnOptionIsUsage "plugins|list|x|--fast")
+    app_cli_usage_says(PluginsListAnOptionIsUsage "plugins|list|x|--fast"
+        "unexpected '--fast'")
     app_cli_usage(PluginsCheckWithoutAPackageIsUsage "plugins|check")
-    app_cli_usage(PluginsCheckAnUnknownOptionIsUsage "plugins|check|x|--of|vcan0")
+    app_cli_usage_says(PluginsCheckAnUnknownOptionIsUsage
+        "plugins|check|x|--of|vcan0" "plugins check takes <pkg>")
+    app_cli_usage_says(PluginsCheckAnEmptyInterfaceIsUsage "plugins|check|x|--on|"
+        "plugins check takes <pkg>")
     app_cli_usage(PluginsCheckOnWithoutAnInterfaceIsUsage "plugins|check|x|--on")
     app_cli_usage(PluginsCheckAFlagForThePackageIsUsage "plugins|check|--on")
     app_cli_usage(PluginsCheckHelpForThePackageIsUsage "plugins|check|--help")
@@ -1577,7 +1582,8 @@ if(TARGET havne-cli)
         "plugins|match|--x|--vin|ZZZFAKE11K0000001")
     app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
     app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
-    app_cli_usage(PluginsWrapWithoutAnOutIsUsage "plugins|wrap|a.json")
+    app_cli_usage_says(PluginsWrapWithoutAnOutIsUsage "plugins|wrap|a.json"
+        "plugins wrap needs --out <pkg>")
     app_cli_usage(PluginsWrapAnOutWithoutAFileIsUsage "plugins|wrap|a.json|--out")
     app_cli_usage(PluginsWrapAFlagForTheFileIsUsage "plugins|wrap|--out|b.json")
     app_cli_usage(PluginsWrapAnUnknownOptionIsUsage

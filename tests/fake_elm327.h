@@ -91,6 +91,7 @@ public:
         monitor_us = stop_us = first_stop_us = monitor_after_stop_us = 0;
         second_stop_us = 0;
         held_ = late_reset_ = false;
+        busy_until_ = 0; /* no cut reply still under way */
         k = knobs{};
     }
 
@@ -200,7 +201,10 @@ public:
                 } else if (second_stop_us == 0) {
                     second_stop_us = now_us;
                 }
-                if (!k.hung) {
+                if (!k.hung && k.stop_resets) {
+                    k.stop_resets = false;
+                    spontaneous_reset(now_us);
+                } else if (!k.hung) {
                     monitoring_ = false;
                     reply("STOPPED", now_us);
                 }
@@ -791,6 +795,13 @@ private:
          * prompt late, whatever the count digit */
         const int64_t end =
             frames > 1 ? at + int64_t{k.multi_frame_prompt_ms} * 1000 : at;
+        if (k.banner_in_reply != nullptr &&
+            strcmp(cmd, k.banner_in_reply) == 0) {
+            k.banner_in_reply = nullptr;
+            settings_defaults();
+            end_line(end);
+            text_line(k.version, end);
+        }
         end_line(end);
         prompt(end);
     }

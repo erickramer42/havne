@@ -109,6 +109,26 @@ TEST(RecorderTest, TwoRecordersInOneSecondGetTwoFolders)
         ecuio_recorder_close(rec, nullptr);
 }
 
+/* No out, header lines missing for their count, an empty root: each
+ * refused before anything is made, the root left as it was */
+TEST(RecorderTest, OpenRefusesEachBadArgument)
+{
+    Root root;
+    const std::string r = root.utf8();
+    ecuio_record_options_t o{};
+    o.root_utf8 = r.c_str();
+    EXPECT_EQ(ecuio_recorder_open(&o, nullptr), ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_recorder_t* rec = nullptr;
+    o.header_line_count = 1;
+    EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(rec, nullptr);
+    o.header_line_count = 0;
+    o.root_utf8 = "";
+    EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(rec, nullptr);
+    EXPECT_FALSE(fs::exists(root.path)) << "nothing made";
+}
+
 /* What open and attach refuse */
 TEST(RecorderTest, OpenAndAttachRefuseWhatTheyMust)
 {

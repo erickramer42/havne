@@ -145,6 +145,44 @@ TEST_F(Elm327SessionTest, ACutDidAnsweredNoDataIsHeldAgainLonger)
     EXPECT_EQ(s.state(), ECUIO_OK);
 }
 
+/* An ECU still sending a cut reply long after the hold (5 s a frame):
+ * the DID asked again gets NO DATA, is held again twice, then left to
+ * the engine's wait, with no third hold */
+TEST_F(Elm327SessionTest, ACutReplyIsHeldAgainTwiceAtMost)
+{
+    const LogDir logs("held-again");
+    set_knobs([](fake_elm327::knobs& k) { k.cut_gap_ms = 5000; });
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri("?profile=uds-generic&did=F19F-F1A0&identify=0"
+                               "&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        s.start();
+        /* The cut, then the asks after holds of 340, 680 and 1360 ms: the
+         * third's NO DATA is where a third hold would be logged */
+        ASSERT_TRUE(wait_for([] { return fake_count("22F1A0") >= 4; }, 6000));
+        EXPECT_EQ(fake_count("22F1A01"), 1u);
+        /* Its NO DATA read off the adapter: the worker takes a prompt it
+         * has read before it looks for the close, so the third is judged */
+        ASSERT_TRUE(wait_for(
+            [] {
+                return on_fake<bool>([](fake_elm327::adapter& a) {
+                    return a.next_due_us() == INT64_MAX;
+                });
+            },
+            2000));
+    }
+    const std::string log = logs.only_log();
+    size_t holds = 0;
+    for (size_t at = log.find("NO DATA after a cut reply");
+         at != std::string::npos;
+         at = log.find("NO DATA after a cut reply", at + 1)) {
+        ++holds;
+    }
+    EXPECT_EQ(holds, 2u) << log;
+}
+
 /* ?scan=first: every scanned DID is asked before the listed one's
  * second poll, where the turns would alternate them */
 TEST_F(Elm327SessionTest, ScanFirstAsksTheRangeBeforeTheRotation)
@@ -248,6 +286,25 @@ TEST_F(Elm327SessionTest, CanErrorIsRequestsFailingUntilTheBusAnswers)
     EXPECT_EQ(episodes, 1u);
 }
 
+/* A request the adapter answers '?' never reached the bus, as CAN ERROR's
+ * didn't: requests failing, one episode, OK once it is taken again */
+TEST_F(Elm327SessionTest, ARequestTheAdapterRefusesIsRequestsFailing)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    ASSERT_GE(fake_count("010C1"), 1u) << "the request as typed";
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = "010C1"; });
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_REQUEST_FAILED; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = nullptr; });
+    EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 8000));
+    uint32_t episodes = 0;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 1u);
+}
+
 /* The link drops (a Bluetooth adapter out of range): a hard failure, one
  * episode, the port reopened on the backoff's schedule; its return runs
  * the setup again and the values resume, with no reconnect */
@@ -297,6 +354,88 @@ TEST_F(Elm327SessionTest, AnAdapterResetGetsItsSetupAgain)
     EXPECT_EQ(s.state(&episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
     EXPECT_EQ(fake_count("ATE0"), 2u);
+}
+
+namespace {
+
+uint32_t fake_resets()
+{
+    return on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.resets; });
+}
+
+} // namespace
+
+/* The banner inside a request's reply, ahead of its prompt (the adapter
+ * reset as it answered): the setup runs again, with no failure */
+TEST_F(Elm327SessionTest, AResetInsideAReplyGetsItsSetupAgain)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    ASSERT_GE(fake_count("010C1"), 1u) << "the request as typed";
+    set_knobs([](fake_elm327::knobs& k) { k.banner_in_reply = "010C1"; });
+    ASSERT_TRUE(wait_for([] { return fake_resets() >= 2; }, 3000));
+    const size_t before = s.cap.count("41 0C");
+    EXPECT_TRUE(
+        wait_for([&] { return s.cap.count("41 0C") > before + 2; }, 3000));
+    uint32_t episodes = 99;
+    EXPECT_EQ(s.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u);
+}
+
+/* A header refused mid-session (AT SH answered '?') is taken as a reset:
+ * the setup runs again at each refusal, with no failure, and the module
+ * is answered once the adapter takes its header again */
+TEST_F(Elm327SessionTest, AHeaderRefusedMidSessionRunsTheSetupAgain)
+{
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    Session s;
+    ASSERT_EQ(
+        s.create(uri(
+            "?profile=uds-generic&did=1E1C,7E9:D801&identify=0&diagnose=0")),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("62 D8 01") >= 1; }, 3000));
+    ASSERT_GE(fake_count("ATSH7E1"), 1u) << "the module's header as typed";
+    const uint32_t resets = fake_resets();
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = "ATSH7E1"; });
+    ASSERT_TRUE(wait_for([&] { return fake_resets() >= resets + 2; }, 3000));
+    set_knobs([](fake_elm327::knobs& k) { k.refuse = nullptr; });
+    const size_t before = s.cap.count("62 D8 01");
+    EXPECT_TRUE(
+        wait_for([&] { return s.cap.count("62 D8 01") > before; }, 3000));
+    uint32_t episodes = 99;
+    (void)s.state(&episodes);
+    EXPECT_EQ(episodes, 0u);
+}
+
+/* A walk that timed out (every request answered NO DATA) is asked again
+ * once the ECU answers: the recovery's probe resumes it to its end */
+TEST_F(Elm327SessionTest, ARecoveryResumesAWalkThatTimedOut)
+{
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    ecuio_channel_support_t sup{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.s, 0, &sup), ECUIO_OK);
+    EXPECT_EQ(sup.flags & ECUIO_SUPPORT_COMPLETE, 0u);
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_support(s.s, 0, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_COMPLETE) != 0;
+        },
+        5000));
+    EXPECT_GE(fake_count("0100"), 2u) << "01 00 asked again";
 }
 
 /* A reset whose setup then fails (the adapter refuses a contract
