@@ -206,8 +206,8 @@ gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
 # test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
-add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp
-    test_socketcan_send.cpp)
+add_executable(test_socketcan test_socketcan.cpp test_socketcan_clock.cpp
+    test_isotp.cpp test_socketcan_send.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 # the simulated ECU loads the replay fixture (SimTest, Linux)
