@@ -55,9 +55,9 @@ core/src/core.cpp	ecuio_session_set_focus_with
 core/src/csv_guess.h	decide_signals
 core/src/csv_guess.h	decide_time
 core/src/csv_guess.h	sample
-core/src/csv_import.h	next
-core/src/csv_import.h	parse_map
 core/src/csv_import.h	run
+core/src/csv_map.h	parse_map
+core/src/csv_reader.h	next
 core/src/elm327_listen.cpp	listen
 core/src/elm327_transport.cpp	elm327_attach
 core/src/elm327_worker.cpp	ask
