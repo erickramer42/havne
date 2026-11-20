@@ -781,21 +781,25 @@ inline taken take_faults(const ecuio_uri::param& p, ecuio_sim_config* out,
                : taken::bad;
 }
 
-/* delay=, fc=, cf= and seed= (sim_timing.h) */
+/* delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h) */
 inline taken take_timing(const ecuio_uri::param& p, ecuio_sim_config* out,
                          char* why, size_t why_cap)
 {
     using ecuio_sim_timing::knob;
     bool ok = true;
-    if (p.is("delay") || p.is("fc") || p.is("cf")) {
+    if (p.is("delay") || p.is("fc") || p.is("cf") || p.is("busy")) {
         const knob what = p.is("delay") ? knob::delay
                           : p.is("fc")  ? knob::fc
-                                        : knob::cf;
+                          : p.is("cf")  ? knob::cf
+                                        : knob::busy;
         ok = ecuio_sim_timing::parse_key(what, p.val, p.val_len, &out->timing,
                                          why, why_cap);
     } else if (p.is("seed")) {
         ok = ecuio_sim_timing::parse_seed(p.val, p.val_len, &out->timing, why,
                                           why_cap);
+    } else if (p.is("bus")) {
+        ok = ecuio_sim_timing::parse_bus(p.val, p.val_len, &out->timing, why,
+                                         why_cap);
     } else {
         return taken::other;
     }
@@ -826,7 +830,7 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&modules][&profile][&vin][&faults][&timing]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
- * where timing is delay=, fc=, cf= and seed= (sim_timing.h)
+ * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
  * says what's wrong (a line). */
 inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
@@ -849,16 +853,16 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values", "modules", "profile", "vin",  "faults",
-        "delay",  "fc",      "cf",      "seed", nullptr};
-    static const char* const kReplayKeys[] = {"loop",   "from",  "to", "vin",
-                                              "faults", "delay", "fc", "cf",
-                                              "seed",   nullptr};
+        "values", "modules", "profile", "vin",  "faults", "delay",
+        "fc",     "cf",      "seed",    "busy", "bus",    nullptr};
+    static const char* const kReplayKeys[] = {
+        "loop", "from", "to",   "vin",  "faults", "delay",
+        "fc",   "cf",   "seed", "busy", "bus",    nullptr};
     if (const ecuio_uri::param* p =
             ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys)) {
         std::snprintf(why, why_cap,
                       "the simulated ECU takes no query key '%.*s' for %s, "
-                      "only %s, vin, faults, delay, fc, cf and seed",
+                      "only %s, vin, faults, delay, fc, cf, seed, busy and bus",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to" : "values, modules, profile");

@@ -8,10 +8,13 @@
 // log-normal through two points (its median and its 99th percentile)
 // on a generator of the module's own; the time from the tester's Flow
 // Control to the first Consecutive Frame; and the module's own least gap
-// between Consecutive Frames, whatever STmin the tester asks. The URI
-// keys delay=, fc=, cf= and seed= read them, each aimable at one module
-// by its reply ID as faults= is. No key set is no delay, the tester's
-// pace and no draw.
+// between Consecutive Frames, whatever STmin the tester asks; what a
+// busy module does with another request; and the bus's rate, for which
+// a reply's frames wait, while the sim's Flow Control, 7F 78 and 7F 21
+// go at once and hold the bus after. The URI keys delay=, fc=, cf=,
+// seed=, busy= and bus= read them, the first four and busy= aimable at
+// one module by its reply ID as faults= is. No key set is no delay, the
+// tester's pace, no draw and the sim's own handling of a busy module.
 //
 // The draw is pinned bit for bit (SimTimingTest's fixed draws), so a
 // bench that copies it gives the same numbers: splitmix64 seeds the
@@ -33,6 +36,11 @@
 
 namespace ecuio_sim_timing {
 
+/* What a module does with a request that comes while it is busy: unset
+ * (the bus drops it, an unbound ask answers it), ignore it, or answer
+ * 7F <service> 21 */
+enum class busy_mode : uint8_t { unset, ignore, nrc21 };
+
 /* One module's timing: p50_us 0 is no delay and no draw */
 struct sim_timing {
     int64_t p50_us = 0;
@@ -40,6 +48,7 @@ struct sim_timing {
     uint32_t fc_us = 0; /* the tester's Flow Control to the first CF */
     uint32_t cf_us = 0; /* the least gap between CFs; a longer STmin wins */
     uint64_t seed = 1;
+    busy_mode busy = busy_mode::unset;
 };
 
 constexpr int64_t DELAY_MAX_US = 10000000;
@@ -50,26 +59,48 @@ constexpr uint32_t GAP_MAX_US = 1000000;
 /* The 99th percentile of the standard normal: z for p = 0.99 */
 constexpr double Z99 = 2.3263478740;
 
-enum class knob : uint8_t { delay, fc, cf };
+enum class knob : uint8_t { delay, fc, cf, busy };
+
+/* bus=: the bus's rate in kbit/s, a classic CAN controller's range */
+constexpr uint32_t BUS_MAX_KBPS = 1000;
+/* An 8-byte classic frame on the wire, stuffing left out: 47 bits of
+ * frame and 64 of data */
+constexpr uint32_t FRAME_BITS = 111;
 
 /* One key's item aimed at one module by its reply ID (delay=900:4000@7EA) */
 struct aim {
     uint32_t reply_id = 0;
     knob what = knob::delay;
-    int64_t a = 0; /* delay's p50, or fc's or cf's time */
+    int64_t a = 0; /* delay's p50, fc's or cf's time, or busy's mode */
     int64_t b = 0; /* delay's p99 */
 };
 
 /* Aims for each key, counted across every time the key comes */
 constexpr uint32_t AIMED_MAX = 32;
-constexpr uint32_t AIMED_KEYS = 3;
+constexpr uint32_t AIMED_KEYS = 4;
 
 struct timings {
     sim_timing all;
+    uint32_t bus_kbps = 0; /* bus=, the bus's alone; 0 for no bus time */
     uint32_t count = 0;
     uint32_t aimed[AIMED_KEYS] = {}; /* each key's aims among items */
     aim items[AIMED_KEYS * AIMED_MAX];
 };
+
+/* An item's value into t */
+inline void apply(sim_timing& t, const aim& a)
+{
+    if (a.what == knob::delay) {
+        t.p50_us = a.a;
+        t.p99_us = a.b;
+    } else if (a.what == knob::fc) {
+        t.fc_us = static_cast<uint32_t>(a.a);
+    } else if (a.what == knob::cf) {
+        t.cf_us = static_cast<uint32_t>(a.a);
+    } else {
+        t.busy = static_cast<busy_mode>(a.a);
+    }
+}
 
 /* The timing of the module answering on reply_id: every module's, each
  * item aimed at it replacing that key's, a later aim an earlier one */
@@ -78,16 +109,8 @@ inline sim_timing for_node(const timings& t, uint32_t reply_id)
     sim_timing out = t.all;
     for (uint32_t i = 0; i < t.count; ++i) {
         const aim& a = t.items[i];
-        if (a.reply_id != reply_id) {
-            continue;
-        }
-        if (a.what == knob::delay) {
-            out.p50_us = a.a;
-            out.p99_us = a.b;
-        } else if (a.what == knob::fc) {
-            out.fc_us = static_cast<uint32_t>(a.a);
-        } else {
-            out.cf_us = static_cast<uint32_t>(a.a);
+        if (a.reply_id == reply_id) {
+            apply(out, a);
         }
     }
     return out;
@@ -294,7 +317,8 @@ inline bool reply_id(const char* s, size_t n, uint32_t* id)
 }
 
 /* One item of what's key: <p50>:<p99> for delay, <us> for fc and cf,
- * then [@<reply ID>]; false for any other shape or a value out of range */
+ * ignore or 21 for busy, then [@<reply ID>]; false for any other shape
+ * or a value out of range */
 inline bool parse_item(knob what, const char* s, size_t n, aim* out,
                        bool* aimed)
 {
@@ -309,6 +333,17 @@ inline bool parse_item(knob what, const char* s, size_t n, aim* out,
     out->what = what;
     uint64_t a = 0;
     uint64_t b = 0;
+    if (what == knob::busy) {
+        const auto is = [&](const char* w) {
+            return at_sign == std::strlen(w) &&
+                   std::strncmp(s, w, at_sign) == 0;
+        };
+        const busy_mode m = is("ignore") ? busy_mode::ignore
+                            : is("21")   ? busy_mode::nrc21
+                                         : busy_mode::unset;
+        out->a = static_cast<int64_t>(m);
+        return m != busy_mode::unset;
+    }
     if (what != knob::delay) {
         if (!decimal(s, at_sign, GAP_MAX_US, &a)) {
             return false;
@@ -334,7 +369,10 @@ inline bool parse_item(knob what, const char* s, size_t n, aim* out,
 
 inline const char* name_of(knob what)
 {
-    return what == knob::delay ? "delay" : what == knob::fc ? "fc" : "cf";
+    return what == knob::delay ? "delay"
+           : what == knob::fc  ? "fc"
+           : what == knob::cf  ? "cf"
+                               : "busy";
 }
 
 inline void refuse_item(knob what, const char* item, size_t len, char* why,
@@ -347,6 +385,11 @@ inline void refuse_item(knob what, const char* item, size_t len, char* why,
                       "p50 from 1 to p99 and p99 at most %lld, the reply ID "
                       "11-bit hex",
                       shown, item, static_cast<long long>(DELAY_MAX_US));
+    } else if (what == knob::busy) {
+        std::snprintf(why, why_cap,
+                      "busy: '%.*s' isn't ignore or 21, then [@<reply ID>], "
+                      "the reply ID 11-bit hex",
+                      shown, item);
     } else {
         std::snprintf(why, why_cap,
                       "%s: '%.*s' isn't <us>[@<reply ID>], from 0 to %u, the "
@@ -357,8 +400,8 @@ inline void refuse_item(knob what, const char* item, size_t len, char* why,
 
 } // namespace detail
 
-/* One of delay=, fc= or cf= (what) into *t: its untargeted item sets
- * every module's (a later one in place of an earlier), each aimed one
+/* One of delay=, fc=, cf= or busy= (what) into *t: its untargeted item
+ * sets every module's (a later one in place of an earlier), each aimed one
  * joins t's aims, at most AIMED_MAX for the key however often it comes;
  * false with why */
 inline bool parse_key(knob what, const char* text, size_t len, timings* t,
@@ -378,14 +421,7 @@ inline bool parse_key(knob what, const char* text, size_t len, timings* t,
             return false;
         }
         if (!aimed) {
-            if (what == knob::delay) {
-                t->all.p50_us = a.a;
-                t->all.p99_us = a.b;
-            } else if (what == knob::fc) {
-                t->all.fc_us = static_cast<uint32_t>(a.a);
-            } else {
-                t->all.cf_us = static_cast<uint32_t>(a.a);
-            }
+            apply(t->all, a);
         } else if (aimed_here == AIMED_MAX) {
             std::snprintf(why, why_cap,
                           "%s: more than %u items aimed at a module",
@@ -416,6 +452,41 @@ inline bool parse_seed(const char* text, size_t len, timings* t, char* why,
     }
     t->all.seed = v;
     return true;
+}
+
+/* bus=<kbit/s>: the bus's rate, 1 to BUS_MAX_KBPS */
+inline bool parse_bus(const char* text, size_t len, timings* t, char* why,
+                      size_t why_cap)
+{
+    uint64_t v = 0;
+    if (!detail::decimal(text, len, BUS_MAX_KBPS, &v) || v == 0) {
+        std::snprintf(why, why_cap, "bus: the bus's rate in kbit/s, 1 to %u",
+                      BUS_MAX_KBPS);
+        return false;
+    }
+    t->bus_kbps = static_cast<uint32_t>(v);
+    return true;
+}
+
+/* The microseconds a frame holds the bus at kbps, rounded up; 0 for none */
+inline int64_t frame_us(uint32_t kbps)
+{
+    if (kbps == 0) {
+        return 0;
+    }
+    return (static_cast<int64_t>(FRAME_BITS) * 1000 + kbps - 1) / kbps;
+}
+
+/* A reply of len bytes' frames after its first, at t's pace with the
+ * tester asking no STmin: 0 for a Single Frame */
+inline int64_t frames_after_first_us(const sim_timing& t, uint32_t len)
+{
+    if (len <= 7) {
+        return 0;
+    }
+    const int64_t cfs = static_cast<int64_t>(len) / 7; /* ceil((len - 6) / 7) */
+    return static_cast<int64_t>(t.fc_us) +
+           (cfs - 1) * static_cast<int64_t>(t.cf_us);
 }
 
 /* Whether every aim names a reply ID one of a sim's ECUs answers on

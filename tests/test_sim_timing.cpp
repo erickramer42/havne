@@ -1,10 +1,11 @@
 // File/layer: tests/test_sim_timing.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SimTimingTest, SimAskTest (test_obd2)
+// Testing: UNIT: SimTimingTest, SimAskTest, SimTest (test_obd2)
 //
 // The simulated ECU's reply timing (core/src/sim_timing.h): the draw's
 // fixed numbers (a bench copying it pins the same), its median and 99th
-// percentile, each module's own generator, the delay=, fc=, cf= and
-// seed= grammar, and what the unbound ask hands back for each reply.
+// percentile, each module's own generator, the delay=, fc=, cf=, seed=,
+// busy= and bus= grammar, what the unbound ask hands back for each
+// reply, and a busy module's way with another request.
 
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
@@ -108,14 +109,14 @@ struct Unbound {
     Unbound(const Unbound&) = delete;
     Unbound& operator=(const Unbound&) = delete;
 
-    std::vector<ecuio_sim_reply_t> ask(uint32_t id, const Bytes& q)
+    std::vector<ecuio_sim_reply_t> ask(uint32_t id, const Bytes& q,
+                                       int64_t t = ECUIO_SIM_NOW)
     {
         std::vector<ecuio_sim_reply_t> out(ECUIO_SIM_MAX_REPLIES);
         uint32_t n = 0;
         EXPECT_EQ(ecuio_sim_ask(sim, id, q.data(),
-                                static_cast<uint32_t>(q.size()), ECUIO_SIM_NOW,
-                                out.data(), static_cast<uint32_t>(out.size()),
-                                &n),
+                                static_cast<uint32_t>(q.size()), t, out.data(),
+                                static_cast<uint32_t>(out.size()), &n),
                   ECUIO_OK)
             << ecuio_last_error_detail();
         out.resize(n);
@@ -271,6 +272,20 @@ TEST(SimTimingTest, TheAimsAreBounded)
               "fc: more than 32 items aimed at a module");
     EXPECT_EQ(refusal("mock://sim?cf=" + items + "&fc=" + items + "&cf=0@7E8"),
               "cf: more than 32 items aimed at a module");
+    std::string delays;
+    std::string busy;
+    for (int i = 0; i < 32; ++i) {
+        delays += (i == 0 ? "" : ",") + std::string("1:2@7E8");
+        busy += (i == 0 ? "" : ",") + std::string(i % 2 ? "21" : "ignore") +
+                "@7E8";
+    }
+    const ecuio_sim_config full = parsed("mock://sim?fc=" + items + "&cf=" +
+                                         items + "&delay=" + delays +
+                                         "&busy=" + busy);
+    EXPECT_EQ(full.timing.count, 128u) << "every key's 32 aims";
+    EXPECT_EQ(for_node(full.timing, 0x7E8).busy, busy_mode::nrc21);
+    EXPECT_EQ(refusal("mock://sim?busy=" + busy + ",21@7E8"),
+              "busy: more than 32 items aimed at a module");
 }
 
 // The unbound ask's replies carry each module's timing: the draw, fc and
@@ -376,4 +391,117 @@ TEST(SimTest, ATimingsAimNeedsItsModule)
         ecuio_sim_create_unbound("mock://sim?modules=2&cf=800@7E9", 0, &sim),
         ECUIO_OK);
     ecuio_sim_destroy(sim);
+}
+
+// busy= and bus=: each module's way with a busy request, the bus's rate,
+// a frame's time on it, and a reply's frames after its first
+TEST(SimTimingTest, TheBusyAndBusKeys)
+{
+    const ecuio_sim_config c =
+        parsed("mock://sim?modules=2&busy=ignore,21@7E9&bus=500");
+    EXPECT_EQ(for_node(c.timing, 0x7E8).busy, busy_mode::ignore);
+    EXPECT_EQ(for_node(c.timing, 0x7E9).busy, busy_mode::nrc21);
+    EXPECT_EQ(for_node(parsed("mock://sim").timing, 0x7E8).busy,
+              busy_mode::unset);
+    EXPECT_EQ(c.timing.bus_kbps, 500u);
+    EXPECT_EQ(frame_us(500), 222);
+    EXPECT_EQ(frame_us(125), 888);
+    EXPECT_EQ(frame_us(1000), 111);
+    EXPECT_EQ(frame_us(7), 15858) << "111000 / 7, rounded up";
+    EXPECT_EQ(frame_us(0), 0);
+    sim_timing t;
+    t.fc_us = 4000;
+    t.cf_us = 5000;
+    EXPECT_EQ(frames_after_first_us(t, 7), 0);      /* a Single Frame */
+    EXPECT_EQ(frames_after_first_us(t, 13), 4000);  /* one CF */
+    EXPECT_EQ(frames_after_first_us(t, 20), 9000);  /* two */
+    EXPECT_EQ(frames_after_first_us(t, 21), 14000); /* three */
+    for (const char* q : {"busy=yes", "busy=", "busy=21@800", "busy=ignore,",
+                          "bus=0", "bus=1001", "bus=x", "bus="}) {
+        const std::string why = refusal(std::string("mock://sim?") + q);
+        const std::string key(q, std::strchr(q, '=') - q);
+        EXPECT_EQ(why.rfind(key + ":", 0), 0u) << q << ": " << why;
+    }
+    EXPECT_EQ(refusal("mock://sim?busy=yes"),
+              "busy: 'yes' isn't ignore or 21, then [@<reply ID>], the reply "
+              "ID 11-bit hex");
+    EXPECT_EQ(refusal("mock://sim?bus=0"),
+              "bus: the bus's rate in kbit/s, 1 to 1000");
+}
+
+// An unbound sim has no bus to time: bus= is refused with the URI,
+// before its profile is looked up
+TEST(SimTest, ABusNeedsABus)
+{
+    ecuio_sim_t* sim = nullptr;
+    EXPECT_EQ(ecuio_sim_create_unbound("mock://sim?bus=500", 0, &sim),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(sim, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "bus: times the frames on a bus, and an unbound sim has "
+                 "none: its caller times them");
+    EXPECT_EQ(ecuio_sim_create_unbound(
+                  "mock://sim?profile=sim-timing-none&bus=500", 0, &sim),
+              ECUIO_ERR_BAD_URI);
+}
+
+// busy=: a request that comes before a module's last reply is over is
+// ignored, or answered 7F <service> 21 at once; without it, answered
+TEST(SimAskTest, ABusyModuleIgnoresOrRefuses)
+{
+    const Bytes rpm = {0x01, 0x0C};
+    Unbound ignore("mock://sim?delay=10000:10000&busy=ignore");
+    ASSERT_EQ(ignore.ask(0x7E0, rpm, 0).size(), 1u);
+    EXPECT_TRUE(ignore.ask(0x7E0, rpm, 5000).empty());
+    EXPECT_TRUE(ignore.ask(0x7E0, rpm, 9999).empty());
+    EXPECT_EQ(ignore.ask(0x7E0, rpm, 10000).size(), 1u) << "its reply is over";
+
+    Unbound refuse("mock://sim?delay=10000:10000&busy=21");
+    ASSERT_EQ(refuse.ask(0x7E0, rpm, 0).size(), 1u);
+    const std::vector<ecuio_sim_reply_t> r = refuse.ask(0x7E0, rpm, 5000);
+    ASSERT_EQ(r.size(), 1u);
+    EXPECT_EQ(r[0].length, 3u);
+    EXPECT_EQ(Bytes(r[0].data, r[0].data + 3), (Bytes{0x7F, 0x01, 0x21}));
+    EXPECT_EQ(r[0].delay_us, 0);
+    EXPECT_EQ(r[0].flags, 0u);
+    ecuio_sim_stats_t st{};
+    ASSERT_EQ(ecuio_sim_get_stats(refuse.sim, &st), ECUIO_OK);
+    EXPECT_EQ(st.requests, 2u);
+    EXPECT_EQ(st.replies, 2u) << "the refusal is a reply";
+    EXPECT_EQ(st.refused, 1u);
+
+    Unbound unset("mock://sim?delay=10000:10000");
+    ASSERT_EQ(unset.ask(0x7E0, rpm, 0).size(), 1u);
+    EXPECT_EQ(unset.ask(0x7E0, rpm, 5000).size(), 1u) << "unset answers";
+
+    /* A segmented reply is busy through its frames: the VIN's 20 bytes,
+     * its draw, fc and one cf */
+    Unbound vin("mock://sim?delay=1000:1000&fc=4000&cf=5000&busy=ignore");
+    ASSERT_EQ(vin.ask(0x7E0, {0x09, 0x02}, 0).size(), 1u);
+    EXPECT_TRUE(vin.ask(0x7E0, rpm, 9999).empty());
+    EXPECT_EQ(vin.ask(0x7E0, rpm, 10000).size(), 1u);
+
+    /* A stalled reply's last frame waits ECUIO_SIM_STALLED_US more, as on
+     * the bus */
+    Unbound stall("mock://sim?delay=1000:1000&fc=4000&cf=5000&busy=ignore"
+                  "&faults=stalled:1");
+    ASSERT_EQ(stall.ask(0x7E0, {0x09, 0x02}, 0).size(), 1u);
+    const int64_t held = 10000 + ECUIO_SIM_STALLED_US;
+    EXPECT_TRUE(stall.ask(0x7E0, rpm, held - 1).empty());
+    EXPECT_EQ(stall.ask(0x7E0, rpm, held).size(), 1u);
+
+    /* Near the clock's end the window saturates at it, never wrapping */
+    const int64_t end = INT64_MAX;
+    Unbound last("mock://sim?delay=10000:10000&busy=21");
+    ASSERT_EQ(last.ask(0x7E0, rpm, end - 5000).size(), 1u);
+    const std::vector<ecuio_sim_reply_t> still = last.ask(0x7E0, rpm, end - 1);
+    ASSERT_EQ(still.size(), 1u);
+    EXPECT_EQ(still[0].data[2], 0x21) << "still busy at the clock's end";
+
+    /* The ask's time never goes back: an earlier one is taken as the
+     * last, so a reply that ended then leaves the module free */
+    Unbound back("mock://sim?busy=ignore");
+    ASSERT_EQ(back.ask(0x7E0, rpm, 0).size(), 1u);
+    ASSERT_EQ(back.ask(0x7E0, rpm, 20000).size(), 1u);
+    EXPECT_EQ(back.ask(0x7E0, rpm, 5000).size(), 1u);
 }

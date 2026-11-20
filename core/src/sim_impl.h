@@ -52,6 +52,8 @@ struct sim_node {
     /* Its delays' own generator, seeded again at build from the URI */
     std::mt19937_64 rng =
         ecuio_sim_timing::sim_timing_rng(1, ECUIO_SIM_REPLY_ID);
+    /* An unbound ask's: when its last reply's last frame goes (busy=) */
+    int64_t busy_until_us = 0;
     /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
      * ECU, everything on another module */
     bool from_set = false;
@@ -96,8 +98,13 @@ struct ecuio_sim {
     /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
      * the clock to the time it's given (its ticks never go back) */
     bool unbound = false;
+    int64_t ask_us = 0; /* the last ask's time: an earlier one is taken as it */
     std::chrono::steady_clock::time_point created =
         std::chrono::steady_clock::now();
+    /* bus=: each frame's time on the bus, and when the bus is free again,
+     * across every node (the worker's alone) */
+    int64_t bus_frame_us = 0;
+    int64_t bus_free_us = 0;
 #if ECUIO_HAVE_SOCKETCAN
     int fd = -1;
     int stop_fd = -1;

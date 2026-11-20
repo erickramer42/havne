@@ -18,7 +18,8 @@ void check_one(const ecuio_sim_timing::sim_timing& t)
 {
     using namespace ecuio_sim_timing;
     if (t.fc_us > GAP_MAX_US || t.cf_us > GAP_MAX_US || t.p50_us < 0 ||
-        t.p99_us > DELAY_MAX_US || (t.p50_us > 0 && t.p50_us > t.p99_us)) {
+        t.busy > busy_mode::nrc21 || t.p99_us > DELAY_MAX_US ||
+        (t.p50_us > 0 && t.p50_us > t.p99_us)) {
         abort();
     }
     std::mt19937_64 rng = sim_timing_rng(t.seed, 0x7E8);
@@ -42,7 +43,7 @@ void check_timing(const ecuio_sim_timing::timings& t)
         }
         aimed += t.aimed[k];
     }
-    if (t.count != aimed) {
+    if (t.count != aimed || t.bus_kbps > ecuio_sim_timing::BUS_MAX_KBPS) {
         abort();
     }
     check_one(t.all);

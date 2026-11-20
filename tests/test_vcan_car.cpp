@@ -4,8 +4,9 @@
 // The simulated car on the bus (ADR-0065 section 10): as many modules as
 // a set holds answering a functional request each on its own reply ID,
 // two segmented replies under way at once, a fault on one module alone,
-// one session reading the made-up whole car (plugins/example-car), and
-// a module's reply timing (delay=, fc=, cf=).
+// one session reading the made-up whole car (plugins/example-car), a
+// module's reply timing (delay=, fc=, cf=), a busy module's 7F xx 21
+// (busy=21), and the bus's frames one at a time (bus=).
 
 #include "ecuio/core.h"
 #include "ecuio/plugin.h"
@@ -22,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -553,5 +555,148 @@ TEST_F(SimCarBusTest, AModulesRepliesKeepItsTiming)
         EXPECT_GE(median(gaps), c.gap);
         EXPECT_LT(median(gaps), 4 * c.gap);
     }
+    EXPECT_EQ(sim.stats().unflowed, 0u);
+}
+
+// busy=21 on the bus: a second request while the first's reply waits its
+// delay is answered 7F 22 21 at once, and the first's reply still comes
+TEST_F(SimCarBusTest, ABusyModuleAnswersBusyRepeatRequest)
+{
+    Modules m("sim-car-bus-busy", 1);
+    Sim sim("mock://sim?profile=sim-car-bus-busy&delay=60000:60000&busy=21");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Fd raw = vcan_bus::open_raw();
+    ASSERT_TRUE(raw.ok());
+    const auto asked = std::chrono::steady_clock::now();
+    ASSERT_TRUE(put(raw.get(), 0x700, {0x03, 0x22, 0x20, 0x00}));
+    ASSERT_TRUE(put(raw.get(), 0x700, {0x03, 0x22, 0x20, 0x00}));
+    std::vector<std::vector<uint8_t>> got;
+    std::vector<double> at;
+    while (got.size() < 2 && ms_since(asked) < 1000) {
+        can_frame f{};
+        if (vcan_bus::read_for(raw.get(), &f, sizeof f, 100) > 0 &&
+            (f.can_id & CAN_SFF_MASK) == 0x740) {
+            got.emplace_back(f.data + 1, f.data + 1 + (f.data[0] & 0x0F));
+            at.push_back(ms_since(asked));
+        }
+    }
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0], (std::vector<uint8_t>{0x7F, 0x22, 0x21}));
+    EXPECT_LT(at[0], 40.0) << "at once, not after the delay";
+    EXPECT_EQ(got[1][0], 0x62) << "the first request's own reply";
+    EXPECT_GE(at[1], 60.0);
+    EXPECT_EQ(sim.stats().refused, 1u);
+}
+
+namespace {
+
+/* A frame and its kernel stamp in ns (SO_TIMESTAMPNS): -1 when no
+ * frame came, *ns -1 when it came with no stamp */
+long read_stamped(int fd, can_frame* f, int timeout_ms, int64_t* ns)
+{
+    pollfd p{fd, POLLIN, 0};
+    if (::poll(&p, 1, timeout_ms) != 1) {
+        return -1;
+    }
+    iovec io{f, sizeof *f};
+    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(timespec))];
+    msghdr msg{};
+    msg.msg_iov = &io;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof control;
+    const long got = static_cast<long>(::recvmsg(fd, &msg, 0));
+    *ns = -1;
+    for (cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr;
+         c = CMSG_NXTHDR(&msg, c)) {
+        if (c->cmsg_level == SOL_SOCKET && c->cmsg_type == SCM_TIMESTAMPNS) {
+            timespec ts{};
+            std::memcpy(&ts, CMSG_DATA(c), sizeof ts);
+            *ns = static_cast<int64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
+        }
+    }
+    return got;
+}
+
+/* SO_TIMESTAMPNS on fd, and true once the kernel stamps a frame as it
+ * arrives: its switch runs as deferred work, and until then a frame is
+ * stamped when it is read. A probe on 0x5AF, which nothing answers,
+ * comes back stamped before its write returned (1 s at most) */
+bool stamps_on_arrival(int fd)
+{
+    const int on = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS, &on, sizeof on) != 0) {
+        return false;
+    }
+    Fd probe = vcan_bus::open_raw();
+    const auto from = std::chrono::steady_clock::now();
+    while (probe.ok() && ms_since(from) < 1000) {
+        if (!put(probe.get(), 0x5AF, {0x00})) {
+            return false;
+        }
+        timespec after{};
+        clock_gettime(CLOCK_REALTIME, &after);
+        const int64_t after_ns =
+            static_cast<int64_t>(after.tv_sec) * 1000000000 + after.tv_nsec;
+        can_frame f{};
+        int64_t ns = -1;
+        while (read_stamped(fd, &f, 100, &ns) > 0) {
+            if ((f.can_id & CAN_SFF_MASK) == 0x5AF) {
+                if (ns >= 0 && ns < after_ns) {
+                    return true;
+                }
+                break;
+            }
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+// bus=125 (888 us a frame): four modules answering one functional
+// request with segmented replies share the bus a frame at a time. vcan
+// stamps a frame when its queue lets it go, up to about 60 us after the
+// sim's write, so the least gap is judged at 3/4 of a frame and the
+// median at a whole one
+TEST_F(SimCarBusTest, TheBusCarriesOneFrameAtATime)
+{
+    Fd raw = vcan_bus::open_raw();
+    ASSERT_TRUE(raw.ok());
+    ASSERT_TRUE(stamps_on_arrival(raw.get()))
+        << "the kernel never stamped a frame as it arrived";
+    Modules m("sim-car-bus-rate", 4);
+    Sim sim("mock://sim?profile=sim-car-bus-rate&bus=125");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    ASSERT_TRUE(put(raw.get(), 0x7DF, {0x03, 0x22, 0x4A, 0x00}));
+    std::vector<int64_t> stamps;
+    const auto asked = std::chrono::steady_clock::now();
+    /* Each module's First Frame and three Consecutive Frames */
+    while (stamps.size() < 16 && ms_since(asked) < 3000) {
+        can_frame f{};
+        int64_t ns = -1;
+        if (read_stamped(raw.get(), &f, 100, &ns) <= 0) {
+            continue;
+        }
+        const uint32_t id = f.can_id & CAN_SFF_MASK;
+        if (id < 0x740 || id > 0x743) {
+            continue;
+        }
+        ASSERT_GE(ns, 0) << "no kernel stamp";
+        stamps.push_back(ns);
+        if ((f.data[0] & 0xF0) == 0x10) {
+            ASSERT_TRUE(put(raw.get(), id - 0x40, {0x30, 0x00, 0x00}));
+        }
+    }
+    ASSERT_EQ(stamps.size(), 16u) << "four modules' four frames each";
+    std::sort(stamps.begin(), stamps.end());
+    std::vector<double> gaps;
+    for (size_t i = 1; i < stamps.size(); ++i) {
+        gaps.push_back((stamps[i] - stamps[i - 1]) / 1000.0);
+    }
+    EXPECT_GE(*std::min_element(gaps.begin(), gaps.end()), 0.75 * 888)
+        << "two frames on the bus at once";
+    EXPECT_GE(median(gaps), 888.0);
+    EXPECT_LT(median(gaps), 4 * 888.0);
     EXPECT_EQ(sim.stats().unflowed, 0u);
 }
