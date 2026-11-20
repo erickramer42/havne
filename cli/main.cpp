@@ -20,35 +20,69 @@ using namespace cmd;
 
 namespace {
 
+// plugins list's packages, an option refused
+int plugins_list(int argc, char** argv)
+{
+    std::vector<const char*> paths;
+    for (int i = 3; i < argc; ++i) {
+        if (argv[i][0] == '-' && argv[i][1] == '-') {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        }
+        paths.push_back(argv[i]);
+    }
+    return run_plugins_list(paths);
+}
+
+// plugins check's package, and --on <vcan> read and checked
+int plugins_check(int argc, char** argv)
+{
+    const char* on = nullptr;
+    if (argc == 6) {
+        if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
+            std::fprintf(stderr, "havne-cli: plugins check takes "
+                                 "<pkg> [--on <vcan>]\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        on = argv[5];
+    }
+    return run_plugins_check(argv[3], on);
+}
+
+// wrap, put and drop: their words through parse_plugin_make, then the run
+int plugins_make(const std::string& word, int argc, char** argv)
+{
+    PluginMakeArgs make;
+    if (word == "wrap") {
+        make.file = argv[3];
+    } else {
+        make.package = argv[3];
+        make.file = word == "put" ? argv[4] : nullptr;
+    }
+    std::string why;
+    if (!parse_plugin_make(word, word == "put" ? 5 : 4, argc, argv, &make,
+                           &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    return word == "wrap"  ? run_plugins_wrap(make)
+           : word == "put" ? run_plugins_put(make)
+                           : run_plugins_drop(make);
+}
+
 // plugins' words, then each one's run
 int cmd_plugins(int argc, char** argv)
 {
     const std::string word = argc > 2 ? argv[2] : "";
     if (word == "list" && argc > 3) {
-        std::vector<const char*> paths;
-        for (int i = 3; i < argc; ++i) {
-            if (argv[i][0] == '-' && argv[i][1] == '-') {
-                std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
-                usage(stderr);
-                return kExitUsage;
-            }
-            paths.push_back(argv[i]);
-        }
-        return run_plugins_list(paths);
+        return plugins_list(argc, argv);
     }
     const bool package = argc > 3 && std::string(argv[3]).rfind("--", 0) != 0;
     if (word == "check" && package && (argc == 4 || argc == 6)) {
-        const char* on = nullptr;
-        if (argc == 6) {
-            if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
-                std::fprintf(stderr, "havne-cli: plugins check takes "
-                                     "<pkg> [--on <vcan>]\n");
-                usage(stderr);
-                return kExitUsage;
-            }
-            on = argv[5];
-        }
-        return run_plugins_check(argv[3], on);
+        return plugins_check(argc, argv);
     }
     if (word == "match" && package && argc == 6 &&
         std::string(argv[4]) == "--vin") {
@@ -58,23 +92,7 @@ int cmd_plugins(int argc, char** argv)
         package && argc > 4 && std::string(argv[4]).rfind("--", 0) != 0;
     if ((word == "wrap" && package) || (word == "put" && two) ||
         (word == "drop" && package)) {
-        PluginMakeArgs make;
-        if (word == "wrap") {
-            make.file = argv[3];
-        } else {
-            make.package = argv[3];
-            make.file = word == "put" ? argv[4] : nullptr;
-        }
-        std::string why;
-        if (!parse_plugin_make(word, word == "put" ? 5 : 4, argc, argv, &make,
-                               &why)) {
-            std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
-            usage(stderr);
-            return kExitUsage;
-        }
-        return word == "wrap"  ? run_plugins_wrap(make)
-               : word == "put" ? run_plugins_put(make)
-                               : run_plugins_drop(make);
+        return plugins_make(word, argc, argv);
     }
     std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check <pkg> "
                          "[--on <vcan>], match <pkg> --vin <VIN>, wrap "
