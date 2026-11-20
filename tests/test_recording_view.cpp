@@ -992,7 +992,7 @@ TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
@@ -2699,7 +2699,7 @@ TEST(RecordingViewTest, ANewerMeansAskReplacesAPassThatGaveWay)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
@@ -2742,7 +2742,7 @@ TEST(RecordingViewTest, ANewerMeansAskTakenWithTheAskAPassGaveWayToReplacesIt)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
@@ -2783,7 +2783,7 @@ TEST(RecordingViewTest, ANewerStretchesAskStalesTheOlderPass)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
@@ -2817,7 +2817,7 @@ TEST(RecordingViewTest, AStretchesAskThatCantStartLeavesTheOlderPassAlone)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
@@ -2850,7 +2850,7 @@ TEST(RecordingViewTest, ACloseEndsAMeansPassThatGaveWay)
 {
     QTemporaryDir dir;
     ASSERT_TRUE(dir.isValid());
-    const QString folder = denseRecording(dir);
+    const QString folder = denseRecording(dir, 120, 100);
     ASSERT_FALSE(folder.isEmpty());
     RecordingView v;
     v.open(folder);
