@@ -37,7 +37,7 @@ cli/elm327_emulator.h	at_command
 cli/elm327_emulator.h	from_host
 cli/health_lines.h	parse_health
 cli/layout_check.h	check
-cli/layout_check.h	value
+cli/layout_json.h	value
 cli/log_lines.h	parse_log
 cli/main.cpp	cmd_plugins
 cli/signal_file_lines.h	def_line
