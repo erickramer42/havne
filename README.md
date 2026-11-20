@@ -107,7 +107,7 @@ it, a frame's path from transport to screen included.
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp), [`app/bridge_recorder.cpp`](app/bridge_recorder.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/cmd_stream.cpp`](cli/cmd_stream.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
-| [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h) | The simulated vehicle and its physics |
+| [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h), [`core/src/mock_drive_model.h`](core/src/mock_drive_model.h) | The simulated vehicle: the physics and the phases in the model, the drive cycle's stepping and encoding beside it |
 | [`core/src/sim_ecu.h`](core/src/sim_ecu.h) | The simulated ECU behind `havne-cli sim`: what it answers, as the simulated car or a recording of the test car, with faults on request; pure, so every answer is a unit test |
 
 ## Try it
