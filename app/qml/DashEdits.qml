@@ -79,6 +79,71 @@ Item {
         part.host.confirmRemovePage = false
         part.host.confirmReplaceKey = ""
         part.host.presetList = mode
+        loadPluginPages()
+    }
+    // The loaded plugins' pages of this form (ADR-0052's appendix on pages),
+    // read when the list opens: [{ id, name, picked, pages: [{ index, name }] }],
+    // the picked vehicle's plugins first. Plain copies, never the bridge's maps
+    property var pluginPageList: []
+    function loadPluginPages() {
+        const picked = {}
+        for (const s of part.host.pickedSets)
+            picked[s.profile] = true
+        const out = []
+        for (const p of Bridge.plugins()) {
+            if (!p.ok)
+                continue
+            const pages = []
+            for (const g of p.pages) {
+                if (g.form !== part.host.form)
+                    continue
+                const r = DashboardBook.importProblem(Bridge.pluginPageText(p.id, g.index), part.host.form, [])
+                // A refused text answers with the built-in page, so only a read one gives a name
+                if ((r.problem !== "" && r.problem !== "dropped") || r.doc.pages.length !== 1)
+                    continue
+                pages.push({ index: g.index, name: r.doc.pages[0].name })
+            }
+            if (pages.length > 0)
+                out.push({ id: String(p.id), name: String(p.name), pages: pages,
+                           picked: Array.from(p.profiles).some(q => picked[q] === true) })
+        }
+        pluginPageList = out.filter(e => e.picked).concat(out.filter(e => !e.picked))
+    }
+    // A plugin's page as the user's own copy after the shown page; one undo
+    // step. Whole whether or not the vehicle's picks have its signals: those
+    // gauges read not in profile, and the note counts them
+    function addPluginPage(id, index) {
+        const entry = pluginPageList.find(e => e.id === id)
+        const plugin = entry ? entry.name : id
+        const r = DashboardBook.importProblem(Bridge.pluginPageText(id, index), part.host.form, [])
+        part.host.presetList = ""
+        if (!DashboardEdit.canAddPage(part.host.doc)) {
+            part.host.layoutFilePart.noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
+            return false
+        }
+        if ((r.problem !== "" && r.problem !== "dropped") || r.doc.pages.length !== 1) {
+            part.host.layoutFilePart.noteLayout(qsTr("The page couldn't be read"), true)
+            return false
+        }
+        const page = r.doc.pages[0]
+        const after = part.host.pageIndex
+        if (!part.host.edit(DashboardBook.insertPages(part.host.doc, after, [page]),
+                  part.host.historyPart.stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1))) {
+            part.host.layoutFilePart.noteLayout(qsTr("The page couldn't be added"), true)
+            return false
+        }
+        part.host.goTo(after + 1)
+        askForPageName()
+        const unbound = DashboardBook.unboundKeyCells({ pages: [page] }, part.host.layoutFilePart.vehicleFiles())
+        const words = [qsTr("Added the page %1 from the plugin %2").arg(page.name).arg(plugin)]
+        if (r.problem === "dropped")
+            words.push(qsTr("%1 left out because they couldn't be read").arg(part.host.droppedText(r.dropped)))
+        if (unbound > 0)
+            words.push(unbound === 1
+                       ? qsTr("1 gauge reads a signal none of the vehicle's picked plugins has: pick the plugin's variant under Signals")
+                       : qsTr("%1 gauges read signals none of the vehicle's picked plugins has: pick the plugin's variant under Signals").arg(unbound))
+        part.host.layoutFilePart.noteLayout(words.join(". "))
+        return true
     }
     function closePresets() {
         part.host.presetList = ""

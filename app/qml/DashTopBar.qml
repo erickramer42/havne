@@ -479,6 +479,7 @@ ColumnLayout {
             onClicked: topBar.host.editsPart.closePresets()
         }
     }
+    DashPluginPages { host: topBar.host }
     RowLayout {
         objectName: "dashReplaceConfirm"
         readonly property real touchMin: Theme.touchTarget
