@@ -37,11 +37,11 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_export_frames.cpp test_export_cancel.cpp
     test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
-    test_health_baseline.cpp test_csv_import.cpp
+    test_health_baseline.cpp test_csv_import.cpp test_csv_import_recording.cpp
     test_frames_read.cpp test_csv_guess.cpp test_csv_guess_rows.cpp
     test_csv_guess_call.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_session_link.cpp
-    test_condition_recording.cpp
+    test_condition_recording.cpp test_condition_recording_events.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp)
@@ -107,13 +107,15 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_eval.cpp
+add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
+    test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
     test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
     test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_plugin_conversation_gate.cpp test_base64.cpp
-    test_condition_file.cpp test_condition_eval.cpp)
+    test_condition_file.cpp test_condition_file_resolve.cpp
+    test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
 # programs' checker and stack machine, which are internal
@@ -223,8 +225,8 @@ gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
 # test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
-add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp
-    test_socketcan_send.cpp)
+add_executable(test_socketcan test_socketcan.cpp test_socketcan_clock.cpp
+    test_isotp.cpp test_socketcan_send.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 # the simulated ECU loads the replay fixture (SimTest, Linux)
@@ -491,7 +493,7 @@ if(TARGET havne-cli)
         # candump log and of a CSV, each interrupted mid-run: an interrupted
         # end, nothing left behind
         add_test(NAME CliTransferRunTest.interrupt
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
@@ -500,7 +502,7 @@ if(TARGET havne-cli)
         # import and a recording's health report at once: the end line,
         # exit 1
         add_test(NAME CliTransferRunTest.interrupt-twice
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-twice $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
@@ -508,7 +510,7 @@ if(TARGET havne-cli)
         # Interrupts once core's call has returned change nothing: the
         # result line whole, exit 0, the file in place
         add_test(NAME CliTransferRunTest.interrupt-late
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-late $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-late PROPERTIES
@@ -516,14 +518,14 @@ if(TARGET havne-cli)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-import $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
         # The same CSVs with no map: guessed, printed as committed, imported;
         # a time with no unit and a file with no header refused
         add_test(NAME CliTransferRunTest.csv-guess
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-guess $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-guess PROPERTIES TIMEOUT 60)
@@ -2062,6 +2064,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_bridge_session.cpp
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
         test_bridge_frames_filter.cpp
@@ -2070,6 +2073,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_obdb.cpp
         test_bridge_health.cpp
         test_bridge_replay.cpp
+        test_bridge_replay_carryover.cpp
         test_bridge_replay_end.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
@@ -2079,6 +2083,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_fake.cpp
         test_bridge_fake_pick.cpp
         test_bridge_signals.cpp
+        test_bridge_signals_trace.cpp
         test_bridge_ticks.cpp
         test_bridge_recorder.cpp
         test_bridge_recorder_armed.cpp
@@ -2096,7 +2101,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view_keys.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
+        test_recording_import_map.cpp
         test_recording_export.cpp
+        test_recording_export_estimate.cpp
         test_one_store.cpp
         test_one_store_update.cpp
         test_one_store_index.cpp
