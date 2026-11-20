@@ -136,6 +136,7 @@ int run_plugins_put(const PluginMakeArgs& args);
 int run_plugins_drop(const PluginMakeArgs& args);
 bool parse_plugin_make(const std::string& word, int first, int argc,
                        char** argv, PluginMakeArgs* args, std::string* why);
+int cmd_plugins(int argc, char** argv);
 
 // cmd_signals.cpp
 int run_signals_check(const char* path);

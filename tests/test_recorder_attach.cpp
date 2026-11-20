@@ -3,6 +3,8 @@
 
 #include "test_recorder_support.h"
 
+#include "open_handles.h"
+
 /* Out of memory at each of an attach's allocations in turn, on a
  * session of six modules: the attach answers OK or OUT_OF_MEMORY and
  * throws nothing, and a refused recorder attaches at the next try with
@@ -87,6 +89,75 @@ TEST(RecorderTest, OutOfMemoryAnywhereInAnAttachIsAnsweredNotThrown)
     }
     EXPECT_GT(refused, 0u);
     ecuio_session_destroy(s);
+}
+
+/* Out of memory at each of an open's allocations in turn, a plain and an
+ * armed recorder, each try under a root of its own: the open answers OK
+ * with a whole recorder or OUT_OF_MEMORY with none, throws nothing, and
+ * leaves no file open */
+TEST(RecorderTest, OutOfMemoryAnywhereInAnOpenIsAnsweredNotThrown)
+{
+    Root root;
+    const std::string base = root.utf8();
+    const char* caller[2] = {"one line", "another"};
+    for (const uint32_t flags : {0u, uint32_t{ECUIO_RECORD_ARMED}}) {
+        ecuio_record_options_t o{};
+        o.flags = flags;
+        o.label_utf8 = "a label";
+        o.header_lines = caller;
+        o.header_line_count = 2;
+        const auto root_of = [&](unsigned long n) {
+            return base + "/" + std::to_string(flags) + "-" + std::to_string(n);
+        };
+        ecuio_recorder_t* rec = nullptr;
+        const unsigned long handles = open_handles();
+        std::string dir = root_of(0);
+        o.root_utf8 = dir.c_str();
+        const unsigned long before = news_on_this_thread();
+        ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+            << ecuio_last_error_detail();
+        const unsigned long news = news_on_this_thread() - before;
+        EXPECT_EQ(ecuio_recorder_close(rec, "counted"), ECUIO_OK);
+        ASSERT_GT(news, 5u);
+        unsigned long refused = 0;
+        for (unsigned long n = 1; n <= news; ++n) {
+            rec = nullptr;
+            dir = root_of(n);
+            o.root_utf8 = dir.c_str();
+            ecuio_status_t rc = ECUIO_OK;
+            bool threw = false;
+            fail_new_on_this_thread(n);
+            try {
+                rc = ecuio_recorder_open(&o, &rec);
+            } catch (...) {
+                threw = true;
+            }
+            fail_new_on_this_thread(0);
+            ASSERT_FALSE(threw) << "the open threw at allocation " << n;
+            if (rc != ECUIO_OK) {
+                ++refused;
+                EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+                EXPECT_EQ(rec, nullptr) << "at " << n;
+                continue;
+            }
+            ASSERT_NE(rec, nullptr);
+            if (flags == 0) {
+                char folder[1024] = {};
+                uint32_t len = 0;
+                ASSERT_EQ(
+                    ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+                    ECUIO_OK);
+                for (const char* file :
+                     {"frames.csv", "signals.csv", "events.log"}) {
+                    EXPECT_TRUE(fs::exists(fs::u8path(folder) / file))
+                        << file << " at " << n;
+                }
+            }
+            EXPECT_EQ(ecuio_recorder_close(rec, "the test's turn"), ECUIO_OK);
+        }
+        EXPECT_GT(refused, 0u);
+        EXPECT_EQ(open_handles(), handles) << "every file closed";
+    }
 }
 
 /* Recorders attach and close one after another while the session

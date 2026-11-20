@@ -65,6 +65,11 @@
 //                than one frame, whatever the count digit: the OBDX Pro
 //                VX in ELM mode (ADR-0056's appendix of 2026-11-08, a
 //                pack 100-113 ms against 21 ms for one PID); 0 none
+//   banner_in_reply  one request, without its CR ("010C1"), whose reply
+//                ends with a reset's banner ahead of its prompt, the
+//                settings gone, once: a reset as the adapter answered
+//   stop_resets  a monitor's next stop answered by a reset's banner and
+//                prompt, the settings gone, in place of STOPPED, once
 
 #ifndef ECUIO_TESTS_FAKE_ELM327_KNOBS_H
 #define ECUIO_TESTS_FAKE_ELM327_KNOBS_H
@@ -100,6 +105,8 @@ struct knobs {
     bool monitor_eats_cfs = false;
     int longer_pid = -1;
     uint32_t multi_frame_prompt_ms = 0;
+    const char* banner_in_reply = nullptr;
+    bool stop_resets = false;
 };
 
 } // namespace fake_elm327

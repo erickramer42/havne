@@ -221,17 +221,11 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,
     return ECUIO_OK;
 }
 
-ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
-                             const ecuio_uri_query* query)
+/* The port's name and kind, then the query's values: BAD_URI with its
+ * detail before anything opens */
+ecuio_status_t read_uri(const char* uri, const ecuio_uri_query* query,
+                        transport* t, request_params* req)
 {
-    if (session->transport != nullptr) {
-        return ECUIO_OK; /* internal.h: idempotent */
-    }
-    std::unique_ptr<transport> t(new (std::nothrow) transport());
-    if (t == nullptr) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
-
     /* The port: the text before the query, judged before any value */
     const char* name = uri + strlen("elm327://");
     const char* q = strchr(name, '?');
@@ -252,8 +246,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     memcpy(t->port_name, name, name_len);
     t->port_name[name_len] = '\0';
 
-    request_params req;
-    ecuio_status_t st = parse_query(query, t.get(), &req);
+    const ecuio_status_t st = parse_query(query, t, req);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -266,9 +259,14 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
                          t->tcp ? "a TCP address" : "an app's stream");
         return ECUIO_ERR_BAD_URI;
     }
+    return ECUIO_OK;
+}
 
-    /* Channels, their addressing mode, and the requests, before the port
-     * opens. One mode for the session: AT SP takes one */
+/* Channels, their addressing mode, and the requests, before the port
+ * opens. One mode for the session: AT SP takes one */
+ecuio_status_t plan_requests(ecuio_session_t* session,
+                             const request_params& req, transport* t)
+{
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     t->chan_count = ecuio_resolve_channels(set, req, t->rx_ids, t->tx_ids);
     uint32_t wide = 0;
@@ -284,9 +282,9 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     }
     t->ext29 = wide != 0;
     t->protocol = elm327_protocol_for(t->ext29, t->can_baud);
-    st = ecuio_build_requests(session, set, req, t->rx_ids, t->tx_ids,
-                              t->chan_count, &t->engine, &t->probe,
-                              &t->identify);
+    const ecuio_status_t st = ecuio_build_requests(
+        session, set, req, t->rx_ids, t->tx_ids, t->chan_count, &t->engine,
+        &t->probe, &t->identify);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -295,54 +293,74 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames
      * a serial link can't carry, a step of its own */
-    if (asks_nothing(t.get()) && t->chan_count == 0) {
+    if (asks_nothing(t) && t->chan_count == 0) {
         ecuio_detail_set("elm327:// listens on its channels' IDs, and this "
                          "session has none: add ?filter=, or use a profile "
                          "that declares a channel");
         return ECUIO_ERR_NOT_IMPLEMENTED;
     }
+    return ECUIO_OK;
+}
 
-    /* The port, then the adapter's setup and readings */
+/* The wire log's first lines: the core, the URI, the port and the CAN
+ * link, and what the log holds */
+void log_heading(transport* t, const char* uri)
+{
+    if (!elm327_log_is_open(t->log)) {
+        return;
+    }
+    char text[512];
+    elm327_log_text(uri, strlen(uri), text, sizeof(text));
+    elm327_log_write(t->log, "Havne ELM327 wire log (ADR-0026), core %s",
+                     ecuio_version_string());
+    elm327_log_write(t->log, "uri %s", text);
+    char link[48];
+    if (t->tcp) {
+        snprintf(link, sizeof(link), "over TCP");
+    } else if (t->stream) {
+        snprintf(link, sizeof(link), "(app stream)");
+    } else {
+        snprintf(link, sizeof(link), "at %u bit/s",
+                 static_cast<unsigned>(t->serial_baud));
+    }
+    elm327_log_write(
+        t->log, "%s %s; CAN at %lu bit/s, protocol %c; %s", t->port_name,
+        link, t->can_baud, t->protocol,
+        t->log.requests
+            ? "every request and reply (ECUIO_SUR_LOG_FRAMES=1)"
+            : "the setup, the readings and the link's events; the "
+              "requests with ECUIO_SUR_LOG_FRAMES=1");
+}
+
+/* The port, then the adapter's setup and readings; the port closed again
+ * when the setup fails */
+ecuio_status_t open_adapter(transport* t, const char* uri, char* version,
+                            size_t version_cap)
+{
     ecuio_elm327_port_open_t opener = g_opener.load();
     t->opener = (opener != nullptr) ? opener : elm327_port_open_os;
     char why[128] = "";
-    st = open_port(t.get(), why, sizeof(why));
+    ecuio_status_t st = open_port(t, why, sizeof(why));
     if (st != ECUIO_OK) {
         ecuio_detail_set("%s: %s", t->port_name, why);
         return st;
     }
     t->port_open = true;
     elm327_log_open(t->log);
-    if (elm327_log_is_open(t->log)) {
-        char text[512];
-        elm327_log_text(uri, strlen(uri), text, sizeof(text));
-        elm327_log_write(t->log, "Havne ELM327 wire log (ADR-0026), core %s",
-                         ecuio_version_string());
-        elm327_log_write(t->log, "uri %s", text);
-        char link[48];
-        if (t->tcp) {
-            snprintf(link, sizeof(link), "over TCP");
-        } else if (t->stream) {
-            snprintf(link, sizeof(link), "(app stream)");
-        } else {
-            snprintf(link, sizeof(link), "at %u bit/s",
-                     static_cast<unsigned>(t->serial_baud));
-        }
-        elm327_log_write(
-            t->log, "%s %s; CAN at %lu bit/s, protocol %c; %s", t->port_name,
-            link, t->can_baud, t->protocol,
-            t->log.requests
-                ? "every request and reply (ECUIO_SUR_LOG_FRAMES=1)"
-                : "the setup, the readings and the link's events; the "
-                  "requests with ECUIO_SUR_LOG_FRAMES=1");
-    }
-    char version[ELM327_LINE_MAX + 1] = {};
-    st = run_setup(t.get(), version, sizeof(version));
+    log_heading(t, uri);
+    st = run_setup(t, version, version_cap);
     if (st != ECUIO_OK) {
-        close_port(t.get());
+        close_port(t);
         return st;
     }
+    return ECUIO_OK;
+}
 
+/* The session takes the transport: the wrapper, the info and modules,
+ * the reports' seeds, the epoch; the port closed on a refusal */
+ecuio_status_t hand_over(ecuio_session_t* session,
+                         std::unique_ptr<transport>& t, const char* version)
+{
     auto* wrap = new (std::nothrow) ecuio_transport_t();
     if (wrap == nullptr) {
         close_port(t.get());
@@ -351,7 +369,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     wrap->ops = &kElm327Ops;
     t->session = session;
     describe_session(t.get(), version, &session->info);
-    st =
+    const ecuio_status_t st =
         ecuio_session_set_modules(session, t->rx_ids, t->tx_ids, t->chan_count);
     if (st != ECUIO_OK) {
         delete wrap;
@@ -364,6 +382,33 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     wrap->impl = t.release();
     session->transport = wrap;
     return ECUIO_OK;
+}
+
+ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
+                             const ecuio_uri_query* query)
+{
+    if (session->transport != nullptr) {
+        return ECUIO_OK; /* internal.h: idempotent */
+    }
+    std::unique_ptr<transport> t(new (std::nothrow) transport());
+    if (t == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    request_params req;
+    ecuio_status_t st = read_uri(uri, query, t.get(), &req);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    st = plan_requests(session, req, t.get());
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    char version[ELM327_LINE_MAX + 1] = {};
+    st = open_adapter(t.get(), uri, version, sizeof(version));
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    return hand_over(session, t, version);
 }
 
 } // namespace

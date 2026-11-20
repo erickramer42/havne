@@ -350,6 +350,78 @@ void attach_commit(ecuio_recorder_t* recorder, attach_build& b,
     recorder->named_focus = std::move(b.named_focus);
 }
 
+/* The options' refusals, after out: NULL_ARGUMENT, then INVALID_ARGUMENT */
+ecuio_status_t open_refusal(const ecuio_record_options_t* options)
+{
+    if (options == nullptr || options->root_utf8 == nullptr ||
+        (options->header_line_count > 0 && options->header_lines == nullptr)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if ((options->flags & ~ECUIO_RECORD_ARMED) != 0 ||
+        options->reserved[0] != 0 || options->reserved[1] != 0 ||
+        options->reserved[2] != 0 || options->reserved[3] != 0 ||
+        options->root_utf8[0] == '\0') {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return ECUIO_OK;
+}
+
+/* The label, then an armed recorder's root and tail, or the recording's
+ * folder and its three files */
+ecuio_status_t open_files(const ecuio_record_options_t* options,
+                          const std::string& root, ecuio_recorder& r)
+{
+    const std::string label =
+        options->label_utf8 != nullptr ? reduce_label(options->label_utf8) : "";
+    const std::string tail = label.empty() ? "" : " " + label;
+    if ((options->flags & ECUIO_RECORD_ARMED) != 0) {
+        /* Each window makes its own folder, under the same name's rule */
+        r.armed = true;
+        r.root = root;
+        r.label_tail = tail;
+    } else {
+        std::string why;
+        std::string leaf;
+        if (!make_recording_folder(root, std::time(nullptr), tail, &leaf,
+                                   &why)) {
+            ecuio_detail_set("can't create the recording's folder: %s",
+                             why.c_str());
+            return ECUIO_ERR_RECORDING_FAILED;
+        }
+        r.folder = absolute(leaf);
+        r.published = r.folder;
+
+        r.frames = open_file(leaf + "/frames.csv");
+        r.signals = open_file(leaf + "/signals.csv");
+        r.events = open_file(leaf + "/events.log");
+        if (r.frames == nullptr || r.signals == nullptr ||
+            r.events == nullptr) {
+            const int e = errno;
+            ecuio_detail_set("can't create the recording's files: %s",
+                             e != 0 ? errno_text(e).c_str()
+                                    : "the folder refused them");
+            return ECUIO_ERR_RECORDING_FAILED;
+        }
+    }
+    return ECUIO_OK;
+}
+
+/* The caller's header lines, under one key, written at attach */
+void queue_caller_lines(const ecuio_record_options_t* options,
+                        ecuio_recorder& r)
+{
+    std::string caller;
+    for (uint32_t i = 0; i < options->header_line_count; ++i) {
+        if (options->header_lines[i] != nullptr) {
+            caller += "caller  " + one_line(options->header_lines[i]) + "\n";
+        }
+    }
+    r.items.push_back(item{item_kind::begin, 0, caller, {}, {}});
+    if (r.armed) {
+        r.armed_caller = caller;
+    }
+}
+
 } // namespace
 
 extern "C" {
@@ -362,15 +434,9 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out = nullptr;
-    if (options == nullptr || options->root_utf8 == nullptr ||
-        (options->header_line_count > 0 && options->header_lines == nullptr)) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
-    if ((options->flags & ~ECUIO_RECORD_ARMED) != 0 ||
-        options->reserved[0] != 0 || options->reserved[1] != 0 ||
-        options->reserved[2] != 0 || options->reserved[3] != 0 ||
-        options->root_utf8[0] == '\0') {
-        return ECUIO_ERR_INVALID_ARGUMENT;
+    const ecuio_status_t refused = open_refusal(options);
+    if (refused != ECUIO_OK) {
+        return refused;
     }
 
     std::unique_ptr<ecuio_recorder> r;
@@ -385,59 +451,26 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
-    std::string root = options->root_utf8;
-    while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
-        root.pop_back();
-    }
-    std::string why;
-    if (!make_root(root, &why)) {
-        ecuio_detail_set("can't create the recordings' folder: %s",
-                         why.c_str());
-        return ECUIO_ERR_RECORDING_FAILED;
-    }
-
-    const std::string label =
-        options->label_utf8 != nullptr ? reduce_label(options->label_utf8) : "";
-    const std::string tail = label.empty() ? "" : " " + label;
-    if ((options->flags & ECUIO_RECORD_ARMED) != 0) {
-        /* Each window makes its own folder, under the same name's rule */
-        r->armed = true;
-        r->root = root;
-        r->label_tail = tail;
-    } else {
-        std::string leaf;
-        if (!make_recording_folder(root, std::time(nullptr), tail, &leaf,
-                                   &why)) {
-            ecuio_detail_set("can't create the recording's folder: %s",
+    /* Every step from here allocates: a failure frees the recorder, its
+     * files closed, and is answered */
+    try {
+        std::string root = options->root_utf8;
+        while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
+            root.pop_back();
+        }
+        std::string why;
+        if (!make_root(root, &why)) {
+            ecuio_detail_set("can't create the recordings' folder: %s",
                              why.c_str());
             return ECUIO_ERR_RECORDING_FAILED;
         }
-        r->folder = absolute(leaf);
-        r->published = r->folder;
-
-        r->frames = open_file(leaf + "/frames.csv");
-        r->signals = open_file(leaf + "/signals.csv");
-        r->events = open_file(leaf + "/events.log");
-        if (r->frames == nullptr || r->signals == nullptr ||
-            r->events == nullptr) {
-            const int e = errno;
-            ecuio_detail_set("can't create the recording's files: %s",
-                             e != 0 ? errno_text(e).c_str()
-                                    : "the folder refused them");
-            return ECUIO_ERR_RECORDING_FAILED;
+        const ecuio_status_t st = open_files(options, root, *r);
+        if (st != ECUIO_OK) {
+            return st;
         }
-    }
-
-    /* The caller's header lines, under one key, written at attach */
-    std::string caller;
-    for (uint32_t i = 0; i < options->header_line_count; ++i) {
-        if (options->header_lines[i] != nullptr) {
-            caller += "caller  " + one_line(options->header_lines[i]) + "\n";
-        }
-    }
-    r->items.push_back(item{item_kind::begin, 0, caller, {}, {}});
-    if (r->armed) {
-        r->armed_caller = caller;
+        queue_caller_lines(options, *r);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
     try {

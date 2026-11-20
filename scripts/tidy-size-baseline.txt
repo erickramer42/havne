@@ -39,7 +39,6 @@ cli/health_lines.h	parse_health
 cli/layout_check.h	check
 cli/layout_json.h	value
 cli/log_lines.h	parse_log
-cli/main.cpp	cmd_plugins
 cli/signal_file_lines.h	def_line
 cli/transfer_lines.h	parse_export
 cli/usage.cpp	usage
@@ -58,10 +57,6 @@ core/src/csv_guess.h	sample
 core/src/csv_import.h	run
 core/src/csv_map.h	parse_map
 core/src/csv_reader.h	next
-core/src/elm327_listen.cpp	listen
-core/src/elm327_transport.cpp	elm327_attach
-core/src/elm327_worker.cpp	ask
-core/src/elm327_worker.cpp	elm327_worker
 core/src/export_csv.cpp	values
 core/src/export_pcapng.cpp	plan
 core/src/export_wide.cpp	wide_survey
@@ -91,7 +86,6 @@ core/src/plugin.cpp	read_values
 core/src/plugin_wrap.cpp	wrapped
 core/src/recorder.cpp	ecuio_recorder_put_frame
 core/src/recorder_armed.cpp	advance_tail
-core/src/recorder_attach.cpp	ecuio_recorder_open
 core/src/recorder_control.cpp	ecuio_recorder_close
 core/src/recorder_writer.cpp	take_timing
 core/src/recording_reader_events.cpp	read_events

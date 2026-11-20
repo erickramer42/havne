@@ -67,46 +67,17 @@ elm327_io stop_monitor(transport* t, uint32_t timeout_ms, OnLine& on_line)
     }
 }
 
-} // namespace
-
-/* One monitor: AT MA, then its lines with no prompt expected. A
- * channel's message is dispatched and matched; each 100 ms with none
- * counts toward the quiet run. It ends on:
- *   the prompt         BUFFER FULL ended it (AT MA again at once), or
- *                      something else did (again on the backoff's
- *                      schedule, counted as quiet)
- *   5 s with no line   the check: stopped, and STOPPED and the prompt
- *                      within 5 s show the adapter is there (AT MA
- *                      again); no prompt is silent, a hard failure,
- *                      since a quiet bus and a hung adapter look the
- *                      same until the adapter is asked
- *   the session closes stopped, the prompt waited for at most 1 s
- *   a reset line, or the port failing */
-monitor_end listen(transport* t, link_health& h)
-{
-    monitor_end end;
-    end.io = drain(t, 0);
-    if (end.io != elm327_io::prompt) {
-        return end;
-    }
-    const exchange_scope scope(t);
-    elm327_log_write(t->log, "the monitor starts (AT MA)");
-    if (logging(t)) {
-        elm327_log_write(t->log, "> ATMA");
-    }
-    static const char kMonitor[] = "ATMA\r";
-    t->sent_at = std::chrono::steady_clock::now();
-    if (!t->port.ops->write(t->port.impl,
-                            reinterpret_cast<const uint8_t*>(kMonitor),
-                            static_cast<uint32_t>(sizeof(kMonitor) - 1))) {
-        elm327_log_write(t->log, "the port failed (writing ATMA)");
-        end.io = elm327_io::failed;
-        return end;
-    }
+/* A monitor's line handler, and what its lines said */
+struct monitor_lines {
+    transport* t;
+    link_health& h;
+    monitor_end& end;
     bool full = false;
     bool reset = false;
     bool heard_now = false; /* a message in this 100 ms window */
-    auto on_line = [&](const elm327_reader& r) {
+
+    void operator()(const elm327_reader& r)
+    {
         elm327_can_line f;
         switch (elm327_classify(r, t->ext29, &f)) {
         case elm327_line::frame: {
@@ -131,24 +102,71 @@ monitor_end listen(transport* t, link_health& h)
              * not frames; a prompt after them ends the monitor */
             break;
         }
-    };
+    }
+};
+
+/* AT MA, its time kept; false when the port failed */
+bool start_monitor(transport* t)
+{
+    elm327_log_write(t->log, "the monitor starts (AT MA)");
+    if (logging(t)) {
+        elm327_log_write(t->log, "> ATMA");
+    }
+    static const char kMonitor[] = "ATMA\r";
+    t->sent_at = std::chrono::steady_clock::now();
+    if (!t->port.ops->write(t->port.impl,
+                            reinterpret_cast<const uint8_t*>(kMonitor),
+                            static_cast<uint32_t>(sizeof(kMonitor) - 1))) {
+        elm327_log_write(t->log, "the port failed (writing ATMA)");
+        return false;
+    }
+    return true;
+}
+
+/* The check after check_ms with no line: the monitor stopped, and what
+ * its answer says of the adapter */
+void check_adapter(transport* t, uint32_t check_ms, monitor_lines& lines)
+{
+    monitor_end& end = lines.end;
+    elm327_log_write(t->log,
+                     "no line for %s: the monitor stops to "
+                     "check the adapter",
+                     words_of(check_ms).text);
+    end.io = stop_monitor(t, check_ms, lines);
+    if (lines.reset) {
+        end.io = elm327_io::reset;
+    } else if (end.io == elm327_io::prompt) {
+        end.at_once = true;
+        elm327_log_write(t->log, "the adapter answered the stop: AT MA "
+                                 "again");
+    } else if (end.io == elm327_io::silent) {
+        elm327_log_write(t->log, "no prompt within %s of the stop",
+                         words_of(check_ms).text);
+    }
+}
+
+/* The monitor's lines in read slices until something ends it */
+void run_monitor(transport* t, monitor_lines& lines)
+{
+    monitor_end& end = lines.end;
     auto last_line = t->sent_at;
     auto window = t->sent_at;
     for (;;) {
-        link_judge_waiting(h);
+        link_judge_waiting(lines.h);
         bool line = false;
-        const bool prompt = take_bytes(t, "ATMA", on_line, &line);
-        if (reset) {
+        const bool prompt = take_bytes(t, "ATMA", lines, &line);
+        if (lines.reset) {
             end.io = elm327_io::reset;
             break;
         }
         if (prompt) {
-            end.at_once = full;
+            end.at_once = lines.full;
             elm327_log_write(t->log,
-                             full ? "the monitor ended at BUFFER FULL: AT MA "
-                                    "again"
-                                  : "the monitor ended unasked: AT MA again "
-                                    "after a wait");
+                             lines.full
+                                 ? "the monitor ended at BUFFER FULL: AT MA "
+                                   "again"
+                                 : "the monitor ended unasked: AT MA again "
+                                   "after a wait");
             break;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -156,36 +174,22 @@ monitor_end listen(transport* t, link_health& h)
             last_line = now;
         }
         if (t->stop_requested.load()) {
-            (void)stop_monitor(t, ELM327_MONITOR_DETACH_MS, on_line);
+            (void)stop_monitor(t, ELM327_MONITOR_DETACH_MS, lines);
             elm327_log_write(t->log, "the monitor stopped: the session "
                                      "closes");
             end.io = elm327_io::stopped;
             break;
         }
         if (now - window >= std::chrono::milliseconds(ELM327_IDLE_READ_MS)) {
-            if (!heard_now) {
-                link_on_read(h, false, false, true);
+            if (!lines.heard_now) {
+                link_on_read(lines.h, false, false, true);
             }
-            heard_now = false;
+            lines.heard_now = false;
             window = now;
         }
         const uint32_t check_ms = monitor_check_ms();
         if (now - last_line >= std::chrono::milliseconds(check_ms)) {
-            elm327_log_write(t->log,
-                             "no line for %s: the monitor stops to "
-                             "check the adapter",
-                             words_of(check_ms).text);
-            end.io = stop_monitor(t, check_ms, on_line);
-            if (reset) {
-                end.io = elm327_io::reset;
-            } else if (end.io == elm327_io::prompt) {
-                end.at_once = true;
-                elm327_log_write(t->log, "the adapter answered the stop: AT MA "
-                                         "again");
-            } else if (end.io == elm327_io::silent) {
-                elm327_log_write(t->log, "no prompt within %s of the stop",
-                                 words_of(check_ms).text);
-            }
+            check_adapter(t, check_ms, lines);
             break;
         }
         const int32_t n = t->port.ops->read(
@@ -198,6 +202,37 @@ monitor_end listen(transport* t, link_health& h)
         t->rx_len = static_cast<uint32_t>(n);
         t->rx_pos = 0;
     }
+}
+
+} // namespace
+
+/* One monitor: AT MA, then its lines with no prompt expected. A
+ * channel's message is dispatched and matched; each 100 ms with none
+ * counts toward the quiet run. It ends on:
+ *   the prompt         BUFFER FULL ended it (AT MA again at once), or
+ *                      something else did (again on the backoff's
+ *                      schedule, counted as quiet)
+ *   5 s with no line   the check: stopped, and STOPPED and the prompt
+ *                      within 5 s show the adapter is there (AT MA
+ *                      again); no prompt is silent, a hard failure,
+ *                      since a quiet bus and a hung adapter look the
+ *                      same until the adapter is asked
+ *   the session closes stopped, the prompt waited for at most 1 s
+ *   a reset line, or the port failing */
+monitor_end listen(transport* t, link_health& h)
+{
+    monitor_end end;
+    end.io = drain(t, 0);
+    if (end.io != elm327_io::prompt) {
+        return end;
+    }
+    const exchange_scope scope(t);
+    if (!start_monitor(t)) {
+        end.io = elm327_io::failed;
+        return end;
+    }
+    monitor_lines lines{t, h, end};
+    run_monitor(t, lines);
     /* a message under way when the monitor ended never finishes */
     (void)isotp_end_all(t->isotp);
     return end;
