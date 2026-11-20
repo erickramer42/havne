@@ -1,5 +1,5 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard{,_pages,_panel},
 //          QmlTest.dashedit
 
 import QtQuick

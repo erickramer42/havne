@@ -1,5 +1,5 @@
 // File/layer: app/qml/NightSwitch.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.phone_* (test_qml)
 
 import QtQuick
 

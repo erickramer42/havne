@@ -4,7 +4,7 @@
 //          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
-//          QML: QmlTest.dashboard (no negative tick count while a
+//          QML: QmlTest.dashboard{,_pages,_panel} (no negative tick count while a
 //          reused cell rebinds), QmlTest.gauges (no bezel, no face)
 
 import QtQuick

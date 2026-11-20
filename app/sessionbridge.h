@@ -1,6 +1,6 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
 // Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge);
-//          QML: QmlTest.dashboardbook
+//          QML: QmlTest.dashboardbook{,_writes,_files}
 
 #pragma once
 

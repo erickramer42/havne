@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsPage.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.linkhealth, QmlTest.log,
-//          QmlTest.phone, QmlTest.driveview (test_qml)
+//          QmlTest.phone_*, QmlTest.driveview{,_sheet,_platform} (test_qml)
 
 import QtCore
 import QtQuick

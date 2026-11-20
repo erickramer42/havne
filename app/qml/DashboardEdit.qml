@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashboardEdit.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboardbook (test_qml)
+// Testing: QML: QmlTest.dashboardbook{,_writes,_files} (test_qml)
 
 // The dashboards' edits (ADR-0057): each takes a document, as
 // DashboardBook describes it, and returns a new one, never changing what

@@ -1,5 +1,5 @@
 // File/layer: app/recordingimport.cpp | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest.Import* (test_bridge); QML: QmlTest.recordings
+// Testing: BRIDGE: BridgeTest.Import* (test_bridge); QML: QmlTest.recordings*
 
 #include "recordingimport.h"
 #include "urlwrite.h"

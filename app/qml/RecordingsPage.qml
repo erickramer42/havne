@@ -1,6 +1,6 @@
 // File/layer: app/qml/RecordingsPage.qml | Qt6 Quick, UI layer
-// Testing: BRIDGE: RecordingViewTest (test_bridge); QML: QmlTest.recordings,
-//          QmlTest.phone, QmlTest.chartlayout (test_qml); Manual smoke
+// Testing: BRIDGE: RecordingViewTest (test_bridge); QML: QmlTest.recordings*,
+//          QmlTest.phone_*, QmlTest.chartlayout{,_panes} (test_qml); Manual smoke
 
 import QtCore
 import QtQuick

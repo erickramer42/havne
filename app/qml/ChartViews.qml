@@ -1,5 +1,5 @@
 // File/layer: app/qml/ChartViews.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.chartlayout (test_qml)
+// Testing: QML: QmlTest.chartlayout{,_panes} (test_qml)
 
 // The Recordings viewer's saved pane arrangements as arithmetic on a
 // parsed text (no Canvas, no Theme): ChartLayout's layout reads none of

@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingSignalRows.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The recording's signals, a row each with its swatch, tick and readouts:
 // one part of RecordingsPage, which holds the state
 

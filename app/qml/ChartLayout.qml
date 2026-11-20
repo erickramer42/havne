@@ -1,5 +1,5 @@
 // File/layer: app/qml/ChartLayout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.chartlayout (test_qml); Manual smoke
+// Testing: QML: QmlTest.chartlayout{,_panes} (test_qml); Manual smoke
 
 pragma Singleton
 import QtQml

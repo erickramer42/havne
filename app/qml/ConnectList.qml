@@ -1,5 +1,5 @@
 // File/layer: app/qml/ConnectList.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.home (test_qml)
+// Testing: QML: QmlTest.phone_*, QmlTest.home (test_qml)
 
 import QtQuick
 import QtQuick.Controls

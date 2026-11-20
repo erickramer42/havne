@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingZoomRow.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // Zoom, the cursor's time, the span line and the frame test: one part of
 // RecordingsPage, which holds the state; on the pinned form it leads the shown
 // view's list

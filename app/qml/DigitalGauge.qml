@@ -1,6 +1,6 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
 // Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility,
-//          QmlTest.dashboard, QmlTest.dashedit;
+//          QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit;
 //          manual smoke: DashboardPage under mock://demo
 
 import QtQuick

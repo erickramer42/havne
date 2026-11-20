@@ -1,6 +1,6 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: QML: QmlTest.theme, QmlTest.dashedit, QmlTest.settings, QmlTest.dashboard,
-//          QmlTest.liveview, QmlTest.log, QmlTest.phone (test_qml); Manual smoke
+// Testing: QML: QmlTest.theme, QmlTest.dashedit, QmlTest.settings, QmlTest.dashboard{,_pages,_panel},
+//          QmlTest.liveview{,_pause}, QmlTest.log, QmlTest.phone_* (test_qml); Manual smoke
 pragma Singleton
 import QtCore
 import QtQuick

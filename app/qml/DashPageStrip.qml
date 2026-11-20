@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashPageStrip.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit (test_qml)
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit (test_qml)
 
 import QtQuick
 

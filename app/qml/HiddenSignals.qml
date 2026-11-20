@@ -1,5 +1,5 @@
 // File/layer: app/qml/HiddenSignals.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.liveview, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.liveview{,_pause}, QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Controls

@@ -1,5 +1,5 @@
 // File/layer: app/qml/StretchesPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Controls

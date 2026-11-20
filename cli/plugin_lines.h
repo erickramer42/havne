@@ -1,6 +1,6 @@
 // File/layer: cli/plugin_lines.h | havne-cli, a plugin's lines (ADR-0052)
-// Testing: UNIT (tests/test_cli.cpp, CliPluginTest); the commands in the
-//          golden runs (tests/golden/cli/plugins-*.jsonl, on
+// Testing: UNIT (tests/test_cli_files.cpp and test_cli_signals.cpp,
+//          CliPluginTest); the commands in the golden runs (tests/golden/cli/plugins-*.jsonl, on
 //          plugins/example-sim), CliPluginMakeTest,
 //          CliPluginConversationTest
 //

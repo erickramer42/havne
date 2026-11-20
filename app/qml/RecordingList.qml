@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingList.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The recordings a session saved, newest first, a row each with Open and
 // Replay: one part of RecordingsPage, which holds the state
 

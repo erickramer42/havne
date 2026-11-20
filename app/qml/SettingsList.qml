@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsList.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The list of Settings' pages, each row with its summary on the right
 
 import QtQuick

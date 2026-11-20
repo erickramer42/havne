@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingImportPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // Import: the file picked, its kind, a CSV's column map and the guess's
 // preview, then Import and Cancel; one part of RecordingsPage, which holds the
 // state

@@ -1,5 +1,5 @@
 // File/layer: app/qml/AlertSignalPicker.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alerts, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alerts, QmlTest.phone_* (test_qml)
 // A signal for an alert: the rows given, found with Live's filter (ADR-0050), one button each
 
 import QtQuick

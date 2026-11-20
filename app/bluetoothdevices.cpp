@@ -1,6 +1,6 @@
 // File/layer: app/bluetoothdevices.cpp | Qt6 Core/Qml (+ Bluetooth on
 //             Android), app layer, C++17
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml); BENCH
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml); BENCH
 
 #include "bluetoothdevices.h"
 #include "sessionbridge.h"

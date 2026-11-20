@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingSpanStats.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // Each plotted signal's statistics over the span between the cursors, a table
 // on the desktop and a grid of cards on a phone: one part of RecordingsPage,
 // which holds the state
