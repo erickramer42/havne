@@ -1,14 +1,15 @@
 // File/layer: tests/test_reply_segmented.cpp | test_obd2, Qt-free
 // Testing: UNIT: RequestEngineTest (whether the engine expects a reply to
 //          take more than one CAN frame, ecuio_engine_reply_segmented in
-//          request_engine_pack.h, and what teaches it: Known Issue #42's
-//          hold reads it)
+//          request_engine_pack.h, and what teaches it: a row's defs, its
+//          answers, a wait run out; Known Issue #42's hold reads it)
 
 #include <gtest/gtest.h>
 
 #include "../core/src/request_engine.h"
 
 #include <cstdint>
+#include <cstring>
 #include <ios>
 #include <vector>
 
@@ -49,22 +50,117 @@ bool segmented(const ecuio_request_engine& e, int32_t r)
     return ecuio_engine_reply_segmented(&e, 0, r);
 }
 
+/* A def on 0x7E8 keyed key (2 bytes: 41 <PID>, 3: 62 <DID>): a number of
+ * bits bits at bit offset off from byte at, or with bits 0 a text of
+ * text bytes (0: to the payload's end) */
+ecuio_signal_def_t def(uint32_t key, uint8_t key_len, uint16_t at, uint8_t bits,
+                       uint8_t off = 0, uint16_t text = 0)
+{
+    ecuio_signal_def_t d = {};
+    d.message_id = 0x7E8;
+    d.mux_length = key_len;
+    d.mux_key = key;
+    d.kind =
+        static_cast<uint8_t>(bits == 0 ? ECUIO_VALUE_TEXT : ECUIO_VALUE_UINT);
+    d.byte_order = off != 0 ? ECUIO_BYTE_ORDER_LE : ECUIO_BYTE_ORDER_BE;
+    d.start_byte = at;
+    d.bit_offset = off;
+    d.bit_length = bits;
+    d.byte_length = text;
+    d.scale = 1.0;
+    return d;
+}
+
+ecuio_signal_set_t set_of(const std::vector<ecuio_signal_def_t>& defs)
+{
+    ecuio_signal_set_t s = {};
+    s.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    s.count = static_cast<uint32_t>(defs.size());
+    s.defs = defs.data();
+    return s;
+}
+
 } // namespace
 
-/* Nothing asked yet is one frame: a DID and a PID before their first
- * reply, no request, a row past the table */
-TEST(RequestEngineTest, ARequestNotYetAnsweredCountsAsOneFrame)
+/* A row not yet answered is segmented when a def it was enrolled for
+ * reads past a Single Frame's 7 bytes or to the payload's end, or, for a
+ * Service 01 PID, when J1979's length takes two frames; any other is one
+ * frame, a row added with no def too. Derive and the plan's derive mark
+ * the same rows */
+TEST(RequestEngineTest, ARowNotYetAnsweredIsJudgedByItsDefsAndJ1979)
 {
+    const std::vector<ecuio_signal_def_t> defs = {
+        def(0x621E00, 3, 3, 16),       /* row 0: a word, to byte 5 */
+        def(0x621E01, 3, 3, 0, 0, 10), /* row 1: 10 bytes of text */
+        def(0x621E02, 3, 3, 0),        /* row 2: text to the end */
+        def(0x621E03, 3, 3, 8),        /* row 3: a byte, */
+        def(0x621E04, 3, 3, 32),       /* row 4: to byte 7, one frame */
+        def(0x621E05, 3, 6, 8, 4),     /* row 5: bits 4-11 of byte 6 on */
+        def(0x621E03, 3, 4, 32),       /* row 3's word to byte 8 */
+        def(0x410C, 2, 2, 16),         /* row 6: rpm, one frame */
+        def(0x4168, 2, 3, 8),          /* row 7: J1979's 7 bytes */
+        def(0x4196, 2, 2, 8),          /* row 8: no J1979 length */
+    };
+    const bool expected[] = {false, true,  true, true, false,
+                             true,  false, true, false};
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
+    std::vector<uint32_t> rows(defs.size());
+    ecuio_derived derived;
+    ASSERT_EQ(ecuio_engine_plan(&set, &rx, 1, rows.data(), &derived),
+              ecuio_plan_result::ok);
+    ASSERT_EQ(derived.total, 9u);
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1, derived.total + 1));
+    ASSERT_TRUE(ecuio_engine_derive_planned(&e, &set, &rx, 1, rows.data()));
+    ecuio_request_engine derives;
+    ASSERT_TRUE(ecuio_engine_init(&derives, 1, derived.total));
+    ASSERT_TRUE(ecuio_engine_derive(&derives, &set, &rx, 1, nullptr));
+    ASSERT_EQ(derives.count, derived.total);
+    EXPECT_EQ(std::memcmp(derives.requests.data(), e.requests.data(),
+                          derived.total * sizeof(ecuio_request)),
+              0);
+    for (int32_t r = 0; r < 9; ++r) {
+        EXPECT_EQ(segmented(e, r), expected[r]) << "row " << r;
+    }
+
+    const uint8_t did[3] = {0x22, 0x1E, 0x10};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
+    EXPECT_FALSE(segmented(e, 9)) << "a row with no def";
+    EXPECT_FALSE(segmented(e, ECUIO_ENGINE_NONE));
+    EXPECT_FALSE(segmented(e, 10));
+}
+
+/* A row its defs mark segmented stays so while its first ask is out (the
+ * hold judges the request on the bus by it); once its wait has run out
+ * before any answer it counts one frame, so a row that only times out
+ * holds the bus once, not on every lap; an answer sets it either way */
+TEST(RequestEngineTest, AWaitRunOutOrAnAnswerOutweighsTheDefs)
+{
+    const std::vector<ecuio_signal_def_t> defs = {
+        def(0x621E01, 3, 3, 0, 0, 10), def(0x621E02, 3, 3, 0, 0, 10)};
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
     ecuio_request_engine e;
     ASSERT_TRUE(ecuio_engine_init(&e, 1));
-    const uint8_t did[3] = {0x22, 0x1E, 0x00};
-    const uint8_t pid[2] = {0x01, 0x0C};
-    ASSERT_EQ(ecuio_engine_add(&e, 0, did, 3), ecuio_engine_add_result::added);
-    ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
+    ASSERT_TRUE(ecuio_engine_derive(&e, &set, &rx, 1, nullptr));
+    ASSERT_TRUE(segmented(e, 0));
+    ASSERT_TRUE(segmented(e, 1));
+
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    EXPECT_TRUE(segmented(e, 0)) << "a first ask out";
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    EXPECT_EQ(e.requests[0].reply_frames, 1u);
     EXPECT_FALSE(segmented(e, 0));
-    EXPECT_FALSE(segmented(e, 1));
-    EXPECT_FALSE(segmented(e, ECUIO_ENGINE_NONE));
-    EXPECT_FALSE(segmented(e, 2));
+
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E02, 4)), 1);
+    EXPECT_FALSE(segmented(e, 1)) << "answered in one frame";
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E01, 10)), 0);
+    EXPECT_TRUE(segmented(e, 0)) << "answered in two";
 }
 
 /* A row's last answer sets it: 7 bytes are a Single Frame, 8 a First

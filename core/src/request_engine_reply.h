@@ -67,7 +67,8 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
  * times out ends the walk, unless a reply naming another PID came
  * while it waited: then it's asked once more, while the budget lasts.
  * A scanned DID, an identification item, a diagnostics item or a
- * clear's request that times out is unanswered. */
+ * clear's request that times out is unanswered. A table row that times
+ * out never answered counts one frame from then (reply_segmented). */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -92,6 +93,10 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     if (out >= 0) {
         timed_out(static_cast<uint32_t>(out));
         ch.check_from = static_cast<uint32_t>(out) + 1; /* a check's next row */
+        if (static_cast<uint32_t>(out) < e->count &&
+            e->requests[out].reply_frames == 0) {
+            e->requests[out].reply_frames = 1;
+        }
     } else if (pack) {
         for (uint32_t k = 0; k < ch.pack_count; ++k) {
             timed_out(ch.pack_rows[k]);

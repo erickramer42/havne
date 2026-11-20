@@ -160,8 +160,10 @@ struct ecuio_request {
     uint8_t swept;        /* 1: counted in its channel's sweep under way (a
                              focus's minimum time, ecuio_engine_count_sweep) */
     uint8_t reply_frames; /* a table row's last answer in CAN frames (a
-                             negative one is one), 0 before any
-                             (reply_segmented) */
+                             negative one, or a wait run out before any,
+                             is one), 0 before any (reply_segmented) */
+    uint8_t long_defs;    /* 1: a def it was enrolled for reads past a
+                             Single Frame (ecuio_engine_def_long) */
 };
 
 struct ecuio_scan_entry {

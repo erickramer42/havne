@@ -187,13 +187,12 @@ TEST_F(J2534HealthTest, TheFakeLosesASingleFrameUnderAnotherModulesSegments)
     EXPECT_EQ(ecuio_j2534_disconnect_channel(guard.h, ch), ECUIO_OK);
 }
 
-/* Two modules on the VX losing as Known Issue #42 does: with the hold,
- * once the first lap has learned 0x7E8's reply is segmented, no reply is
- * lost, no write to 0x7E1 lands inside a 0x7E8 reply's window, and both
- * modules keep a pace. The first lap's loss leaves 0x7E1 silent until its
- * next reply, and a silent module's request holds no one, so 0x7E0's next
- * goes beside it; from the lap after, 0x7E0's request waits for 0x7E1's
- * reply again (the reply delay, 4 ms, after its write). */
+/* Two modules on the VX losing as Known Issue #42 does: with the hold no
+ * reply is lost, the first lap's neither (uds-generic's hex defs run to
+ * the reply's end, so a first ask goes alone), no write to 0x7E1 lands
+ * inside a 0x7E8 reply's window, and both modules keep a pace; 0x7E0's
+ * request waits for 0x7E1's reply (the reply delay, 4 ms, after its
+ * write). */
 TEST_F(J2534HealthTest, VxTheHoldLosesNoReplyUnderSegments)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -206,9 +205,8 @@ TEST_F(J2534HealthTest, VxTheHoldLosesNoReplyUnderSegments)
     ASSERT_EQ(ecuio_register_frame_callback(session, by_id_cb, &g_by_id),
               ECUIO_OK);
     ASSERT_TRUE(wait_for_frames(10, 5000)) << "replies didn't arrive";
-    /* The first lap may lose 0x7E9's reply: 0x7E8's isn't known long */
     const uint32_t first_lap = fake_control::lost_under_segments(page);
-    EXPECT_LE(first_lap, 1u);
+    EXPECT_EQ(first_lap, 0u);
     const int e8 = g_by_id.e8.load();
     const int e9 = g_by_id.e9.load();
     std::this_thread::sleep_for(std::chrono::milliseconds(1000));

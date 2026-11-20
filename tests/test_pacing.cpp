@@ -672,7 +672,7 @@ TEST(PacingTest, TheHoldsPredictionForTwoModulesThroughTheVx)
     const pacing::bench_result held = run(cfg);
     cfg.model.hold = false;
     const pacing::bench_result plain = run(cfg);
-    EXPECT_LE(held.lost, 2u);
+    EXPECT_EQ(held.lost, 0u);
     EXPECT_GT(static_cast<double>(held.answered[1]),
               0.99 * static_cast<double>(held.asked[1]));
     const double kept = static_cast<double>(held.answered[0]) /
@@ -683,8 +683,8 @@ TEST(PacingTest, TheHoldsPredictionForTwoModulesThroughTheVx)
 
 /* The hold's rules on the bench, D11's shape with lost_under_segments on:
  * no channel asks while another's segmented request is out, and a
- * segmented request waits out the other's Single Frame, so at most one
- * reply is lost (the first segmented ask's, its length not yet learned).
+ * segmented request waits out the other's Single Frame, so no reply is
+ * lost (the first ask too: its def's 10 bytes take two frames).
  * The second module is answered at least 4x as often as with ?hold=0,
  * and the Single Frame module goes first at each segmented exchange's
  * end, so both are asked in every second */
@@ -699,7 +699,7 @@ TEST(PacingTest, TheHoldTakesTurnsBetweenTwoModules)
     const pacing::bench_result held = run(cfg);
     cfg.model.hold = false;
     const pacing::bench_result plain = run(cfg);
-    EXPECT_LE(held.lost, 1u);
+    EXPECT_EQ(held.lost, 0u);
     EXPECT_GE(static_cast<double>(held.answered[1]),
               4.0 * static_cast<double>(plain.answered[1]))
         << held.answered[1] << " held, " << plain.answered[1]
