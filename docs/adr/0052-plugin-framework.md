@@ -782,3 +782,16 @@ add, so a user doesn't build it one gauge at a time.
 - **The store** lists each loaded plugin's pages in its entry (`index`,
   `form`, `path`, in the manifest's order) and gives a page's text by
   plugin id and index; it judges nothing of a page.
+- **The Dashboard's offer:** Add page lists each loaded plugin's pages for
+  the window's form, the picked vehicle's plugins first. A page is added
+  whole as the user's own copy after the shown page, whether or not the
+  vehicle picks a variant that has its signals: those gauges read "not in
+  profile" and the layout note counts them. A put, drop or removal of the
+  plugin leaves a copy as it is.
+
+> **Note of 2026-11-19, what v0.9.0 takes of tier 2.** The appendix "what
+> v0.9.0 takes of tiers 2 and 3" read as v0.9.0's; the cut of 2026-11-19
+> moves the conversation tier's running part to v0.9.1. v0.9.0 reads and
+> checks a conversation part and binds no module, so such a plugin is data
+> only there ([ADR-0066](0066-conversation-tier-and-write-gates.md)'s note
+> of the same date).
