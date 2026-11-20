@@ -9,6 +9,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "session.h"
+#include "j2534_clock.h"
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "request_setup.h"    /* the unpicked check's interval */
@@ -1384,6 +1385,11 @@ void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
         g_after_dispatch_takes_user.store(user);
     }
     g_after_dispatch_takes.store(hook);
+}
+
+void ecuio_set_j2534_clock_lag_us(uint64_t us)
+{
+    j2534_clock_lag_override_us().store(us);
 }
 
 void ecuio_set_unpicked_check_ms(uint32_t ms)
