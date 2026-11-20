@@ -2057,6 +2057,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_recorder.cpp
         test_bridge_conditions.cpp
         test_recording_view.cpp
+        test_recording_view_stretches.cpp
+        test_recording_view_stats.cpp
+        test_recording_view_open.cpp
+        test_recording_view_passes.cpp
+        test_recording_view_conditions.cpp
         test_recording_view_keys.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
