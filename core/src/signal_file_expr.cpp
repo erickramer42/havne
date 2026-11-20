@@ -414,6 +414,7 @@ std::string program_fault(const ecuio_signal_file& f,
     }
     std::vector<uint32_t> depth(f.defs.size(), 0);
     uint32_t deep = 1;
+    size_t deepest = kNone; /* the input that sets deep */
     for (uint32_t k = 0; k < program.input_count; ++k) {
         const size_t j = def_by_id(f, program.input_ids[k]);
         if (j == kNone) {
@@ -427,12 +428,22 @@ std::string program_fault(const ecuio_signal_file& f,
                 return "the program keeps an age bound on " + q(d.name) +
                        ", a computed signal: its own inputs carry their ages";
             }
-            deep = std::max(deep, depth_of(f, j, depth, 1) + 1);
+            const uint32_t at = depth_of(f, j, depth, 1) + 1;
+            if (at > deep) {
+                deep = at;
+                deepest = j;
+            }
         } else if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
             return "the program reads " + q(d.name) + ", which is text";
         }
     }
     if (deep > ECUIO_COMPUTED_MAX_DEPTH) {
+        /* The depth comes through a base program (no key of the file's):
+         * name it */
+        if (deepest != kNone &&
+            *ecuio_signal_file_key(&f, &f.defs[deepest]) == '\0') {
+            return ecuio_sf::reads_deep_base_words(f.defs[deepest].name, deep);
+        }
         return "the program sits " + std::to_string(deep) +
                " computed signals deep: a chain goes " +
                std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most";

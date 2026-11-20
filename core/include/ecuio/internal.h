@@ -199,6 +199,11 @@ void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
  * at once. */
 void ecuio_set_unpicked_check_ms(uint32_t ms);
 
+/* TEST-ONLY: how far a J2534 vendor clock may fall behind the host's
+ * before core stops trusting it (us; j2534_clock.h's J2534_CLOCK_LAG_US);
+ * 0 restores 10 s. A worker reads it on every frame. */
+void ecuio_set_j2534_clock_lag_us(uint64_t us);
+
 /* TEST-ONLY, for the transports' own cases (ADR-0066 section 2.4): hands
  * a session that asks requests one request of 1 to 60 bytes for
  * channel's ECU, which its worker sends as a talk at its next pass

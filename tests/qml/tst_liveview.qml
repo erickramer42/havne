@@ -983,6 +983,111 @@ TestCase {
         verify(read > 0, "some trace has a sample at the cursor")
     }
 
+    // The paused view reads only the samples in view, found by a binary
+    // search: the reads follow the window, not the ring, and the picked
+    // samples are the linear walk's
+    function test_aPausedViewReadsOnlyTheWindowsSamples() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const n = 30000                        // a full ring's samples
+        const t0 = -n * 10
+        const plain = []
+        for (let i = 0; i < n; ++i)
+            plain.push(t0 + i * 10, 50 + 40 * Math.sin(i / 7))
+        let reads = 0
+        const counted = new Proxy(plain, {
+            get(target, key) {
+                if (typeof key === "string" && key.length > 0 && key.charCodeAt(0) <= 57
+                        && key.charCodeAt(0) >= 48)
+                    ++reads
+                return target[key]
+            }
+        })
+        const window = page.chartWindowS * 1000
+        const viewEnd = t0 + n * 5             // the middle of the ring
+        page.viewEndMs = viewEnd
+        page.snapshot = [{ row: 0, unit: "x", decimals: 0, samples: counted }]
+        reads = 0
+        const out = page.pausedSeries(600)
+        const inView = Math.round(window / 10)
+        verify(reads > 0, "the search read samples")
+        verify(reads < 8 * inView + 500, "reads " + reads + " for " + inView + " in view")
+        // The same by grouping every sample in view by its column (columns
+        // are counted from time 0, and the times here are negative)
+        const colMs = window / 600
+        const groups = new Map()
+        for (let i = 0; i + 1 < plain.length; i += 2) {
+            if (plain[i] < viewEnd - window || plain[i] > viewEnd)
+                continue
+            const c = Math.floor(plain[i] / colMs)
+            const g = groups.get(c) || { lo: i, hi: i, last: i }
+            if (plain[i + 1] < plain[g.lo + 1]) g.lo = i
+            if (plain[i + 1] > plain[g.hi + 1]) g.hi = i
+            g.last = i
+            groups.set(c, g)
+        }
+        const want = []
+        for (const g of groups.values()) {
+            const keep = [g.lo, g.hi, g.last].filter((v, k, all) => all.indexOf(v) === k)
+            for (const i of keep.sort((x, y) => x - y))
+                want.push(plain[i], plain[i + 1])
+        }
+        compare(JSON.stringify(out[0].samples), JSON.stringify(want))
+        verify(want.length > 0, "the window holds samples")
+        // A window before every sample and one after hold none
+        page.viewEndMs = t0 - 1000
+        compare(page.pausedSeries(600)[0].samples.length, 0, "before the ring")
+        page.viewEndMs = 0
+        page.snapshot = [{ row: 0, unit: "x", decimals: 0, samples: [-20000, 1, -5000, 2] }]
+        compare(page.pausedSeries(600)[0].samples.length, 4, "both in a 30 s window")
+    }
+
+    // The sample nearest the cursor is found by a search, with the answer
+    // a walk of every sample gives: the earlier of two equally near, none
+    // past staleMs, none without samples
+    function test_theCursorsSampleIsFoundBySearch() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const n = 30000
+        const plain = []
+        for (let i = 0; i < n; ++i)
+            plain.push(-300000 + i * 10, i)
+        let reads = 0
+        const counted = new Proxy(plain, {
+            get(target, key) {
+                if (typeof key === "string" && key.charCodeAt(0) >= 48 && key.charCodeAt(0) <= 57)
+                    ++reads
+                return target[key]
+            }
+        })
+        const walk = (samples, at) => {
+            let best = -1
+            for (let i = 0; i + 1 < samples.length; i += 2) {
+                if (best < 0 || Math.abs(samples[i] - at) < Math.abs(samples[best] - at))
+                    best = i
+            }
+            return best >= 0 && Math.abs(samples[best] - at) <= page.staleMs ? best : -1
+        }
+        // On a sample, between two (equally near: the earlier), at both
+        // ends, past either end by less and by more than staleMs
+        const cursors = [-150000, -149995, -149996, -149994, -300000, -10, -300003,
+                         -300000 - page.staleMs, -300000 - page.staleMs - 1,
+                         -10 + page.staleMs, -10 + page.staleMs + 1, -12345]
+        for (const at of cursors) {
+            page.cursorMs = at
+            reads = 0
+            const got = page.cursorSample(counted)
+            compare(got, walk(plain, at), "cursor " + at)
+            verify(reads > 0, "the search read samples")
+            verify(reads < 200, "cursor " + at + " read " + reads)
+        }
+        page.cursorMs = -150000
+        compare(page.cursorSample([]), -1, "no samples")
+        compare(page.cursorSample([-150000, 1]), 0, "one sample")
+        const twice = [-150100, 1, -150000, 2, -150000, 3, -149900, 4]
+        compare(page.cursorSample(twice), 2, "the first of equal times")
+        page.cursorMs = NaN
+        compare(page.cursorSample(plain), -1, "no cursor")
+    }
+
     // The snapshot goes with what it was taken of: a unit change, leaving
     // the page, a disconnect
     function test_thePauseDropsWithItsSession() {

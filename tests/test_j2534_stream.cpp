@@ -2777,6 +2777,86 @@ TEST(J2534StreamTest, VendorClockThatStepsFallsBackToTheHost)
         << "never decreases";
 }
 
+/* A vendor clock that stands still or counts frames lags the host a frame
+ * at a time: the lag is judged over the session, so it still catches up. */
+TEST(J2534StreamTest, VendorClockThatStaysFrozenIsCaughtUpToTheHost)
+{
+    j2534_clock c;
+    constexpr uint64_t kMs = 1000;
+    constexpr uint64_t kFrame = 10 * kMs;
+    (void)j2534_clock_step(c, 7000u, 0);
+    uint64_t caught_at = 0;
+    for (uint64_t t = kFrame; t <= 40000 * kMs; t += kFrame) {
+        const uint64_t at = j2534_clock_step(c, 7000u, t);
+        if (caught_at == 0 && c.trust_lost) {
+            caught_at = t;
+            EXPECT_GT(t, J2534_CLOCK_LAG_US) << "never before the lag";
+        }
+        if (caught_at != 0) {
+            EXPECT_LE(at, t) << t;
+            EXPECT_GE(at + kFrame, t) << "within a frame of the host, " << t;
+        }
+    }
+    EXPECT_NE(caught_at, 0u);
+    EXPECT_LE(caught_at, J2534_CLOCK_LAG_US + 2 * kFrame);
+    EXPECT_GT(c.host_steps, 2900u) << "every frame after the catch-up";
+}
+
+TEST(J2534StreamTest, VendorClockThatCountsOnePerFrameIsCaughtUp)
+{
+    j2534_clock c;
+    uint32_t raw = 1;
+    (void)j2534_clock_step(c, raw, 0);
+    uint64_t at = 0;
+    uint64_t t = 0;
+    for (int i = 0; i < 4000; ++i) {
+        t += 10 * 1000; /* a frame every 10 ms of host time */
+        at = j2534_clock_step(c, ++raw, t);
+    }
+    EXPECT_GE(c.host_steps, 1u);
+    EXPECT_GE(at + 10 * 1000, t) << "within a frame of the host";
+    EXPECT_LE(at, t);
+}
+
+/* Stuck after N honest frames: the honest part keeps the vendor's own
+ * resolution, and the catch-up comes only once the lag passes the bound. */
+TEST(J2534StreamTest, VendorClockFrozenAfterSomeFramesKeepsItsEarlyDeltas)
+{
+    j2534_clock c;
+    (void)j2534_clock_step(c, 1000u, 0);
+    EXPECT_EQ(j2534_clock_step(c, 1500u, 500), 500u);
+    EXPECT_EQ(j2534_clock_step(c, 2000u, 1000), 1000u);
+    EXPECT_EQ(c.host_steps, 0u);
+    /* frozen at 2000 from here, the host at 1 s steps */
+    uint64_t at = 0;
+    uint32_t steps_seen = 0;
+    for (uint64_t t = 1000000; t <= 20000000; t += 1000000) {
+        at = j2534_clock_step(c, 2000u, t);
+        if (c.host_steps != steps_seen) {
+            steps_seen = c.host_steps;
+            EXPECT_GT(t, J2534_CLOCK_LAG_US) << "never before the lag";
+        }
+    }
+    EXPECT_GE(steps_seen, 1u);
+    EXPECT_EQ(at, 20000000u) << "the host's clock from the catch-up on";
+}
+
+/* Queued frames reach the host together, up to the worker's 5 s backoff
+ * after their stamps: a legitimate batch is not a stuck clock. */
+TEST(J2534StreamTest, VendorClockBatchQueuedForFiveSecondsIsNotCaughtUp)
+{
+    j2534_clock c;
+    (void)j2534_clock_step(c, 1000000u, 0);
+    /* the vendor ran 5 s while the worker backed off; the frames reach
+     * the host at 5 s and the vendor's stamps say 1.0 to 5.0 s */
+    uint64_t at = 0;
+    for (int i = 1; i <= 50; ++i) {
+        at = j2534_clock_step(c, 1000000u + i * 100000u, 5000000u);
+    }
+    EXPECT_EQ(c.host_steps, 0u);
+    EXPECT_EQ(at, 5000000u);
+}
+
 /* ECUIO_ERR_REQUEST_FAILED has a distinct, mapped string. */
 TEST(J2534StreamTest, RequestFailedStatusHasDistinctString)
 {

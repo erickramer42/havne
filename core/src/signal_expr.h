@@ -101,6 +101,10 @@ extern const char* const kReplacedFormat;
 extern const char* const kReplacedAged;
 /* ": that puts 'Name' 9 computed signals deep: ..." */
 std::string too_deep_words(const std::string& name, uint32_t depth);
+/* "the program reads 'Boost', which sits 8 computed signals deep: that
+ * puts the program 9 deep, ...": a program over a base program's
+ * chain, depth being the program's own */
+std::string reads_deep_base_words(const std::string& base, uint32_t depth);
 
 } // namespace ecuio_sf
 

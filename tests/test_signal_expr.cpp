@@ -502,6 +502,28 @@ TEST(SignalExprTest, ASignalInABaseDefsPlaceIsJudgedAsTheLoaderJudgesIt)
     EXPECT_NE(c.detail.find("that puts 'Boost' 9 computed signals deep"),
               std::string::npos)
         << c.detail;
+
+    /* A program reading Boost by ID, whose chain is 8 deep through the
+     * stand-in: refused naming Boost, not as the program's own depth */
+    c = check(f.get(), nullptr, "obd2.map + 1");
+    ASSERT_EQ(c.status, ECUIO_OK) << c.detail;
+    ecuio_computed_t over_boost = c.out.program;
+    over_boost.input_ids[0] = ECUIO_OBD2_SIG_BOOST_ID;
+    uint16_t ids[8];
+    uint32_t count = 77;
+    EXPECT_EQ(ecuio_signal_file_expr_leaves(f.get(), &over_boost, ids, 8, &count),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the program reads 'Boost', which sits 8 computed signals deep: "
+              "that puts the program 9 deep, and a chain goes 8 deep at most");
+    /* The text check can't read Boost: no key names a base program, so
+     * the same chain is out of an expression's reach and is refused as a
+     * name it doesn't know, not as a depth */
+    c = check(f.get(), nullptr, "obd2.boost + 1");
+    EXPECT_EQ(c.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(c.detail.find("which isn't one of obd2's keys"),
+              std::string::npos)
+        << c.detail;
 }
 
 // The name an expression reads a def by, for every def of a file: its

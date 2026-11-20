@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "ecuio/core.h"
+#include "ecuio/internal.h"
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/profile.h"
 
@@ -100,6 +101,43 @@ TEST_F(J2534HealthTest, VendorStampsBecomeSessionTime)
     EXPECT_GE(delivered.stamps[2], delivered.stamps[1]);
     EXPECT_LT(delivered.stamps[2] - delivered.stamps[1], uint64_t{1000000})
         << "a step back counts as the host's time between the reads";
+}
+
+/* A vendor clock that never moves: two frames with one stamp, the second
+ * sent past the lag after the first (the seam sets 300 ms in place of
+ * J2534_CLOCK_LAG_US's 10 s), are that far apart in session time: the
+ * host's clock stands in for the vendor's from the catch-up on. */
+TEST_F(J2534HealthTest, AVendorClockThatStaysFrozenIsCaughtUpToTheHost)
+{
+    struct LagScope {
+        LagScope() { ecuio_set_j2534_clock_lag_us(300000); }
+        ~LagScope() { ecuio_set_j2534_clock_lag_us(0); }
+    } lag;
+    ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw"));
+    const uint8_t a[5] = {0x00, 0x00, 0x07, 0xE8, 0xA1};
+    const uint8_t b[5] = {0x00, 0x00, 0x07, 0xE8, 0xB2};
+    ASSERT_TRUE(fake_control::post(page, a, sizeof(a), 5000u, 0));
+    const auto first_by =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (delivered.count.load() < 1 &&
+           std::chrono::steady_clock::now() < first_by) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(delivered.count.load(), 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    ASSERT_TRUE(fake_control::post(page, b, sizeof(b), 5000u, 0));
+    const auto second_by =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (delivered.count.load() < 2 &&
+           std::chrono::steady_clock::now() < second_by) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    session = nullptr;
+    ASSERT_EQ(delivered.count.load(), 2);
+    EXPECT_GE(delivered.stamps[1] - delivered.stamps[0], uint64_t{400000})
+        << "the host's time stands in for a clock that stands still";
 }
 
 /* Polls the error state until it reads want or budget_ms passes; le and
