@@ -1048,7 +1048,7 @@ TEST_F(J2534HealthTest, VxAReplyPastTheSliceIsNotHeldByAZeroTimeoutRead)
 
 /* A read asks for one message, so the VX's read ends when the reply
  * arrives, 4 ms after its request, instead of holding the 10 ms slice
- * for a batch of 16, and answers with it. Measured (the median is a
+ * for a batch, and answers with it. Measured (the median is a
  * test property): 5.1 ms through either surrogate; held to
  * the slice, 11.3 ms (x64) and 13.3 ms (x86); with one more call for the
  * rest of a batch, which the fake holds 10 ms as the VX did, failing.

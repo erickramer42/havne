@@ -1120,7 +1120,8 @@ TEST(J2534SurrogateTest, AReadClaimingMoreFramesThanABatchHoldsEndsTheHandle)
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
 
     const std::string log = read_session_log(path);
-    EXPECT_NE(log.find("17 frame(s) on the reply to op=5 (skew?); child "
+    EXPECT_NE(log.find(std::to_string(ECUIO_SUR_MAX_FRAMES_PER_READ + 1) +
+                       " frame(s) on the reply to op=5 (skew?); child "
                        "unresponsive"),
               std::string::npos)
         << log;
@@ -1401,14 +1402,15 @@ TEST(J2534SurrogateTest, LongMessagesCrossThePipeWholeOneARead)
     const std::string path = ecuio_j2534_sur_log_path(h);
 
     const unsigned char req[7] = {0x00, 0x00, 0x07, 0xE0, 0x22, 0xF1, 0xA1};
-    for (int i = 0; i < ECUIO_SUR_MAX_FRAMES_PER_READ; ++i) {
+    constexpr int kMessages = 16;
+    for (int i = 0; i < kMessages; ++i) {
         uint32_t written = 0;
         ASSERT_EQ(ecuio_j2534_sur_write_frame(h, channel, req, sizeof(req),
                                               ECUIO_PT_TX_ISO15765_FRAME_PAD,
                                               0, &written), ECUIO_OK) << i;
     }
     int whole = 0;
-    for (int i = 0; i < ECUIO_SUR_MAX_FRAMES_PER_READ; ++i) {
+    for (int i = 0; i < kMessages; ++i) {
         ecuio_pt_rx_t m = {};
         bool got = false;
         ASSERT_EQ(ecuio_j2534_sur_read_msg(h, channel, &m, 50, &got),
@@ -1421,7 +1423,7 @@ TEST(J2534SurrogateTest, LongMessagesCrossThePipeWholeOneARead)
         }
         whole += same ? 1 : 0;
     }
-    EXPECT_EQ(whole, ECUIO_SUR_MAX_FRAMES_PER_READ);
+    EXPECT_EQ(whole, kMessages);
     ASSERT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);   /* child exits: log complete */
     const std::string log = read_session_log(path);
     size_t reads = 0;
@@ -1436,7 +1438,7 @@ TEST(J2534SurrogateTest, LongMessagesCrossThePipeWholeOneARead)
             << "a read carried more than one message:\n"
             << log;
     }
-    EXPECT_EQ(reads, static_cast<size_t>(ECUIO_SUR_MAX_FRAMES_PER_READ));
+    EXPECT_EQ(reads, static_cast<size_t>(kMessages));
 }
 
 /* A request to 0x7E0 on a channel filtered for 0x7E8, and the reply
