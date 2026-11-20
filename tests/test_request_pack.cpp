@@ -393,3 +393,41 @@ TEST(RequestPackTest, TwoChannelsSizeTheirPacksByTheirOwnLengths)
         << "3 + 2: 04's 2 would make 7";
     EXPECT_EQ(one[0], (Bytes{0x01, 0x0C, 0x0D, 0x04})) << "2 + 2 + 2";
 }
+
+/* A sent pack stamps each of its rows with the write's time (the J2534
+ * hold's overdue order reads a channel's next row's), and a write that
+ * failed stamps none */
+TEST(RequestPackTest, ASentPackStampsEachOfItsRows)
+{
+    auto d = driver(1, 0);
+    for (const uint8_t pid : {uint8_t{0x0C}, uint8_t{0x0D}, uint8_t{0x05}}) {
+        add(&d->e, 0, pid);
+    }
+    ecuio_engine_probe(&d->e);
+    d->ecus = [](uint32_t, const Bytes& q) { return answer(q); };
+    int64_t at = -1;
+    for (int i = 0; i < 1000 && at < 0; ++i) {
+        const int64_t now = d->now;
+        d->pass();
+        if (!d->sent.empty() && d->sent.back().bytes.size() > 2) {
+            at = now;
+        }
+    }
+    ASSERT_GE(at, 0) << "no pack was asked";
+    const Bytes pack = d->sent.back().bytes;
+    for (uint32_t i = 0; i < d->e.count; ++i) {
+        const ecuio_request& r = d->e.requests[i];
+        if (std::find(pack.begin() + 1, pack.end(), r.bytes[1]) != pack.end()) {
+            EXPECT_EQ(d->e.asked_us[i], at) << "PID " << int{r.bytes[1]};
+        }
+    }
+
+    const int64_t later = d->now + ECUIO_ENGINE_WAIT_US;
+    (void)ecuio_engine_expire(&d->e, 0, later);
+    const int32_t r = ecuio_engine_due(&d->e, 0, later);
+    ASSERT_NE(r, ECUIO_ENGINE_NONE);
+    ecuio_engine_sent(&d->e, 0, r, false, later);
+    for (uint32_t i = 0; i < d->e.count; ++i) {
+        EXPECT_LT(d->e.asked_us[i], later) << "row " << i;
+    }
+}

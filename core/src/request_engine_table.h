@@ -62,6 +62,7 @@ inline bool ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count,
         e->timing_of.assign(room, ECUIO_TIMING_NONE);
         e->timing_rows.assign(pool, 0);
         e->marks.assign(room, 0);
+        e->asked_us.assign(room, 0);
     } catch (...) {
         *e = ecuio_request_engine{};
         return false;

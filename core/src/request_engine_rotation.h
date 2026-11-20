@@ -55,23 +55,36 @@ inline void ecuio_engine_set_duplicates(ecuio_request_engine* e,
     e->duplicate_count = count;
 }
 
-/* Channel c's next request of one class, from that class's cursor, or
- * ECUIO_ENGINE_NONE when the class has none in the rotation. */
-inline int32_t ecuio_engine_next_of(ecuio_request_engine* e, uint32_t c,
+/* Channel c's next request of one class, from that class's cursor, the
+ * cursor left alone; ECUIO_ENGINE_NONE when the class has none in the
+ * rotation. */
+inline int32_t ecuio_engine_peek_of(const ecuio_request_engine* e, uint32_t c,
                                     bool slow)
 {
-    ecuio_engine_channel& ch = e->chans[c];
-    uint32_t& cursor = slow ? ch.slow_cursor : ch.cursor;
+    const ecuio_engine_channel& ch = e->chans[c];
+    const uint32_t cursor = slow ? ch.slow_cursor : ch.cursor;
     for (uint32_t k = 0; k < e->count; ++k) {
         const uint32_t i = (cursor + k) % e->count;
         const ecuio_request& r = e->requests[i];
         if (r.channel == c && ecuio_engine_in_rotation(r) &&
             (r.slow != 0) == slow) {
-            cursor = (i + 1) % e->count;
             return static_cast<int32_t>(i);
         }
     }
     return ECUIO_ENGINE_NONE;
+}
+
+/* Channel c's next request of one class, its cursor moved past it */
+inline int32_t ecuio_engine_next_of(ecuio_request_engine* e, uint32_t c,
+                                    bool slow)
+{
+    const int32_t i = ecuio_engine_peek_of(e, c, slow);
+    if (i >= 0) {
+        ecuio_engine_channel& ch = e->chans[c];
+        (slow ? ch.slow_cursor : ch.cursor) =
+            (static_cast<uint32_t>(i) + 1) % e->count;
+    }
+    return i;
 }
 
 /* The request r names on channel c: a table index, the one-shot or the

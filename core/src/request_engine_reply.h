@@ -20,7 +20,8 @@
  * leaves nothing outstanding, and a one-shot stays due. The wait and the
  * latency run from now, the write's return; the floor from start_us, the
  * write's start (now when the driver gives none), so the write's own
- * time isn't added to it. */
+ * time isn't added to it. A sent table row, and each row of a sent pack,
+ * is stamped in asked_us. */
 inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c, int32_t r,
                               bool sent, int64_t now_us, int64_t start_us = -1)
 {
@@ -33,6 +34,13 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c, int32_t r,
     if (sent) {
         ch.sent_us = now_us;
         ch.last_sent_us = now_us;
+        if (r >= 0 && static_cast<uint32_t>(r) < e->count) {
+            e->asked_us[r] = now_us;
+        }
+        for (uint32_t k = 0; r == ECUIO_ENGINE_PACK && k < ch.pack_count;
+             ++k) {
+            e->asked_us[ch.pack_rows[k]] = now_us;
+        }
     }
     const int64_t from =
         (start_us < 0 || start_us > now_us) ? now_us : start_us;
