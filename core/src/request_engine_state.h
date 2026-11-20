@@ -100,12 +100,14 @@ constexpr uint8_t ECUIO_ENGINE_PID_LONG = 0xFF;
 constexpr uint8_t ECUIO_BITMAP_REPLY_LEN = 6;
 
 /* The most DIDs a session scans, over every channel (ADR-0020): a
- * 0x100-wide block four times over, at six bytes an entry. */
+ * 0x100-wide block four times over, at eight bytes an entry. */
 constexpr uint32_t ECUIO_ENGINE_SCAN_MAX = 1024;
 
 /* What became of a scanned DID. */
 constexpr uint8_t ECUIO_SCAN_UNASKED = 0;      /* not asked yet, or asked
-                                                * again after a recovery */
+                                                * again: once after the
+                                                * channel's round, or after
+                                                * a recovery */
 constexpr uint8_t ECUIO_SCAN_FOUND = 1;        /* answered positive */
 constexpr uint8_t ECUIO_SCAN_REFUSED = 2;      /* answered negative */
 constexpr uint8_t ECUIO_SCAN_UNANSWERED = 3;   /* its wait ran out */
@@ -168,6 +170,8 @@ struct ecuio_scan_entry {
     uint8_t outcome;    /* ECUIO_SCAN_* */
     uint8_t nrc;        /* the negative reply's code, when refused */
     uint8_t polled;     /* 1 once found and in the rotation */
+    uint8_t retried;    /* 1 once asked again after its channel's round;
+                           a recovery's rescan clears it */
 };
 
 struct ecuio_engine_channel {
