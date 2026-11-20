@@ -630,3 +630,7 @@ Two rules join the turns of the appendix of 2026-11-18.
   keep-alive taking the turn costs the walk nothing.
 
 `RequestTurnsTest` (test_obd2) pins both.
+
+> **Amended 2026-11-20:** a key past its window settles `lapsed`, not
+> unsent: it never touched the bus, and `unsent` means a failed write
+> (ADR-0066's appendix of 2026-11-20).
