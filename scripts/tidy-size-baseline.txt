@@ -82,11 +82,11 @@ core/src/j2534_worker.cpp	j2534_worker
 core/src/json.cpp	number
 core/src/mock_drive_cycle.h	drive_script
 core/src/mock_drive_cycle.h	update_vehicle
-core/src/obdb_import.cpp	command
-core/src/obdb_import.cpp	enum_values
-core/src/obdb_import.cpp	number_fields
-core/src/obdb_import.cpp	signal
-core/src/obdb_import.cpp	synthetic
+core/src/obdb_importer.h	command
+core/src/obdb_importer.h	enum_values
+core/src/obdb_importer.h	number_fields
+core/src/obdb_importer.h	signal
+core/src/obdb_importer.h	synthetic
 core/src/plugin.cpp	read_values
 core/src/plugin_wrap.cpp	wrapped
 core/src/recorder.cpp	ecuio_recorder_put_frame
