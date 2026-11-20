@@ -28,7 +28,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
     test_health_baseline.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
+    test_frames_read.cpp test_csv_guess.cpp test_csv_guess_rows.cpp
+    test_csv_guess_call.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_session_link.cpp
     test_condition_recording.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
