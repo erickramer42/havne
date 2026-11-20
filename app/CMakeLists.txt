@@ -165,6 +165,7 @@ qt_add_qml_module(app_ui
         qml/DashLayoutFile.qml
         qml/DashAddFlow.qml
         qml/DashEdits.qml
+        qml/DashPluginPages.qml
         qml/DashDrive.qml
         qml/DashPages.qml
         qml/LogNotice.qml
