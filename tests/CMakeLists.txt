@@ -33,6 +33,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
+    test_condition_recording_events.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp)
 
