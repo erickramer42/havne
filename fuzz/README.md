@@ -36,6 +36,8 @@ UndefinedBehaviorSanitizer with Clang):
 
 The app's store migration (`app/storemigration.cpp`, [ADR-0064](../docs/adr/0064-one-store.md)) reads the earlier version's stored JSON with QtCore and has no target: this tier builds the Qt-free core alone. `BridgeTest.OneStoreMigration*` pin the odd shapes by hand over the corpus in `tests/data/vehiclebook`, and every entry is judged by itself, so a malformed one is left out and never ends the run.
 
+A harness too long for one file keeps its entry point in its own `.cpp` and the rest in headers beside it (`fuzz_recording_*.h`), all in one translation unit.
+
 They aren't ctest tests: a time-bounded fuzzer in the default pass
 would make a green suite stop meaning green. The CI `fuzz` job runs
 each for 60 s on Linux with Clang and uploads any crashing input.
