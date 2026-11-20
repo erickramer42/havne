@@ -213,11 +213,157 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
 
 namespace {
 
+/* A request as typed, and what its reply is judged by */
+struct typed_request {
+    char cmd[ELM327_CMD_MAX];
+    uint8_t count;
+    uint8_t pid;
+    uint16_t did;
+    bool pack;
+    bool did_ask;
+};
+
+/* Request r of channel c's command, with the response-count digit when
+ * its reply is taken to fit one line (elm327_response_count); false when
+ * it won't format */
+bool type_request(transport* t, uint32_t c, int32_t r, typed_request* out)
+{
+    ecuio_request_engine& e = t->engine;
+    const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
+    out->pack = r == ECUIO_ENGINE_PACK;
+    /* A talk: its whole request, no response count, never taken back */
+    const bool talk = r == ECUIO_ENGINE_ONCE && e.chans[c].talk.out;
+    uint32_t len = 0;
+    const uint8_t* pdu =
+        ecuio_engine_pdu_of(e.chans[c].talk, talk, q.bytes, q.len, &len);
+    out->count = out->pack ? elm327_pack_count(q.reply_len, t->tx_ids[c])
+                 : talk    ? uint8_t{0}
+                           : elm327_response_count(q.bytes, q.len, t->tx_ids[c],
+                                                   t->one_frame, t->long_dids);
+    /* The one-shot settles in the reply */
+    out->pid = q.bytes[1];
+    out->did_ask = !out->pack && !talk && q.len == 3 && q.bytes[0] == 0x22;
+    out->did = static_cast<uint16_t>((q.bytes[1] << 8) | q.bytes[2]);
+    return elm327_format_request(pdu, len, out->count, out->cmd,
+                                 sizeof(out->cmd)) != 0;
+}
+
+/* A line of a request's reply, by its kind */
+void take_reply_line(transport* t, const elm327_reader& line, reply_seen& seen)
+{
+    elm327_can_line f;
+    switch (elm327_classify(line, t->ext29, &f)) {
+    case elm327_line::frame:
+        take_frame(t, f, seen, true);
+        break;
+    case elm327_line::no_bus:
+        seen.no_bus = true;
+        break;
+    case elm327_line::refused:
+        seen.refused = true;
+        break;
+    case elm327_line::reset:
+        seen.reset = true;
+        break;
+    case elm327_line::no_data:
+        /* Left to the engine's wait to judge the request, unless an
+         * ECU still sending a cut reply ignored it (learn_reply_length) */
+        seen.no_data = true;
+        break;
+    default:
+        /* The read errors end this read without a reply; OK, a
+         * search, an alert or anything else is ignored */
+        break;
+    }
+}
+
+/* Whether a reply was cut at its prompt; its channel c is held while the
+ * ECU sends the rest */
+bool end_cut_reply(transport* t, uint32_t c, elm327_io io)
+{
+    /* A message still under way at the prompt was cut there: the ECU goes
+     * on sending it, for as many Consecutive Frames as it had left */
+    uint32_t frames_left = 0;
+    if (io == elm327_io::prompt) {
+        for (const isotp_rx_slot& s : t->isotp.slots) {
+            if (s.active && s.expected > s.have) {
+                const uint32_t n = (uint32_t{s.expected} - s.have + 6u) / 7u;
+                frames_left = (n > frames_left) ? n : frames_left;
+            }
+        }
+    }
+    const bool cut = io == elm327_io::prompt && isotp_end_all(t->isotp) > 0;
+    auto& held = t->cut[c];
+    if (cut) {
+        held.hold_us =
+            int64_t{frames_left} * ELM327_CUT_FRAME_US + ELM327_CUT_MARGIN_US;
+        if (held.hold_us > ELM327_CUT_HOLD_MAX_US) {
+            held.hold_us = ELM327_CUT_HOLD_MAX_US;
+        }
+        held.hold_until_us = now_us(t) + held.hold_us;
+    }
+    return cut;
+}
+
+/* What a reply says of its request's length: a DID taken back and asked
+ * again with no digit, a held DID's NO DATA held again or closed, a PID
+ * taken off the digit */
+void learn_reply_length(transport* t, uint32_t c, int32_t r,
+                        const typed_request& typed, bool cut,
+                        const reply_seen& seen)
+{
+    ecuio_request_engine& e = t->engine;
+    auto& held = t->cut[c];
+    if (typed.did_ask && typed.count > 0 && (cut || seen.pending) &&
+        e.chans[c].outstanding == r) {
+        /* The digit ended the reply before its answer: a First Frame, or
+         * the ECU's 7F 22 78 while it works. Taken back, the request goes
+         * again with no digit, so a found DID isn't lost to the wait; after
+         * a cut, once the ECU has sent the rest */
+        elm327_long_did_set(t->long_dids, typed.did);
+        ecuio_engine_sent(&e, c, r, false, now_us(t));
+        held.did = typed.did;
+        held.open = cut;
+        held.tries = 0;
+        elm327_log_write(t->log,
+                         "22 %04X's reply %s: asked again, and with no "
+                         "response count from now on",
+                         static_cast<unsigned>(typed.did),
+                         cut ? "spans frames" : "is pending");
+    } else if (typed.did_ask && held.open && held.did == typed.did &&
+               e.chans[c].outstanding == r) {
+        if (seen.no_data && !seen.matched && !cut &&
+            held.tries < ELM327_CUT_RETRIES) {
+            /* Asked again after a cut and nothing came: the ECU was still
+             * sending, slower than the hold allowed. Held again, longer */
+            ++held.tries;
+            held.hold_us *= 2;
+            held.hold_until_us = now_us(t) + held.hold_us;
+            ecuio_engine_sent(&e, c, r, false, now_us(t));
+            elm327_log_write(t->log,
+                             "22 %04X: NO DATA after a cut reply, the ECU "
+                             "still sending it: asked again in %lld ms",
+                             static_cast<unsigned>(typed.did),
+                             static_cast<long long>(held.hold_us / 1000));
+        } else {
+            held.open = false;
+        }
+    } else if (cut && typed.count > 0 && !typed.pack && !typed.did_ask) {
+        /* The digit ended the reply after a First Frame: the PID's reply
+         * spans frames, and this one is lost to the engine's wait. From
+         * now on it goes without the digit */
+        elm327_one_frame_set(t->one_frame, typed.pid, false);
+        elm327_log_write(t->log,
+                         "01 %02X's reply spans frames: asked with no "
+                         "response count from now on",
+                         static_cast<unsigned>(typed.pid));
+    }
+}
+
 /* Asks request r of channel c (ADR-0026 section 3): its header if another
- * channel's is set, then the request with the response-count digit when
- * its reply is taken to fit one line (elm327_response_count), then the
- * reply to its prompt. A 0x22 request whose digit ended the reply before
- * its answer is taken back, so it's asked again with none. */
+ * channel's is set, then the request (type_request), then the reply to
+ * its prompt. A 0x22 request whose digit ended the reply before its
+ * answer is taken back, so it's asked again with none. */
 elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
 {
     /* The header switch, the request and its reply go in the wire log
@@ -241,118 +387,17 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
         return unsent((header.io == elm327_io::prompt) ? elm327_io::reset
                                                        : header.io);
     }
-    const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
-    const bool pack = r == ECUIO_ENGINE_PACK;
-    /* A talk: its whole request, no response count, never taken back */
-    const bool talk = r == ECUIO_ENGINE_ONCE && e.chans[c].talk.out;
-    uint32_t len = 0;
-    const uint8_t* pdu =
-        ecuio_engine_pdu_of(e.chans[c].talk, talk, q.bytes, q.len, &len);
-    const uint8_t count =
-        pack   ? elm327_pack_count(q.reply_len, t->tx_ids[c])
-        : talk ? uint8_t{0}
-               : elm327_response_count(q.bytes, q.len, t->tx_ids[c],
-                                       t->one_frame, t->long_dids);
-    /* The one-shot settles in the reply */
-    const uint8_t pid = q.bytes[1];
-    const bool did_ask = !pack && !talk && q.len == 3 && q.bytes[0] == 0x22;
-    const auto did = static_cast<uint16_t>((q.bytes[1] << 8) | q.bytes[2]);
-    char cmd[ELM327_CMD_MAX];
-    if (elm327_format_request(pdu, len, count, cmd, sizeof(cmd)) == 0) {
+    typed_request typed;
+    if (!type_request(t, c, r, &typed)) {
         return unsent(elm327_io::prompt); /* never: 1 to 7 bytes */
     }
     ecuio_engine_sent(&e, c, r, true, now_us(t));
-    const elm327_io io = command(t, cmd, true, [&](const elm327_reader& line) {
-        elm327_can_line f;
-        switch (elm327_classify(line, t->ext29, &f)) {
-        case elm327_line::frame:
-            take_frame(t, f, seen, true);
-            break;
-        case elm327_line::no_bus:
-            seen.no_bus = true;
-            break;
-        case elm327_line::refused:
-            seen.refused = true;
-            break;
-        case elm327_line::reset:
-            seen.reset = true;
-            break;
-        case elm327_line::no_data:
-            /* Left to the engine's wait to judge the request, unless an
-             * ECU still sending a cut reply ignored it (below) */
-            seen.no_data = true;
-            break;
-        default:
-            /* The read errors end this read without a reply; OK, a
-             * search, an alert or anything else is ignored */
-            break;
-        }
-    });
-    /* A message still under way at the prompt was cut there: the ECU goes
-     * on sending it, for as many Consecutive Frames as it had left */
-    uint32_t frames_left = 0;
-    if (io == elm327_io::prompt) {
-        for (const isotp_rx_slot& s : t->isotp.slots) {
-            if (s.active && s.expected > s.have) {
-                const uint32_t n = (uint32_t{s.expected} - s.have + 6u) / 7u;
-                frames_left = (n > frames_left) ? n : frames_left;
-            }
-        }
-    }
-    const bool cut = io == elm327_io::prompt && isotp_end_all(t->isotp) > 0;
-    auto& held = t->cut[c];
-    if (cut) {
-        held.hold_us =
-            int64_t{frames_left} * ELM327_CUT_FRAME_US + ELM327_CUT_MARGIN_US;
-        if (held.hold_us > ELM327_CUT_HOLD_MAX_US) {
-            held.hold_us = ELM327_CUT_HOLD_MAX_US;
-        }
-        held.hold_until_us = now_us(t) + held.hold_us;
-    }
-    if (did_ask && count > 0 && (cut || seen.pending) &&
-        e.chans[c].outstanding == r) {
-        /* The digit ended the reply before its answer: a First Frame, or
-         * the ECU's 7F 22 78 while it works. Taken back, the request goes
-         * again with no digit, so a found DID isn't lost to the wait; after
-         * a cut, once the ECU has sent the rest */
-        elm327_long_did_set(t->long_dids, did);
-        ecuio_engine_sent(&e, c, r, false, now_us(t));
-        held.did = did;
-        held.open = cut;
-        held.tries = 0;
-        elm327_log_write(t->log,
-                         "22 %04X's reply %s: asked again, and with no "
-                         "response count from now on",
-                         static_cast<unsigned>(did),
-                         cut ? "spans frames" : "is pending");
-    } else if (did_ask && held.open && held.did == did &&
-               e.chans[c].outstanding == r) {
-        if (seen.no_data && !seen.matched && !cut &&
-            held.tries < ELM327_CUT_RETRIES) {
-            /* Asked again after a cut and nothing came: the ECU was still
-             * sending, slower than the hold allowed. Held again, longer */
-            ++held.tries;
-            held.hold_us *= 2;
-            held.hold_until_us = now_us(t) + held.hold_us;
-            ecuio_engine_sent(&e, c, r, false, now_us(t));
-            elm327_log_write(t->log,
-                             "22 %04X: NO DATA after a cut reply, the ECU "
-                             "still sending it: asked again in %lld ms",
-                             static_cast<unsigned>(did),
-                             static_cast<long long>(held.hold_us / 1000));
-        } else {
-            held.open = false;
-        }
-    } else if (cut && count > 0 && !pack && !did_ask) {
-        /* The digit ended the reply after a First Frame: the PID's reply
-         * spans frames, and this one is lost to the engine's wait. From
-         * now on it goes without the digit */
-        elm327_one_frame_set(t->one_frame, pid, false);
-        elm327_log_write(t->log,
-                         "01 %02X's reply spans frames: asked with no "
-                         "response count from now on",
-                         static_cast<unsigned>(pid));
-    }
+    const elm327_io io =
+        command(t, typed.cmd, true, [&](const elm327_reader& line) {
+            take_reply_line(t, line, seen);
+        });
+    const bool cut = end_cut_reply(t, c, io);
+    learn_reply_length(t, c, r, typed, cut, seen);
     return io;
 }
 
