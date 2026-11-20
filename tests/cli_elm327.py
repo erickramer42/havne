@@ -189,6 +189,25 @@ def stream(cli, uri, extra):
     return lines
 
 
+def stream_until(cli, uri, extra, done):
+    """stream's lines until done(lines) holds, then the child is ended;
+    its own --seconds in extra stays the upper bound"""
+    p = subprocess.Popen([cli, "stream", uri] + extra, stdout=subprocess.PIPE,
+                         text=True)
+    lines = []
+    try:
+        for l in p.stdout:
+            if l.strip():
+                lines.append(json.loads(l))
+                if done(lines):
+                    break
+    finally:
+        p.terminate()
+        p.stdout.close()
+        p.wait(timeout=60)
+    return lines
+
+
 def session(cli):
     emu = Emulator(cli, "mock://emu")
     uri = "elm327://127.0.0.1:%d" % emu.port
@@ -266,14 +285,21 @@ def car(cli, package):
                    extra=["--plugin", package])
     uri = "elm327://127.0.0.1:%d?profile=%s&identify=0&diagnose=0" % (
         emu.port, profile)
-    lines = stream(cli, uri, ["--values", "--seconds", "20", "--plugin", package])
-    names = {}
-    for l in lines:
-        if l["type"] == "signals":
-            names = {d["id"]: d["name"] for d in l["signals"]}
-    named = {l["id"] for l in lines if l["type"] == "values"
-             for v in l["values"] if names.get(v["id"], "").endswith("Module Name")}
     want = {"0x7E8"} | {"0x%X" % (0x520 + n) for n in range(17)}
+
+    def named_in(lines):
+        names = {}
+        for l in lines:
+            if l["type"] == "signals":
+                names = {d["id"]: d["name"] for d in l["signals"]}
+        return {l["id"] for l in lines if l["type"] == "values"
+                for v in l["values"]
+                if names.get(v["id"], "").endswith("Module Name")}
+
+    lines = stream_until(cli, uri,
+                         ["--values", "--seconds", "20", "--plugin", package],
+                         lambda ls: named_in(ls) >= want)
+    named = named_in(lines)
     expect(named == want, "every module's name: missing %r" % sorted(want - named))
     emu.end()
 
