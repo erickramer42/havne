@@ -681,6 +681,70 @@ TEST(PacingTest, TheHoldsPredictionForTwoModulesThroughTheVx)
     EXPECT_LT(kept, 0.75);
 }
 
+/* The hold's rules on the bench, D11's shape with lost_under_segments on:
+ * no channel asks while another's segmented request is out, and a
+ * segmented request waits out the other's Single Frame, so at most one
+ * reply is lost (the first segmented ask's, its length not yet learned).
+ * The second module is answered at least 4x as often as with ?hold=0,
+ * and a held channel goes first in the next pass, so both are asked in
+ * every second */
+TEST(PacingTest, TheHoldTakesTurnsBetweenTwoModules)
+{
+    const TwoDids profile;
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.profile = TwoDids::kName;
+    cfg.picks.clear();
+    cfg.seconds = 60;
+    cfg.model.lost_under_segments = true;
+    const pacing::bench_result held = run(cfg);
+    cfg.model.hold = false;
+    const pacing::bench_result plain = run(cfg);
+    EXPECT_LE(held.lost, 1u);
+    EXPECT_GE(static_cast<double>(held.answered[1]),
+              4.0 * static_cast<double>(plain.answered[1]))
+        << held.answered[1] << " held, " << plain.answered[1]
+        << " with ?hold=0";
+
+    ASSERT_EQ(held.sent_chan.size(), held.sent_us.size());
+    ASSERT_FALSE(held.sent_us.empty());
+    const int64_t from = held.sent_us.front();
+    std::vector<uint32_t> asked(static_cast<size_t>(cfg.seconds), 0u);
+    for (size_t i = 0; i < held.sent_us.size(); ++i) {
+        const auto s = static_cast<size_t>((held.sent_us[i] - from) / 1000000);
+        if (s < asked.size()) {
+            asked[s] |= 1u << held.sent_chan[i];
+        }
+    }
+    /* the last second may end before the run's */
+    for (size_t s = 0; s + 1 < asked.size(); ++s) {
+        EXPECT_EQ(asked[s], 3u) << "second " << s;
+    }
+}
+
+/* Without a segmented reply the hold changes nothing: two modules'
+ * one-frame DIDs, identification and diagnostics off (the VIN's reply is
+ * segmented), lost_under_segments on. The run is the one with ?hold=0
+ * and nothing is lost; a reply not seen yet counted segmented would hold
+ * the first asks */
+TEST(PacingTest, TheHoldChangesNothingWithoutASegmentedReply)
+{
+    const TwoModules profile;
+    pacing::bench_config cfg = one_pid(pacing::adapter::j2534);
+    cfg.profile = TwoModules::kName;
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    cfg.model.lost_under_segments = true;
+    const pacing::bench_result held = run(cfg);
+    cfg.model.hold = false;
+    const pacing::bench_result plain = run(cfg);
+    ASSERT_GT(held.sent_us.size(), 1000u);
+    EXPECT_EQ(held.sent_us, plain.sent_us);
+    EXPECT_EQ(held.sent_chan, plain.sent_chan);
+    EXPECT_EQ(held.lost + plain.lost, 0u);
+    EXPECT_EQ(held.timeouts + plain.timeouts, 0u);
+}
+
 /* The J2534 model's pass is the worker's (j2534_hold_pass), the hold on by
  * default: while the engine ECU's three-frame reply is out the other
  * module isn't asked, so two modules ask fewer requests a second than

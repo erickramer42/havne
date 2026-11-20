@@ -124,6 +124,7 @@ struct bench_config {
 struct bench_result {
     cli::SummaryTally tally{nullptr};
     std::vector<int64_t> sent_us;
+    std::vector<uint32_t> sent_chan; /* each request's channel */
     uint64_t timeouts = 0;
     uint64_t cuts = 0;    /* ELM327: replies the prompt ended early */
     uint64_t headers = 0; /* ELM327: AT SH switches */
@@ -495,6 +496,7 @@ inline void bench::send(uint32_t c, int32_t r, int64_t now)
     f.row = r;
     m_flights.push_back(std::move(f));
     m_result.sent_us.push_back(now);
+    m_result.sent_chan.push_back(c);
     ++m_result.asked[c];
     at(now, request, static_cast<uint32_t>(m_flights.size() - 1));
 }
