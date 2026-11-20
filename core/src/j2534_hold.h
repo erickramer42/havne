@@ -2,7 +2,7 @@
 //             J2534 worker's hold, pure and header-only: no clock, no I/O
 //             and no platform headers, so it builds and is tested on every
 //             platform and the pacing bench calls it as the worker does
-// Testing: UNIT: J2534HoldTest (test_obd2, tests/test_j2534_hold.cpp)
+// Testing: UNIT: J2534HoldTest (test_obd2, tests/test_j2534_hold*.cpp)
 //
 // Known Issue #42: through the OBDX Pro VX a module's Single Frame reply
 // is lost while another module's segmented reply comes in, though the
@@ -42,12 +42,14 @@
 // A key (request_talk.h) has a window to go in, so it goes ahead of every
 // other channel's next request: while one is offered with its window
 // open and its channel's floor before the window's end (?gap= can put it
-// past) no other channel starts a request, a chosen one waits on too, and
-// the key itself waits only for a segmented exchange already on the bus
-// (its Single Frame reply could be lost beside it), so for one exchange at
-// most. A key whose window passes while it waits is settled unsent at
-// that pass and never written. The window is over before the session
-// gate opens, so no key is offered when a session request goes through.
+// past) no other channel starts a request but a key of its own or its
+// session request near S3 (both Single Frames), a chosen one waits on
+// too, and the key itself waits only for a segmented exchange already on
+// the bus (its Single Frame reply could be lost beside it), so for one
+// exchange at most. A key whose window passes while it waits is settled
+// unsent at that pass and never written. The window is over before its
+// own channel's session gate opens, so no key is offered on a channel
+// whose session request goes through.
 //
 // A hold's chosen rows are its engine's table rows, so a hold lives no
 // longer than the ecuio_engine_init it follows. The hold applies with two

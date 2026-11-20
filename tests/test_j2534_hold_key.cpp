@@ -294,6 +294,8 @@ TEST(J2534HoldTest, AKeyPastItsWindowHoldsNoOne)
     EXPECT_NE(j2534_hold_next(b.hold, &b.e, 0, until, &held), ECUIO_ENGINE_NONE)
         << "past it channel 0 asks";
     EXPECT_EQ(held, 0u);
+    /* The engine is left mid-request (channel 0's due request taken and
+     * never sent): nothing may follow these calls */
 }
 
 /* A key whose channel's floor (?gap=) falls past its window can never
