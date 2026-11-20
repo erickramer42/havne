@@ -2040,6 +2040,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_bridge_session.cpp
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
         test_bridge_readonce.cpp
