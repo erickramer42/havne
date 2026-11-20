@@ -323,6 +323,9 @@ struct ecuio_request_engine {
     /* A focus's row marks, one byte for each table row: the driver's
      * scratch (ecuio_take_focus), sized with the table */
     std::vector<uint8_t> marks;
+    /* Each table row's last write, 0 before any (ecuio_engine_sent; the
+     * J2534 hold's overdue order), sized with the table */
+    std::vector<int64_t> asked_us;
     uint32_t count = 0; /* the table's rows in use */
     uint32_t timing_taken = 0;
     uint32_t untimed = 0;

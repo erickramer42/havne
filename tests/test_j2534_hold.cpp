@@ -106,7 +106,8 @@ TEST(J2534HoldTest, ASegmentedExchangeIsAloneOnTheBus)
     }
 }
 
-/* The channels take turns: a held channel goes first when the hold ends,
+/* The channels take turns: the Single Frame channel goes first when the
+ * segmented exchange ends, and the segmented one's request waits for it,
  * so from channel 0's first reply (its frames learned) the writes
  * alternate 0, 1, 0, 1 */
 TEST(J2534HoldTest, TheHeldChannelGoesNext)
@@ -252,9 +253,10 @@ TEST(J2534HoldTest, SingleFramesShareTheBusButNotWithASegmentedReply)
     EXPECT_TRUE(shared) << "channels 1 and 2 overlap";
 }
 
-/* Three modules, two answering segmented: the channels take turns, so
- * the third asks about as often as they do, wherever the two stand in
- * channel order, and no segmented exchange shares the bus */
+/* Three modules, two answering segmented, one row each: wherever the two
+ * stand in channel order, they take turns, the Single Frame module goes
+ * at each segmented exchange's end, and no segmented exchange shares the
+ * bus */
 TEST(J2534HoldTest, ThreeModulesTwoSegmentedShareTheBus)
 {
     for (const uint32_t segmented : {0x3u, 0x5u, 0x6u}) {
@@ -278,13 +280,19 @@ TEST(J2534HoldTest, ThreeModulesTwoSegmentedShareTheBus)
             }
             learned[c] = true;
         }
-        const size_t most = std::max({n[0], n[1], n[2]});
-        for (uint32_t c = 0; c < 3; ++c) {
-            /* a turn each: about 2000 / 29 (13, 13 and 3 ms exchanges) */
-            EXPECT_GT(n[c], 50u) << "segmented " << segmented << ", " << c;
-            /* pins equal turns: 127/64/63 starves no one yet fails it */
-            EXPECT_GE(2 * n[c], most) << "segmented " << segmented << ", " << c;
-        }
+        const uint32_t sf = segmented == 0x3u ? 2 : segmented == 0x5u ? 1 : 0;
+        const uint32_t s1 = sf == 0 ? 1 : 0;
+        const uint32_t s2 = sf == 2 ? 1 : 2;
+        /* each segmented exchange (13 ms) with a Single Frame one (3 ms)
+         * beside it: about 2000 / 32 each, twice that for the third, 250
+         * in all, where equal turns give 211 */
+        EXPECT_GT(n[s1], 50u) << "segmented " << segmented;
+        EXPECT_GT(n[s2], 50u) << "segmented " << segmented;
+        EXPECT_LE(std::max(n[s1], n[s2]), std::min(n[s1], n[s2]) + 2)
+            << "segmented " << segmented;
+        EXPECT_GE(10 * n[sf], 16 * std::max(n[s1], n[s2]))
+            << "segmented " << segmented;
+        EXPECT_GE(n[0] + n[1] + n[2], 230u) << "segmented " << segmented;
     }
 }
 

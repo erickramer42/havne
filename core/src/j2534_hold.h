@@ -15,9 +15,19 @@
 //     request until no other channel has a request out, and while it
 //     waits no other channel starts one (a Single Frame asked first can
 //     land inside a segmented reply asked a moment later);
-//   - the channels a pass held go first in the next pass, taken in turn
-//     from the channel past the last one written, so two channels whose
-//     segmented exchanges keep coming never starve the others.
+//   - each pass takes first the channels whose last request was a Single
+//     Frame and that hold no chosen row, together; then the rest, the
+//     most overdue first: the one whose next (or chosen) row was last
+//     written longest ago (j2534_hold_age_us). A module with more rows so
+//     takes more turns and each signal is asked about as often;
+//   - a Single Frame channel whose next row, answered in one frame, is
+//     older than every chosen row goes ahead of them once more
+//     (j2534_hold_extra_turn), at most one such pass for each segmented
+//     write, so a big Single Frame module keeps up with the segmented
+//     ones. A chosen row so waits for the Single Frames in flight, one
+//     extra pass and each row older than its own once; a waiting row only
+//     grows older, so none starves. A scan's new rows, never asked, rank
+//     oldest and take turns ahead of the rest until each is asked once.
 //
 // A chosen request is due's own: the engine moved past it and left the
 // channel with nothing outstanding, so nothing changes in the engine
@@ -66,8 +76,12 @@
 
 struct j2534_hold {
     bool on = true;    /* ?hold= */
+    bool extra = false; /* a Single Frame channel went ahead of a chosen
+                           row since the last segmented write */
     uint32_t held = 0; /* a bit for each channel the last pass held */
-    uint32_t from = 0; /* past the channel last written: the held go from it */
+    uint32_t segmented = 0; /* a bit for each channel whose last write was
+                               expected segmented */
+    uint32_t from = 0; /* past the last segmented write: equal ages from it */
     int32_t chosen[ECUIO_MAX_CHANNELS]; /* due's request kept, or NONE */
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
@@ -161,39 +175,119 @@ inline bool j2534_hold_other_key(const ecuio_request_engine* e, uint32_t c,
     return false;
 }
 
-/* Whether a channel but c has a chosen request, or a key that can still
- * go, at now: what keeps c from starting a request */
-inline bool j2534_hold_other_chosen(const j2534_hold& h,
-                                    const ecuio_request_engine* e, uint32_t c,
-                                    int64_t now_us)
+/* Whether a channel but c has a chosen row */
+inline bool j2534_hold_other_row(const j2534_hold& h,
+                                 const ecuio_request_engine* e, uint32_t c)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         if (k != c && h.chosen[k] != ECUIO_ENGINE_NONE) {
             return true;
         }
     }
-    return j2534_hold_other_key(e, c, now_us);
+    return false;
 }
 
-/* The pass's order into order[] (e->chan_count entries): the channels the
- * last pass held, from h.from on around the channels, then the rest in
- * channel order (with two channels at most one is held, so the order is
- * channel order's but for it) */
-inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
-                             uint32_t* order)
+/* Whether a channel but c has a chosen request, or a key that can still
+ * go, at now: what keeps c from starting a request */
+inline bool j2534_hold_other_chosen(const j2534_hold& h,
+                                    const ecuio_request_engine* e, uint32_t c,
+                                    int64_t now_us)
 {
-    const uint32_t first = j2534_hold_applies(h, e) ? h.held : 0u;
+    return j2534_hold_other_row(h, e, c) || j2534_hold_other_key(e, c, now_us);
+}
+
+/* How long channel c's next request has waited at now: its chosen row's
+ * time since that row's last write; else its next fast row's (a slow
+ * row's when it has none: slow rows take their share of the channel's
+ * own turns, so they never rank it); with a one-shot to send, the older
+ * of that and the channel's last write, since the two take turns */
+inline int64_t j2534_hold_age_us(const j2534_hold& h,
+                                 const ecuio_request_engine* e, uint32_t c,
+                                 int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    int32_t r = h.chosen[c];
+    if (r == ECUIO_ENGINE_PACK) {
+        r = static_cast<int32_t>(ch.pack_rows[0]);
+    } else if (r == ECUIO_ENGINE_NONE) {
+        r = ecuio_engine_peek_of(e, c, false);
+        r = r >= 0 ? r : ecuio_engine_peek_of(e, c, true);
+        if (ecuio_engine_once_waiting(ch)) {
+            const int64_t row = r >= 0 ? e->asked_us[r] : ch.last_sent_us;
+            return now_us - (row < ch.last_sent_us ? row : ch.last_sent_us);
+        }
+    }
+    return now_us - (r >= 0 ? e->asked_us[r] : ch.last_sent_us);
+}
+
+/* Whether channel c may go ahead of the chosen rows at now: no Single
+ * Frame channel went ahead since the last segmented write, no key that
+ * can still go waits, c's last write was a Single Frame, and its next
+ * fast row was answered in one frame (a first ask's length is unknown)
+ * and is older than every chosen row. A segmented slow row or pack due
+ * then hands c is kept chosen, and goes ahead of the chosen rows only as
+ * the older (j2534_hold_order ranks it with them). So a chosen row waits
+ * for the Single Frames in flight, one extra pass and each row older
+ * than its own once, and the biggest Single Frame modules take the extra
+ * turns */
+inline bool j2534_hold_extra_turn(const j2534_hold& h,
+                                  const ecuio_request_engine* e, uint32_t c,
+                                  int64_t now_us)
+{
+    if (h.extra || ((h.segmented >> c) & 1u) != 0 ||
+        ecuio_engine_once_waiting(e->chans[c]) ||
+        j2534_hold_other_key(e, c, now_us)) {
+        return false;
+    }
+    const int32_t r = ecuio_engine_peek_of(e, c, false);
+    if (r < 0 || e->requests[r].reply_frames != 1) {
+        return false;
+    }
+    const int64_t age = now_us - e->asked_us[r];
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        if (k != c && h.chosen[k] != ECUIO_ENGINE_NONE &&
+            j2534_hold_age_us(h, e, k, now_us) >= age) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The pass's order at now into order[] (e->chan_count entries): the
+ * channels whose last write was a Single Frame and with no chosen row, in
+ * channel order, then the rest (a segmented last write or a chosen row),
+ * the oldest age first, equal ages from h.from on around the channels. A
+ * chosen row so goes ahead of another only as the older. With no
+ * segmented write it is channel order. */
+inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
+                             int64_t now_us, uint32_t* order)
+{
+    uint32_t seg = 0;
+    for (uint32_t c = 0; j2534_hold_applies(h, e) && c < e->chan_count; ++c) {
+        const bool chosen = h.chosen[c] != ECUIO_ENGINE_NONE;
+        seg |= ((h.segmented >> c) & 1u) != 0 || chosen ? 1u << c : 0u;
+    }
     uint32_t n = 0;
-    for (uint32_t i = 0; i < e->chan_count; ++i) {
-        const uint32_t c = (h.from + i) % e->chan_count;
-        if (((first >> c) & 1u) != 0) {
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (((seg >> c) & 1u) == 0) {
             order[n++] = c;
         }
     }
-    for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (((first >> c) & 1u) == 0) {
-            order[n++] = c;
+    const uint32_t first = n;
+    int64_t age[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t i = 0; i < e->chan_count; ++i) {
+        const uint32_t c = (h.from + i) % e->chan_count;
+        if (((seg >> c) & 1u) == 0) {
+            continue;
         }
+        const int64_t a = j2534_hold_age_us(h, e, c, now_us);
+        uint32_t k = n++;
+        for (; k > first && age[k - 1] < a; --k) {
+            order[k] = order[k - 1];
+            age[k] = age[k - 1];
+        }
+        order[k] = c;
+        age[k] = a;
     }
 }
 
@@ -225,12 +319,13 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
  * is out (and it isn't held); its chosen request once no other channel
  * has one on the bus or a key that can still go (a row the focus parked
  * meanwhile dropped); else its session request near S3; else, unless
- * another's segmented reply is due, another's chosen request waits or
- * another has a key that can still go (c is then held, a bit in
- * *held_now), due's request, kept chosen instead when its reply is
- * expected segmented while another channel has one on the bus and c isn't
- * silent. c's own key waits only for another's segmented reply, and one
- * past its window is settled lapsed first. NONE: nothing to write. */
+ * another's segmented reply is due, another's chosen request waits (unless
+ * c takes an extra turn ahead of it) or another has a key that can still
+ * go (c is then held, a bit in *held_now), due's request, kept chosen
+ * instead when its reply is expected segmented while another channel has
+ * one on the bus or a chosen row, and c isn't silent. c's own key waits
+ * only for another's segmented reply, and one past its window is settled
+ * lapsed first. NONE: nothing to write. */
 inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
                                uint32_t c, int64_t now_us, uint32_t* held_now)
 {
@@ -258,14 +353,16 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
     }
     if (j2534_hold_other_out(h, e, c, true) ||
         (!j2534_hold_key_waits(e, c, now_us) &&
-         j2534_hold_other_chosen(h, e, c, now_us))) {
+         j2534_hold_other_chosen(h, e, c, now_us) &&
+         !j2534_hold_extra_turn(h, e, c, now_us))) {
         *held_now |= 1u << c;
         return ECUIO_ENGINE_NONE;
     }
     const int32_t r = ecuio_engine_due(e, c, now_us);
     if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, c) ||
         !ecuio_engine_reply_segmented(e, c, r) ||
-        !j2534_hold_other_out(h, e, c, false)) {
+        !(j2534_hold_other_out(h, e, c, false) ||
+          j2534_hold_other_row(h, e, c))) {
         return r;
     }
     h.chosen[c] = r;
@@ -273,7 +370,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
     return ECUIO_ENGINE_NONE;
 }
 
-/* The pass's end: the channels it held go first in the next */
+/* The pass's end: the channels it held, which the next event leaves out */
 inline void j2534_hold_pass_end(j2534_hold& h, uint32_t held_now)
 {
     h.held = held_now;
@@ -321,16 +418,26 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         }
     }
     uint32_t order[ECUIO_MAX_CHANNELS];
-    j2534_hold_order(h, e, order);
+    j2534_hold_order(h, e, now_us, order);
     uint32_t held_now = 0;
+    bool ahead = false; /* a write went ahead of a chosen row */
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         const uint32_t c = order[k];
         const int32_t r = j2534_hold_next(h, e, c, now_us, &held_now);
-        if (r != ECUIO_ENGINE_NONE) {
-            write(c, r);
+        if (r == ECUIO_ENGINE_NONE) {
+            continue;
+        }
+        const bool segmented = ecuio_engine_reply_segmented(e, c, r);
+        ahead = ahead || (!segmented && j2534_hold_other_row(h, e, c));
+        write(c, r);
+        h.segmented = segmented ? h.segmented | 1u << c
+                                : h.segmented & ~(1u << c);
+        if (segmented) {
             h.from = (c + 1) % e->chan_count;
+            h.extra = false;
         }
     }
+    h.extra = h.extra || ahead;
     j2534_hold_pass_end(h, held_now);
 }
 

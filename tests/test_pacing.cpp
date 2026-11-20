@@ -686,8 +686,8 @@ TEST(PacingTest, TheHoldsPredictionForTwoModulesThroughTheVx)
  * segmented request waits out the other's Single Frame, so at most one
  * reply is lost (the first segmented ask's, its length not yet learned).
  * The second module is answered at least 4x as often as with ?hold=0,
- * and a held channel goes first in the next pass, so both are asked in
- * every second */
+ * and the Single Frame module goes first at each segmented exchange's
+ * end, so both are asked in every second */
 TEST(PacingTest, TheHoldTakesTurnsBetweenTwoModules)
 {
     const TwoDids profile;

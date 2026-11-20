@@ -687,3 +687,32 @@ TEST(RequestTableTest, ACheckAsksAParkedRequestOnceOutsideTheRotation)
         << "its only one dropped";
     EXPECT_FALSE(one->chans[0].check_due);
 }
+
+/* The peek names each class's next row and moves no cursor: due then
+ * hands out the class's row the peek named, and stamps it once sent */
+TEST(RequestTableTest, ThePeekNamesTheNextRowOfEachClass)
+{
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    for (const uint8_t pid : {uint8_t{0x0C}, uint8_t{0x05}, uint8_t{0x0D}}) {
+        const uint8_t q[2] = {0x01, pid};
+        ASSERT_EQ(ecuio_engine_add(&e, 0, q, 2),
+                  ecuio_engine_add_result::added);
+    }
+    ecuio_engine_classify(&e, [](uint8_t pid) { return pid != 0x05; });
+    int64_t now = kMs;
+    for (int i = 0; i < 9; ++i) {
+        const int32_t fast = ecuio_engine_peek_of(&e, 0, false);
+        const int32_t slow = ecuio_engine_peek_of(&e, 0, true);
+        ASSERT_EQ(ecuio_engine_peek_of(&e, 0, false), fast) << i;
+        ASSERT_EQ(slow, 1) << "the slow class's one row";
+        const int32_t r = ecuio_engine_due(&e, 0, now);
+        ASSERT_GE(r, 0) << i;
+        EXPECT_EQ(r, e.requests[r].slow != 0 ? slow : fast) << i;
+        ecuio_engine_sent(&e, 0, r, true, now);
+        EXPECT_EQ(e.asked_us[r], now) << i;
+        const uint8_t reply[4] = {0x41, e.requests[r].bytes[1], 0x2A, 0x2A};
+        (void)ecuio_engine_on_frame(&e, 0, reply, 4, now + kMs, nullptr);
+        now += ECUIO_ENGINE_GAP_US;
+    }
+}

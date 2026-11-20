@@ -148,8 +148,8 @@ add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
-    test_sim_car.cpp test_sim_timing.cpp test_scan_retry.cpp
-    test_security_access.cpp)
+    test_j2534_hold_order.cpp test_sim_car.cpp test_sim_timing.cpp
+    test_scan_retry.cpp test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
