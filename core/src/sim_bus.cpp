@@ -6,9 +6,10 @@
 // vcan interface hearing 0x7DF and each node's request ID, requests
 // through each node's own ISO-TP receiver, each answered (sim.cpp's
 // answer) and sent through that node's ISO-TP sender on its reply ID,
-// broken as the faults say. One worker thread ticks the ECU's clock (and
-// the mock's drive cycle) every 50 ms, reads, answers and sends; it
-// allocates nothing.
+// broken as the faults say, at the pace the timing says (sim_timing.h),
+// and with bus= one frame at a time across every node. One worker
+// thread ticks the ECU's clock (and the mock's drive cycle) every 50 ms,
+// reads, answers and sends; it allocates nothing.
 
 #include "sim_impl.h"
 
@@ -27,6 +28,7 @@
 #include <linux/can.h>
 #include <linux/can/raw.h>
 #include <poll.h>
+#include <time.h>
 #include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -66,18 +68,45 @@ bool put(int fd, const isotp_can& f)
     return false;
 }
 
+/* One frame out, holding the bus for its time from when it went (bus=):
+ * the worker's own work since its wake doesn't shorten a frame */
+bool send(ecuio_sim* s, const isotp_can& f)
+{
+    if (!put(s->fd, f)) {
+        return false;
+    }
+    if (s->bus_frame_us != 0) {
+        const int64_t went = now_us();
+        s->bus_free_us =
+            (s->bus_free_us > went ? s->bus_free_us : went) + s->bus_frame_us;
+    }
+    return true;
+}
+
+/* Whether another frame holds the bus at now (bus=) */
+bool bus_held(const ecuio_sim* s, int64_t now)
+{
+    return s->bus_frame_us != 0 && now < s->bus_free_us;
+}
+
 /* Starts n's reply at now: its Single Frame (the send is over) or its
- * First Frame. False when the bus failed. */
+ * First Frame; put off while the bus is held. False when the bus
+ * failed. */
 bool start(ecuio_sim* s, sim_node& n, int64_t now)
 {
     sim_sending& r = n.r;
     isotp_can f;
+    if (bus_held(s, now)) {
+        r.waiting = true;
+        r.start_us = s->bus_free_us;
+        return true;
+    }
     r.waiting = false;
     if (!isotp_tx_start(n.tx, n.reply_id, r.data, static_cast<uint16_t>(r.len),
                         now, &f)) {
         return true; /* a send under way: dropped, as a busy ECU would */
     }
-    if (!put(s->fd, f)) {
+    if (!send(s, f)) {
         return false;
     }
     if (n.tx.state == isotp_tx_state::idle) {
@@ -100,6 +129,11 @@ bool pump(ecuio_sim* s, sim_node& n, int64_t now)
             r.held = true;
             n.tx.due_us = now + ECUIO_SIM_STALLED_US;
         }
+        if (n.tx.state == isotp_tx_state::sending && now >= n.tx.due_us &&
+            bus_held(s, now)) {
+            n.tx.due_us = s->bus_free_us;
+            return true;
+        }
         isotp_can f;
         const uint8_t seq = n.tx.seq;
         switch (isotp_tx_next(n.tx, now, &f)) {
@@ -108,7 +142,7 @@ bool pump(ecuio_sim* s, sim_node& n, int64_t now)
                 r.fate == ecuio_sim_fate::bad_sequence) {
                 f.data[0] = static_cast<uint8_t>(0x20 | ((seq + 1) & 0x0F));
             }
-            if (!put(s->fd, f)) {
+            if (!send(s, f)) {
                 return false;
             }
             if (n.tx.state == isotp_tx_state::idle) {
@@ -147,15 +181,41 @@ void yield(ecuio_sim* s)
     }
 }
 
+/* A request to n while its reply waits (busy=21): 7F <service> 21 as a
+ * Single Frame; while its frames are under way, nothing, since a Single
+ * Frame on its reply ID would cut its own message. False when the bus
+ * failed. */
+bool refuse_busy(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
+{
+    if (n.timing.busy != ecuio_sim_timing::busy_mode::nrc21 || n.r.active ||
+        m.len == 0) {
+        return true;
+    }
+    const uint8_t refusal[3] = {0x7F, m.data[0], 0x21};
+    isotp_can f;
+    if (!isotp_tx_start(n.tx, n.reply_id, refusal, 3, now, &f)) {
+        return true;
+    }
+    if (!send(s, f)) {
+        return false;
+    }
+    s->replies.fetch_add(1, std::memory_order_relaxed);
+    s->refused.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
 /* A whole request to n: answered, its fate decided, its send started or
  * put off. False when the bus failed. */
 bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
 {
     sim_sending& r = n.r;
     s->requests.fetch_add(1, std::memory_order_relaxed);
-    if (yielded(s) || r.active || r.waiting) {
-        /* silent, or busy with a reply: a tester sends one at a time */
+    if (yielded(s)) {
         return true;
+    }
+    if (r.active || r.waiting) {
+        /* busy with a reply: a tester sends one at a time */
+        return refuse_busy(s, n, m, now);
     }
     const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
     r.len = answer(s, n, m.data, m.len, functional, r.data);
@@ -177,8 +237,7 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
          * whole */
         const uint8_t wait[3] = {0x7F, m.data[0], 0x78};
         isotp_can f;
-        if (isotp_tx_start(n.tx, n.reply_id, wait, 3, now, &f) &&
-            !put(s->fd, f)) {
+        if (isotp_tx_start(n.tx, n.reply_id, wait, 3, now, &f) && !send(s, f)) {
             return false;
         }
         r.fate = ecuio_sim_fate::intact;
@@ -210,7 +269,7 @@ bool feed(ecuio_sim* s, sim_node& n, const isotp_can& f, int64_t now)
         if (yielded(s)) {
             break; /* silent: no Flow Control either */
         }
-        if (!put(s->fd, isotp_flow_control(n.reply_id))) {
+        if (!send(s, isotp_flow_control(n.reply_id))) {
             return false;
         }
         break;
@@ -318,7 +377,11 @@ void run(ecuio_sim* s)
         }
         const int64_t wait_us = due > now ? due - now : 0;
         struct pollfd p[2] = {{s->fd, POLLIN, 0}, {s->stop_fd, POLLIN, 0}};
-        const int got = poll(p, 2, static_cast<int>((wait_us + 999) / 1000));
+        /* To the microsecond: a frame's time on the bus is a fraction of
+         * a millisecond */
+        const timespec wait = {static_cast<time_t>(wait_us / 1000000),
+                               static_cast<long>(wait_us % 1000000) * 1000};
+        const int got = ppoll(p, 2, &wait, nullptr);
         if (got < 0 && errno != EINTR) {
             break;
         }

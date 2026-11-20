@@ -562,6 +562,7 @@ def main(argv):
                       "&cf=5000,800@7E9&seed=7",
         "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
         "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
+        "uri-busy-bus": "mock://sim?modules=2&busy=ignore,21@7E9&bus=500",
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
     return 0

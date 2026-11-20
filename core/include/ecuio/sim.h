@@ -27,7 +27,8 @@ extern "C" {
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
- *   fc=<us>[@<reply ID>][,...], cf=<us>[@<reply ID>][,...] and seed=<n>
+ *   fc=<us>[@<reply ID>][,...], cf=<us>[@<reply ID>][,...], seed=<n>,
+ *   busy=ignore|21[@<reply ID>][,...] and bus=<kbit/s>
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
  * J1979 PID. modules=2: a second module too, on 0x7E1 answering as
@@ -76,6 +77,13 @@ extern "C" {
  * count together.
  * With none of them, a reply starts at once and its frames go at the
  * tester's pace.
+ * busy: what a module does with a request that comes while its reply
+ * waits or is under way: ignore it, or answer 7F <service> 21 (while its
+ * frames are under way on a bus, it ignores it). Without it a module on
+ * a bus ignores it and an unbound one answers it as any other. bus: the
+ * bus's rate (1-1000 kbit/s), each frame 111 bits (stuffing left out): a
+ * reply's frames wait for it, while the sim's Flow Control, 7F 78 and
+ * 7F 21 go at once and hold it after; a bus's sim only.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -206,7 +214,8 @@ void ecuio_sim_destroy(ecuio_sim_t* sim);
  *   after the NULL checks.
  * - The URI, its profile and its recording as ecuio_sim_create's, in
  *   that order, on every platform: BAD_URI, UNKNOWN_PROFILE,
- *   INVALID_ARGUMENT, LOAD_FAILED.
+ *   INVALID_ARGUMENT, LOAD_FAILED. bus= is BAD_URI, with the URI: an
+ *   unbound sim's caller times its frames.
  * - ecuio_sim_get_stats, ecuio_sim_set_value and ecuio_sim_destroy work
  *   on it as on a sim on a bus; its flags stay 0.
  */
