@@ -2,7 +2,7 @@
 //             J2534 worker's hold, pure and header-only: no clock, no I/O
 //             and no platform headers, so it builds and is tested on every
 //             platform and the pacing bench calls it as the worker does
-// Testing: UNIT: J2534HoldTest (test_obd2, tests/test_j2534_hold.cpp)
+// Testing: UNIT: J2534HoldTest (test_obd2, tests/test_j2534_hold*.cpp)
 //
 // Known Issue #42: through the OBDX Pro VX a module's Single Frame reply
 // is lost while another module's segmented reply comes in, though the
@@ -15,8 +15,9 @@
 //     request until no other channel has a request out, and while it
 //     waits no other channel starts one (a Single Frame asked first can
 //     land inside a segmented reply asked a moment later);
-//   - the channels a pass held go first in the next pass, so a channel
-//     whose segmented exchanges keep coming never starves the rest.
+//   - the channels a pass held go first in the next pass, taken in turn
+//     from the channel past the last one written, so two channels whose
+//     segmented exchanges keep coming never starve the others.
 //
 // A chosen request is due's own: the engine moved past it and left the
 // channel with nothing outstanding, so nothing changes in the engine
@@ -40,12 +41,15 @@
 //
 // A key (request_talk.h) has a window to go in, so it goes ahead of every
 // other channel's next request: while one is offered with its window
-// open no other channel starts a request, a chosen one waits on too, and
-// the key itself waits only for a segmented exchange already on the bus
-// (its Single Frame reply could be lost beside it), so for one exchange at
-// most. A key whose window passes while it waits is settled unsent at
-// that pass and never written. The window is over before the session
-// gate opens, so no key is offered when a session request goes through.
+// open and its channel's floor before the window's end (?gap= can put it
+// past) no other channel starts a request but a key of its own or its
+// session request near S3 (both Single Frames), a chosen one waits on
+// too, and the key itself waits only for a segmented exchange already on
+// the bus (its Single Frame reply could be lost beside it), so for one
+// exchange at most. A key whose window passes while it waits is settled
+// unsent at that pass and never written. The window is over before its
+// own channel's session gate opens, so no key is offered on a channel
+// whose session request goes through.
 //
 // A hold's chosen rows are its engine's table rows, so a hold lives no
 // longer than the ecuio_engine_init it follows. The hold applies with two
@@ -63,6 +67,7 @@
 struct j2534_hold {
     bool on = true;    /* ?hold= */
     uint32_t held = 0; /* a bit for each channel the last pass held */
+    uint32_t from = 0; /* past the channel last written: the held go from it */
     int32_t chosen[ECUIO_MAX_CHANNELS]; /* due's request kept, or NONE */
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
@@ -135,20 +140,29 @@ inline bool j2534_hold_key_waits(const ecuio_request_engine* e, uint32_t k,
            ecuio_key_window_open(ch.key, now_us);
 }
 
-/* Whether a channel but c has a key waiting at now */
+/* Whether channel k's key waits at now and its floor comes before its
+ * window's end: one that can't go in its window holds no one */
+inline bool j2534_hold_key_can_go(const ecuio_request_engine* e, uint32_t k,
+                                  int64_t now_us)
+{
+    return j2534_hold_key_waits(e, k, now_us) &&
+           e->chans[k].next_send_us < e->chans[k].key.until_us;
+}
+
+/* Whether a channel but c has a key waiting at now that can still go */
 inline bool j2534_hold_other_key(const ecuio_request_engine* e, uint32_t c,
                                  int64_t now_us)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
-        if (k != c && j2534_hold_key_waits(e, k, now_us)) {
+        if (k != c && j2534_hold_key_can_go(e, k, now_us)) {
             return true;
         }
     }
     return false;
 }
 
-/* Whether a channel but c has a chosen request or a key waiting at now:
- * what keeps c from starting a request */
+/* Whether a channel but c has a chosen request, or a key that can still
+ * go, at now: what keeps c from starting a request */
 inline bool j2534_hold_other_chosen(const j2534_hold& h,
                                     const ecuio_request_engine* e, uint32_t c,
                                     int64_t now_us)
@@ -162,17 +176,23 @@ inline bool j2534_hold_other_chosen(const j2534_hold& h,
 }
 
 /* The pass's order into order[] (e->chan_count entries): the channels the
- * last pass held, then the rest, each in channel order */
+ * last pass held, from h.from on around the channels, then the rest in
+ * channel order (with two channels at most one is held, so the order is
+ * channel order's but for it) */
 inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
                              uint32_t* order)
 {
     const uint32_t first = j2534_hold_applies(h, e) ? h.held : 0u;
     uint32_t n = 0;
-    for (uint32_t pass = 0; pass < 2; ++pass) {
-        for (uint32_t c = 0; c < e->chan_count; ++c) {
-            if (((first >> c) & 1u) == (pass == 0 ? 1u : 0u)) {
-                order[n++] = c;
-            }
+    for (uint32_t i = 0; i < e->chan_count; ++i) {
+        const uint32_t c = (h.from + i) % e->chan_count;
+        if (((first >> c) & 1u) != 0) {
+            order[n++] = c;
+        }
+    }
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (((first >> c) & 1u) == 0) {
+            order[n++] = c;
         }
     }
 }
@@ -203,14 +223,14 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
 
 /* What channel c writes this pass at now: nothing while its own request
  * is out (and it isn't held); its chosen request once no other channel
- * has one on the bus and no other's key waits (a row the focus parked
+ * has one on the bus or a key that can still go (a row the focus parked
  * meanwhile dropped); else its session request near S3; else, unless
- * another's segmented reply is due or another's chosen request or key
- * waits (c is then held, a bit in *held_now), due's request, kept chosen
- * instead when its reply is expected segmented while another channel has
- * one on the bus and c isn't silent. c's own key waits only for another's
- * segmented reply, and one past its window is settled unsent first.
- * NONE: nothing to write. */
+ * another's segmented reply is due, another's chosen request waits or
+ * another has a key that can still go (c is then held, a bit in
+ * *held_now), due's request, kept chosen instead when its reply is
+ * expected segmented while another channel has one on the bus and c isn't
+ * silent. c's own key waits only for another's segmented reply, and one
+ * past its window is settled unsent first. NONE: nothing to write. */
 inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
                                uint32_t c, int64_t now_us, uint32_t* held_now)
 {
@@ -308,6 +328,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         const int32_t r = j2534_hold_next(h, e, c, now_us, &held_now);
         if (r != ECUIO_ENGINE_NONE) {
             write(c, r);
+            h.from = (c + 1) % e->chan_count;
         }
     }
     j2534_hold_pass_end(h, held_now);
@@ -316,8 +337,8 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
 /* The engine's next event, with the held channels and those whose chosen
  * request waits left out while the hold applies: they wait on another
  * channel's reply, which is in the figure. The whole figure when nothing
- * else is left. A held channel's waiting key keeps one event of its own,
- * its window's end, where the pass settles it. */
+ * else is left. A waiting key keeps one event of its own, its window's
+ * end, where the pass settles it, held or behind its own floor. */
 inline int64_t j2534_hold_next_event_us(const j2534_hold& h,
                                         const ecuio_request_engine* e,
                                         int64_t now_us)
@@ -334,7 +355,7 @@ inline int64_t j2534_hold_next_event_us(const j2534_hold& h,
         next = ecuio_engine_next_event_us(e, now_us);
     }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (((h.held >> c) & 1u) != 0 && j2534_hold_key_waits(e, c, now_us) &&
+        if (j2534_hold_key_waits(e, c, now_us) &&
             e->chans[c].key.until_us - now_us < next) {
             next = e->chans[c].key.until_us - now_us;
         }

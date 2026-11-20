@@ -5,6 +5,8 @@
 
 #include "j2534_hold_support.h"
 
+#include <algorithm>
+
 using namespace j2534_hold_test;
 
 namespace {
@@ -248,6 +250,42 @@ TEST(J2534HoldTest, SingleFramesShareTheBusButNotWithASegmentedReply)
         }
     }
     EXPECT_TRUE(shared) << "channels 1 and 2 overlap";
+}
+
+/* Three modules, two answering segmented: the channels take turns, so
+ * the third asks about as often as they do, wherever the two stand in
+ * channel order, and no segmented exchange shares the bus */
+TEST(J2534HoldTest, ThreeModulesTwoSegmentedShareTheBus)
+{
+    for (const uint32_t segmented : {0x3u, 0x5u, 0x6u}) {
+        Bus b;
+        ASSERT_NO_FATAL_FAILURE(two_modules(b, 3));
+        b.reply_of = [segmented](uint32_t c, const ecuio_request& q) {
+            Bytes out = {0x62, q.bytes[1], q.bytes[2]};
+            out.insert(out.end(), ((segmented >> c) & 1u) != 0 ? 17u : 2u,
+                       uint8_t{0x2A});
+            return out;
+        };
+        b.until(2000 * kMs);
+        size_t n[3] = {};
+        bool learned[3] = {};
+        for (size_t i = 0; i < b.exchanges.size(); ++i) {
+            const uint32_t c = b.exchanges[i].c;
+            ++n[c];
+            if (((segmented >> c) & 1u) != 0 && learned[c]) {
+                EXPECT_FALSE(overlaps_another(b.exchanges, i))
+                    << "segmented " << segmented << ", exchange " << i;
+            }
+            learned[c] = true;
+        }
+        const size_t most = std::max({n[0], n[1], n[2]});
+        for (uint32_t c = 0; c < 3; ++c) {
+            /* a turn each: about 2000 / 29 (13, 13 and 3 ms exchanges) */
+            EXPECT_GT(n[c], 50u) << "segmented " << segmented << ", " << c;
+            /* pins equal turns: 127/64/63 starves no one yet fails it */
+            EXPECT_GE(2 * n[c], most) << "segmented " << segmented << ", " << c;
+        }
+    }
 }
 
 /* Channel 0 asks three rows, one long, with modules answering in 6 ms

@@ -188,6 +188,44 @@ TEST(J2534HoldTest, AKeyWaitsOnlyForTheExchangeInFlight)
         << "the others ask on after the key's reply";
 }
 
+/* Two keys waiting at once don't wait on each other: offered on channels
+ * 0 and 1 while channel 2's segmented exchange is out, both are written
+ * in the pass at that exchange's end, and both are answered */
+TEST(J2534HoldTest, TwoKeysOnTwoChannelsGoTogether)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(key_modules(b, 3, 1u << 2));
+    b.until(300 * kMs);
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 0, 500));
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 1, 500));
+    for (int i = 0; i < 800 && !j2534_hold_on_bus(&b.e, 2); ++i) {
+        b.pass();
+    }
+    ASSERT_TRUE(j2534_hold_on_bus(&b.e, 2));
+    const size_t flight = out_on(b, 2);
+    ASSERT_LT(flight, b.exchanges.size());
+    ASSERT_TRUE(b.exchanges[flight].segmented);
+    ASSERT_EQ(offer_key(b, 0), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer_key(b, 1), ecuio_talk_offer::taken);
+    const size_t from = b.exchanges.size();
+    ASSERT_TRUE(next_write(b));
+    ASSERT_EQ(b.exchanges.size(), from + 2) << "both in one pass";
+    for (size_t i = from; i < from + 2; ++i) {
+        EXPECT_EQ(b.exchanges[i].bytes, kKeyEcho) << i;
+        EXPECT_EQ(b.exchanges[i].sent_us, b.exchanges[from].sent_us) << i;
+    }
+    EXPECT_NE(b.exchanges[from].c, b.exchanges[from + 1].c);
+    EXPECT_GE(b.exchanges[from].sent_us, b.exchanges[flight].ended_us);
+    EXPECT_LE(b.exchanges[from].sent_us - b.exchanges[flight].ended_us,
+              kStepUs)
+        << "at that exchange's end";
+    for (const uint32_t c : {0u, 1u}) {
+        ecuio_talk_result r;
+        ASSERT_NO_FATAL_FAILURE(talk_ended(b, c, &r));
+        EXPECT_EQ(r.end, ecuio_talk_end::answered) << c;
+    }
+}
+
 /* While a key waits no other channel starts a request: one due in the
  * same pass, ahead of the key's channel in the pass's order, would put a
  * segmented reply on the bus for the key to wait out */
@@ -256,6 +294,75 @@ TEST(J2534HoldTest, AKeyPastItsWindowHoldsNoOne)
     EXPECT_NE(j2534_hold_next(b.hold, &b.e, 0, until, &held), ECUIO_ENGINE_NONE)
         << "past it channel 0 asks";
     EXPECT_EQ(held, 0u);
+    /* The engine is left mid-request (channel 0's due request taken and
+     * never sent): nothing may follow these calls */
+}
+
+/* A key whose channel's floor (?gap=) falls past its window can never
+ * go: it holds no one, so channel 0 asks at its own floor inside the
+ * window, and the window's end is the next event, where the key is
+ * settled unsent, ahead of the key's floor */
+TEST(J2534HoldTest, AKeyThatCantGoInItsWindowHoldsNoOne)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(key_modules(b, 2, 1u << 0));
+    /* Channel 0's 13 ms segmented exchanges hold channel 1 that long, so
+     * channel 1 asks 13 ms behind it, each every 100 ms */
+    b.e.gap_us = 100 * kMs;
+    b.until(500 * kMs);
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 1, 90));
+    const int64_t until = b.e.chans[1].key.until_us;
+    ASSERT_GE(b.e.chans[1].next_send_us, until) << "the key's floor past it";
+    ASSERT_GT(b.e.chans[0].next_send_us, b.now);
+    ASSERT_LT(b.e.chans[0].next_send_us, until) << "channel 0 due inside it";
+    const int64_t floor0 = b.e.chans[0].next_send_us;
+    ASSERT_EQ(offer_key(b, 1), ecuio_talk_offer::taken);
+    const size_t from = b.exchanges.size();
+    ASSERT_TRUE(next_write(b));
+    EXPECT_EQ(b.exchanges[from].c, 0u);
+    EXPECT_LE(b.exchanges[from].sent_us - floor0, kStepUs)
+        << "at channel 0's floor, not held for the key";
+    EXPECT_EQ(j2534_hold_next_event_us(b.hold, &b.e, b.now), until - b.now)
+        << "the window's end, ahead of the key's floor";
+    while (b.now < until) {
+        b.pass();
+    }
+    ecuio_talk_result r;
+    EXPECT_FALSE(ecuio_engine_talk_take(b.e.chans[1].talk, &r));
+    b.pass();
+    ASSERT_TRUE(ecuio_engine_talk_take(b.e.chans[1].talk, &r))
+        << "settled at the window's end";
+    EXPECT_EQ(r.end, ecuio_talk_end::unsent);
+    b.until(b.now + 300 * kMs);
+    for (size_t i = from; i < b.exchanges.size(); ++i) {
+        EXPECT_NE(b.exchanges[i].bytes, kKeyEcho) << "request " << i;
+    }
+}
+
+/* A key that can't go in its window, with nothing on the bus to hold its
+ * channel: the window's end is still the next event, ahead of both
+ * channels' floors, so the worker wakes to settle it there */
+TEST(J2534HoldTest, AKeyThatCantGoIsSettledAtItsWindowsEnd)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(key_modules(b, 2, 0));
+    b.e.gap_us = 100 * kMs; /* both channels ask together, every 100 ms */
+    b.until(500 * kMs);
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 1, 90));
+    const int64_t until = b.e.chans[1].key.until_us;
+    ASSERT_GE(b.e.chans[1].next_send_us, until) << "the key's floor past it";
+    ASSERT_GE(b.e.chans[0].next_send_us, until) << "channel 0's too";
+    ASSERT_EQ(offer_key(b, 1), ecuio_talk_offer::taken);
+    b.pass();
+    ASSERT_EQ(b.hold.held, 0u) << "nothing on the bus holds the key's channel";
+    EXPECT_EQ(j2534_hold_next_event_us(b.hold, &b.e, b.now), until - b.now);
+    while (b.now < until) {
+        b.pass();
+    }
+    b.pass();
+    ecuio_talk_result r;
+    ASSERT_TRUE(ecuio_engine_talk_take(b.e.chans[1].talk, &r));
+    EXPECT_EQ(r.end, ecuio_talk_end::unsent);
 }
 
 /* A key held behind a segmented exchange past its window is settled
