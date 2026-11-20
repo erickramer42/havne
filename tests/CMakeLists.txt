@@ -222,7 +222,9 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
 # that ECU (ADR-0040, SocketCanRequestTest), and against the test car's
 # recording as the ECU, its replies broken at the ISO-TP level
-# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
+# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest); it is in
+# parts by theme (test_vcan_requests_*.cpp, helpers in
+# test_vcan_requests_support.h).
 # test_vcan_isotp.cpp: core's ISO-TP against the kernel's
 # (IsoTpConformanceTest).
 # test_vcan_talk.cpp: a request longer than a frame through a requesting
@@ -235,7 +237,9 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # one at a time while the rest of the suite runs beside them.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
-                   test_vcan_requests.cpp test_vcan_isotp.cpp
+                   test_vcan_requests.cpp test_vcan_requests_focus.cpp
+                   test_vcan_requests_close.cpp
+                   test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
                    test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
