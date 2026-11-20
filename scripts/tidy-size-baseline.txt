@@ -118,7 +118,7 @@ core/src/signals.cpp	ecuio_decode_signal
 core/src/signals.cpp	ecuio_validate_signal
 core/src/sim_ecu.h	ecuio_sim_answer
 core/src/sim_ecu.h	pid_data
-core/src/socketcan_wire.h	socketcan_send_refusal
+core/src/socketcan_link.h	socketcan_send_refusal
 core/src/uds_generic.cpp	ecuio_uds_build
 surrogate/surrogate_main.cpp	handle_op_read
 surrogate/surrogate_main.cpp	wmain
