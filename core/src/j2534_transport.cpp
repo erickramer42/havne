@@ -45,7 +45,7 @@
 extern "C" const char* const ecuio_j2534_query_keys[] = {
     "baud",     "flags",    "filter",       "txid",       "poll", "probe",
     "identify", "diagnose", "pack",         "scan",       "gap",  "profile",
-    "did",      "session",  "keepalive_ms", "packframes", nullptr};
+    "did",      "session",  "keepalive_ms", "packframes", "hold", nullptr};
 
 #ifdef _WIN32
 
@@ -69,6 +69,7 @@ using namespace ecuio_j2534;
 struct j2534_uri_params {
     unsigned long baud = 0;
     unsigned long flags = 0;
+    bool hold = true;
     request_params req;
 };
 
@@ -97,6 +98,8 @@ void resolve_channels(ecuio_j2534_transport* t, const ecuio_signal_set_t* set,
  *   - lowercase keys only:
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
+ *       hold   0 or 1: the hold for Known Issue #42 (j2534_hold.h), on
+ *              by default
  *       the request keys (ecuio_request_param lists them); ?filter='s
  *              channel registers a FLOW_CONTROL filter; without ?gap=
  *              the floor is J2534_GAP_US
@@ -126,6 +129,12 @@ ecuio_status_t parse_query(const ecuio_uri_query* query, j2534_uri_params* p)
                 wanted = "a decimal or 0x-hex number";
             } else {
                 p->flags = v;
+            }
+        } else if (q.is("hold")) {
+            if (q.val_len != 1 || (q.val[0] != '0' && q.val[0] != '1')) {
+                wanted = "0 or 1";
+            } else {
+                p->hold = q.val[0] == '1';
             }
         } else {
             /* the request keys; profile and did are core's, read and
@@ -410,6 +419,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     st = ecuio_build_requests(session, set, params.req, rx_ids, tx_ids,
                               t->chan_count, &t->engine, &t->probe,
                               &t->identify);
+    t->hold = params.hold;
     if (st != ECUIO_OK) {
         return st;
     }

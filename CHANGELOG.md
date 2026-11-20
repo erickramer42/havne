@@ -28,6 +28,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - The Dashboard says when a new gauge's range is a guess (a signal with no range of its own): its panel shows "Range guessed: set From and To." until you set From or To.
 - A replay's log starts with the profile the recording was made under, and says when the recording holds no signal values.
 - Windows builds are reproducible: building a release commit again gives byte-identical `havne.exe`, `havne-cli.exe`, `ecuio.dll` and surrogates, and the same release zip (the symbols zip differs). A manual CI workflow, `repro-windows.yml`, checks it.
+- **The simulated ECU can answer at a car's pace:** `delay=<p50>:<p99>` draws each reply's time to its first frame from a log-normal through its median and 99th percentile (in microseconds), `fc=` and `cf=` set when its Consecutive Frames go, and `seed=` repeats a run; each can be aimed at one module (`@<reply ID>`). With none of them it answers as before. `havne-cli sim --elm327` sends a reply's frames at the sim's `fc=` and `cf=`.
+- `packframes=` keeps each packed Service 01 request's reply within that many CAN frames (`packframes=1`: one frame), for an adapter that is slow after a reply of several frames, such as the OBDX Pro VX in ELM mode.
+- **The simulated ECU's faults can be aimed at one module** (`faults=late:3@7EA`), and each module counts its own: a profile's modules no longer share one count.
+- **A second example plugin, `example-car`,** is a whole made-up car of 18 modules that `plugins check` reads with no car.
+- **C API:** `ecuio_sim_reply_t` gains `fc_us` and `cf_us` in its reserved words (size and other offsets unchanged). **Python:** `Sim.ask`'s replies carry them.
 
 ### Changed
 

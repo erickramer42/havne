@@ -134,7 +134,7 @@ SettingsKit {
         logSpy.clear()
         const show = find(page, "errorShowLog")
         verify(!show.visible, "no refusal, no Show log")
-        page.requestConnect("mock://demo?profile=no-such-profile")
+        page.connectFromPart.requestConnect("mock://demo?profile=no-such-profile")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "the refusal")
         verify(show.visible, "Show log beside it")
         tap(show)
@@ -150,13 +150,13 @@ SettingsKit {
         page.canInterfaces = [{ name: "can0", kind: "can", up: true }]
         page.bluetoothAdapters = [{ name: "", address: "00:11:22:33:44:55", kind: "bt" },
                                   { name: "Scope", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }]
-        compare(page.connectAdapters.map(a => a.uri), page.devices.map(d => d.base))
-        compare(page.connectAdapters.map(a => a.uri),
+        compare(page.connectFromPart.connectAdapters.map(a => a.uri), page.devices.map(d => d.base))
+        compare(page.connectFromPart.connectAdapters.map(a => a.uri),
                 ["j2534://Vendor X", "elm327://COM5", "socketcan://can0",
                  "elm327://bt:00:11:22:33:44:55", "elm327://ble:AA:BB:CC:DD:EE:FF"])
-        compare(page.connectAdapters.map(a => a.title),
+        compare(page.connectFromPart.connectAdapters.map(a => a.title),
                 ["Vendor X  (x64)", "COM5", "can0", "00:11:22:33:44:55", "Scope"])
-        compare(page.connectAdapters.map(a => a.kind),
+        compare(page.connectFromPart.connectAdapters.map(a => a.kind),
                 ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
     }
 
@@ -169,7 +169,7 @@ SettingsKit {
                                           { target: Bridge, signalName: "logMessage" })
         // the relay button, with the relay refusing what the field holds
         find(page, "relayButton").clicked()
-        const words = page.errorLabel.text
+        const words = page.connectPart.errorLabel.text
         verify(words !== "", "the relay's own words")
         compare(spy.count, 1, "one line logged")
         compare(spy.signalArguments[0][0], "Relay: " + words)

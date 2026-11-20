@@ -322,13 +322,17 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
  * window's end); 0 when something is due now, INT64_MAX when nothing
  * is. A channel whose window is open with nothing to send after it
  * reports the window's end too: a driver counts quiet reads only at
- * INT64_MAX, and a link judged silent would end the window. */
+ * INT64_MAX, and a link judged silent would end the window. The
+ * channels with a bit in skip are left out. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
-                                          int64_t now_us)
+                                          int64_t now_us, uint32_t skip = 0)
 {
     int64_t next = INT64_MAX;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
+        if (((skip >> c) & 1u) != 0) {
+            continue;
+        }
         const bool window = ecuio_key_window_open(ch.key, now_us);
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&

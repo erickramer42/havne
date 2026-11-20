@@ -88,7 +88,7 @@ DashEditKit {
 
     // Add: a kind with its still preview, then a signal of the session's;
     // the cell stores the signal's decoded unit and its default range
-    // (DashboardBook.defaultRange) in any unit system, with its
+    // (DashboardEdit.defaultRange) in any unit system, with its
     // counterpart's ref
     function test_addTakesTheDecodedUnitAndRange_data() {
         return [{ tag: "metric", units: 0, from: "0", to: "150" },
@@ -210,7 +210,7 @@ DashEditKit {
         cell = addGauge(page, "shift-light", "speed")
         const speed = Bridge.profileSignals("mock://demo").find(
             r => r.ref === Bridge.gaugeSignals["speed"][0])
-        const range = DashboardBook.defaultRange(speed.decodedUnit, speed.decodedLow, speed.decodedHigh)
+        const range = DashboardEdit.defaultRange(speed.decodedUnit, speed.decodedLow, speed.decodedHigh)
         compare([cell.options.from, cell.options.to], [range.from, range.to],
                 "another signal keeps its range")
     }

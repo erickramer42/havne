@@ -1672,6 +1672,18 @@ don't say:
       `rx_id`, `tx_id`, `id[32]`, `flags`, `reserved[4]`), so a front end
       names a module by the manifest's id and a later field needs no new
       getter.
+    - **The service and level getters fill sized structs too:**
+      `ecuio_plugin_service_t` (32 bytes: `struct_size`, `sid`,
+      `sub_count`, `subs[14]`, `flags`, `reserved[2]`) and
+      `ecuio_plugin_security_level_t` (40 bytes: `struct_size`, `rx_id`,
+      `level`, `seed_bytes`, `key_bytes`, `reserved0`, `delay_ms`,
+      `key_window_ms`, `flags`, `reserved[4]`), so a service that
+      outgrows 14 sub-functions or a level that gains a field needs no
+      new getter. Each getter builds a fresh struct field by field, so a
+      field the loader keeps beside its own data can't reach a caller
+      unasked. `havne-cli`'s conversation line names a security level's
+      ECU by its manifest id (`"ecu": "pcm"`), which joins
+      `security[].ecu` to `ecus[].id`.
     - The module is checked at load (its SHA-256, then its shape by
       `check_module`), not first at connect; instantiating stays attach's.
     - A packed binary file is `{"kind": "wasm", "base64": ...}`: RFC 4648,

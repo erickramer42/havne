@@ -376,7 +376,7 @@ SettingsKit {
         const page = createPage()
         const field = find(page, "uriField")
         field.text = "mock://other"
-        page.connectFromList("mock://demo")
+        page.connectFromPart.connectFromList("mock://demo")
         compare(field.text, "mock://demo", "before the connect answers")
         verify(Bridge.connecting)
         tryVerify(() => Bridge.connected, 5000, "connects")
@@ -675,27 +675,27 @@ SettingsKit {
     // field's URI, or the chosen profile alone when no URI is typed
     function test_theOfflineUriFollowsTheFieldAndTheChoice() {
         const page = createPage()
-        page.uriField.text = ""
-        compare(page.offlineUri, "", "nothing typed, nothing chosen")
+        page.connectPart.uriField.text = ""
+        compare(page.uriPart.offlineUri, "", "nothing typed, nothing chosen")
 
         page.uriPart.chooseProfile("obd2")
-        compare(page.uriField.text, "", "no URI is made up in the field")
-        compare(page.offlineUri, "mock://?profile=obd2")
-        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
+        compare(page.connectPart.uriField.text, "", "no URI is made up in the field")
+        compare(page.uriPart.offlineUri, "mock://?profile=obd2")
+        verify(Bridge.profileSignals(page.uriPart.offlineUri).some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
                "a built-in profile's rows, with no URI typed")
 
-        page.uriField.text = "mock://demo"
-        compare(page.offlineUri, "mock://demo", "a typed URI is read as it is")
+        page.connectPart.uriField.text = "mock://demo"
+        compare(page.uriPart.offlineUri, "mock://demo", "a typed URI is read as it is")
         page.uriPart.chooseProfile("obd2")
-        compare(page.offlineUri, "mock://demo?profile=obd2", "with the choice it composes")
+        compare(page.uriPart.offlineUri, "mock://demo?profile=obd2", "with the choice it composes")
 
-        page.uriField.text = ""
+        page.connectPart.uriField.text = ""
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "offline.json", "Offline"))
         page.uriPart.chooseProfile("plugin.offline.base")
-        compare(page.offlineUri, "mock://?profile=plugin.offline.base")
-        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"],
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.offline.base")
+        compare(Bridge.profileSignals(page.uriPart.offlineUri).map(r => r.name), ["A"],
                 "the picked vehicle's own plugin, before any connect")
     }
 
@@ -704,32 +704,32 @@ SettingsKit {
     // profiles' names reach the Dashboard
     function test_theOfflineUriFallsBackToTheVehiclesFirstPick() {
         const page = createPage()
-        page.uriField.text = ""
+        page.connectPart.uriField.text = ""
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "fallback.json", "Fallback"))
         page.uriPart.chooseProfile("default")
-        compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the vehicle's pick")
-        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"])
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.fallback.base", "the vehicle's pick")
+        compare(Bridge.profileSignals(page.uriPart.offlineUri).map(r => r.name), ["A"])
 
         verify(importExample(page))
         pressRow(page, "plugin.example-sim.my2019")
         page.uriPart.chooseProfile("default")
-        compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the first pick, in the picks' order")
-        compare(JSON.stringify(page.pickedSets),
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.fallback.base", "the first pick, in the picks' order")
+        compare(JSON.stringify(page.uriPart.pickedSets),
                 JSON.stringify([{ profile: "plugin.fallback.base", name: "Fallback", variant: "base" },
                                 { profile: "plugin.example-sim.my2019",
                                   name: "Example: the simulated car", variant: "my2019" }]))
-        compare(page.profileNames["plugin.example-sim.base"], "Example: the simulated car",
+        compare(page.uriPart.profileNames["plugin.example-sim.base"], "Example: the simulated car",
                 "every variant of a loaded plugin by its name")
-        compare(page.profileNames["plugin.fallback.base"], "Fallback")
+        compare(page.uriPart.profileNames["plugin.fallback.base"], "Fallback")
 
-        page.uriField.text = "mock://demo"
-        compare(page.offlineUri, "mock://demo", "a typed URI still wins")
-        page.uriField.text = ""
+        page.connectPart.uriField.text = "mock://demo"
+        compare(page.uriPart.offlineUri, "mock://demo", "a typed URI still wins")
+        page.connectPart.uriField.text = ""
         press(page, "vehicle_none")
-        compare(page.offlineUri, "", "no vehicle, nothing to fall back to")
-        compare(page.pickedSets.length, 0)
+        compare(page.uriPart.offlineUri, "", "no vehicle, nothing to fall back to")
+        compare(page.uriPart.pickedSets.length, 0)
     }
 
     // An adapter's address under Default (the vehicle's saved one, restored
@@ -742,34 +742,34 @@ SettingsKit {
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "standin.json", "Standin"))
-        page.uriField.text = "elm327://COM3"
+        page.connectPart.uriField.text = "elm327://COM3"
         compare(page.uriPart.profileChoice, "default")
-        compare(page.offlineUri, "elm327://COM3", "a pick that doesn't read obd2 stands in for nothing")
+        compare(page.uriPart.offlineUri, "elm327://COM3", "a pick that doesn't read obd2 stands in for nothing")
 
         verify(importExample(page))
         pressRow(page, "plugin.example-sim.my2019")
-        page.uriField.text = "elm327://COM3"
-        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the pick that extends obd2")
-        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === "key:clutch_slip"),
+        page.connectPart.uriField.text = "elm327://COM3"
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the pick that extends obd2")
+        verify(Bridge.profileSignals(page.uriPart.offlineUri).some(r => r.ref === "key:clutch_slip"),
                "the plugin's own signals are listed")
-        page.uriField.text = "j2534://Some Adapter"
-        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "on any adapter")
-        page.uriField.text = "mock://demo"
-        compare(page.offlineUri, "mock://demo", "not on the demo, whose Default isn't obd2")
+        page.connectPart.uriField.text = "j2534://Some Adapter"
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.example-sim.my2019", "on any adapter")
+        page.connectPart.uriField.text = "mock://demo"
+        compare(page.uriPart.offlineUri, "mock://demo", "not on the demo, whose Default isn't obd2")
 
-        page.uriField.text = "elm327://COM3?profile=raw"
-        compare(page.offlineUri, "elm327://COM3?profile=raw", "a typed profile= wins")
-        page.uriField.text = "elm327://COM3"
+        page.connectPart.uriField.text = "elm327://COM3?profile=raw"
+        compare(page.uriPart.offlineUri, "elm327://COM3?profile=raw", "a typed profile= wins")
+        page.connectPart.uriField.text = "elm327://COM3"
         page.uriPart.chooseProfile("uds-generic")
-        compare(page.offlineUri, page.uriField.text, "the Profile row's choice wins")
-        verify(page.offlineUri.indexOf("profile=uds-generic") >= 0, page.offlineUri)
+        compare(page.uriPart.offlineUri, page.connectPart.uriField.text, "the Profile row's choice wins")
+        verify(page.uriPart.offlineUri.indexOf("profile=uds-generic") >= 0, page.uriPart.offlineUri)
 
         page.uriPart.chooseProfile("default")
-        compare(page.uriField.text, "elm327://COM3")
+        compare(page.connectPart.uriField.text, "elm327://COM3")
         verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "example-sim").sha256))
         compare(page.picksPart.picks, ["plugin.standin.base"], "the pick goes with the plugin")
-        compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
-        page.uriField.text = ""
-        compare(page.offlineUri, "mock://?profile=plugin.standin.base", "the vehicle's pick, with no address")
+        compare(page.uriPart.offlineUri, "elm327://COM3", "and the address is listed as it is")
+        page.connectPart.uriField.text = ""
+        compare(page.uriPart.offlineUri, "mock://?profile=plugin.standin.base", "the vehicle's pick, with no address")
     }
 }

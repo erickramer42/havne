@@ -2,7 +2,8 @@
 // Testing: UNIT: PickOnlyTest (a session whose set derives more requests
 //          than a rotation holds, ADR-0065 sections 2, 3 and 8: the table
 //          attach builds, the focus and the conditions through it, the
-//          rotation's refusals, the timing rows published)
+//          rotation's refusals, the timing rows published); ReplyTimingTest
+//          (a scan-only session's timing, ADR-0042)
 //
 // Each case creates a mock session on car_sized_set.h's set (two modules
 // asked their most), builds its requests as a requesting attach does
@@ -690,4 +691,65 @@ TEST(PickOnlyTest, AnUnpickedSessionWithItsLinkDownChecksAModuleEachInterval)
         ecuio_request_timed_out(*e, h);
     }
     EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+}
+
+/* A session whose DIDs are all scanned has an empty rotation at attach:
+ * it gets its timing all the same, so a DID the scan finds is timed and
+ * published once it joins (a scan=first log's latency.csv) */
+TEST(ReplyTimingTest, AScanAloneIsTimedOnceItFindsADid)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+                  "mock://scan?profile=uds-generic&did=7E8:1E20-1E21", &s),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    request_params params;
+    params.identify = false;
+    params.diagnose = false;
+    params.scan_first = true;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, ecuio_session_signal_set(s), params,
+                                   s->module_rx.data(), s->module_tx.data(),
+                                   s->info.module_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(e->count, 0u) << "nothing to rotate until the scan finds";
+    std::unique_ptr<ecuio_timing_table> timing;
+    ecuio_attach_timing(*e, timing, ECUIO_TIMING_CLOCK_HOST);
+    ASSERT_NE(timing, nullptr);
+
+    /* The ECU answers 1E20 and refuses 1E21, each 4 ms after its request */
+    int64_t now = 1000000;
+    for (int k = 0; k < 8; ++k, now += ECUIO_ENGINE_WAIT_US) {
+        const int32_t r = ecuio_engine_due(e.get(), 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            continue;
+        }
+        ecuio_engine_sent(e.get(), 0, r, true, now);
+        const ecuio_request& q = ecuio_engine_request_of(e.get(), 0, r);
+        const bool found =
+            q.len == 3 && q.bytes[1] == 0x1E && q.bytes[2] == 0x20;
+        const uint8_t positive[] = {0x62, 0x1E, 0x20, 0x05};
+        const uint8_t refused[] = {0x7F, 0x22, 0x31};
+        (void)ecuio_engine_on_frame(e.get(), 0, found ? positive : refused,
+                                    found ? 4 : 3, now + 4000, nullptr);
+    }
+    ASSERT_EQ(e->count, 1u) << "1E20 found and polled";
+
+    int64_t published = 0;
+    ecuio_publish_timing(s, *e, nullptr, now, published, true);
+    std::vector<ecuio_request_timing_t> rows(4);
+    ecuio_session_timing_t t{};
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s, &t, rows.data(), 4, &count),
+              ECUIO_OK);
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(rows[0].request[1], 0x1E);
+    EXPECT_EQ(rows[0].request[2], 0x20);
+    EXPECT_GE(rows[0].answered, 1u) << "the found DID's own turns are timed";
+    EXPECT_EQ(t.untimed, 0u);
+    ecuio_session_destroy(s);
 }

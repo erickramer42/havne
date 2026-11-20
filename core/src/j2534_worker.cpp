@@ -10,6 +10,8 @@
 //          J2534HealthTest.LongRepliesArriveWhole
 //          The floor and the timer's wait: J2534HealthTest.TheFloor*,
 //          .VxTheFloorsWaitReadsNothing
+//          The hold (Known Issue #42): UNIT: J2534HoldTest; on the fake,
+//          tests/test_j2534_hold_bus.cpp (J2534HealthTest)
 //
 // The J2534 session's worker: the read pump, a request's write, the
 // link-health feed and the close's 10 01. j2534_transport.cpp starts it
@@ -25,6 +27,7 @@
                                       TX_ISO15765_FRAME_PAD */
 #include "session.h"
 #include "request_engine.h"
+#include "j2534_hold.h"
 #include "request_setup.h"
 #include "link_health.h"
 #include "j2534_clock.h"
@@ -349,6 +352,23 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
     }
 }
 
+/* The pass's sends (j2534_hold_pass): each wait that ran out, and what
+ * the hold gives each channel to write (due's request, unless a segmented
+ * reply keeps it or another waiting) */
+void ask_channels(ecuio_j2534_transport* t, ecuio_request_engine& e,
+                  link_health& h, j2534_hold& hold)
+{
+    j2534_hold_pass(
+        hold, &e, engine_now_us(t),
+        [&](uint32_t) { ecuio_request_timed_out(e, h); },
+        [&](uint32_t c, int32_t r) {
+            const int64_t start = engine_now_us(t);
+            const bool sent = send_request(t, ecuio_engine_request_of(&e, c, r),
+                                           h, r == ECUIO_ENGINE_ONCE);
+            ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
+        });
+}
+
 } // namespace
 
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
@@ -356,8 +376,9 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
  *
  * One loop serves every mode (ADR-0015 section 1). With requests (the set's
  * rotation, or ?poll='s one), each pass ends the waits that ran out,
- * sends each idle channel's next request once its floor has passed,
- * then reads once, for at most the slice, and gives a matched frame to
+ * sends each idle channel's next request once its floor has passed (a
+ * reply expected segmented alone on the bus, j2534_hold.h), then reads
+ * once, for at most the slice, and gives a matched frame to
  * the engine, so the next request goes out when the reply is in. While
  * no reply may come (ecuio_engine_awaiting) it waits on its own timer
  * instead of reading.
@@ -393,6 +414,10 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     int64_t timing_at = 0;
+    /* made after attach's ecuio_engine_init: its chosen rows are this
+     * table's, and it ends with the worker */
+    j2534_hold hold;
+    hold.on = t->hold;
     if (requests && t->probe) {
         ecuio_engine_probe(&e);
     }
@@ -404,21 +429,8 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
     while (!t->stop_requested.load()) {
         link_judge_waiting(h);
         if (requests) {
-            const int64_t now = engine_now_us(t);
             ecuio_key_windows_judge(&e, h);
-            for (uint32_t c = 0; c < e.chan_count; ++c) {
-                if (ecuio_engine_expire(&e, c, now)) {
-                    ecuio_request_timed_out(e, h);
-                }
-                const int32_t r = ecuio_engine_due(&e, c, now);
-                if (r != ECUIO_ENGINE_NONE) {
-                    const int64_t start = engine_now_us(t);
-                    const bool sent =
-                        send_request(t, ecuio_engine_request_of(&e, c, r), h,
-                                     r == ECUIO_ENGINE_ONCE);
-                    ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
-                }
-            }
+            ask_channels(t, e, h, hold);
         }
 
         /* With nothing due on any channel (a scan that found nothing
@@ -426,9 +438,9 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
          * request can time out, so the session reads as a passive one
          * does: empty reads count toward quiet, which can't tell an
          * ECU that went away from one with nothing left to answer. */
-        const int64_t next_us = requests
-            ? ecuio_engine_next_event_us(&e, engine_now_us(t))
-            : INT64_MAX;
+        const int64_t next_us =
+            requests ? j2534_hold_next_event_us(hold, &e, engine_now_us(t))
+                     : INT64_MAX;
         const bool asking = next_us != INT64_MAX;
         /* Every reply in and only a floor (or a focus's sweep) to wait
          * for: the worker's own timer, no vendor read, which the VX holds
@@ -457,6 +469,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
                 e.stamp_breaks = t->clock.host_steps;
                 (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                             engine_now_us(t), nullptr);
+                j2534_hold_answered(hold, o.chan);
             }
             const bool unpicked = !asking && ecuio_engine_unpicked(&e);
             update_health(h, o, !asking && !unpicked);
@@ -466,6 +479,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
         }
         if (h.recovered) {
             h.recovered = false;
+            j2534_hold_recovered(hold);
             if (requests && t->probe) {
                 ecuio_engine_probe(&e);
             }

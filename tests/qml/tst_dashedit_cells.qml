@@ -119,7 +119,7 @@ DashEditKit {
         click(page, "panelKind")
         click(page, "addKind_analog")
         c = page.doc.pages[0].cells[0]
-        const back = DashboardBook.defaultRange("RPM")
+        const back = DashboardEdit.defaultRange("RPM")
         compare([c.kind, c.options.from, c.options.to], ["analog", back.from, back.to],
                 "leaving takes the signal's default range")
         press(find(page, "dashCell_0_1"))
@@ -451,7 +451,7 @@ DashEditKit {
         }
         compare(page.problem, "", "it reads")
         compare(storedText(page), text, "a read writes nothing")
-        verify(page.edit(DashboardBook.renamePage(page.doc, 0, "Q")), "an edit")
+        verify(page.edit(DashboardEdit.renamePage(page.doc, 0, "Q")), "an edit")
         const written = JSON.parse(storedText(page))
         compare(written.format, 2, "the first edit writes format 2")
         compare(written.pages[0].cells[1].h, 12, "with the scaled spans")

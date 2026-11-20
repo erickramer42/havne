@@ -104,7 +104,7 @@ ColumnLayout {
                 if (!root.host.uriPart.syncing && root.host.uriPart.profileChoice === "uds-generic")
                     root.host.uriPart.recompose()
             }
-            onAccepted: root.host.requestConnect(root.host.uriField.text)
+            onAccepted: root.host.connectFromPart.requestConnect(root.host.connectPart.uriField.text)
         }
     }
 

@@ -25,6 +25,8 @@
 #include "summary_lines.h"
 
 #include "elm327_protocol.h"
+#include "isotp.h"
+#include "j2534_hold.h"
 #include "request_engine.h"
 #include "request_setup.h"
 #include "request_turns.h"
@@ -50,6 +52,7 @@ struct adapter_model {
     adapter kind = adapter::j2534;
     int64_t write_us = 1000;  /* J2534: a write through the surrogate */
     int64_t deliver_us = 500; /* J2534: the last frame to the engine */
+    bool hold = true;         /* J2534: ?hold= (j2534_hold.h) */
     int64_t fc_turn_us = 170; /* the adapter's Flow Control after a FF */
     int64_t echo_us = 100;    /* SocketCAN: the request's echo */
     /* ELM327: the link's one way (half a Bluetooth or USB round trip), a
@@ -134,12 +137,6 @@ struct bench_result {
 // stuffing: about 120 bits
 inline constexpr int64_t kFrameUs = 240;
 
-// The frames an ISO-TP message of len bytes takes (classic CAN)
-inline uint32_t isotp_frames_of(uint32_t len)
-{
-    return len <= 7 ? 1u : 1u + (len - 6u + 6u) / 7u;
-}
-
 // A Service 01 bitmap reply (41 <base> b1..b4) rewritten to list only the
 // supported PIDs, its last bit set while one past its range is listed
 inline void filter_bitmap(uint8_t* data, uint32_t len,
@@ -162,6 +159,24 @@ inline void filter_bitmap(uint8_t* data, uint32_t len,
         bits[3] |= 0x01;
     }
     std::memcpy(data + 2, bits, 4);
+}
+
+// The test car's engine ECU: the Service 01 PIDs its bitmaps list to 0x60
+// (docs/bench-sessions/2026-10-22-vehicle.md), 0x60 the last read
+inline std::vector<uint8_t> test_car_pids()
+{
+    std::vector<uint8_t> pids;
+    const uint8_t bitmaps[3][4] = {{0xFE, 0x7F, 0xA8, 0x13},
+                                   {0xA0, 0x17, 0xF0, 0x11},
+                                   {0xFE, 0xD0, 0x8C, 0x81}};
+    for (uint32_t b = 0; b < 3; ++b) {
+        for (uint32_t k = 0; k < 32; ++k) {
+            if (bitmaps[b][k / 8] & (0x80u >> (k % 8))) {
+                pids.push_back(static_cast<uint8_t>(b * 0x20 + k + 1));
+            }
+        }
+    }
+    return pids;
 }
 
 class bench
@@ -260,6 +275,8 @@ private:
     ecuio_session_t* m_session = nullptr;
     ecuio_sim_t* m_sim = nullptr;
     std::unique_ptr<ecuio_request_engine> m_engine;
+    j2534_hold m_hold; /* J2534: the worker's hold, holding no row before
+                        * the first look */
     std::vector<std::mt19937_64> m_rng; /* one for each channel's module */
     std::priority_queue<event, std::vector<event>, std::greater<event>>
         m_events;
@@ -382,24 +399,21 @@ inline bench_result bench::run()
     return std::move(m_result);
 }
 
-// The J2534 worker's pass: the waits that ran out, then each idle
-// channel's next request once its floor has passed, each write taking
-// the surrogate's time
+// The J2534 worker's pass (j2534_hold_pass): the waits that ran out, then
+// what the hold gives each channel to write, each write taking the
+// surrogate's time
 inline void bench::look_j2534(int64_t now)
 {
     ecuio_request_engine* e = m_engine.get();
-    for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (ecuio_engine_expire(e, c, now)) {
-            ++m_result.timeouts;
-        }
-        const int32_t r = ecuio_engine_due(e, c, now);
-        if (r != ECUIO_ENGINE_NONE) {
+    m_hold.on = m_cfg.model.hold;
+    j2534_hold_pass(
+        m_hold, e, now, [this](uint32_t) { ++m_result.timeouts; },
+        [this, e, &now](uint32_t c, int32_t r) {
             const int64_t started = now;
             now += m_cfg.model.write_us;
             send(c, r, now);
             ecuio_engine_sent(e, c, r, true, now, started);
-        }
-    }
+        });
     schedule_look(now);
 }
 
@@ -427,7 +441,10 @@ inline void bench::look_socketcan(int64_t now)
 
 inline void bench::schedule_look(int64_t now)
 {
-    const int64_t next = ecuio_engine_next_event_us(m_engine.get(), now);
+    const int64_t next =
+        m_cfg.model.kind == adapter::j2534
+            ? j2534_hold_next_event_us(m_hold, m_engine.get(), now)
+            : ecuio_engine_next_event_us(m_engine.get(), now);
     if (next != INT64_MAX) {
         look_at(now + std::max<int64_t>(next, 1));
     }
@@ -490,7 +507,7 @@ inline void bench::on_request(const event& ev)
             filter_bitmap(f.data.data(), static_cast<uint32_t>(f.data.size()),
                           m_cfg.supported);
         }
-        f.frames = isotp_frames_of(replies[i].length);
+        f.frames = isotp_frames(replies[i].length);
         const int64_t delay = sim_timing_draw(m_cfg.timing, m_rng[req.chan]);
         m_flights.push_back(std::move(f));
         at(end + delay + replies[i].delay_us, reply_frame,
@@ -538,6 +555,7 @@ inline void bench::on_deliver(const event& ev)
         (void)ecuio_engine_on_frame(m_engine.get(), c, f.data.data(),
                                     static_cast<uint16_t>(f.data.size()), ev.at,
                                     nullptr);
+        j2534_hold_answered(m_hold, c);
     }
     ecuio_frame_t frame;
     std::memset(&frame, 0, sizeof frame);

@@ -213,19 +213,19 @@ ColumnLayout {
                 text: Relay.running ? qsTr("Stop relaying") : qsTr("Relay")
                 // Not beside a session: the adapter takes one link
                 enabled: Relay.running
-                         || (root.host.ownPart.idle && /^elm327:\/\/bt:/i.test(root.host.uriField.text))
+                         || (root.host.ownPart.idle && /^elm327:\/\/bt:/i.test(root.host.connectPart.uriField.text))
                 onClicked: {
                     if (Relay.running) {
                         Relay.stop()
                         return
                     }
-                    const why = Relay.start(root.host.uriField.text)
-                    root.host.errorLabel.text = why
-                    root.host.errorLabel.visible = why !== ""
+                    const why = Relay.start(root.host.connectPart.uriField.text)
+                    root.host.connectPart.errorLabel.text = why
+                    root.host.connectPart.errorLabel.visible = why !== ""
                     // A refusal goes to the log, so Show log has it to show
                     if (why !== "")
                         Bridge.logEvent(qsTr("Relay: %1").arg(why))
-                    root.host.logExplains = why !== ""
+                    root.host.connectPart.logExplains = why !== ""
                 }
             }
         }

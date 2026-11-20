@@ -2724,6 +2724,18 @@ TEST(FolderExportTest, TheSessionKeysAreKeptInTheUri)
                   "\nuri  elm327://<address>?profile=uds-generic\n"),
               std::string::npos)
         << d.files["events.log"];
+
+    /* J2534's hold for Known Issue #42 (?hold=) is kept too */
+    Folder h;
+    recording(h, row(1000, 0x7E8, 0, {0x02, 0x41, 0x00}), "",
+              "uri  j2534://C:/Vendor/vx.dll?profile=obd2&hold=0\n"
+              "profile  obd2\n");
+    FolderExported j(h);
+    ASSERT_EQ(j.rc, ECUIO_OK) << j.detail;
+    EXPECT_NE(j.files["events.log"].find(
+                  "\nuri  j2534://<path>?profile=obd2&hold=0\n"),
+              std::string::npos)
+        << j.files["events.log"];
 }
 
 /* A log of another format (format 1's, before ADR-0049) is a file the

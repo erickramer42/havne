@@ -81,7 +81,7 @@ SettingsKit {
         compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
         verify(importFile(page, "plain.json", "Plain"))
         compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
-        compare(page.connectProfileWords["elm327://COM5"], undefined)
+        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], undefined)
         verify(importFile(page, "plus.json", "Plus", "D101", true))
         verify(importFile(page, "more.json", "More", "D102", true))
         const plus = "plugin.plus.base"
@@ -108,9 +108,9 @@ SettingsKit {
         compare(page.connectFromPart.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
         compare(page.connectFromPart.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
 
-        compare(page.connectProfileWords["elm327://COM5"], "obd2 + Plus")
-        compare(page.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
-        compare(page.connectProfileWords["socketcan://can1"], undefined,
+        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], "obd2 + Plus")
+        compare(page.connectFromPart.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
+        compare(page.connectFromPart.connectProfileWords["socketcan://can1"], undefined,
                 "no word on a row that isn't composed")
         compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
                 "a plugin's profile by its name")
@@ -139,7 +139,7 @@ SettingsKit {
         compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
                 "nor a plugin's profile")
         compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
-        compare(page.connectProfileWords["elm327://COM5"], undefined)
+        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], undefined)
     }
 
     // A list's connect puts the composed address in the field, as typed
@@ -152,7 +152,7 @@ SettingsKit {
         const field = find(page, "uriField")
         field.text = "mock://other"
         const closed = "elm327://127.0.0.1:1"
-        page.connectFromList(closed)
+        page.connectFromPart.connectFromList(closed)
         compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
         compare(page.uriPart.profileChoice, "plugin.plus.base", "the row follows the field")
         verify(find(page, "profile_plugin.plus.base").checked)
@@ -163,7 +163,7 @@ SettingsKit {
         compare(page.pickedVehicle.uri, "")
 
         // The demo is left as it is
-        page.connectFromList("mock://demo")
+        page.connectFromPart.connectFromList("mock://demo")
         compare(field.text, "mock://demo")
         tryVerify(() => Bridge.connected, 5000, "connects")
         compare(Bridge.currentUri, "mock://demo")
@@ -192,7 +192,7 @@ SettingsKit {
         const composed = uri + "?profile=plugin.plus.base"
         const field = find(page, "uriField")
         field.text = ""
-        page.connectFromList(uri)
+        page.connectFromPart.connectFromList(uri)
         compare(field.text, composed)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, composed)
@@ -202,14 +202,14 @@ SettingsKit {
                "the session reads the plugin's signal with obd2's")
         tryVerify(() => page.pickedVehicle.uri === uri, 10000, "the vehicle keeps the row's address")
         endSession()
-        sameList(page.connectUris, [uri])
-        compare(page.connectProfileWords[uri], "obd2 + Plus", "the row says what it reads")
+        sameList(page.connectFromPart.connectUris, [uri])
+        compare(page.connectFromPart.connectProfileWords[uri], "obd2 + Plus", "the row says what it reads")
 
         // Another vehicle, which picks nothing, reads the row as it is
         press(page, "vehicleNew")
         compare(page.picksPart.picks, [])
-        compare(page.connectProfileWords[uri], undefined)
-        page.connectFromList(uri)
+        compare(page.connectFromPart.connectProfileWords[uri], undefined)
+        page.connectFromPart.connectFromList(uri)
         compare(field.text, uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
@@ -229,7 +229,7 @@ SettingsKit {
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
         const uri = emulatorUri()
         find(page, "uriField").text = ""
-        page.connectFromList(uri)
+        page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
         sameList(page.connectFromPart.recentUris, [uri])
@@ -259,12 +259,12 @@ SettingsKit {
         sameList(page.connectFromPart.recentUris, [composed])
         endSession()
         compare(page.connectFromPart.listConnectUri(composed), composed, "its vehicle picks the plugin")
-        compare(page.connectProfileWords[composed], "Plus")
+        compare(page.connectFromPart.connectProfileWords[composed], "Plus")
 
         press(page, "vehicleNew")
         compare(page.connectFromPart.listConnectUri(composed), uri)
-        compare(page.connectProfileWords[composed], undefined, "no word: it reads Default")
-        page.connectFromList(composed)
+        compare(page.connectFromPart.connectProfileWords[composed], undefined, "no word: it reads Default")
+        page.connectFromPart.connectFromList(composed)
         compare(field.text, uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
@@ -286,7 +286,7 @@ SettingsKit {
         const plus = uri + "?profile=plugin.plus.base"
         const more = uri + "?profile=plugin.more.base"
         find(page, "uriField").text = ""
-        page.connectFromList(uri)
+        page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, plus)
         tryVerify(() => page.pickedVehicle.uri === uri, 10000)
@@ -295,10 +295,10 @@ SettingsKit {
         page.open("signals")
         pressRow(page, "plugin.plus.base")
         compare(page.picksPart.picks, ["plugin.more.base"])
-        sameList(page.connectUris, [uri])
-        compare(page.connectProfileWords[uri], "obd2 + More")
+        sameList(page.connectFromPart.connectUris, [uri])
+        compare(page.connectFromPart.connectProfileWords[uri], "obd2 + More")
         compare(page.connectFromPart.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
-        page.connectFromList(uri)
+        page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, more)
         endSession()
@@ -314,7 +314,7 @@ SettingsKit {
         verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
         compare(page.picksPart.picks, [])
         compare(page.connectFromPart.listConnectUri(uri), uri)
-        compare(page.connectProfileWords[uri], undefined)
+        compare(page.connectFromPart.connectProfileWords[uri], undefined)
     }
 
     // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06, ADR-0064 Q3) ----

@@ -42,6 +42,10 @@
 //    holds each response back that long after the write (default 0);
 //    ECUIO_FAKE_LONG_REPLY_DELAY_MS adds its delay to a response longer
 //    than one Single Frame (over 7 bytes), as a long reply takes;
+//    ECUIO_FAKE_LOST_UNDER_SEGMENTS=1 drops a Single Frame reply from
+//    one ID arriving while another ID's long reply is on the bus (its
+//    First Frame at the reply delay to its whole arrival), whichever
+//    was written first: Known Issue #42 on the VX, counted on the page;
 //    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
 //    (7F <service> 78) at once, ahead of that reply.
 //    ECUIO_FAKE_HELD_SERVICE=<service, hex> answers each request of that
@@ -123,6 +127,7 @@
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
 #include "fake_ecus.h"
+#include "fake_j2534_queue.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -132,21 +137,12 @@
 #include <mutex>
 #include <cstdlib>
 
-#define FAKE_QUEUE_DEPTH 32   /* a read's indication cap and more */
 #define FAKE_FILTER_DEPTH 32
 #define FAKE_CONFIG_DEPTH 16
 #define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
 #define STATUS_FAILED  ECUIO_PT_STATUS_FAILED
 
 namespace fake_j2534 {
-
-struct FrameSlot {
-    unsigned char data[ECUIO_PT_MSG_DATA_SIZE];
-    unsigned long size;
-    unsigned long timestamp_us;
-    unsigned long rx_status;   /* replayed verbatim into PASSTHRU_MSG.RxStatus */
-    long long arrives_us;      /* steady clock; reads skip it until then */
-};
 
 struct FilterRecord {
     unsigned long filter_id;
@@ -157,11 +153,7 @@ struct FilterRecord {
     unsigned long mask_len;
 };
 
-std::mutex g_lock;
-std::condition_variable g_arrived;      /* a message was queued */
 int g_handle = 0;                       /* 1 between Open and Close */
-FrameSlot g_queue[FAKE_QUEUE_DEPTH];    /* in arrival order */
-unsigned long g_queue_len = 0;
 
 /* The VX as measured (docs/bench-sessions/2026-10-22.md): its reply
  * latency is the engine ECU's median from indication to reply; with
@@ -272,12 +264,6 @@ unsigned long knob_ms(const char* name, unsigned long fallback)
     return (ms <= 60000) ? ms : fallback;
 }
 
-long long now_us()
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-}
-
 /* Whether this process is a surrogate (its exe is
  * ecuio-j2534-surrogate*.exe), the only host ECUIO_FAKE_EXIT_ON_READ
  * may end. */
@@ -297,53 +283,6 @@ bool in_a_surrogate()
 unsigned long vendor_stamp(long long steady_us)
 {
     return static_cast<unsigned long>(steady_us & 0xFFFFFFFFLL);
-}
-
-/* Enqueue into the shared RX FIFO (mutex held by caller), arriving at
- * arrives_us (0: now). The queue stays in arrival order, so a message
- * injected now goes ahead of a reply still on its way. Drops on full
- * exactly like InjectFrame: documented, keeps counts honest. */
-void enqueue_rx_locked(const unsigned char* data, unsigned long size,
-                       unsigned long timestamp_us, unsigned long rx_status,
-                       long long arrives_us = 0)
-{
-    if (g_queue_len >= FAKE_QUEUE_DEPTH) {
-        return;
-    }
-    if (arrives_us == 0) {
-        arrives_us = now_us();
-    }
-    unsigned long i = g_queue_len;
-    while (i > 0 && g_queue[i - 1].arrives_us > arrives_us) {
-        g_queue[i] = g_queue[i - 1];
-        --i;
-    }
-    FrameSlot& slot = g_queue[i];
-    memcpy(slot.data, data, size);
-    slot.size = size;
-    slot.timestamp_us = timestamp_us;
-    slot.rx_status = rx_status;
-    slot.arrives_us = arrives_us;
-    ++g_queue_len;
-    g_arrived.notify_all();
-}
-
-/* How many queued messages have arrived by now: a prefix of the queue. */
-unsigned long arrived_locked(long long now)
-{
-    unsigned long n = 0;
-    while (n < g_queue_len && g_queue[n].arrives_us <= now) {
-        ++n;
-    }
-    return n;
-}
-
-void pop_front_locked(unsigned long n)
-{
-    for (unsigned long i = n; i < g_queue_len; ++i) {
-        g_queue[i - n] = g_queue[i];
-    }
-    g_queue_len -= n;
 }
 
 /* Moves the messages a test queued on the control page into the RX
@@ -854,6 +793,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const unsigned long long_delay_ms =
         fake_j2534::knob_ms("ECUIO_FAKE_LONG_REPLY_DELAY_MS", 0);
     const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
+    const bool lose = fake_j2534::knob_on("ECUIO_FAKE_LOST_UNDER_SEGMENTS");
     long held_service = -1;
     {
         char hb[32] = {};
@@ -1043,10 +983,14 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             written_us + 1000LL * static_cast<long long>(delay_ms);
         static unsigned long resp_ts = 0x1000;
         resp_ts += 1;
-        fake_j2534::enqueue_rx_locked(
-            echo, echo_len,
-            vx ? fake_j2534::vendor_stamp(arrives_us) : resp_ts, 0,
-            arrives_us);
+        const uint32_t lost = fake_j2534::enqueue_reply_locked(
+            echo, echo_len, vx ? fake_j2534::vendor_stamp(arrives_us) : resp_ts,
+            written_us + 1000LL * static_cast<long long>(reply_delay_ms),
+            arrives_us, lose);
+        fake_control::Page* page = fake_control::attach();
+        if (lost > 0 && page != nullptr) {
+            fake_control::count_lost(page, lost);
+        }
     }
 
     return STATUS_NOERROR;   /* *pNumMsgs stays 1: fully written */

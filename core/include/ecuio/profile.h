@@ -312,7 +312,7 @@ ecuio_status_t ecuio_session_get_unsplit_replies(
 
 /* interval_clock; KERNEL is the kernel's receive times, as wall-clock
  * deltas */
-#define ECUIO_TIMING_CLOCK_NONE    0u   /* no rotation */
+#define ECUIO_TIMING_CLOCK_NONE    0u   /* no rotation and no scan */
 #define ECUIO_TIMING_CLOCK_HOST    1u   /* as the worker read them (ELM327) */
 #define ECUIO_TIMING_CLOCK_ADAPTER 2u   /* the adapter's (J2534) */
 #define ECUIO_TIMING_CLOCK_KERNEL  3u   /* the kernel's (SocketCAN) */

@@ -71,20 +71,20 @@ Rectangle {
         y: 4
         shownW: parent.width - 8 - root.stripWidth
         shownH: parent.height - 8 - root.stripHeight
-        emptyText: root.host.plottedNoValues.length > 0 ? root.host.noValuesText(root.host.plottedNoValues)
+        emptyText: root.host.plottedNoValues.length > 0 ? root.host.reportPart.noValuesText(root.host.plottedNoValues)
                                                    : qsTr("No signals plotted; tick a row to plot it")
-        fetch: function(widthPx) { return root.host.series(widthPx) }
+        fetch: function(widthPx) { return root.host.seriesPart.series(widthPx) }
         layoutOpts: ({
-            gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.valueText,
+            gapMs: Theme.staleMs, minSpanUnits: 20, format: root.host.formatPart.valueText,
             span: { t0: root.host.viewT0, t1: root.host.viewT1 }, absolute: true,
-            caption: root.host.captionOf,
-            tags: root.host.cursorTags(),
+            caption: root.host.formatPart.captionOf,
+            tags: root.host.cursorsPart.cursorTags(),
             axisH: root.host.phoneShape && root.host.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
             panes: { max: root.host.paneLimit, minH: ChartLayout.paneMinH,
                      shares: root.host.paneShares, ranges: root.host.paneRanges,
-                     assign: root.host.assignRows(),
+                     assign: root.host.panesPart.assignRows(),
                      mixedLabel: qsTr("mixed") } })
-        onDrawnChanged: root.host.notePanes(drawn)
+        onDrawnChanged: root.host.panesPart.notePanes(drawn)
         // Findings as bars along the plot's foot and the conditions in two
         // rows over them, the picked condition tinted, markers as dashed
         // lines with their labels, the cursors as solid lines over
@@ -106,7 +106,7 @@ Rectangle {
             }
             if (!root.host.bandsShown || root.host.stretchList === null)
                 return
-            const chosen = root.host.jumpIndex >= 0 ? root.host.stretchesOf(root.host.jumpKind)[root.host.jumpIndex]
+            const chosen = root.host.jumpIndex >= 0 ? root.host.comparePart.stretchesOf(root.host.jumpKind)[root.host.jumpIndex]
                                                : undefined
             for (const s of root.host.stretchList) {
                 const x0 = Math.max(l.left, xOf(s.fromMs))
@@ -130,7 +130,7 @@ Rectangle {
             for (const f of root.host.chartFindings) {
                 const x0 = xOf(f.atMs), x1 = xOf(f.atMs + f.lengthMs)
                 if (x1 < l.left || x0 > plotEnd) continue
-                ctx.fillStyle = root.host.findingColor(f.kind)
+                ctx.fillStyle = root.host.formatPart.findingColor(f.kind)
                 const left = Math.max(l.left, x0)
                 ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(plotEnd, x1) - left), 4)
             }
@@ -219,7 +219,7 @@ Rectangle {
         onActiveChanged: {
             if (!active) {
                 if (boxing)
-                    root.host.finishBox()
+                    root.host.cursorsPart.finishBox()
                 boxing = false
                 return
             }
@@ -227,20 +227,20 @@ Rectangle {
             fromPinch = pinch.active || Date.now() - pinch.endedAt < 300
             boxing = !fromPinch && (chartTap.held || (centroid.modifiers & Qt.ShiftModifier) !== 0)
             if (boxing) {
-                root.host.boxFromMs = root.host.timeAt(centroid.pressPosition.x)
+                root.host.boxFromMs = root.host.cursorsPart.timeAt(centroid.pressPosition.x)
                 root.host.boxToMs = root.host.boxFromMs
             }
         }
         onActiveTranslationChanged: {
             if (!active || fromPinch) return
             if (boxing) {
-                root.host.boxToMs = Math.min(root.host.viewT1, Math.max(root.host.viewT0, root.host.timeAt(centroid.position.x)))
+                root.host.boxToMs = Math.min(root.host.viewT1, Math.max(root.host.viewT0, root.host.cursorsPart.timeAt(centroid.position.x)))
                 chart.repaintMarks()
                 return
             }
             const span = root.host.viewT1 - root.host.viewT0
-            const t0 = startT0 - activeTranslation.x / Math.max(1, root.host.plotWidth() - 1) * span
-            root.host.setView(t0, t0 + span)
+            const t0 = startT0 - activeTranslation.x / Math.max(1, root.host.cursorsPart.plotWidth() - 1) * span
+            root.host.cursorsPart.setView(t0, t0 + span)
         }
     }
     // A pinch zooms the time about its middle; one whose fingers
@@ -278,11 +278,11 @@ Rectangle {
         onActiveScaleChanged: {
             if (!active || activeScale <= 0) return
             if (pane >= 0) {
-                root.host.setPaneRange(startPane.key,
+                root.host.panesPart.setPaneRange(startPane.key,
                                   ChartLayout.scaledRange(startPane, startY, 1 / activeScale))
                 return
             }
-            root.host.zoomAt(root.host.timeAt(centroid.position.x), lastScale / activeScale)
+            root.host.cursorsPart.zoomAt(root.host.cursorsPart.timeAt(centroid.position.x), lastScale / activeScale)
             lastScale = activeScale
         }
     }
@@ -311,11 +311,11 @@ Rectangle {
                 const l = chart.drawn
                 const i = l ? ChartLayout.paneAt(l, event.y - chart.y) : -1
                 if (i >= 0 && l.panes[i].axis)
-                    root.host.setPaneRange(l.panes[i].key,
+                    root.host.panesPart.setPaneRange(l.panes[i].key,
                                       ChartLayout.scaledRange(l.panes[i], event.y - chart.y, factor))
                 return
             }
-            root.host.zoomAt(root.host.timeAt(event.x), factor)
+            root.host.cursorsPart.zoomAt(root.host.cursorsPart.timeAt(event.x), factor)
         }
     }
     DoubleTapHandler {
@@ -333,32 +333,32 @@ Rectangle {
         onLongPressed: {
             const at = chartTap.point.position
             // A press on a value label offers its signal's pane, on any form
-            const labeled = root.host.labelRowAt(at.x - chart.x, at.y - chart.y)
+            const labeled = root.host.panesPart.labelRowAt(at.x - chart.x, at.y - chart.y)
             if (labeled >= 0) {
                 held = true
-                root.host.openPaneMenu(labeled, chart)
+                root.host.panesPart.openPaneMenu(labeled, chart)
                 return
             }
-            if (!root.host.phoneShape || at.x - chart.x < root.host.plotLeft())
+            if (!root.host.phoneShape || at.x - chart.x < root.host.cursorsPart.plotLeft())
                 return
             held = true
-            root.host.placeSecond(root.host.snapped(root.host.timeAt(at.x)))
+            root.host.cursorsPart.placeSecond(root.host.cursorsPart.snapped(root.host.cursorsPart.timeAt(at.x)))
         }
         onTapped: (eventPoint, button) => {
             lastAt = eventPoint.position
             // A tap on the axes' column places no cursor
-            if (eventPoint.position.x - chart.x < root.host.plotLeft())
+            if (eventPoint.position.x - chart.x < root.host.cursorsPart.plotLeft())
                 return
-            const t = root.host.snapped(root.host.timeAt(eventPoint.position.x))
+            const t = root.host.cursorsPart.snapped(root.host.cursorsPart.timeAt(eventPoint.position.x))
             if ((chartTap.point.modifiers & Qt.ShiftModifier) !== 0)
-                root.host.placeSecond(t)
+                root.host.cursorsPart.placeSecond(t)
             else
-                root.host.setCursor(t)
+                root.host.cursorsPart.setCursor(t)
         }
         // A double-click or double-tap maximizes it, or gives the
         // signals back (on an axis or a seam, root.doubleTapAt);
         // the two taps of a thumb may land a little apart
-        onDoubleTap: root.host.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
+        onDoubleTap: root.host.panesPart.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
     }
 
     // On the desktop a drag on a pane's axis pans its range (a
@@ -386,7 +386,7 @@ Rectangle {
                 }
                 onActiveTranslationChanged: {
                     if (active && startRange)
-                        root.host.setPaneRange(startRange.key, ChartLayout.pannedRange(
+                        root.host.panesPart.setPaneRange(startRange.key, ChartLayout.pannedRange(
                             startRange, startRange.h, activeTranslation.y))
                 }
             }
@@ -425,7 +425,7 @@ Rectangle {
                 onActiveChanged: if (active) startHeights = root.host.paneBoxes.map(b => b.h)
                 onActiveTranslationChanged: {
                     if (active && startHeights.length > seam.index + 1)
-                        root.host.setPaneShares(startHeights.length, ChartLayout.seamShares(
+                        root.host.panesPart.setPaneShares(startHeights.length, ChartLayout.seamShares(
                             startHeights, seam.index, activeTranslation.y, ChartLayout.paneMinH))
                 }
             }
@@ -444,7 +444,7 @@ Rectangle {
         visible: chart.drawn !== null && at >= root.host.viewT0 && at <= root.host.viewT1
         width: Math.max(minWidth, handleText.implicitWidth + 8)
         height: root.host.phoneShape ? Theme.touchTarget : 24
-        x: Math.min(Math.max(0, root.host.xOfTime(at) - width / 2), root.width - width)
+        x: Math.min(Math.max(0, root.host.cursorsPart.xOfTime(at) - width / 2), root.width - width)
         y: chart.y + (chart.drawn ? chart.drawn.top + chart.drawn.plotH + tabH : 0) - height
         Accessible.role: Accessible.Slider
         Accessible.name: qsTr("Cursor at %1").arg(handleText.text)
@@ -462,7 +462,7 @@ Rectangle {
                 id: handleText
                 objectName: "handleTime"
                 anchors.centerIn: parent
-                text: root.host.timeText(handle.at, true)
+                text: root.host.formatPart.timeText(handle.at, true)
                 color: parent.moved ? Theme.bg : Theme.text
                 font.pixelSize: ChartLayout.labelPx
                 font.family: Theme.valueFamily
@@ -490,14 +490,14 @@ Rectangle {
                 dragging = true
                 // Past the plot's edge the handle would leave the view,
                 // hide, and lose the grab before the drop
-                const t = Math.min(Math.max(root.host.timeAt(x), root.host.viewT0), root.host.viewT1)
+                const t = Math.min(Math.max(root.host.cursorsPart.timeAt(x), root.host.viewT0), root.host.viewT1)
                 if (handle.isB)
-                    root.host.setCursorB(t)
+                    root.host.cursorsPart.setCursorB(t)
                 else
-                    root.host.setCursor(t)
+                    root.host.cursorsPart.setCursor(t)
             }
-            onReleased: if (dragging) root.host.dropHandle(handle.isB)
-            onCanceled: if (dragging) root.host.dropHandle(handle.isB)
+            onReleased: if (dragging) root.host.cursorsPart.dropHandle(handle.isB)
+            onCanceled: if (dragging) root.host.cursorsPart.dropHandle(handle.isB)
         }
     }
     CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }
@@ -544,7 +544,7 @@ Rectangle {
                 width: 8
                 height: 8
                 radius: 2
-                color: Theme.seriesColor(root.host.slotOf(stripRow.modelData.index))
+                color: Theme.seriesColor(root.host.panesPart.slotOf(stripRow.modelData.index))
             }
             Label {
                 objectName: "stripName"
@@ -563,7 +563,7 @@ Rectangle {
                 text: !stripRow.at || stripRow.at.atMs < 0 ? qsTr("—")
                       : stripRow.modelData.isText ? stripRow.at.text
                       : stripRow.at.label ? stripRow.at.label
-                      : root.host.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
+                      : root.host.formatPart.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                        stripRow.at.unit)
                 color: Theme.text
                 font.family: Theme.valueFamily
@@ -576,7 +576,7 @@ Rectangle {
                 x: 12
                 y: 34
                 width: parent.width - 12
-                text: visible ? root.host.spanCaption(stripRow.modelData) : ""
+                text: visible ? root.host.textsPart.spanCaption(stripRow.modelData) : ""
                 color: Theme.textDim
                 font.pixelSize: Theme.fontCaption
                 font.family: Theme.valueFamily
