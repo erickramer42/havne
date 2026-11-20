@@ -1,6 +1,10 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/core_detail.cpp
+    src/core_getters.cpp
+    src/core_dispatch.cpp
+    src/core_pick.cpp
     src/frame_decoder.cpp
     src/dtc_titles.cpp
     src/export.cpp
