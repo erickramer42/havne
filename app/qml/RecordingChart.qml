@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingChart.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The viewer's chart: the strip chart, its pan, pinch, wheel and tap, the
 // cursor handles and strip, the pane axes and seams; one part of
 // RecordingsPage, which holds the state

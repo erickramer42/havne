@@ -1,6 +1,6 @@
 // File/layer: app/recordingexport.cpp | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings,
-//          QmlTest.phone; MANUAL SMOKE: the test phone (a provider's folder)
+// Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings*,
+//          QmlTest.phone_*; MANUAL SMOKE: the test phone (a provider's folder)
 
 #include "recordingexport.h"
 #include "urlwrite.h"

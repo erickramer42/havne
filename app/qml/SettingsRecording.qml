@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsRecording.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The recording switch and where recordings go: one part of SettingsPage, which holds the state
 
 import QtQuick

@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsSignals.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone, QmlTest.accessibility (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_*, QmlTest.accessibility (test_qml)
 // The one Import and the one list of plugins, each variant the picked vehicle's to pick (ADR-0064): one part of SettingsPage, which holds the state
 
 import QtCore

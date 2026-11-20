@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsDisplay.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone, QmlTest.driveview (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_*, QmlTest.driveview{,_sheet,_platform} (test_qml)
 // Zoom, the look, Night, units and the drive view's settings: one part of
 // SettingsPage, which holds the zoom's and the units' state; the drive
 // view's is stored here

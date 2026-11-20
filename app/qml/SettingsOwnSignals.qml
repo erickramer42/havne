@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsOwnSignals.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The vehicle's own signals and Add a signal: one part of SettingsPage, which holds the state
 
 import QtQuick

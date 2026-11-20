@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingAbout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // What applies to a recording as a whole: its info, the frames check, Save
 // report, the decode, the baseline, Compare and the alignment; one part of
 // RecordingsPage, which holds the state

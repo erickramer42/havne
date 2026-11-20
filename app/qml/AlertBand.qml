@@ -1,5 +1,5 @@
 // File/layer: app/qml/AlertBand.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alertband, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alertband, QmlTest.phone_* (test_qml)
 
 pragma ComponentBehavior: Bound
 

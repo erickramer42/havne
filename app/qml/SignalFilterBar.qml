@@ -1,6 +1,6 @@
 // File/layer: app/qml/SignalFilterBar.qml | Qt6 Quick, UI layer
-// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview,
-//          QmlTest.recordings, QmlTest.dashedit, QmlTest.phone (test_qml)
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview{,_pause},
+//          QmlTest.recordings*, QmlTest.dashedit, QmlTest.phone_* (test_qml)
 
 pragma ComponentBehavior: Bound
 

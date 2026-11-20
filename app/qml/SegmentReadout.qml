@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentReadout.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.accessibility, QmlTest.dashboard{,_pages,_panel}
 
 import QtQuick
 

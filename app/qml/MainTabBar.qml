@@ -1,5 +1,5 @@
 // File/layer: app/qml/MainTabBar.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.driveview (test_qml)
+// Testing: QML: QmlTest.phone_*, QmlTest.driveview{,_sheet,_platform} (test_qml)
 
 import QtQuick
 import QtQuick.Controls

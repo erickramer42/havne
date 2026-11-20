@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsAlertEditor.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alerts, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alerts, QmlTest.phone_* (test_qml)
 // One condition (ADR-0063 section 5): its name, up to four terms, its hold and its uses, saved through core's loader; the Alerts page's own page
 
 import QtQuick

@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsAlerts.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alerts, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alerts, QmlTest.phone_* (test_qml)
 // The app's one set of conditions (ADR-0063 sections 5 and 9): its list with each one's state, Add, Add from a signal, Import and Export; one part of SettingsPage
 
 import QtCore

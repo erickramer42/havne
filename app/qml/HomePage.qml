@@ -1,5 +1,5 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.home, QmlTest.gauges, QmlTest.linkhealth, QmlTest.phone (test_qml); Manual smoke
+// Testing: QML: QmlTest.home, QmlTest.gauges, QmlTest.linkhealth, QmlTest.phone_* (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Controls

@@ -1,5 +1,5 @@
 // File/layer: app/qml/ViewHead.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // A list head of RecordingsPage's pinned phone viewer, which holds the state
 
 import QtQuick

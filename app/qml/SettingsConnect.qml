@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsConnect.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The connect bar (the status line, the URI field and Connect): one part of SettingsPage, which holds the state
 
 import QtQuick

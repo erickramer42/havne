@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingFramesView.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The frames of the part in view, read from frames.csv: the table's tools, the
 // Frames | By ID switch and the two lists; one part of RecordingsPage, which
 // holds the state

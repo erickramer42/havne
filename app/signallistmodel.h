@@ -1,5 +1,5 @@
 // File/layer: app/signallistmodel.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview{,_pause}
 
 #pragma once
 

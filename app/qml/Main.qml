@@ -1,5 +1,5 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview, QmlTest.alerts (test_qml);
+// Testing: QML: QmlTest.phone_*, QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform}, QmlTest.alerts (test_qml);
 //          BENCH, Manual smoke
 
 import QtCore

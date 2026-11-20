@@ -1,5 +1,5 @@
 // File/layer: app/bluetoothdevices.h | Qt6 Core/Qml, app layer, C++17
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml); BENCH, Vehicle
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml); BENCH, Vehicle
 
 #pragma once
 

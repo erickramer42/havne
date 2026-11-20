@@ -1,5 +1,5 @@
 // File/layer: app/qml/HeaderButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Layouts

@@ -1,6 +1,6 @@
 // File/layer: app/recordingexport.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings,
-//          QmlTest.phone
+// Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings*,
+//          QmlTest.phone_*
 //
 // The Recordings viewer's Export (ADR-0056 sections 5 and 7): the whole of a
 // recording written by core's ecuio_export as pcapng, a wide or long CSV or a

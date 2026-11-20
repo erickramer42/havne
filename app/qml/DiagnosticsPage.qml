@@ -1,6 +1,6 @@
 // File/layer: app/qml/DiagnosticsPage.qml | Qt6 Quick, UI layer
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.diagnostics,
-//          QmlTest.phone (test_qml)
+//          QmlTest.phone_* (test_qml)
 
 import QtCore
 import QtQuick

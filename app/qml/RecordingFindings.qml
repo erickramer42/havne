@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingFindings.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The frames check's findings, a row each, a tap centering the view on one:
 // one part of RecordingsPage, which holds the state
 

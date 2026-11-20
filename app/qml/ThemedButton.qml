@@ -1,5 +1,5 @@
 // File/layer: app/qml/ThemedButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.buttons, QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.buttons, QmlTest.settings, QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Controls

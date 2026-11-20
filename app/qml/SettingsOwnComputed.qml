@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsOwnComputed.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The form's computed-signal part (ADR-0062's appendix of 2026-11-16): the
 // expression, checked as it is typed by core, the signals it reads, typed
 // test values and the value they give, and a list that inserts a signal's

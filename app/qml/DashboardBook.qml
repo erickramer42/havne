@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashboardBook.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboardbook (test_qml)
+// Testing: QML: QmlTest.dashboardbook{,_writes,_files} (test_qml)
 
 pragma Singleton
 import QtQml

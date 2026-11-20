@@ -1,5 +1,5 @@
 // File/layer: app/qml/ChartBands.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.chartlayout (test_qml)
+// Testing: QML: QmlTest.chartlayout{,_panes} (test_qml)
 
 // A dense trace's strokes as polylines and min-max bands: the sample
 // pairs cut at outages, and the pieces a band is drawn as. ChartLayout's

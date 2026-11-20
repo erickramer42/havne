@@ -1,5 +1,5 @@
 // File/layer: app/qml/SignalHub.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard (test_qml)
+// Testing: QML: QmlTest.dashboard{,_pages,_panel} (test_qml)
 
 import QtQuick
 

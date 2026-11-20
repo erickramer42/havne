@@ -1,5 +1,5 @@
 // File/layer: app/qml/MainHeader.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview (test_qml)
+// Testing: QML: QmlTest.phone_*, QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml)
 
 import QtQuick
 import QtQuick.Controls

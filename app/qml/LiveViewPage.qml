@@ -1,6 +1,6 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: BRIDGE: test_bridge; QML: QmlTest.liveview, QmlTest.linkhealth,
-//          QmlTest.chartlayout, QmlTest.phone (test_qml); Manual smoke
+// Testing: BRIDGE: test_bridge; QML: QmlTest.liveview{,_pause}, QmlTest.linkhealth,
+//          QmlTest.chartlayout{,_panes}, QmlTest.phone_* (test_qml); Manual smoke
 
 import QtCore
 import QtQuick

@@ -1,6 +1,6 @@
 // File/layer: app/qml/LogPage.qml | Qt Quick, UI layer
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.log,
-//          QmlTest.linkhealth, QmlTest.phone (test_qml); Manual smoke
+//          QmlTest.linkhealth, QmlTest.phone_* (test_qml); Manual smoke
 
 pragma ComponentBehavior: Bound
 

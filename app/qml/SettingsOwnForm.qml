@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsOwnForm.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The form for a vehicle's own signal (Add a signal, Edit): a page of its own in Settings
 
 import QtQuick

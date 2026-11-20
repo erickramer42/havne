@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentRow.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.segments, QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.segments, QmlTest.settings, QmlTest.phone_* (test_qml)
 // The one look of a closed choice: SegmentButtons on a surface track with
 // the panel's hairline edge. Where one value is in force and a tap takes
 // effect at once, use this; a checkable ThemedButton is a toggle on its own

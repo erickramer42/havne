@@ -1,6 +1,6 @@
 // File/layer: app/qml/StripChart.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.chartlayout, QmlTest.liveview, QmlTest.phone,
-//          QmlTest.recordings (test_qml); Manual smoke
+// Testing: QML: QmlTest.chartlayout{,_panes}, QmlTest.liveview{,_pause}, QmlTest.phone_*,
+//          QmlTest.recordings* (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Shapes

@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsSubpage.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // One page of Settings: a scrolling column under a pinned title row with
 // a back arrow
 
