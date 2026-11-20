@@ -158,7 +158,8 @@ _Static_assert(offsetof(ecuio_recorder_state_t, frames_passed) == 184,
  * options, root or out; ECUIO_ERR_INVALID_ARGUMENT for a flag other than
  * ECUIO_RECORD_ARMED or nonzero reserved; ECUIO_ERR_RECORDING_FAILED
  * when the folder can't be created, with ecuio_last_error_detail naming
- * the cause, never the path.
+ * the cause, never the path; ECUIO_ERR_OUT_OF_MEMORY when an allocation
+ * fails, the files it made closed.
  */
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
                                    ecuio_recorder_t** out);

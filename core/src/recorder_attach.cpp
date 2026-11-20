@@ -451,21 +451,27 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
-    std::string root = options->root_utf8;
-    while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
-        root.pop_back();
+    /* Every step from here allocates: a failure frees the recorder, its
+     * files closed, and is answered */
+    try {
+        std::string root = options->root_utf8;
+        while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
+            root.pop_back();
+        }
+        std::string why;
+        if (!make_root(root, &why)) {
+            ecuio_detail_set("can't create the recordings' folder: %s",
+                             why.c_str());
+            return ECUIO_ERR_RECORDING_FAILED;
+        }
+        const ecuio_status_t st = open_files(options, root, *r);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        queue_caller_lines(options, *r);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    std::string why;
-    if (!make_root(root, &why)) {
-        ecuio_detail_set("can't create the recordings' folder: %s",
-                         why.c_str());
-        return ECUIO_ERR_RECORDING_FAILED;
-    }
-    const ecuio_status_t st = open_files(options, root, *r);
-    if (st != ECUIO_OK) {
-        return st;
-    }
-    queue_caller_lines(options, *r);
 
     try {
         r->writer = std::thread([rec = r.get()] { rec->run(); });
