@@ -25,8 +25,8 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c, int32_t r,
                               bool sent, int64_t now_us, int64_t start_us = -1)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (!sent && r == ECUIO_ENGINE_ONCE && ch.talk.out) {
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::unsent, 0); /* never twice */
+    if (r == ECUIO_ENGINE_ONCE && ch.talk.out) {
+        ecuio_talk_sent(ch.talk, ch.key, sent, now_us); /* never twice */
     }
     ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
@@ -103,7 +103,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     } else if (once && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
     } else if (once && ch.talk.out) {
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::unanswered, 0);
+        ecuio_talk_settle(ch.talk, ch.key, ecuio_talk_end::unanswered, 0,
+                          now_us);
     } else if (once) {
         if (ch.walk_stray && !ch.walk_reasked &&
             (!ch.walk_timed || now_us < ch.walk_until_us)) {
@@ -143,7 +144,7 @@ inline void ecuio_engine_once_answered(ecuio_request_engine* e, uint32_t c,
     } else if (ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0, len);
     } else if (ch.talk.out) {
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::answered, 0);
+        ecuio_talk_settle(ch.talk, ch.key, ecuio_talk_end::answered, 0, now_us);
     } else if (len >= ECUIO_BITMAP_REPLY_LEN) {
         ecuio_engine_take_bitmap(e, c, data, now_us);
     } else {
@@ -225,7 +226,7 @@ inline void ecuio_engine_drop_refused(ecuio_request_engine* e, uint32_t c,
 /* The one-shot channel c had out, refused with code: the item it held
  * is settled, or the walk ends */
 inline void ecuio_engine_once_refused(ecuio_request_engine* e, uint32_t c,
-                                      uint8_t code, bool talk)
+                                      uint8_t code, bool talk, int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.clearing) {
@@ -238,7 +239,8 @@ inline void ecuio_engine_once_refused(ecuio_request_engine* e, uint32_t c,
     } else if (ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
     } else if (talk) {
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
+        ecuio_talk_settle(ch.talk, ch.key, ecuio_talk_end::refused, code,
+                          now_us);
     } else {
         ecuio_engine_end_walk(e, c);
     }
@@ -274,7 +276,7 @@ inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
     const bool talk = out == ECUIO_ENGINE_ONCE && ch.talk.out;
     ecuio_engine_drop_refused(e, c, out, service, code, talk);
     if (out == ECUIO_ENGINE_ONCE) {
-        ecuio_engine_once_refused(e, c, code, talk);
+        ecuio_engine_once_refused(e, c, code, talk, now_us);
     }
     return ecuio_reply::negative;
 }

@@ -54,6 +54,8 @@
 //    ECUIO_FAKE_ABSENT_ECU=<reply ID, hex> leaves every request to that
 //    ECU with no answer: a module this car lacks. FFFFFFFF leaves every
 //    ECU's: a car with its ignition off.
+//    ECUIO_FAKE_SECURITY_STRICT=1 has the engine ECU's security access
+//    want its key straight after its seed (fake_ecus.h).
 //    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to
 //    an unsupported PID or DID (hex or decimal), or 0 for no reply at
 //    all. The supported-PID bitmaps (PIDs 0x00, 0x20, 0x40) mark the
@@ -876,6 +878,9 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             fake_j2534::read_knob("ECUIO_FAKE_SESSION_NRC", code, sizeof(code))
                 ? static_cast<unsigned>(strtol(code, nullptr, 0))
                 : 0u;
+        /* Security access that wants its key straight after its seed */
+        fake_ecu::security_strict() =
+            fake_j2534::knob_on("ECUIO_FAKE_SECURITY_STRICT");
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -918,7 +923,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
      * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
      * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
-     * bytes: the adapter-framed logical message. With
+     * bytes; Service 0x27 of any length (the engine ECU's security
+     * access): the adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
      * Everything else keeps the deterministic echo semantics. */
@@ -934,6 +940,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                                        req[4] == 0x10 || req[4] == 0x3E)) ||
                            (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
+                           (n >= 5 && req[4] == 0x27) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
                                        req[4] == 0x07 || req[4] == 0x0A)));
 

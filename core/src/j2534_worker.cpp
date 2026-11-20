@@ -429,6 +429,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
     while (!t->stop_requested.load()) {
         link_judge_waiting(h);
         if (requests) {
+            ecuio_key_windows_judge(&e, h);
             ask_channels(t, e, h, hold);
         }
 
@@ -490,7 +491,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
         if (requests) {
             ecuio_take_diag_request(t->session, &e, diag_seen);
             ecuio_take_clear_requests(t->session, &e, clear_seen);
-            ecuio_take_test_talk(t->session, &e);
+            ecuio_take_test_talk(t->session, &e, engine_now_us(t));
             ecuio_take_focus(t->session, &e, focus_seen);
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {

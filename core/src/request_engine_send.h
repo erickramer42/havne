@@ -1,8 +1,8 @@
 // File/layer: core/src/request_engine_send.h | internal, not ABI-exported;
 //             a part of the request engine, included by
 //             request_engine.h, whose description covers it
-// What a channel sends next (ecuio_engine_due), a talk's turn and
-// the next event.
+// What a channel sends next (ecuio_engine_due), a talk's offer and turn,
+// and the next event.
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: RequestEngineTest, EngineTalkTest, RequestTurnsTest
 //          (test_obd2); HARNESS: every transport's suites
@@ -17,15 +17,31 @@
 #include "request_engine_diag.h"
 #include "request_engine_session.h"
 
-/* Whether a talk offered first goes now: ahead of the keep-alive and
- * every list, and behind a session entry that is due */
-inline bool ecuio_engine_talk_first(const ecuio_request_engine* e,
-                                    ecuio_engine_channel& ch, int64_t now_us)
+/* Offers q as channel c's talk at now_us (request_talk.h's door, with the
+ * channel's window). A functional channel's bound is one frame, and
+ * security access goes to a module's own address: a seed or a key there
+ * is refused, and so is a channel the engine lacks, and a seed anywhere
+ * while a functional channel has a session
+ * (ecuio_engine_functional_session). */
+inline ecuio_talk_offer ecuio_engine_offer_talk(ecuio_request_engine* e,
+                                                uint32_t c,
+                                                const ecuio_talk_request& q,
+                                                int64_t now_us)
 {
-    const bool entering = ecuio_engine_session_live(e, ch) &&
-                          (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
-                           now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US);
-    return !entering && ecuio_talk_turn(ch.talk, true, false);
+    if (c >= e->chan_count) {
+        return ecuio_talk_offer::refused;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.functional && q.kind != ecuio_talk_kind::plain) {
+        return ecuio_talk_offer::refused;
+    }
+    if (q.kind == ecuio_talk_kind::seed && ecuio_engine_functional_session(e)) {
+        return ecuio_talk_offer::refused;
+    }
+    const uint32_t bound = ch.functional && e->pdu_max > ECUIO_ENGINE_PDU_SINGLE
+                               ? ECUIO_ENGINE_PDU_SINGLE
+                               : e->pdu_max;
+    return ecuio_engine_talk(ch.talk, ch.key, bound, q, now_us);
 }
 
 /* The offered talk takes channel c's one-shot */
@@ -37,15 +53,22 @@ inline int32_t ecuio_engine_talk_slot(ecuio_engine_channel& ch, uint32_t c)
     return ECUIO_ENGINE_ONCE;
 }
 
-/* due's lead: true when the floor, a one-shot already in, a talk offered
- * first, the session or the walk decides, with *r its answer. A walk out
- * of budget ends here. */
+/* due's lead: true when the floor, a key's window, a one-shot already in,
+ * a key, the session or the walk decides, with *r its answer. A key
+ * whose window ended before this turn settles unsent, and a walk out of
+ * budget ends here. No session entry can be due ahead of a key: its
+ * window ends with the session's step and inside S3. */
 inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
                                   int64_t now_us, int32_t* r)
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
         *r = ECUIO_ENGINE_NONE;
+        return true;
+    }
+    const bool awaited = ecuio_engine_key_awaited(e, ch, now_us);
+    if (ch.functional && awaited) {
+        *r = ECUIO_ENGINE_NONE; /* every module hears this address */
         return true;
     }
     /* Taken before a probe started the walk: it goes first, so its reply
@@ -55,8 +78,13 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }
-    if (ecuio_engine_talk_first(e, ch, now_us)) {
+    (void)ecuio_talk_key_lapsed(ch.talk, ch.key, now_us);
+    if (ecuio_talk_turn(ch.talk, true, false)) {
         *r = ecuio_engine_talk_slot(ch, c);
+        return true;
+    }
+    if (awaited) {
+        *r = ECUIO_ENGINE_NONE; /* nothing but the key, not yet offered */
         return true;
     }
     /* ADR-0060: the session first; while 10 03 is due nothing else goes */
@@ -247,8 +275,8 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
 
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
- * in the one-shot (its write failed), then for a talk offered first,
- * then while its walk has a bitmap
+ * in the one-shot (its write failed), then for a key, and nothing more
+ * while a key's window holds the channel; then while its walk has a bitmap
  * to ask, then, taking turns with the rotation, for a clear's next
  * request, the next identification item, then the next diagnostics
  * item, then a talk and the next scanned DID in turns, else the next
@@ -290,7 +318,11 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 /* Microseconds until the engine next has something to do: a wait
  * ending, or a channel's floor passing while it has something to send
  * (with only its rotation left, a focus's next sweep, when that is
- * later); 0 when something is due now, INT64_MAX when nothing is. The
+ * later; with a key's window holding it and no key offered, the
+ * window's end); 0 when something is due now, INT64_MAX when nothing
+ * is. A channel whose window is open with nothing to send after it
+ * reports the window's end too: a driver counts quiet reads only at
+ * INT64_MAX, and a link judged silent would end the window. The
  * channels with a bit in skip are left out. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us, uint32_t skip = 0)
@@ -301,10 +333,11 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         if (((skip >> c) & 1u) != 0) {
             continue;
         }
+        const bool window = ecuio_key_window_open(ch.key, now_us);
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
             ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
-            !ch.talk.offered && !ecuio_engine_session_live(e, ch)) {
+            !ch.talk.offered && !ecuio_engine_session_live(e, ch) && !window) {
             continue;
         }
         int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
@@ -325,6 +358,13 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
             if (s < at) {
                 at = s;
             }
+        }
+        if (ch.outstanding == ECUIO_ENGINE_NONE && at != INT64_MAX &&
+            !ecuio_talk_key_waits(ch.talk)) {
+            const int64_t held = ecuio_engine_key_held_until(e, ch);
+            at = held > at ? held : at;
+        } else if (window && at == INT64_MAX) {
+            at = ch.key.until_us;
         }
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {

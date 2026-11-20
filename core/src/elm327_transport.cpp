@@ -284,8 +284,9 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     }
     t->ext29 = wide != 0;
     t->protocol = elm327_protocol_for(t->ext29, t->can_baud);
-    st = ecuio_build_requests(session, set, req, t->rx_ids, t->chan_count,
-                              &t->engine, &t->probe, &t->identify);
+    st = ecuio_build_requests(session, set, req, t->rx_ids, t->tx_ids,
+                              t->chan_count, &t->engine, &t->probe,
+                              &t->identify);
     if (st != ECUIO_OK) {
         return st;
     }

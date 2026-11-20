@@ -62,6 +62,9 @@ constexpr int64_t ECUIO_ENGINE_KEEPALIVE_US = 2000000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MIN_US = 500000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MAX_US = 4500000;
 constexpr int64_t ECUIO_ENGINE_S3_US = 5000000;
+static_assert(ECUIO_KEY_WINDOW_SESSION_US == ECUIO_ENGINE_S3_US - 1000000,
+              "a key sent inside its window reaches the ECU a second "
+              "before S3 runs out");
 
 /* A channel's session is one of core.h's ECUIO_SESSION_STATE_*; a module
  * that loses it to 7E or 7F ECUIO_SESSION_LOSSES_MAX times within the
@@ -265,13 +268,31 @@ struct ecuio_engine_channel {
     bool sessioning = false;
     bool session_fresh = false;
     bool refused_own = false;
+    /* The channel's requests go to a functional address (0x7DF,
+     * 0x18DB33F1), which every module hears: it sends nothing while any
+     * channel's window is open, and never a seed, a key or a talk longer
+     * than a frame. Set once, by ecuio_build_requests. */
+    bool functional = false;
     uint16_t session_entries = 0; /* each 50 03 */
     uint16_t session_lost = 0;    /* each re-entry */
     uint32_t refused_losses = 0;  /* 7E or 7F re-entries in this window */
     int64_t loss_window_us = 0;   /* when that window started */
     int64_t last_sent_us = 0;
+    /* The key's window (request_talk.h): while it is open the channel
+     * sends only a key */
+    ecuio_key_window key;
     ecuio_request session_refused = {};
 };
+
+/* Sets channel ch's session step. A key's window lasts only while the
+ * session is entered: every other step ends it (request_talk.h). */
+inline void ecuio_engine_session_step(ecuio_engine_channel& ch, uint8_t step)
+{
+    ch.session_step = step;
+    if (step != ECUIO_SESSION_STATE_ENTERED) {
+        ch.key.until_us = 0;
+    }
+}
 
 /* A table row with no reply-timing row: none yet, and none ever (the
  * pool was spent when it first entered the rotation) */

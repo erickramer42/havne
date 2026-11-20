@@ -71,9 +71,10 @@ struct Car {
         params.diagnose = false;
         bool probe = false;
         bool identify = false;
-        EXPECT_EQ(ecuio_build_requests(
-                      s, car_set(), params, s->module_rx.data(),
-                      s->info.module_count, e.get(), &probe, &identify),
+        EXPECT_EQ(ecuio_build_requests(s, car_set(), params,
+                                       s->module_rx.data(), s->module_tx.data(),
+                                       s->info.module_count, e.get(), &probe,
+                                       &identify),
                   ECUIO_OK)
             << ecuio_last_error_detail();
     }
@@ -232,8 +233,8 @@ TEST(PickOnlyTest, ASetThatFitsARotationIsAskedWholeAndRefusesNoPickBySize)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->module_rx.data(),
-                                   s->info.module_count, e.get(), &probe,
-                                   &identify),
+                                   s->module_tx.data(), s->info.module_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     EXPECT_FALSE(e->pick_only);
     EXPECT_FALSE(s->focus_pick_only);
@@ -265,8 +266,8 @@ TEST(PickOnlyTest, ASetThatFitsARotationIsAskedWholeAndRefusesNoPickBySize)
         << ecuio_last_error_detail();
     auto f = std::make_unique<ecuio_request_engine>();
     ASSERT_EQ(ecuio_build_requests(s, &full, params, s->module_rx.data(),
-                                   s->info.module_count, f.get(), &probe,
-                                   &identify),
+                                   s->module_tx.data(), s->info.module_count,
+                                   f.get(), &probe, &identify),
               ECUIO_OK)
         << ecuio_last_error_detail();
     EXPECT_FALSE(f->pick_only);
@@ -710,8 +711,9 @@ TEST(ReplyTimingTest, AScanAloneIsTimedOnceItFindsADid)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, ecuio_session_signal_set(s), params,
-                                   s->module_rx.data(), s->info.module_count,
-                                   e.get(), &probe, &identify),
+                                   s->module_rx.data(), s->module_tx.data(),
+                                   s->info.module_count, e.get(), &probe,
+                                   &identify),
               ECUIO_OK)
         << ecuio_last_error_detail();
     EXPECT_EQ(e->count, 0u) << "nothing to rotate until the scan finds";

@@ -341,7 +341,7 @@ inline bool bench::open(std::string* why)
     bool probe = false;
     bool identify = false;
     if (ecuio_build_requests(m_session, set, m_cfg.params,
-                             m_session->info.rx_ids,
+                             m_session->info.rx_ids, m_session->info.tx_ids,
                              m_session->info.channel_count, m_engine.get(),
                              &probe, &identify) != ECUIO_OK) {
         *why = std::string("requests: ") + ecuio_last_error_detail();

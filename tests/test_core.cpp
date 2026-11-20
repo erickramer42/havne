@@ -5858,8 +5858,8 @@ TEST(CoreTest, AFocusOnAComputedSignalKeepsItsLeavesAsked)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ASSERT_GT(e->count, 2u);
     ecuio_focus_seen seen;
@@ -7895,8 +7895,8 @@ TEST(CoreTest, AFocusThatLeavesNothingToRequestIsRefused)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ASSERT_EQ(e->count, 1u);
 
@@ -7935,8 +7935,8 @@ TEST(CoreTest, AComputedPickKeepsItsInputsRequested)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen seen;
     ecuio_take_focus(s, e.get(), seen);
@@ -7978,7 +7978,7 @@ TEST(CoreTest, AComputedPickKeepsItsInputsRequested)
     poll.has_poll = true;
     poll.poll_pid = 0x0C;
     auto p = std::make_unique<ecuio_request_engine>();
-    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids,
+    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids, s->info.tx_ids,
                                    s->info.channel_count, p.get(), &probe,
                                    &identify),
               ECUIO_OK);
@@ -8039,8 +8039,8 @@ TEST(CoreTest, AFocusKeepsAnAttachedConditionsSignalsAsked)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen seen;
     ecuio_take_focus(s, e.get(), seen);
@@ -8091,7 +8091,7 @@ TEST(CoreTest, AFocusKeepsAnAttachedConditionsSignalsAsked)
     poll.has_poll = true;
     poll.poll_pid = 0x0C;
     auto p = std::make_unique<ecuio_request_engine>();
-    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids,
+    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids, s->info.tx_ids,
                                    s->info.channel_count, p.get(), &probe,
                                    &identify),
               ECUIO_OK);
@@ -8146,8 +8146,8 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen seen;
     ecuio_take_focus(s, e.get(), seen);
@@ -8225,8 +8225,8 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
     set = ecuio_session_signal_set(s);
     auto f = std::make_unique<ecuio_request_engine>();
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, f.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   f.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen fresh;
     ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK);
@@ -8266,8 +8266,8 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
         ECUIO_OK);
     auto g = std::make_unique<ecuio_request_engine>();
     ASSERT_EQ(ecuio_build_requests(s, &passive, params, s->info.rx_ids,
-                                   s->info.channel_count, g.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   g.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen third;
     const uint16_t first = 61001;
@@ -8353,8 +8353,8 @@ TEST(CoreTest, AComputedSignalReadingAnInputOnlyInABranchIsNotListedWithIt)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen seen;
     const uint16_t speed = ECUIO_OBD2_SIG_SPEED_ID;
@@ -8376,8 +8376,8 @@ TEST(CoreTest, AComputedSignalReadingAnInputOnlyInABranchIsNotListedWithIt)
     set = ecuio_session_signal_set(s);
     auto d = std::make_unique<ecuio_request_engine>();
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, d.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   d.get(), &probe, &identify),
               ECUIO_OK);
     uint32_t maf_row = d->count;
     for (uint32_t k = 0; k < d->count; ++k) {
@@ -8461,8 +8461,8 @@ TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ecuio_focus_seen seen;
     ecuio_take_focus(s, e.get(), seen);
@@ -8564,8 +8564,8 @@ TEST(CoreTest, AScannedDidFoundUnderAFocusJoinsItWhenPicked)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ASSERT_EQ(e->count, 1u) << "the polled DID; the scan's are unasked";
 
@@ -8615,8 +8615,8 @@ TEST(CoreTest, AScannedDidJoiningLeavesTheSweepUnderWayAlone)
     bool probe = false;
     bool identify = false;
     ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
-                                   s->info.channel_count, e.get(), &probe,
-                                   &identify),
+                                   s->info.tx_ids, s->info.channel_count,
+                                   e.get(), &probe, &identify),
               ECUIO_OK);
     ASSERT_EQ(e->count, 2u) << "the polled DIDs; the scan's are unasked";
     /* The finds come by hand (join): the scan's own requests stay out */

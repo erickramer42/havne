@@ -58,7 +58,14 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
 {
     const bool has_extended =
         n.module == 0 && !n.from_set && s->ecu.recording == nullptr;
-    if (!functional && s->ecu.recording == nullptr) {
+    if (s->ecu.recording == nullptr) {
+        n.session.security.strict = s->strict.load(std::memory_order_relaxed);
+    }
+    if (functional) {
+        /* every module hears 0x7DF: it comes between a strict one's seed
+         * and its key, and is no node's session's otherwise */
+        ecuio_sim_security_between(n.session.security);
+    } else if (s->ecu.recording == nullptr) {
         bool handled = false;
         const uint32_t m = ecuio_sim_session_answer(
             n.session, has_extended, s->ecu.time_us, req, len, out, &handled);
@@ -613,6 +620,13 @@ ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
     out->pending = sim->pending.load(std::memory_order_relaxed);
     out->flags = sim->flags.load(std::memory_order_acquire);
     return ECUIO_OK;
+}
+
+void ecuio_sim_test_set_strict(ecuio_sim_t* sim, int on)
+{
+    if (sim != nullptr) {
+        sim->strict.store(on != 0, std::memory_order_relaxed);
+    }
 }
 
 ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,

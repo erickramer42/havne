@@ -424,6 +424,7 @@ void elm327_worker(transport* t)
     while (!t->stop_requested.load()) {
         link_judge_waiting(h);
         const int64_t now = now_us(t);
+        ecuio_key_windows_judge(&e, h);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (ecuio_engine_expire(&e, c, now)) {
                 ecuio_request_timed_out(e, h);
@@ -540,7 +541,7 @@ void elm327_worker(transport* t)
         }
         ecuio_take_diag_request(t->session, &e, diag_seen);
         ecuio_take_clear_requests(t->session, &e, clear_seen);
-        ecuio_take_test_talk(t->session, &e);
+        ecuio_take_test_talk(t->session, &e, now_us(t));
         ecuio_take_focus(t->session, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);

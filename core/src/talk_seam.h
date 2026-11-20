@@ -8,7 +8,9 @@
 // and each requesting worker calls ecuio_take_test_talk where it takes a
 // clear (SocketCAN's once before its loop too, so a request handed over
 // before start is the session's first). The worker offers the request to
-// its engine and, once the engine has settled it, leaves the result for
+// its engine at its own time (ecuio_engine_offer_talk: a seed with its
+// window, a key inside one) and, once the engine has settled it, leaves
+// the result for
 // ecuio_session_test_talk_result. Nothing in the app or the CLI reaches
 // this: it lets a test send a request longer than a frame through a real
 // session.
@@ -25,19 +27,22 @@
 #include "request_engine.h"
 #include "session.h"
 
-/* The worker's pass over the session's slot: offers a request newly
- * asked, and settles the one its engine has finished */
+/* The worker's pass over the session's slot at now_us: offers a request
+ * newly asked, and settles the one its engine has finished */
 inline void ecuio_take_test_talk(ecuio_session_t* session,
-                                 ecuio_request_engine* e)
+                                 ecuio_request_engine* e, int64_t now_us)
 {
     ecuio_test_talk_slot& slot = session->test_talk;
     const uint8_t state = slot.state.load();
     if (state == ECUIO_TEST_TALK_ASKED) {
+        ecuio_talk_request q;
+        q.pdu = slot.pdu;
+        q.len = slot.len;
+        q.echo = slot.echo;
+        q.kind = slot.kind;
+        q.window_us = int64_t{slot.window_ms} * 1000;
         const ecuio_talk_offer offer =
-            slot.channel < e->chan_count
-                ? ecuio_engine_talk(e->chans[slot.channel].talk, e->pdu_max,
-                                    slot.pdu, slot.len, slot.echo, slot.first)
-                : ecuio_talk_offer::refused;
+            ecuio_engine_offer_talk(e, slot.channel, q, now_us);
         slot.offer = offer;
         slot.result = ecuio_talk_result{};
         slot.state.store(offer == ecuio_talk_offer::taken

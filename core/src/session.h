@@ -40,7 +40,8 @@ struct ecuio_test_talk_slot {
     uint32_t channel = 0;
     uint32_t len = 0;
     uint8_t echo = 0;
-    bool first = false;
+    ecuio_talk_kind kind = ecuio_talk_kind::plain;
+    uint32_t window_ms = 0; /* a seed's */
     uint8_t pdu[ECUIO_ENGINE_PDU_MAX] = {};
     ecuio_talk_offer offer = ecuio_talk_offer::taken;
     ecuio_talk_result result;

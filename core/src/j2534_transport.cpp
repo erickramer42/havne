@@ -411,11 +411,14 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
      * author omitting them, or ?poll= without one; before any hardware
      * is touched. */
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
+    uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         rx_ids[i] = t->chans[i].rx_id;
+        tx_ids[i] = t->chans[i].tx_id;
     }
-    st = ecuio_build_requests(session, set, params.req, rx_ids, t->chan_count,
-                              &t->engine, &t->probe, &t->identify);
+    st = ecuio_build_requests(session, set, params.req, rx_ids, tx_ids,
+                              t->chan_count, &t->engine, &t->probe,
+                              &t->identify);
     t->hold = params.hold;
     if (st != ECUIO_OK) {
         return st;
@@ -470,10 +473,6 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->handle = handle;
     t->channel = channel;
     describe_session(t.get(), params.baud, connect_flags, &session->info);
-    uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        tx_ids[i] = t->chans[i].tx_id;
-    }
     st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
     if (st != ECUIO_OK) {
         delete wrap;

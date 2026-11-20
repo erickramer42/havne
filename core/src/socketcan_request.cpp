@@ -192,14 +192,13 @@ bool send_frame(ecuio_socketcan_transport* t, sent_request& pending, uint32_t c,
     return true;
 }
 
-/* A request that didn't get out: taken back (a talk settles unsent), a
- * failed write for link health, the sender free for the next */
+/* A request that didn't get out (socketcan_send_failed), with this
+ * transport's sender and engine */
 void send_failed(ecuio_socketcan_transport* t, link_health& h,
-                 socketcan_send& send, uint32_t c, int32_t r, int64_t now)
+                 socketcan_send& send, uint32_t c, int32_t r, int64_t now,
+                 socketcan_send_why why)
 {
-    socketcan_send_end(send, *t->sender);
-    ecuio_engine_sent(&t->engine, c, r, false, now);
-    link_on_write(h, false);
+    socketcan_send_failed(send, *t->sender, &t->engine, c, r, why, h, now);
 }
 
 /* The next request due on any channel, from next_chan on: its one frame,
@@ -227,7 +226,7 @@ void send_due(ecuio_socketcan_transport* t, link_health& h,
     if (socketcan_send_start(send, *t->sender, c, r, t->tx_ids[c], pdu, len,
                              now, &f) == socketcan_send_step::failed ||
         !send_frame(t, pending, c, r, f, now)) {
-        send_failed(t, h, send, c, r, now);
+        send_failed(t, h, send, c, r, now, socketcan_send_why::write);
     }
 }
 
@@ -248,10 +247,11 @@ void send_on(ecuio_socketcan_transport* t, link_health& h,
     isotp_can f;
     const socketcan_send_step step =
         socketcan_send_next(send, *t->sender, pending.active, now, &f);
-    if (step == socketcan_send_step::failed ||
-        (step != socketcan_send_step::none &&
-         !send_frame(t, pending, send.c, send.r, f, now))) {
-        send_failed(t, h, send, send.c, send.r, now);
+    if (step == socketcan_send_step::failed) {
+        send_failed(t, h, send, send.c, send.r, now, send.why);
+    } else if (step != socketcan_send_step::none &&
+               !send_frame(t, pending, send.c, send.r, f, now)) {
+        send_failed(t, h, send, send.c, send.r, now, socketcan_send_why::write);
     } else if (send.active && now >= t->engine.chans[send.c].deadline_us) {
         ecuio_engine_sent(&t->engine, send.c, send.r, true, now);
     }
@@ -270,7 +270,7 @@ bool send_flow(ecuio_socketcan_transport* t, link_health& h,
     }
     (void)socketcan_proof_settle(t->proof, now, true);
     if (step == socketcan_send_step::failed) {
-        send_failed(t, h, send, c, send.r, now);
+        send_failed(t, h, send, c, send.r, now, send.why);
     }
     return true;
 }
@@ -308,7 +308,8 @@ struct request_sends {
         if (step == socketcan_proof_step::halt) {
             link_on_read(h, true, false, false); /* one episode; no more sent */
             if (send.active) {
-                send_failed(t, h, send, send.c, send.r, now_us(t));
+                send_failed(t, h, send, send.c, send.r, now_us(t),
+                            socketcan_send_why::write);
             }
         }
         pending.active = false;
@@ -320,7 +321,8 @@ struct request_sends {
     {
         pending.active = false;
         if (send.active) {
-            send_failed(t, h, send, send.c, send.r, now_us(t));
+            send_failed(t, h, send, send.c, send.r, now_us(t),
+                        socketcan_send_why::write);
         }
     }
 
@@ -328,6 +330,7 @@ struct request_sends {
      * going out keeps, then a request whose echo is late */
     void expire(int64_t now)
     {
+        ecuio_key_windows_judge(&e, h);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (send.active && send.c == c) {
                 continue; /* still going out: send_on keeps its wait */
@@ -436,7 +439,7 @@ void request_worker(ecuio_socketcan_transport* t)
     /* A focus set before start applies from the first request, and the
      * seam's talk handed over before start is that request */
     ecuio_take_focus(s, &e, focus_seen);
-    ecuio_take_test_talk(s, &e);
+    ecuio_take_test_talk(s, &e, now_us(t));
 
     while (!t->stop.load()) {
         link_judge_waiting(h);
@@ -641,7 +644,7 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         ecuio_take_diag_request(s, &e, diag_seen);
         ecuio_take_clear_requests(s, &e, clear_seen);
-        ecuio_take_test_talk(s, &e);
+        ecuio_take_test_talk(s, &e, now_us(t));
         ecuio_take_focus(s, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(s, e, c, t->rx_ids[c], published[c]);
