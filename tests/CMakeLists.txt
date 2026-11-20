@@ -2290,15 +2290,22 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set(_qml_cost_dashedit_layout 23)
     set(_qml_cost_driveview 37)
     set(_qml_cost_phone 33)
-    set(_qml_cost_recordings 25)
+    set(_qml_cost_recordings 4)
+    set(_qml_cost_recordings_export 3)
+    set(_qml_cost_recordings_layout 3)
+    set(_qml_cost_recordings_cursors 4)
+    set(_qml_cost_recordings_panes 3)
+    set(_qml_cost_recordings_stretches 4)
+    set(_qml_cost_recordings_compare 3)
+    set(_qml_cost_recordings_baseline 3)
     set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
         # A file's bound is a hang guard, not a measurement: each case
-        # waits for what it checks with tryVerify, and tst_recordings
-        # alone opens a 10,200-frame recording, which a machine building
+        # waits for what it checks with tryVerify, and the recordings
+        # files open a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
         # A file near the bound runs as _qml_parts ctest entries, each
         # a disjoint share of its cases (every nth one, so the slow
