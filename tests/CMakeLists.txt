@@ -2264,10 +2264,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
-    set(_qml_split_files dashboard driveview phone)
-    # The shares a file runs as, where not three: tst_phone's longest share
-    # otherwise outlasts the rest of the suite
-    set(_qml_shares_phone 5)
+    set(_qml_split_files dashboard driveview)
+    # The shares a file runs as, where not three: set _qml_shares_<name>
     # Seconds a file's entry (or one share of it) took in a full run's
     # CTestCostData.txt, so a tree with no history starts the long ones first
     set(_qml_cost_dashboard 40)
@@ -2279,7 +2277,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set(_qml_cost_dashedit_undo 38)
     set(_qml_cost_dashedit_layout 23)
     set(_qml_cost_driveview 37)
-    set(_qml_cost_phone 33)
+    set(_qml_cost_phone_fit 35)
+    set(_qml_cost_phone_viewer 35)
+    set(_qml_cost_phone_frame 35)
+    set(_qml_cost_phone_headers 25)
+    set(_qml_cost_phone_connect 40)
     set(_qml_cost_recordings 25)
     set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
