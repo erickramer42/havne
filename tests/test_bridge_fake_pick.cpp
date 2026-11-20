@@ -221,7 +221,22 @@ TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
         bridge.stopLog();
         EXPECT_TRUE(log.contains(kNoneToPick)) << log.join('\n').toStdString();
         EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
-        const auto afterLog = writes();
+        // A request chosen before the log's focus cleared may still go out:
+        // the baseline is taken once the writes have been still for 300 ms
+        uint32_t last = writes();
+        QElapsedTimer still;
+        still.start();
+        ASSERT_TRUE(spinUntil(
+            [&]() {
+                if (writes() != last) {
+                    last = writes();
+                    still.restart();
+                }
+                return still.elapsed() >= 300;
+            },
+            5000, 10))
+            << "the asking never stopped after Stop log";
+        const auto afterLog = last;
         settle.restart();
         ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 400; }, 5000));
         EXPECT_EQ(writes(), afterLog);
