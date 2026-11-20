@@ -884,7 +884,7 @@ jobs:
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     # Two runners, each with its own build, run alternate halves of ctest
     # (-I k,,2: every case once across the two); the steps after the tests
     # run on the first
@@ -954,8 +954,10 @@ jobs:
           "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as win-build's; read on every ref, saved by
-      # the first shard on dev and main only
+      # the release publishes, as win-build's. Each run's first shard saves
+      # its cache under the run's own key after the build, on every ref;
+      # a run restores the newest it may read (its branch's, else main's).
+      # 500 MB keeps each entry small inside the 10 GB
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -966,40 +968,38 @@ jobs:
           tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
           echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
-
-      - name: Name the compiler cache's week
-        id: week
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+          echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
-        id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ steps.week.outputs.week }}
-          restore-keys: sccache-linux-build-1-
+          key: sccache-linux-build-2-${{ github.run_id }}
+          restore-keys: sccache-linux-build-2-
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
       # and bpftrace: core's USDT probes and the step that traces them;
       # can-utils: candump, which CliTransferRunTest.candump logs vcan0
-      # with (ECUIO_VCAN_REQUIRED fails it without one)
+      # with (ECUIO_VCAN_REQUIRED fails it without one); ninja-build and
+      # mold: the build's scheduler and linker, for its time
       - name: Build full app
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
-            systemtap-sdt-dev bpftrace can-utils
-          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python" \
-            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+            systemtap-sdt-dev bpftrace can-utils ninja-build mold
+          cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_LINKER_TYPE=MOLD
           cmake --build build
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Save the compiler cache (dev and main)
-        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+      # Saved before the tests, so a run that fails or times out in them
+      # still leaves its objects for the next
+      - name: Save the compiler cache
+        if: matrix.shard == 1
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ steps.week.outputs.week }}
+          key: sccache-linux-build-2-${{ github.run_id }}
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
       # frames (the mock's 16-byte telemetry), whatever the kernel's
@@ -1015,11 +1015,25 @@ jobs:
       # PythonTest.test_vcan (v0.6.0's "a Python script opens SocketCAN")
       # fail rather than skip without vcan0; ECUIO_PYTEST_REQUIRED:
       # PythonTest.* fail rather than skip without pytest
+      # ctest starts the cases that took longest last time first (its cost
+      # data), so the slowest don't finish the run alone
+      - name: Restore the tests' cost data
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/Testing/Temporary/CTestCostData.txt
+          key: ctest-cost-linux-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: ctest-cost-linux-${{ matrix.shard }}-
       - name: Run tests
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_PYTEST_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
+      - name: Save the tests' cost data
+        if: success() || failure()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/Testing/Temporary/CTestCostData.txt
+          key: ctest-cost-linux-${{ matrix.shard }}-${{ github.run_id }}
       # The one SocketCAN case that sets the interface down and up again
       # needs CAP_NET_ADMIN; it skips in the run above, and runs here
       - name: SocketCAN as root (the interface down and up)
