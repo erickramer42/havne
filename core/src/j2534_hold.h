@@ -47,7 +47,7 @@
 // too, and the key itself waits only for a segmented exchange already on
 // the bus (its Single Frame reply could be lost beside it), so for one
 // exchange at most. A key whose window passes while it waits is settled
-// unsent at that pass and never written. The window is over before its
+// lapsed at that pass and never written. The window is over before its
 // own channel's session gate opens, so no key is offered on a channel
 // whose session request goes through.
 //
@@ -201,7 +201,7 @@ inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
  * its session with S3 near or past, and due's next request (a session
  * request taken already, or one due with nothing due hands out first:
  * another one-shot taken). No key is offered then: its window ended
- * before the gate opened, and the pass settled it unsent. */
+ * before the gate opened, and the pass settled it lapsed. */
 inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
                                    int64_t now_us)
 {
@@ -230,7 +230,7 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
  * *held_now), due's request, kept chosen instead when its reply is
  * expected segmented while another channel has one on the bus and c isn't
  * silent. c's own key waits only for another's segmented reply, and one
- * past its window is settled unsent first. NONE: nothing to write. */
+ * past its window is settled lapsed first. NONE: nothing to write. */
 inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
                                uint32_t c, int64_t now_us, uint32_t* held_now)
 {

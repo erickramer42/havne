@@ -55,7 +55,7 @@ inline int32_t ecuio_engine_talk_slot(ecuio_engine_channel& ch, uint32_t c)
 
 /* due's lead: true when the floor, a key's window, a one-shot already in,
  * a key, the session or the walk decides, with *r its answer. A key
- * whose window ended before this turn settles unsent, and a walk out of
+ * whose window ended before this turn settles lapsed, and a walk out of
  * budget ends here. No session entry can be due ahead of a key: its
  * window ends with the session's step and inside S3. */
 inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,

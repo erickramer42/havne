@@ -302,7 +302,7 @@ TEST(KeyWindowTest, AKeysSendEndsTheWindowWhateverBecomesOfIt)
 }
 
 /* A session that is entered again took the seed with it: the window
- * ends, a key offered meanwhile settles unsent ahead of the entry, and
+ * ends, a key offered meanwhile settles lapsed ahead of the entry, and
  * none is taken after. */
 TEST(KeyWindowTest, ASessionEnteredAgainEndsTheWindow)
 {
@@ -320,7 +320,7 @@ TEST(KeyWindowTest, ASessionEnteredAgainEndsTheWindow)
         EXPECT_EQ(e.chans[0].key.until_us, 0);
         EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kEnter)
             << "the entry, not a key for a seed the ECU dropped";
-        EXPECT_EQ(taken(&e), ecuio_talk_end::unsent);
+        EXPECT_EQ(taken(&e), ecuio_talk_end::lapsed);
         EXPECT_EQ(offer_key(&e, now, key), ecuio_talk_offer::refused);
         (void)steps(&e, &now, std::ref(ecu), 6);
         EXPECT_EQ(count_of(ecu.heard, key), 0u);
@@ -402,13 +402,14 @@ TEST(KeyWindowTest, TheDriverEndsEveryWindowAndTheCallerItsOwn)
     EXPECT_EQ(offer_key(&e, now, key, 1), ecuio_talk_offer::refused);
     EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE)
         << "the key offered before the link failed doesn't go";
-    EXPECT_EQ(taken(&e), ecuio_talk_end::unsent);
+    EXPECT_EQ(taken(&e), ecuio_talk_end::lapsed);
 }
 
 /* A key offered in time that reaches its turn late (a long floor, a
- * worker held up) settles unsent: the engine sends no key for a seed
- * that has lapsed, whatever the caller did. */
-TEST(KeyWindowTest, AKeyOfferedInTimeAndLateToItsTurnIsUnsent)
+ * worker held up) settles lapsed, an end of its own since it never
+ * touched the bus: the engine sends no key for a seed that has lapsed,
+ * whatever the caller did. */
+TEST(KeyWindowTest, AKeyOfferedInTimeAndLateToItsTurnLapses)
 {
     static ecuio_request_engine e;
     Ecu ecu;
@@ -423,7 +424,7 @@ TEST(KeyWindowTest, AKeyOfferedInTimeAndLateToItsTurnIsUnsent)
     const int32_t r = ecuio_engine_due(&e, 0, now);
     ASSERT_NE(r, ECUIO_ENGINE_NONE) << "the channel reads on";
     EXPECT_EQ(wire(&e, 0, r), kRow);
-    EXPECT_EQ(taken(&e), ecuio_talk_end::unsent);
+    EXPECT_EQ(taken(&e), ecuio_talk_end::lapsed);
     EXPECT_EQ(e.chans[0].key.until_us, 0);
     /* one microsecond earlier it goes */
     static ecuio_request_engine f;

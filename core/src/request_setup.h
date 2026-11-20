@@ -791,7 +791,7 @@ inline void ecuio_request_timed_out(const ecuio_request_engine& e,
 
 /* Once a worker pass, beside its expire loop: while the link isn't OK
  * no key's window stands (ecuio_engine_key_windows_end), so a key
- * offered across a failure is refused or settles unsent */
+ * offered across a failure is refused or settles lapsed */
 inline void ecuio_key_windows_judge(ecuio_request_engine* e,
                                     const link_health& h)
 {
