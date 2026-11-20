@@ -58,7 +58,6 @@ core/src/csv_guess.h	sample
 core/src/csv_import.h	run
 core/src/csv_map.h	parse_map
 core/src/csv_reader.h	next
-core/src/elm327_listen.cpp	listen
 core/src/export_csv.cpp	values
 core/src/export_pcapng.cpp	plan
 core/src/export_wide.cpp	wide_survey
