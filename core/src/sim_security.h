@@ -62,6 +62,9 @@ struct ecuio_sim_security {
     uint8_t wrong = 0;    /* wrong keys counted toward the lockout */
     bool delayed = false; /* a lockout's delay runs until delay_until_us */
     int64_t delay_until_us = 0;
+    /* A key must directly follow its seed (ecuio_sim_security_between);
+     * off, as a module that lets other requests in between */
+    bool strict = false;
 };
 
 inline const ecuio_sim_security_level* ecuio_sim_security_find(uint8_t level)
@@ -91,6 +94,16 @@ inline void ecuio_sim_security_lock(ecuio_sim_security& s)
 {
     s.seed_out = 0;
     s.unlocked = 0;
+}
+
+/* A request that is no 27 reached the ECU: a strict one's seed out is
+ * spent, so the key that follows it answers 24 (ISO 14229-1 lets a
+ * server refuse a key that doesn't directly follow its seed) */
+inline void ecuio_sim_security_between(ecuio_sim_security& s)
+{
+    if (s.strict) {
+        s.seed_out = 0;
+    }
 }
 
 /* The ECU's answer to a 27 request (req[0] is 0x27, len at least 1) at

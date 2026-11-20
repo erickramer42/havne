@@ -23,17 +23,17 @@ Item {
         const key = names.every(n => part.host.historyPart.steppedOptions.indexOf(n) >= 0)
             ? "opt/" + part.host.pageIndex + "/" + part.host.selected + "/" + names.join(",") : ""
         const word = part.host.historyPart.optionWords[names[0]] ?? names[0]
-        return part.host.edit(DashboardBook.setOptions(base ?? part.host.doc, part.host.pageIndex, part.host.selected, changes),
+        return part.host.edit(DashboardEdit.setOptions(base ?? part.host.doc, part.host.pageIndex, part.host.selected, changes),
                     part.host.historyPart.stepOf(key, qsTr("changed %1's %2").arg(part.host.cellName(part.host.selectedCell)).arg(word),
                            part.host.selected, part.host.selected))
     }
     function setLabel(text) {
-        return part.host.edit(DashboardBook.setCell(part.host.doc, part.host.pageIndex, part.host.selected,
+        return part.host.edit(DashboardEdit.setCell(part.host.doc, part.host.pageIndex, part.host.selected,
                                           { label: text === "" ? null : text }),
                     part.host.historyPart.stepOf("", qsTr("changed %1's label").arg(part.host.cellName(part.host.selectedCell)), part.host.selected, part.host.selected))
     }
     function resize(w, h) {
-        return part.host.edit(DashboardBook.resizeCell(part.host.doc, part.host.pageIndex, part.host.selected, w, h),
+        return part.host.edit(DashboardEdit.resizeCell(part.host.doc, part.host.pageIndex, part.host.selected, w, h),
                     part.host.historyPart.stepOf("size/" + part.host.pageIndex + "/" + part.host.selected,
                            qsTr("resized %1").arg(part.host.cellName(part.host.selectedCell)), part.host.selected, part.host.selected))
     }
@@ -41,13 +41,13 @@ Item {
     // the order, which both forms' grids follow
     function moveTo(to) {
         const t = Math.max(0, Math.min(part.host.shownCells.length - 1, to))
-        if (part.host.edit(DashboardBook.moveCell(part.host.doc, part.host.pageIndex, part.host.selected, t),
+        if (part.host.edit(DashboardEdit.moveCell(part.host.doc, part.host.pageIndex, part.host.selected, t),
                  part.host.historyPart.stepOf("", qsTr("moved %1").arg(part.host.cellName(part.host.selectedCell)), part.host.selected, t)))
             part.host.selected = t
     }
     function removeCell(i) {
         part.host.commitTyping()
-        if (!part.host.edit(DashboardBook.removeCell(part.host.doc, part.host.pageIndex, i),
+        if (!part.host.edit(DashboardEdit.removeCell(part.host.doc, part.host.pageIndex, i),
                   part.host.historyPart.stepOf("", qsTr("removed %1").arg(part.host.cellName(part.host.shownCells[i])), i, -1)))
             return
         if (part.host.selected === i) {
@@ -61,7 +61,7 @@ Item {
     // ---- The pages' edits
 
     function addPage() {
-        if (part.host.edit(DashboardBook.addPage(part.host.doc, qsTr("Page %1").arg(part.host.pages.length + 1)),
+        if (part.host.edit(DashboardEdit.addPage(part.host.doc, qsTr("Page %1").arg(part.host.pages.length + 1)),
                  part.host.historyPart.stepOf("", qsTr("added a page"), -1, -1, part.host.pages.length))) {
             part.host.goTo(part.host.pages.length - 1)
             askForPageName()
@@ -79,6 +79,71 @@ Item {
         part.host.confirmRemovePage = false
         part.host.confirmReplaceKey = ""
         part.host.presetList = mode
+        loadPluginPages()
+    }
+    // The loaded plugins' pages of this form (ADR-0052's appendix on pages),
+    // read when the list opens: [{ id, name, picked, pages: [{ index, name }] }],
+    // the picked vehicle's plugins first. Plain copies, never the bridge's maps
+    property var pluginPageList: []
+    function loadPluginPages() {
+        const picked = {}
+        for (const s of part.host.pickedSets)
+            picked[s.profile] = true
+        const out = []
+        for (const p of Bridge.plugins()) {
+            if (!p.ok)
+                continue
+            const pages = []
+            for (const g of p.pages) {
+                if (g.form !== part.host.form)
+                    continue
+                const r = DashboardBook.importProblem(Bridge.pluginPageText(p.id, g.index), part.host.form, [])
+                // A refused text answers with the built-in page, so only a read one gives a name
+                if ((r.problem !== "" && r.problem !== "dropped") || r.doc.pages.length !== 1)
+                    continue
+                pages.push({ index: g.index, name: r.doc.pages[0].name })
+            }
+            if (pages.length > 0)
+                out.push({ id: String(p.id), name: String(p.name), pages: pages,
+                           picked: Array.from(p.profiles).some(q => picked[q] === true) })
+        }
+        pluginPageList = out.filter(e => e.picked).concat(out.filter(e => !e.picked))
+    }
+    // A plugin's page as the user's own copy after the shown page; one undo
+    // step. Whole whether or not the vehicle's picks have its signals: those
+    // gauges read not in profile, and the note counts them
+    function addPluginPage(id, index) {
+        const entry = pluginPageList.find(e => e.id === id)
+        const plugin = entry ? entry.name : id
+        const r = DashboardBook.importProblem(Bridge.pluginPageText(id, index), part.host.form, [])
+        part.host.presetList = ""
+        if (!DashboardEdit.canAddPage(part.host.doc)) {
+            part.host.layoutFilePart.noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
+            return false
+        }
+        if ((r.problem !== "" && r.problem !== "dropped") || r.doc.pages.length !== 1) {
+            part.host.layoutFilePart.noteLayout(qsTr("The page couldn't be read"), true)
+            return false
+        }
+        const page = r.doc.pages[0]
+        const after = part.host.pageIndex
+        if (!part.host.edit(DashboardBook.insertPages(part.host.doc, after, [page]),
+                  part.host.historyPart.stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1))) {
+            part.host.layoutFilePart.noteLayout(qsTr("The page couldn't be added"), true)
+            return false
+        }
+        part.host.goTo(after + 1)
+        askForPageName()
+        const unbound = DashboardBook.unboundKeyCells({ pages: [page] }, part.host.layoutFilePart.vehicleFiles())
+        const words = [qsTr("Added the page %1 from the plugin %2").arg(page.name).arg(plugin)]
+        if (r.problem === "dropped")
+            words.push(qsTr("%1 left out because they couldn't be read").arg(part.host.droppedText(r.dropped)))
+        if (unbound > 0)
+            words.push(unbound === 1
+                       ? qsTr("1 gauge reads a signal none of the vehicle's picked plugins has: pick the plugin's variant under Signals")
+                       : qsTr("%1 gauges read signals none of the vehicle's picked plugins has: pick the plugin's variant under Signals").arg(unbound))
+        part.host.layoutFilePart.noteLayout(words.join(". "))
+        return true
     }
     function closePresets() {
         part.host.presetList = ""
@@ -138,11 +203,11 @@ Item {
     }
     function movePage(by) {
         const to = part.host.pageIndex + by
-        if (part.host.edit(DashboardBook.movePage(part.host.doc, part.host.pageIndex, to), part.host.historyPart.stepOf("", qsTr("moved the page"), -1, -1, to)))
+        if (part.host.edit(DashboardEdit.movePage(part.host.doc, part.host.pageIndex, to), part.host.historyPart.stepOf("", qsTr("moved the page"), -1, -1, to)))
             part.host.goTo(to)
     }
     function renamePage(name) {
-        part.host.edit(DashboardBook.renamePage(part.host.doc, part.host.pageIndex, name), part.host.historyPart.stepOf("", qsTr("renamed the page"), -1, -1))
+        part.host.edit(DashboardEdit.renamePage(part.host.doc, part.host.pageIndex, name), part.host.historyPart.stepOf("", qsTr("renamed the page"), -1, -1))
     }
     // Another page takes this one's index, so nothing stays selected
     function removePage() {
@@ -152,7 +217,7 @@ Item {
         part.host.addKind = ""
         const p = part.host.pages[part.host.pageIndex]
         const name = p && p.name ? p.name : qsTr("Page %1").arg(part.host.pageIndex + 1)
-        part.host.edit(DashboardBook.removePage(part.host.doc, part.host.pageIndex),
+        part.host.edit(DashboardEdit.removePage(part.host.doc, part.host.pageIndex),
              part.host.historyPart.stepOf("", qsTr("removed the page %1").arg(name), -1, -1,
                     Math.max(0, Math.min(part.host.pageIndex, part.host.pages.length - 2))))
     }

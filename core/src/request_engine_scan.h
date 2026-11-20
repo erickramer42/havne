@@ -8,6 +8,7 @@
 #ifndef ECUIO_REQUEST_ENGINE_SCAN_H
 #define ECUIO_REQUEST_ENGINE_SCAN_H
 
+#include "isotp.h"
 #include "request_engine_table.h"
 
 /* Adds did to channel's scan (ADR-0020): asked once, 22 <DID>, outside
@@ -50,15 +51,29 @@ inline int32_t ecuio_engine_scan_next(ecuio_request_engine* e, uint32_t c)
     return -1;
 }
 
-/* A found DID joins channel c's rotation, room permitting */
+/* The CAN frames a reply of len bytes took, for a request's
+ * reply_frames */
+inline uint8_t ecuio_engine_reply_frames(uint32_t len)
+{
+    const uint32_t frames = isotp_frames(len);
+    return frames < 255u ? static_cast<uint8_t>(frames) : uint8_t{255};
+}
+
+/* A found DID joins channel c's rotation, room permitting, a new row
+ * knowing the frames its scan's reply of reply_len bytes took (0: none
+ * seen) */
 inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
-                                   ecuio_scan_entry& s)
+                                   ecuio_scan_entry& s, uint16_t reply_len = 0)
 {
     const uint8_t req[3] = {0x22, static_cast<uint8_t>(s.did >> 8),
                             static_cast<uint8_t>(s.did)};
     const ecuio_engine_add_result r = ecuio_engine_add(e, c, req, 3);
     s.polled = (r == ecuio_engine_add_result::added ||
                 r == ecuio_engine_add_result::duplicate) ? 1 : 0;
+    if (r == ecuio_engine_add_result::added && reply_len > 0) {
+        e->requests[e->count - 1].reply_frames =
+            ecuio_engine_reply_frames(reply_len);
+    }
 }
 
 /* Channel c's scan has asked every entry: the ones whose wait ran out go
@@ -98,9 +113,11 @@ inline void ecuio_engine_scan_retry(ecuio_request_engine* e, uint32_t c)
 }
 
 /* Settles the scan entry channel c has out: found (and in the rotation
- * while the table has room), refused with its code, or unanswered. */
+ * while the table has room, with its reply's reply_len bytes), refused
+ * with its code, or unanswered. */
 inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
-                                     uint8_t outcome, uint8_t nrc)
+                                     uint8_t outcome, uint8_t nrc,
+                                     uint16_t reply_len = 0)
 {
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_scan_entry& s = e->scan[ch.scan_index];
@@ -108,7 +125,7 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
     s.outcome = outcome;
     s.nrc = nrc;
     if (outcome == ECUIO_SCAN_FOUND) {
-        ecuio_engine_scan_poll(e, c, s);
+        ecuio_engine_scan_poll(e, c, s, reply_len);
     }
     if (ch.scan_pending > 0) {
         --ch.scan_pending;
@@ -142,7 +159,7 @@ inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
         if (s.channel == c && s.did == did &&
             (s.outcome == ECUIO_SCAN_UNANSWERED || waiting)) {
             s.outcome = ECUIO_SCAN_FOUND;
-            ecuio_engine_scan_poll(e, c, s);
+            ecuio_engine_scan_poll(e, c, s, len);
             if (waiting && ch.scan_pending > 0) {
                 --ch.scan_pending;
                 if (ch.scan_pending == 0) {
@@ -186,7 +203,7 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             if (ch.session_step == ECUIO_SESSION_STATE_ENTERED) {
                 ecuio_engine_count16(ch.session_lost);
             }
-            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+            ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
             ++ch.generation;
         }
         for (uint32_t i = 0; i < ch.ident_count; ++i) {

@@ -41,7 +41,7 @@ ColumnLayout {
     // The name typed is one of obd2's signals (not one of the vehicle's own): core
     // replaces that signal by name and keeps its ID, so what reads it reads this one
     readonly property string replaced: {
-        const name = root.host.formName.text.trim()
+        const name = root.host.ownFormPart.formName.text.trim()
         if (!root.shown || name === "" || root.host.ownSignals.some(s => s.name === name))
             return ""
         return root.nameRows.some(r => r.name === name) ? name : ""
@@ -78,13 +78,13 @@ ColumnLayout {
     }
 
     Connections {
-        target: root.host.formUnit
+        target: root.host.ownFormPart.formUnit
         function onTextChanged() {
             root.recompute()
         }
     }
     Connections {
-        target: root.host.formDecimals
+        target: root.host.ownFormPart.formDecimals
         function onTextChanged() {
             root.recompute()
         }
@@ -167,8 +167,8 @@ ColumnLayout {
     }
 
     function shownNumber(v) {
-        const d = Number(root.host.formDecimals.text)
-        return root.host.formDecimals.text.trim() !== "" && isFinite(d) && d >= 0 && d <= 3
+        const d = Number(root.host.ownFormPart.formDecimals.text)
+        return root.host.ownFormPart.formDecimals.text.trim() !== "" && isFinite(d) && d >= 0 && d <= 3
             ? v.toFixed(d) : String(Number(v.toPrecision(7)))
     }
 
@@ -186,7 +186,7 @@ ColumnLayout {
         if (!r.ok) {
             root.preview = { text: String(r.words), warn: true }
         } else if (r.hasValue) {
-            const unit = root.host.formUnit.text
+            const unit = root.host.ownFormPart.formUnit.text
             root.preview = { text: qsTr("= %1%2").arg(root.shownNumber(r.value),
                                                    unit !== "" ? " " + unit : ""), warn: false }
         } else if (r.why === "missing") {

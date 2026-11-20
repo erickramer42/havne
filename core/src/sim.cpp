@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string>
@@ -57,7 +58,14 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
 {
     const bool has_extended =
         n.module == 0 && !n.from_set && s->ecu.recording == nullptr;
-    if (!functional && s->ecu.recording == nullptr) {
+    if (s->ecu.recording == nullptr) {
+        n.session.security.strict = s->strict.load(std::memory_order_relaxed);
+    }
+    if (functional) {
+        /* every module hears 0x7DF: it comes between a strict one's seed
+         * and its key, and is no node's session's otherwise */
+        ecuio_sim_security_between(n.session.security);
+    } else if (s->ecu.recording == nullptr) {
         bool handled = false;
         const uint32_t m = ecuio_sim_session_answer(
             n.session, has_extended, s->ecu.time_us, req, len, out, &handled);
@@ -124,13 +132,18 @@ struct sim_plan {
     ecuio_sim_module_plan modules;
 };
 
-/* The URI and its profile, on every platform */
-ecuio_status_t plan_sim(const char* uri, sim_plan* p)
+/* The URI and its profile, on every platform; bus= only with a bus */
+ecuio_status_t plan_sim(const char* uri, bool unbound, sim_plan* p)
 {
     char why[256] = {};
     if (ecuio_sim_parse_uri(uri, &p->config, why, sizeof why) !=
         ecuio_sim_uri_result::ok) {
         ecuio_detail_set("%s", why);
+        return ECUIO_ERR_BAD_URI;
+    }
+    if (unbound && p->config.timing.bus_kbps != 0) {
+        ecuio_detail_set("bus: times the frames on a bus, and an unbound "
+                         "sim has none: its caller times them");
         return ECUIO_ERR_BAD_URI;
     }
     if (p->config.profile_len != 0) {
@@ -261,6 +274,7 @@ ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
     config.path = nullptr; /* the URI's, gone after create */
     config.path_len = 0;
     s->ecu.config = config;
+    s->bus_frame_us = ecuio_sim_timing::frame_us(config.timing.bus_kbps);
     if (!build_nodes(s.get(), p)) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -287,13 +301,35 @@ void put_reply(ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n,
     ++*n;
 }
 
-/* node's answer to an ask's request, its fate decided, into replies
- * at *n (counted past capacity) */
+/* A busy node's way with a request at t (busy=): false when it answers
+ * as usual, true when it ignores it or answered 7F <service> 21 */
+bool ask_busy(ecuio_sim* sim, const sim_node& node, const uint8_t* request,
+              int64_t t, ecuio_sim_reply_t* replies, uint32_t capacity,
+              uint32_t* n)
+{
+    using ecuio_sim_timing::busy_mode;
+    if (node.timing.busy == busy_mode::unset || t >= node.busy_until_us) {
+        return false;
+    }
+    if (node.timing.busy == busy_mode::nrc21) {
+        const uint8_t refusal[3] = {0x7F, request[0], 0x21};
+        put_reply(replies, capacity, n, node, 0, 0, refusal, sizeof refusal);
+        sim->replies.fetch_add(1, std::memory_order_relaxed);
+        sim->refused.fetch_add(1, std::memory_order_relaxed);
+    }
+    return true;
+}
+
+/* node's answer to an ask's request at t, its fate decided, into
+ * replies at *n (counted past capacity) */
 void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
-              uint32_t length, bool functional, ecuio_sim_reply_t* replies,
-              uint32_t capacity, uint32_t* n)
+              uint32_t length, bool functional, int64_t t,
+              ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n)
 {
     sim->requests.fetch_add(1, std::memory_order_relaxed);
+    if (ask_busy(sim, node, request, t, replies, capacity, n)) {
+        return;
+    }
     sim_sending& r = node.r;
     r.len = answer(sim, node, request, length, functional, r.data);
     if (r.len == 0) {
@@ -330,6 +366,17 @@ void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
     }
     put_reply(replies, capacity, n, node, flags, delay, r.data, r.len);
     sent(sim, r);
+    /* As the bus holds it: a stalled reply's last frame waits too. Any
+     * time from ECUIO_SIM_NOW up is an ask's, so the end saturates */
+    int64_t span =
+        delay + ecuio_sim_timing::frames_after_first_us(node.timing, r.len);
+    if (r.fate == ecuio_sim_fate::stalled) {
+        span += ECUIO_SIM_STALLED_US;
+    }
+    node.busy_until_us =
+        t > (std::numeric_limits<int64_t>::max)() - span
+            ? (std::numeric_limits<int64_t>::max)()
+            : t + span;
 }
 
 /* An ask's clock catches up at most this much a call, tick by tick; a
@@ -445,7 +492,7 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     sim_plan p;
-    const ecuio_status_t planned = plan_sim(uri, &p);
+    const ecuio_status_t planned = plan_sim(uri, false, &p);
     if (planned != ECUIO_OK) {
         return planned;
     }
@@ -481,7 +528,7 @@ ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     sim_plan p;
-    const ecuio_status_t planned = plan_sim(uri, &p);
+    const ecuio_status_t planned = plan_sim(uri, true, &p);
     if (planned != ECUIO_OK) {
         return planned;
     }
@@ -528,12 +575,15 @@ ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
                 std::chrono::steady_clock::now() - sim->created)
                 .count());
     }
+    t = t < sim->ask_us ? sim->ask_us : t;
+    sim->ask_us = t;
     ecuio_sim_ecu& e = sim->ecu;
     if (t - e.time_us > kCatchUpUs) {
         e.time_us += (t - e.time_us - kCatchUpUs) / ECUIO_SIM_TICK_US *
                      ECUIO_SIM_TICK_US;
     }
-    while (e.time_us + ECUIO_SIM_TICK_US <= t) {
+    /* A difference, never a sum: t may be within a tick of the end */
+    while (t - e.time_us >= ECUIO_SIM_TICK_US) {
         ecuio_sim_tick(e);
     }
 
@@ -544,7 +594,8 @@ ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
         if (!functional && request_id != node.request_id) {
             continue;
         }
-        ask_node(sim, node, request, length, functional, replies, capacity, &n);
+        ask_node(sim, node, request, length, functional, t, replies, capacity,
+                 &n);
     }
     *count = n;
     return ECUIO_OK;
@@ -569,6 +620,13 @@ ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
     out->pending = sim->pending.load(std::memory_order_relaxed);
     out->flags = sim->flags.load(std::memory_order_acquire);
     return ECUIO_OK;
+}
+
+void ecuio_sim_test_set_strict(ecuio_sim_t* sim, int on)
+{
+    if (sim != nullptr) {
+        sim->strict.store(on != 0, std::memory_order_relaxed);
+    }
 }
 
 ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,

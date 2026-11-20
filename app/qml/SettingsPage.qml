@@ -16,30 +16,13 @@ Pane {
 
     readonly property int driveHideMs: settingsDisplay.driveHideMs
     readonly property string driveOrientation: settingsDisplay.driveOrientation
-    property alias uriField: settingsConnect.uriField
-    property alias errorLabel: settingsConnect.errorLabel
-    property alias logExplains: settingsConnect.logExplains
-    property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
-    property alias obdbYearField: settingsSignals.obdbYearField
-    property alias importVariantField: settingsSignals.importVariantField
-    property alias saveDialog: settingsSignals.saveDialog
-    property alias formName: settingsOwnForm.formName
-    property alias formRx: settingsOwnForm.formRx
-    property alias formTx: settingsOwnForm.formTx
-    property alias formNumber: settingsOwnForm.formNumber
-    property alias formByte: settingsOwnForm.formByte
-    property alias formBits: settingsOwnForm.formBits
-    property alias formBit: settingsOwnForm.formBit
-    property alias formBytes: settingsOwnForm.formBytes
-    property alias formSigned: settingsOwnForm.formSigned
-    property alias formScale: settingsOwnForm.formScale
-    property alias formOffset: settingsOwnForm.formOffset
-    property alias formUnit: settingsOwnForm.formUnit
-    property alias formDecimals: settingsOwnForm.formDecimals
-    property alias formValues: settingsOwnForm.formValues
-    property alias exprEditor: settingsOwnForm.computedPart
-    property alias vinLookupField: settingsVinLookup.vinLookupField
-    property alias didField: settingsProfile.didField
+
+    readonly property SettingsConnect connectPart: settingsConnect
+    readonly property SettingsVehiclePicker vehiclePickerPart: settingsVehiclePicker
+    readonly property SettingsSignals signalsPart: settingsSignals
+    readonly property SettingsOwnForm ownFormPart: settingsOwnForm
+    readonly property SettingsVinLookup vinLookupPart: settingsVinLookup
+    readonly property SettingsProfile profilePart: settingsProfile
 
     readonly property int deviceRowHeight: 56
     readonly property int deviceRowsShown: 4   // the list scrolls past this
@@ -180,7 +163,7 @@ Pane {
     // The picked vehicle's plotted signals reach Live once this session's
     // rows exist; a change of rows before that isn't the user's
     property bool plottedApplied: false
-    readonly property string typedLabel: vehicleLabelField.text.trim()
+    readonly property string typedLabel: settingsVehiclePicker.vehicleLabelField.text.trim()
     readonly property string newLabel: typedLabel !== "" ? typedLabel
                                                          : VehicleBook.defaultNewLabel(vehicles)
     readonly property string copyLabel: typedLabel !== "" || pickedVehicle === null
@@ -378,7 +361,7 @@ Pane {
 
     // A replay plays a recording already, so the bridge doesn't record
     // one; the Record switch keeps its setting for the next live session
-    readonly property bool replayInField: /^\s*replay:\/\//i.test(uriField.text)
+    readonly property bool replayInField: /^\s*replay:\/\//i.test(settingsConnect.uriField.text)
 
     function refreshDevices() {
         j2534Devices = Bridge.discoverJ2534Devices()
@@ -393,14 +376,14 @@ Pane {
     function pickRecording(uri) {
         // The field is on Connection, which a phone may not be showing
         open("connection")
-        uriField.text = uri
+        settingsConnect.uriField.text = uri
         showUriField()
     }
 
     // The row a device or recording list shows outlined: its URI is in
     // the field, whatever the query
     function isChosen(uri) {
-        return uri !== "" && uriCompose.splitUri(uriField.text).base === uriCompose.splitUri(uri).base
+        return uri !== "" && uriCompose.splitUri(settingsConnect.uriField.text).base === uriCompose.splitUri(uri).base
     }
 
     // A row or preset fills the field: scrolls the page back to the field,
@@ -409,7 +392,7 @@ Pane {
     function showUriField() {
         const body = connectionPage.body
         // Under the pinned title row, not behind it
-        const top = uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
+        const top = settingsConnect.uriField.mapToItem(body, 0, 0).y + body.y - Theme.spacing
                     - connectionPage.headerHeight
         if (top < connectionPage.contentY)
             connectionPage.contentY = Math.max(0, top)
@@ -419,22 +402,11 @@ Pane {
 
     readonly property SettingsUri uriPart: uriCompose
 
-    // SettingsUri's members others use
-    property alias pickedSets: uriCompose.pickedSets
-    property alias profileNames: uriCompose.profileNames
-    property alias offlineUri: uriCompose.offlineUri
 
     SettingsConnectFrom { id: connectFrom; host: page }
 
     readonly property SettingsConnectFrom connectFromPart: connectFrom
 
-    // SettingsConnectFrom's members others use
-    function requestConnect(uri, kept) { return connectFrom.requestConnect(uri, kept) }
-    property alias vehicleUri: connectFrom.vehicleUri
-    property alias connectUris: connectFrom.connectUris
-    property alias connectAdapters: connectFrom.connectAdapters
-    property alias connectProfileWords: connectFrom.connectProfileWords
-    function connectFromList(uri) { return connectFrom.connectFromList(uri) }
 
     // ---- The last URI that connected, the recent ones, the Record switch
     // and each device's versions (seenVersions, as JSON), kept between runs
@@ -471,8 +443,8 @@ Pane {
             sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
         // it back; as a list would connect it, like a picked vehicle's
-        if (uriField.text === "")
-            uriField.text = connectFrom.listConnectUri(sessionSettings.uri)
+        if (settingsConnect.uriField.text === "")
+            settingsConnect.uriField.text = connectFrom.listConnectUri(sessionSettings.uri)
         connectFrom.recentUris = connectFrom.parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
         if (JSON.stringify(connectFrom.recentUris) !== sessionSettings.recentUris)
             sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
@@ -488,9 +460,9 @@ Pane {
         }
         function onConnectResult(uri, error) {
             const keeps = connectFrom.connectKeeps !== "" ? connectFrom.connectKeeps : uri
-            page.errorLabel.text = error
-            page.errorLabel.visible = (error !== "")
-            page.logExplains = (error !== "")
+            settingsConnect.errorLabel.text = error
+            settingsConnect.errorLabel.visible = (error !== "")
+            settingsConnect.logExplains = (error !== "")
             if (error === "") {
                 if (connectFrom.keptUri(keeps)) {
                     sessionSettings.uri = keeps

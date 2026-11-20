@@ -237,12 +237,13 @@ inline bool ecuio_pack_frames_fit(const request_params& params)
  * declared channels. BAD_URI with the detail set when they have none,
  * or for ?scan=first outside uds-generic, which alone scans, before any
  * hardware is touched. ?session=03 (ADR-0060) belongs to uds-generic too,
- * and ?keepalive_ms= to it. */
+ * and ?keepalive_ms= to it. tx_ids marks each channel whose requests go
+ * to a functional address (ecuio_engine_channel::functional). */
 inline ecuio_status_t
 ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      const request_params& params, const uint32_t* rx_ids,
-                     uint32_t chan_count, ecuio_request_engine* e, bool* probe,
-                     bool* identify)
+                     const uint32_t* tx_ids, uint32_t chan_count,
+                     ecuio_request_engine* e, bool* probe, bool* identify)
 {
     /* The table's room (ADR-0065 section 3): what the set derives, each
      * def's row with it, and each DID the scan can find */
@@ -288,6 +289,9 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     const size_t room = params.has_poll ? 1 : derived.total + scanned;
     if (!ecuio_engine_init(e, chan_count, static_cast<uint32_t>(room))) {
         return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    for (uint32_t c = 0; c < chan_count; ++c) {
+        e->chans[c].functional = isotp_functional_id(tx_ids[c]);
     }
     /* More than a session asks: nothing until a focus picks (section 2) */
     const bool pick_only =
@@ -782,6 +786,17 @@ inline void ecuio_request_timed_out(const ecuio_request_engine& e,
 {
     if (!ecuio_engine_unpicked_answering(&e)) {
         link_on_request_timeout(h);
+    }
+}
+
+/* Once a worker pass, beside its expire loop: while the link isn't OK
+ * no key's window stands (ecuio_engine_key_windows_end), so a key
+ * offered across a failure is refused or settles unsent */
+inline void ecuio_key_windows_judge(ecuio_request_engine* e,
+                                    const link_health& h)
+{
+    if (h.state != ECUIO_OK) {
+        ecuio_engine_key_windows_end(e);
     }
 }
 

@@ -157,7 +157,7 @@ TestCase {
         compare(page.pickedVehicle.own, own)
         compare(page.ownSignals.map(s => s.key), ["own_pressure"], "the form edits its file's variant")
         compare(find(find(page, "ownSignal_0"), "ownSignalText").text, "Own pressure: 22 D110 on 7E8")
-        compare(page.uriField.text, "elm327://COM5?profile=" + shared, "the vehicle's saved address")
+        compare(page.connectPart.uriField.text, "elm327://COM5?profile=" + shared, "the vehicle's saved address")
         compare(page.uriPart.profileChoice, shared)
         // On the adapter the first pick that reads obd2 stands where
         // Default does, the rest in their order after the built-ins

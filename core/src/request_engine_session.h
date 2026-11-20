@@ -31,7 +31,7 @@ inline bool ecuio_engine_session(ecuio_request_engine* e, uint8_t sub,
                           ? ECUIO_ENGINE_KEEPALIVE_MAX_US
                           : keepalive_us;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        e->chans[c].session_step = ECUIO_SESSION_STATE_ENTERING;
+        ecuio_engine_session_step(e->chans[c], ECUIO_SESSION_STATE_ENTERING);
     }
     return true;
 }
@@ -45,19 +45,79 @@ inline bool ecuio_engine_session_live(const ecuio_request_engine* e,
             ch.session_step == ECUIO_SESSION_STATE_ENTERED);
 }
 
+/* When the key's window that keeps channel ch from sending ends: its own,
+ * or for a functional channel the latest of every channel's; 0 for none.
+ * A window that ended by the time alone still reads here, in the past. */
+inline int64_t ecuio_engine_key_held_until(const ecuio_request_engine* e,
+                                           const ecuio_engine_channel& ch)
+{
+    if (!ch.functional) {
+        return ch.key.until_us;
+    }
+    int64_t latest = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].key.until_us > latest) {
+            latest = e->chans[c].key.until_us;
+        }
+    }
+    return latest;
+}
+
+/* Whether a functional channel was asked into a session. Another
+ * channel's window would hold its keep-alive, a long one past S3, and
+ * the 10 03 that follows returns every module that hears it to a new
+ * session. So an engine with one takes no seed (ecuio_engine_offer_talk). */
+inline bool ecuio_engine_functional_session(const ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        if (ch.functional && ch.session_step != ECUIO_SESSION_STATE_NOT_ASKED) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether a key's window keeps channel ch from sending at now_us */
+inline bool ecuio_engine_key_awaited(const ecuio_request_engine* e,
+                                     const ecuio_engine_channel& ch,
+                                     int64_t now_us)
+{
+    return now_us < ecuio_engine_key_held_until(e, ch);
+}
+
+/* Ends channel c's window: the caller's, when no key follows a seed (one
+ * of all zeroes: the level is unlocked) */
+inline void ecuio_engine_key_window_end(ecuio_request_engine* e, uint32_t c)
+{
+    e->chans[c].key.until_us = 0;
+}
+
+/* Ends every channel's window: the driver's call while its link isn't
+ * OK, since a seed may not have outlived what failed */
+inline void ecuio_engine_key_windows_end(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        e->chans[c].key.until_us = 0;
+    }
+}
+
 /* When channel c's session next needs a request: at once while 10 03 is
- * due, keepalive_us after its last request while entered, else never */
+ * due, keepalive_us after its last request while entered, neither before
+ * a key's window that holds the channel ends; else never */
 inline int64_t ecuio_engine_session_next_us(const ecuio_request_engine* e,
                                             const ecuio_engine_channel& ch)
 {
     if (!ecuio_engine_session_live(e, ch)) {
         return INT64_MAX;
     }
-    if (ch.session_step == ECUIO_SESSION_STATE_ENTERING) {
-        return ch.next_send_us;
+    int64_t at = ch.next_send_us;
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+        ch.last_sent_us + e->keepalive_us > at) {
+        at = ch.last_sent_us + e->keepalive_us;
     }
-    const int64_t k = ch.last_sent_us + e->keepalive_us;
-    return k > ch.next_send_us ? k : ch.next_send_us;
+    const int64_t held = ecuio_engine_key_held_until(e, ch);
+    return held > at ? held : at;
 }
 
 /* Channel c's session request, when one is due at now_us: 10 <session>
@@ -73,7 +133,8 @@ inline bool ecuio_engine_session_due(ecuio_request_engine* e, uint32_t c,
     }
     if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
         now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US) {
-        ch.session_step = ECUIO_SESSION_STATE_ENTERING; /* lapsed */
+        ecuio_engine_session_step(ch,
+                                  ECUIO_SESSION_STATE_ENTERING); /* lapsed */
         ecuio_engine_count16(ch.session_lost);
         ++ch.generation;
     }
@@ -89,7 +150,7 @@ inline bool ecuio_engine_session_due(ecuio_request_engine* e, uint32_t c,
         return false;
     }
     if (!ecuio_engine_session_request_allowed(sid, sub)) {
-        ch.session_step = ECUIO_SESSION_STATE_REFUSED;
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_REFUSED);
         ch.session_nrc = 0;
         ++ch.generation;
         return false;
@@ -116,23 +177,23 @@ inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
     ch.sessioning = false;
     if (ch.once.bytes[0] == ECUIO_TESTER_PRESENT) {
         if (outcome == ECUIO_DIAG_UNANSWERED) {
-            ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+            ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
             ecuio_engine_count16(ch.session_lost);
             ++ch.generation;
         }
         return;
     }
     if (outcome == ECUIO_DIAG_ANSWERED) {
-        ch.session_step = ECUIO_SESSION_STATE_ENTERED;
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERED);
         ch.session_nrc = 0;
         ch.session_fresh = true;
         ch.last_sent_us = now_us;
         ecuio_engine_count16(ch.session_entries);
     } else if (outcome == ECUIO_DIAG_REFUSED) {
-        ch.session_step = ECUIO_SESSION_STATE_REFUSED;
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_REFUSED);
         ch.session_nrc = nrc;
     } else {
-        ch.session_step = ECUIO_SESSION_STATE_UNANSWERED;
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_UNANSWERED);
     }
     ++ch.generation;
 }
@@ -198,7 +259,7 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
         ch.loss_window_us = now_us;
     }
     if (++ch.refused_losses >= ECUIO_SESSION_LOSSES_MAX) {
-        ch.session_step = ECUIO_SESSION_STATE_ABANDONED;
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ABANDONED);
         ch.session_nrc = code;
         ++ch.generation;
         return false;
@@ -206,7 +267,7 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
     ch.session_refused = r;
     ch.refused_own = false;
     ch.outstanding = ECUIO_ENGINE_NONE;
-    ch.session_step = ECUIO_SESSION_STATE_ENTERING;
+    ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
     ecuio_engine_count16(ch.session_lost);
     ++ch.generation;
     if (out != ECUIO_ENGINE_ONCE) {
@@ -226,7 +287,8 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
     ch.identifying = false; /* the item is still unasked */
     ch.diagnosing = false;
     if (ch.talk.out) { /* not asked again: its unlock went with the session */
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
+        ecuio_talk_settle(ch.talk, ch.key, ecuio_talk_end::refused, code,
+                          now_us);
     }
     return true;
 }
@@ -247,7 +309,7 @@ inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
     out->bytes[1] = ECUIO_SESSION_DEFAULT;
     out->len = 2;
     out->channel = static_cast<uint8_t>(c);
-    ch.session_step = ECUIO_SESSION_STATE_NOT_ASKED;
+    ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
     return true;
 }
 

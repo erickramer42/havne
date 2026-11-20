@@ -1,228 +1,36 @@
 // File/layer: tests/test_engine_talk.cpp | test_obd2, Qt-free
 // Testing: UNIT: EngineTalkTest (a talk through the request engine's
-//          one-shot, ADR-0066 section 2.4, with the time passed in)
+//          one-shot, ADR-0066 section 2.4, with the time passed in: the
+//          door, its turn and its settle)
 
-#include <gtest/gtest.h>
+#include "engine_talk_support.h"
 
-#include "../core/src/request_engine.h"
-#include "../core/src/request_talk.h"
-#include "../core/src/sim_security.h"
-#include "../core/src/tier2_ceiling.h"
-
-#include <cstring>
-#include <functional>
-#include <initializer_list>
-#include <string>
-#include <vector>
-
-namespace {
-
-using Bytes = std::vector<uint8_t>;
-constexpr int64_t kMs = 1000;
-
-constexpr uint16_t kDid = 0x1E1C; /* in the rotation, answered always */
-const Bytes kRow = {0x22, 0x1E, 0x1C};
-const Bytes kEnter = {0x10, 0x03};
-const Bytes kKeep = {0x3E, 0x00};
-const Bytes kGated = {0x22, 0xD2, 0x10};
-
-/* An ECU with the simulated ECU's security access (sim_security.h): an
- * extended session, 27 in it, D210 once unlocked, the rotation's DIDs
- * (1Exx) and any DID from D300 on always; silent to whatever `silent`
- * names */
-struct Ecu {
-    ecuio_sim_security security;
-    bool extended = false;
-    const int64_t* now = nullptr;
-    Bytes silent;
-    std::vector<Bytes> heard;
-
-    Bytes operator()(const Bytes& q)
-    {
-        heard.push_back(q);
-        if (q == silent) {
-            return {};
-        }
-        if (q.size() == 2 && q[0] == 0x10 && (q[1] == 0x01 || q[1] == 0x03)) {
-            extended = q[1] == 0x03;
-            ecuio_sim_security_lock(security);
-            return {0x50, q[1], 0x00, 0x32, 0x01, 0xF4};
-        }
-        if (q == kKeep) {
-            return {0x7E, 0x00};
-        }
-        uint8_t out[32] = {};
-        if (!q.empty() && q[0] == 0x27) {
-            const uint32_t n = ecuio_sim_security_answer(
-                security, extended, ECUIO_SIM_SECURITY_DELAY_US, *now, q.data(),
-                static_cast<uint32_t>(q.size()), out);
-            return Bytes(out, out + n);
-        }
-        if (q == kGated) {
-            const uint32_t n = ecuio_sim_security_did(security, extended, out);
-            return n != 0 ? Bytes(out, out + n) : Bytes{0x7F, 0x22, 0x31};
-        }
-        if (q.size() == 3 && q[0] == 0x22 && (q[1] == 0x1E || q[1] >= 0xD3)) {
-            return {0x62, q[1], q[2], 0x12, 0x34};
-        }
-        return {0x7F, q.empty() ? uint8_t{0} : q[0], 0x11};
-    }
-};
-
-using Responder = std::function<Bytes(const Bytes&)>;
-
-/* What the transport would put on the wire for request r */
-Bytes wire(const ecuio_request_engine* e, uint32_t c, int32_t r)
-{
-    const ecuio_request& q = ecuio_engine_request_of(e, c, r);
-    uint32_t len = 0;
-    const uint8_t* pdu = ecuio_engine_pdu_of(
-        e->chans[c].talk, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
-    return Bytes(pdu, pdu + len);
-}
-
-/* Sends channel c's next request at *now and answers it through respond
- * (silence waits the wait out); the bytes sent, or none when nothing was
- * due (the time then moves on a floor's gap) */
-Bytes step(ecuio_request_engine* e, uint32_t c, int64_t* now,
-           const Responder& respond)
-{
-    const int32_t r = ecuio_engine_due(e, c, *now);
-    if (r == ECUIO_ENGINE_NONE) {
-        *now += ECUIO_ENGINE_GAP_US;
-        return {};
-    }
-    const Bytes sent = wire(e, c, r);
-    ecuio_engine_sent(e, c, r, true, *now);
-    const Bytes reply = respond(sent);
-    if (reply.empty()) {
-        *now += ECUIO_ENGINE_WAIT_US;
-        EXPECT_TRUE(ecuio_engine_expire(e, c, *now));
-    } else {
-        *now += 4 * kMs;
-        (void)ecuio_engine_on_frame(e, c, reply.data(),
-                                    static_cast<uint16_t>(reply.size()), *now,
-                                    nullptr);
-    }
-    *now += ECUIO_ENGINE_GAP_US;
-    return sent;
-}
-
-/* Steps until channel 0's talk has settled, at most n; what went out */
-std::vector<Bytes> until_settled(ecuio_request_engine* e, int64_t* now,
-                                 const Responder& respond, int n = 12)
-{
-    std::vector<Bytes> out;
-    const ecuio_engine_talk_state& t = e->chans[0].talk;
-    for (int i = 0; i < n && t.result.end == ecuio_talk_end::none; ++i) {
-        Bytes b = step(e, 0, now, respond);
-        if (!b.empty()) {
-            out.push_back(b);
-        }
-    }
-    return out;
-}
-
-/* Channel 0's next one-shot at *now, chosen and not yet sent; the
- * rotation's requests due before it are sent and answered */
-int32_t next_once(ecuio_request_engine* e, int64_t* now, Ecu* ecu)
-{
-    for (int i = 0; i < 8; ++i) {
-        const int32_t r = ecuio_engine_due(e, 0, *now);
-        if (r == ECUIO_ENGINE_ONCE) {
-            return r;
-        }
-        if (r != ECUIO_ENGINE_NONE) {
-            ecuio_engine_sent(e, 0, r, true, *now);
-            const Bytes reply = (*ecu)(wire(e, 0, r));
-            (void)ecuio_engine_on_frame(e, 0, reply.data(),
-                                        static_cast<uint16_t>(reply.size()),
-                                        *now, nullptr);
-        }
-        *now += ECUIO_ENGINE_GAP_US;
-    }
-    return ECUIO_ENGINE_NONE;
-}
-
-ecuio_talk_offer offer(ecuio_request_engine* e, const Bytes& pdu, uint8_t echo,
-                       bool first = false, uint32_t c = 0)
-{
-    return ecuio_engine_talk(e->chans[c].talk, e->pdu_max, pdu.data(),
-                             static_cast<uint32_t>(pdu.size()), echo, first);
-}
-
-/* The settle, taken: its end, and its code into *nrc when given */
-ecuio_talk_end taken(ecuio_request_engine* e, uint8_t* nrc = nullptr)
-{
-    ecuio_talk_result r;
-    if (!ecuio_engine_talk_take(e->chans[0].talk, &r)) {
-        return ecuio_talk_end::none;
-    }
-    if (nrc != nullptr) {
-        *nrc = r.nrc;
-    }
-    return r.end;
-}
-
-size_t count_of(const std::vector<Bytes>& v, const Bytes& want)
-{
-    size_t n = 0;
-    for (const Bytes& b : v) {
-        n += b == want ? 1 : 0;
-    }
-    return n;
-}
-
-/* One channel with kDid in its rotation, on a transport that sends
- * ISO-TP whole; rows 0: nothing in the rotation */
-void engine(ecuio_request_engine* e, int rows = 1)
-{
-    ASSERT_TRUE(ecuio_engine_init(e, 1));
-    e->pdu_max = ECUIO_ENGINE_PDU_MAX;
-    for (int i = 0; i < rows; ++i) {
-        const uint8_t did[3] = {0x22, kDid >> 8,
-                                static_cast<uint8_t>((kDid & 0xFF) + i)};
-        ASSERT_EQ(ecuio_engine_add(e, 0, did, 3),
-                  ecuio_engine_add_result::added);
-    }
-}
-
-/* The engine above, in the extended session and past its first reads */
-void entered(ecuio_request_engine* e, Ecu* ecu, int64_t* now, int rows = 1)
-{
-    engine(e, rows);
-    ecu->now = now;
-    ASSERT_TRUE(ecuio_engine_session(e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    for (int i = 0; i < 4; ++i) {
-        (void)step(e, 0, now, std::ref(*ecu));
-    }
-    ASSERT_EQ(e->chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
-    ASSERT_FALSE(e->chans[0].session_fresh);
-    ecu->heard.clear();
-}
-
-Bytes key_for(uint8_t level)
-{
-    const ecuio_sim_security_level* l = ecuio_sim_security_find(level);
-    Bytes req = {0x27, static_cast<uint8_t>(level + 1)};
-    req.resize(2u + l->bytes);
-    ecuio_sim_security_key(l->seed, l->bytes, req.data() + 2);
-    return req;
-}
-
-} // namespace
+using namespace engine_talk_test;
 
 TEST(EngineTalkTest, TheDoorIsTheCeilingForEveryServiceAndSubFunction)
 {
     /* Whatever the caller checked: an offer is taken exactly when tier
-     * 2's ceiling allows its first two bytes */
+     * 2's ceiling allows its first two bytes. Each is offered as what it
+     * can be (a 27 as a seed or, inside a window, a key) with its
+     * service's echo, by a list of the case's own. */
     for (unsigned sid = 0; sid < 256; ++sid) {
         for (unsigned sub = 0; sub < 256; ++sub) {
             ecuio_engine_talk_state t;
-            const uint8_t pdu[3] = {static_cast<uint8_t>(sid),
-                                    static_cast<uint8_t>(sub), 0x00};
-            const ecuio_talk_offer got =
-                ecuio_engine_talk(t, ECUIO_ENGINE_PDU_MAX, pdu, 3, 1, false);
+            ecuio_key_window w;
+            w.until_us = 1000;
+            w.seed = static_cast<uint8_t>(sub - 1); /* a key is its seed's */
+            const Bytes pdu = {static_cast<uint8_t>(sid),
+                               static_cast<uint8_t>(sub), 0x00};
+            const uint8_t echo = sid == 0x22 ? 3 : sid == 0x2A ? 1 : 2;
+            ecuio_talk_offer got = ecuio_talk_offer::busy;
+            if (sid != 0x27) {
+                got = door(t, w, pdu, echo);
+            } else if (sub % 2 == 1) {
+                got = door(t, w, {pdu[0], pdu[1]}, 2, ecuio_talk_kind::seed,
+                           kWindow);
+            } else {
+                got = door(t, w, pdu, 2, ecuio_talk_kind::key);
+            }
             const bool allowed = ecuio_tier2_allowed(pdu[0], pdu[1]);
             ASSERT_EQ(got, allowed ? ecuio_talk_offer::taken
                                    : ecuio_talk_offer::refused)
@@ -236,40 +44,145 @@ TEST(EngineTalkTest, TheDoorIsTheCeilingForEveryServiceAndSubFunction)
          {Bytes{0x2E, 0xF1, 0x90, 0x00}, Bytes{0x10, 0x02}, Bytes{0x31, 0x01},
           Bytes{0x10, 0x01}, Bytes{0x27, 0x81}, Bytes(100, 0x2E)}) {
         ecuio_engine_talk_state t;
-        EXPECT_EQ(ecuio_engine_talk(t, ECUIO_ENGINE_PDU_MAX, pdu.data(),
-                                    static_cast<uint32_t>(pdu.size()), 1,
-                                    false),
+        ecuio_key_window w;
+        EXPECT_EQ(door(t, w, pdu, 2), ecuio_talk_offer::refused) << int{pdu[0]};
+        EXPECT_EQ(door(t, w, pdu, 2, ecuio_talk_kind::seed, kWindow),
                   ecuio_talk_offer::refused)
             << int{pdu[0]};
         EXPECT_FALSE(t.offered);
     }
 }
 
+/* A 27 leaves core only as a seed or as a key inside a window, however
+ * its caller named it: the sandbox's bound doesn't rest on the label. */
+TEST(EngineTalkTest, A27IsTakenOnlyAsASeedOrAKey)
+{
+    const Bytes seed = {0x27, 0x01};
+    const Bytes key = key_for(0x01);
+    const Bytes read = {0x22, 0xD2, 0x10};
+    const auto refused = [](const Bytes& pdu, uint8_t echo,
+                            ecuio_talk_kind kind, int64_t window_us,
+                            int64_t until_us, int64_t now_us) {
+        ecuio_engine_talk_state t;
+        ecuio_key_window w;
+        w.until_us = until_us;
+        w.seed = 0x01;
+        const ecuio_talk_offer got =
+            door(t, w, pdu, echo, kind, window_us, now_us);
+        EXPECT_EQ(t.offered, got == ecuio_talk_offer::taken);
+        EXPECT_NE(got, ecuio_talk_offer::busy);
+        EXPECT_NE(got, ecuio_talk_offer::too_long);
+        return got == ecuio_talk_offer::refused;
+    };
+    const ecuio_talk_kind plain = ecuio_talk_kind::plain;
+    const ecuio_talk_kind as_seed = ecuio_talk_kind::seed;
+    const ecuio_talk_kind as_key = ecuio_talk_kind::key;
+    /* plain: never a 27, with a window open or none */
+    EXPECT_TRUE(refused(seed, 2, plain, 0, 0, 0));
+    EXPECT_TRUE(refused(key, 2, plain, 0, 0, 0));
+    EXPECT_TRUE(refused(key, 2, plain, 0, 1000, 0)) << "a window is open";
+    EXPECT_FALSE(refused(read, 3, plain, 0, 0, 0));
+    /* a seed: 27 and an odd sub-function, nothing more, its window in
+     * bounds */
+    EXPECT_FALSE(refused(seed, 2, as_seed, kWindow, 0, 0));
+    EXPECT_TRUE(refused(read, 3, as_seed, kWindow, 0, 0)) << "a read";
+    EXPECT_TRUE(refused({0x10, 0x03}, 2, as_seed, kWindow, 0, 0))
+        << "odd and two bytes, and no 27";
+    EXPECT_TRUE(refused({0x27, 0x02}, 2, as_seed, kWindow, 0, 0)) << "even";
+    EXPECT_TRUE(refused({0x27, 0x01, 0x00}, 2, as_seed, kWindow, 0, 0))
+        << "a seed request carries nothing";
+    EXPECT_TRUE(refused(seed, 2, as_seed, 0, 0, 0)) << "no window";
+    EXPECT_TRUE(refused(seed, 2, as_seed, ECUIO_KEY_WINDOW_MIN_US - 1, 0, 0));
+    EXPECT_FALSE(refused(seed, 2, as_seed, ECUIO_KEY_WINDOW_MIN_US, 0, 0));
+    EXPECT_FALSE(refused(seed, 2, as_seed, ECUIO_KEY_WINDOW_MAX_US, 0, 0));
+    EXPECT_TRUE(refused(seed, 2, as_seed, ECUIO_KEY_WINDOW_MAX_US + 1, 0, 0));
+    EXPECT_EQ(ECUIO_KEY_WINDOW_MIN_US, 50 * kMs);
+    EXPECT_EQ(ECUIO_KEY_WINDOW_MAX_US, 4000 * kMs);
+    /* a key: 27 and the sub-function after its seed's (01 here), while
+     * the window is open */
+    EXPECT_FALSE(refused(key, 2, as_key, 0, 1000, 999));
+    EXPECT_TRUE(refused(key, 2, as_key, 0, 1000, 1000)) << "at its end";
+    EXPECT_TRUE(refused(key, 2, as_key, 0, 0, 0)) << "no window";
+    EXPECT_TRUE(refused(read, 3, as_key, 0, 1000, 0)) << "a read";
+    EXPECT_TRUE(refused({0x19, 0x02, 0xFF}, 2, as_key, 0, 1000, 0))
+        << "the key's sub-function, and no 27";
+    EXPECT_TRUE(refused(seed, 2, as_key, 0, 1000, 0)) << "odd";
+    EXPECT_TRUE(refused(key_for(0x03), 2, as_key, 0, 1000, 0))
+        << "even, and another seed's";
+    EXPECT_FALSE(refused({0x27, 0x02}, 2, as_key, 0, 1000, 0))
+        << "its length is the ECU's to judge";
+}
+
 TEST(EngineTalkTest, AnOfferNeedsARequestAnEchoAndItsSubFunction)
 {
-    const uint8_t seed[2] = {0x27, 0x01};
-    const uint8_t read[3] = {0x22, 0xD2, 0x10};
+    const Bytes read = {0x22, 0xD2, 0x10};
+    const Bytes keep = {0x3E, 0x00};
     ecuio_engine_talk_state t;
-    const auto ask = [&t](const uint8_t* pdu, uint32_t len, uint8_t echo) {
-        return ecuio_engine_talk(t, ECUIO_ENGINE_PDU_MAX, pdu, len, echo,
-                                 false);
+    ecuio_key_window w;
+    const auto ask = [&](const uint8_t* pdu, uint32_t len, uint8_t echo) {
+        ecuio_talk_request q;
+        q.pdu = pdu;
+        q.len = len;
+        q.echo = echo;
+        return ecuio_engine_talk(t, w, ECUIO_ENGINE_PDU_MAX, q, 0);
     };
-    EXPECT_EQ(ask(nullptr, 2, 1), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(seed, 0, 1), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(seed, 2, 0), ecuio_talk_offer::refused);
+    EXPECT_EQ(ask(nullptr, 2, 2), ecuio_talk_offer::refused);
+    EXPECT_EQ(ask(keep.data(), 0, 2), ecuio_talk_offer::refused);
+    EXPECT_EQ(ask(keep.data(), 2, 0), ecuio_talk_offer::refused);
     const uint8_t two[5] = {0x22, 0xD2, 0x10, 0xD3, 0x01};
     EXPECT_EQ(ask(two, 5, 4), ecuio_talk_offer::refused) << "echo past 3";
-    EXPECT_EQ(ask(seed, 2, 3), ecuio_talk_offer::refused) << "echo past len";
-    /* a service that splits by sub-function, with none: 27 alone would
-     * be judged as 27 00, which no level has; 3E alone as 3E 00 */
-    const uint8_t keep[1] = {0x3E};
-    EXPECT_EQ(ask(seed, 1, 1), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(keep, 1, 1), ecuio_talk_offer::refused);
+    EXPECT_EQ(ask(keep.data(), 2, 3), ecuio_talk_offer::refused)
+        << "echo past len";
+    /* a service that splits by sub-function, with none: 3E alone would
+     * be judged as 3E 00, 2C alone as 2C 00 */
+    const uint8_t define[1] = {0x2C};
+    EXPECT_EQ(ask(keep.data(), 1, 1), ecuio_talk_offer::refused);
+    EXPECT_EQ(ask(define, 1, 1), ecuio_talk_offer::refused);
     EXPECT_FALSE(t.offered);
-    EXPECT_EQ(ask(read, 3, 3), ecuio_talk_offer::taken);
+    EXPECT_EQ(ask(read.data(), 3, 3), ecuio_talk_offer::taken);
     EXPECT_TRUE(t.offered);
-    EXPECT_EQ(Bytes(t.pdu, t.pdu + t.len), Bytes(read, read + 3))
+    EXPECT_EQ(Bytes(t.pdu, t.pdu + t.len), read)
         << "the offer keeps the request";
+}
+
+/* A reply is matched on the echo bytes, so too few would let another
+ * request's reply settle the talk: any 62 a read, any 67 a key */
+TEST(EngineTalkTest, AnEchoIsNeverShorterThanItsServicesOwn)
+{
+    struct Row {
+        Bytes pdu;
+        uint8_t least;
+        ecuio_talk_kind kind;
+    };
+    const Row rows[] = {
+        {{0x22, 0xD2, 0x10}, 3, ecuio_talk_kind::plain},
+        {{0x22, 0xD2, 0x10, 0xD3, 0x01}, 3, ecuio_talk_kind::plain},
+        {{0x10, 0x03}, 2, ecuio_talk_kind::plain},
+        {{0x3E, 0x00}, 2, ecuio_talk_kind::plain},
+        {{0x19, 0x02, 0xFF}, 2, ecuio_talk_kind::plain},
+        {{0x2C, 0x03, 0xF2, 0x00}, 2, ecuio_talk_kind::plain},
+        {{0x2A, 0x01, 0x10}, 1, ecuio_talk_kind::plain},
+        {{0x27, 0x01}, 2, ecuio_talk_kind::seed},
+        {key_for(0x01), 2, ecuio_talk_kind::key},
+    };
+    for (const Row& row : rows) {
+        for (uint8_t echo = 1; echo <= 3 && echo <= row.pdu.size(); ++echo) {
+            ecuio_engine_talk_state t;
+            ecuio_key_window w;
+            w.until_us = 1000;
+            w.seed = 0x01;
+            EXPECT_EQ(door(t, w, row.pdu, echo, row.kind, kWindow),
+                      echo >= row.least ? ecuio_talk_offer::taken
+                                        : ecuio_talk_offer::refused)
+                << int{row.pdu[0]} << " echo " << int{echo};
+        }
+        EXPECT_EQ(ecuio_talk_echo_min(row.pdu[0]), row.least);
+    }
+    /* a 22 with no whole DID has no echo of three */
+    ecuio_engine_talk_state t;
+    ecuio_key_window w;
+    EXPECT_EQ(door(t, w, {0x22, 0xD2}, 2), ecuio_talk_offer::refused);
+    EXPECT_EQ(door(t, w, {0x22}, 1), ecuio_talk_offer::refused);
 }
 
 TEST(EngineTalkTest, ARequestPastTheTransportsBoundIsTooLong)
@@ -277,8 +190,10 @@ TEST(EngineTalkTest, ARequestPastTheTransportsBoundIsTooLong)
     Bytes pdu(ECUIO_ENGINE_PDU_MAX + 1, 0x00);
     pdu[0] = 0x22;
     ecuio_engine_talk_state t;
+    ecuio_key_window w;
     const auto ask = [&](uint32_t len, uint32_t pdu_max) {
-        return ecuio_engine_talk(t, pdu_max, pdu.data(), len, 1, false);
+        return door(t, w, Bytes(pdu.begin(), pdu.begin() + len), 3,
+                    ecuio_talk_kind::plain, 0, 0, pdu_max);
     };
     EXPECT_EQ(ask(8, ECUIO_ENGINE_PDU_SINGLE), ecuio_talk_offer::too_long);
     EXPECT_EQ(ask(61, ECUIO_ENGINE_PDU_MAX), ecuio_talk_offer::too_long);
@@ -297,6 +212,8 @@ TEST(EngineTalkTest, ARequestPastTheTransportsBoundIsTooLong)
     EXPECT_EQ(e.pdu_max, ECUIO_ENGINE_PDU_SINGLE);
     EXPECT_EQ(ECUIO_ENGINE_PDU_SINGLE, 7u);
     EXPECT_EQ(ECUIO_ENGINE_PDU_MAX, 60u);
+    EXPECT_EQ(offer(&e, {0x22, 0xD3, 0x01}, 3, 1), ecuio_talk_offer::refused)
+        << "a channel the engine lacks";
 }
 
 TEST(EngineTalkTest, OneTalkAtATimeAndItsSettleIsTakenOnce)
@@ -329,66 +246,6 @@ TEST(EngineTalkTest, OneTalkAtATimeAndItsSettleIsTakenOnce)
     EXPECT_EQ(taken(&e), ecuio_talk_end::none) << "read once";
     EXPECT_EQ(offer(&e, b, 3), ecuio_talk_offer::taken);
     EXPECT_EQ(count_of(ecu.heard, a), 1u);
-}
-
-TEST(EngineTalkTest, ASeedThenItsEighteenByteKeyUnlockThroughTheEngine)
-{
-    static ecuio_request_engine e;
-    Ecu ecu;
-    int64_t now = 0;
-    entered(&e, &ecu, &now);
-    const Bytes seed = {0x27, 0x03};
-    ASSERT_EQ(offer(&e, seed, 2), ecuio_talk_offer::taken);
-    (void)until_settled(&e, &now, std::ref(ecu));
-    ASSERT_EQ(taken(&e), ecuio_talk_end::answered);
-    ASSERT_EQ(ecu.security.seed_out, 0x03);
-    /* The key: 18 bytes out, and 67 04 answers it, two bytes */
-    const Bytes key = key_for(0x03);
-    ASSERT_EQ(key.size(), 18u);
-    ASSERT_EQ(offer(&e, key, 2, true), ecuio_talk_offer::taken);
-    const std::vector<Bytes> sent = until_settled(&e, &now, std::ref(ecu));
-    ASSERT_EQ(sent.size(), 1u) << "nothing between the seed and its key";
-    EXPECT_EQ(sent[0], key) << "the whole request, not its echo bytes";
-    EXPECT_EQ(taken(&e), ecuio_talk_end::answered);
-    EXPECT_EQ(ecu.security.unlocked, 0x03);
-    /* and the gated DID reads */
-    ASSERT_EQ(offer(&e, kGated, 3), ecuio_talk_offer::taken);
-    (void)until_settled(&e, &now, std::ref(ecu));
-    EXPECT_EQ(taken(&e), ecuio_talk_end::answered);
-    EXPECT_EQ(count_of(ecu.heard, key), 1u);
-}
-
-/* Nothing comes between a seed's reply and its key: not a scan entry
- * that waits (the scan's turn is only for a talk that isn't first), not
- * the keep-alive when it is due, not the rotation. Only a session entry
- * that is due stands ahead (FirstStandsBehindASessionEntryThatIsDue): an
- * ECU that has left the session has dropped the seed with it. */
-TEST(EngineTalkTest, TheKeyIsTheNextRequestWithAScanWaitingAndTheKeepAliveDue)
-{
-    static ecuio_request_engine e;
-    Ecu ecu;
-    int64_t now = 0;
-    entered(&e, &ecu, &now);
-    for (uint16_t did = 0xD220; did < 0xD228; ++did) {
-        ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, did)); /* the ECU has none */
-    }
-    const Bytes seed = {0x27, 0x03};
-    ASSERT_EQ(offer(&e, seed, 2), ecuio_talk_offer::taken);
-    (void)until_settled(&e, &now, std::ref(ecu));
-    ASSERT_EQ(taken(&e), ecuio_talk_end::answered);
-    ASSERT_TRUE(e.chans[0].talk.after_scan) << "a scan entry has the next turn";
-    ASSERT_GT(e.chans[0].scan_pending, 0u);
-    /* the caller takes its time over the key: the keep-alive comes due */
-    now += e.keepalive_us;
-    ASSERT_LT(now - e.chans[0].last_sent_us, ECUIO_ENGINE_S3_US)
-        << "the session is still held";
-    ecu.heard.clear();
-    const Bytes key = key_for(0x03);
-    ASSERT_EQ(offer(&e, key, 2, true), ecuio_talk_offer::taken);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), key) << "the very next request";
-    ASSERT_EQ(ecu.heard.size(), 1u);
-    EXPECT_EQ(taken(&e), ecuio_talk_end::answered);
-    EXPECT_EQ(ecu.security.unlocked, 0x03);
 }
 
 /* The door judges the bytes it keeps: a caller's buffer that changes
@@ -436,9 +293,9 @@ TEST(EngineTalkTest, TheWireBytesAreTheOnesOfferedWhateverTheCallerDoesAfter)
     longest[1] = 0x01;
     const Bytes whole = longest;
     now += ECUIO_ENGINE_GAP_US;
-    ASSERT_EQ(offer(&e, longest, 2, true), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer(&e, longest, 2), ecuio_talk_offer::taken);
     longest.assign(longest.size(), 0x2E);
-    ASSERT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_ONCE);
+    ASSERT_EQ(next_once(&e, &now, &ecu), ECUIO_ENGINE_ONCE);
     EXPECT_EQ(wire(&e, 0, ECUIO_ENGINE_ONCE), whole);
 }
 
@@ -448,9 +305,10 @@ TEST(EngineTalkTest, OnlyAReplyEchoingItsFirstBytesAnswersIt)
     Ecu ecu;
     int64_t now = 0;
     entered(&e, &ecu, &now);
+    seeded(&e, &ecu, &now);
     const Bytes key = key_for(0x03);
-    ASSERT_EQ(offer(&e, key, 2), ecuio_talk_offer::taken);
-    const int32_t r = next_once(&e, &now, &ecu);
+    ASSERT_EQ(offer_key(&e, now, key), ecuio_talk_offer::taken);
+    const int32_t r = ecuio_engine_due(&e, 0, now);
     ASSERT_EQ(r, ECUIO_ENGINE_ONCE);
     ecuio_engine_sent(&e, 0, r, true, now);
     const auto frame = [&](std::initializer_list<uint8_t> bytes) {
@@ -471,88 +329,7 @@ TEST(EngineTalkTest, OnlyAReplyEchoingItsFirstBytesAnswersIt)
     EXPECT_EQ(taken(&e), ecuio_talk_end::answered);
 }
 
-TEST(EngineTalkTest, FirstGoesAheadOfTheKeepAliveTheWalkAndTheRotation)
-{
-    static ecuio_request_engine e;
-    Ecu ecu;
-    int64_t now = 0;
-    entered(&e, &ecu, &now);
-    /* a Service 01 row, so a probe starts a walk */
-    const uint8_t pid[2] = {0x01, 0x0C};
-    ASSERT_EQ(ecuio_engine_add(&e, 0, pid, 2), ecuio_engine_add_result::added);
-    now += e.keepalive_us; /* the keep-alive is due */
-    ecuio_engine_probe(&e);
-    ASSERT_TRUE(e.chans[0].walking);
-    const Bytes key = key_for(0x01);
-    ASSERT_EQ(offer(&e, key, 2, true), ecuio_talk_offer::taken);
-    const int32_t r = ecuio_engine_due(&e, 0, now);
-    ASSERT_EQ(r, ECUIO_ENGINE_ONCE);
-    EXPECT_EQ(wire(&e, 0, r), key);
-    ecuio_engine_sent(&e, 0, r, true, now);
-    /* its service's reply to another request is no stray answer to the
-     * walk's bitmap, which waits behind it */
-    const Bytes other = {0x67, 0x04};
-    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, other.data(), 2, now, nullptr),
-              ecuio_reply::none);
-    EXPECT_FALSE(e.chans[0].walk_stray);
-    const Bytes refusal = ecu(key);
-    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, refusal.data(),
-                                    static_cast<uint16_t>(refusal.size()),
-                                    now + kMs, nullptr),
-              ecuio_reply::negative);
-    now += ECUIO_ENGINE_GAP_US;
-    EXPECT_EQ(taken(&e), ecuio_talk_end::refused) << "24: no seed was out";
-
-    /* Not first: the keep-alive and the walk's bitmap go before it */
-    now += e.keepalive_us;
-    ecuio_engine_probe(&e); /* the walk's budget again */
-    ASSERT_TRUE(e.chans[0].walking);
-    ASSERT_EQ(offer(&e, key, 2, false), ecuio_talk_offer::taken);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kKeep);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), (Bytes{0x01, 0x00}));
-    const std::vector<Bytes> sent = until_settled(&e, &now, std::ref(ecu));
-    ASSERT_FALSE(sent.empty());
-    EXPECT_EQ(sent.back(), key);
-    EXPECT_LE(sent.size(), 2u) << "then at the rotation's next turn";
-
-    /* With no session there is no entry to stand behind, however long
-     * the channel has been quiet */
-    static ecuio_request_engine plain;
-    engine(&plain);
-    ASSERT_EQ(ecuio_engine_add(&plain, 0, pid, 2),
-              ecuio_engine_add_result::added);
-    const int64_t later = 3 * ECUIO_ENGINE_S3_US;
-    ecuio_engine_probe(&plain);
-    ASSERT_TRUE(plain.chans[0].walking);
-    const Bytes read = {0x22, 0xD3, 0x01};
-    ASSERT_EQ(offer(&plain, read, 3, true), ecuio_talk_offer::taken);
-    const int32_t p = ecuio_engine_due(&plain, 0, later);
-    ASSERT_EQ(p, ECUIO_ENGINE_ONCE);
-    EXPECT_EQ(wire(&plain, 0, p), read);
-}
-
-TEST(EngineTalkTest, FirstStandsBehindASessionEntryThatIsDue)
-{
-    static ecuio_request_engine e;
-    Ecu ecu;
-    int64_t now = 0;
-    engine(&e);
-    ecu.now = &now;
-    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    const Bytes seed = {0x27, 0x01};
-    ASSERT_EQ(offer(&e, seed, 2, true), ecuio_talk_offer::taken);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kEnter) << "not yet entered";
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), seed);
-    EXPECT_EQ(taken(&e), ecuio_talk_end::answered);
-    /* S3 has passed with nothing sent: the session is gone, so the entry
-     * goes first again */
-    now += ECUIO_ENGINE_S3_US;
-    ASSERT_EQ(offer(&e, seed, 2, true), ecuio_talk_offer::taken);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kEnter);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), seed);
-}
-
-TEST(EngineTalkTest, WithoutFirstItTakesTurnsWithTheScanAndTheRotation)
+TEST(EngineTalkTest, APlainTalkTakesTurnsWithTheScanAndTheRotation)
 {
     static ecuio_request_engine e;
     engine(&e);
@@ -619,14 +396,14 @@ TEST(EngineTalkTest, AFailedWriteSettlesItUnsentAndItNeverGoesAgain)
     Ecu ecu;
     int64_t now = 0;
     ecu.now = &now;
-    const Bytes key = key_for(0x01);
-    ASSERT_EQ(offer(&e, key, 2), ecuio_talk_offer::taken);
+    const Bytes talk = long_read();
+    ASSERT_EQ(offer(&e, talk, 2), ecuio_talk_offer::taken);
     const int32_t r = ecuio_engine_due(&e, 0, now);
     ASSERT_EQ(r, ECUIO_ENGINE_ONCE);
     ecuio_engine_sent(&e, 0, r, false, now); /* the write failed */
     now += ECUIO_ENGINE_GAP_US;
     EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_NONE)
-        << "a key is not sent twice for one seed";
+        << "part of it may be on the bus: never a second time";
     EXPECT_EQ(taken(&e), ecuio_talk_end::unsent);
     /* where a scanned DID whose write failed stays due and goes again */
     ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0xD310));
@@ -702,25 +479,33 @@ TEST(EngineTalkTest, A7FInTheSessionEntersItAgainAndTheTalkIsNotAskedAgain)
     Ecu ecu;
     int64_t now = 0;
     entered(&e, &ecu, &now);
-    /* The ECU has fallen back to the default session behind core's back */
+    /* The ECU has fallen back to the default session behind core's back,
+     * and keeps this DID to the extended one */
+    const Bytes talk = {0x22, 0xD3, 0x01};
+    const Responder left = [&](const Bytes& q) -> Bytes {
+        if (q == talk && !ecu.extended) {
+            ecu.heard.push_back(q);
+            return {0x7F, 0x22, 0x7F};
+        }
+        return ecu(q);
+    };
     ecu.extended = false;
-    const Bytes seed = {0x27, 0x01};
-    ASSERT_EQ(offer(&e, seed, 2), ecuio_talk_offer::taken);
-    (void)until_settled(&e, &now, std::ref(ecu));
+    ASSERT_EQ(offer(&e, talk, 3), ecuio_talk_offer::taken);
+    (void)until_settled(&e, &now, left);
     uint8_t nrc = 0;
     EXPECT_EQ(taken(&e, &nrc), ecuio_talk_end::refused);
     EXPECT_EQ(nrc, 0x7F);
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERING);
     EXPECT_EQ(e.chans[0].session_lost, 1u);
-    EXPECT_EQ(count_of(ecu.heard, seed), 1u)
+    EXPECT_EQ(count_of(ecu.heard, talk), 1u)
         << "it went once, not again ahead of the entry";
     ecu.heard.clear();
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kEnter)
+    EXPECT_EQ(step(&e, 0, &now, left), kEnter)
         << "the session is entered again";
     for (int i = 0; i < 6; ++i) {
-        (void)step(&e, 0, &now, std::ref(ecu));
+        (void)step(&e, 0, &now, left);
     }
-    EXPECT_EQ(count_of(ecu.heard, seed), 0u)
+    EXPECT_EQ(count_of(ecu.heard, talk), 0u)
         << "the caller decides what follows a lost session";
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
 }
@@ -741,13 +526,14 @@ TEST(EngineTalkTest, A7FStraightAfterTheEntryIsTheTalksOwnAnswer)
     const Responder kept = [&](const Bytes& q) -> Bytes {
         return q == seed ? Bytes{0x7F, 0x27, 0x7F} : ecu(q);
     };
-    ASSERT_EQ(offer(&e, seed, 2), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer_seed(&e, now, 0x01), ecuio_talk_offer::taken);
     (void)until_settled(&e, &now, kept);
     uint8_t nrc = 0;
     EXPECT_EQ(taken(&e, &nrc), ecuio_talk_end::refused);
     EXPECT_EQ(nrc, 0x7F);
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(e.chans[0].session_lost, 0u);
+    EXPECT_EQ(e.chans[0].key.until_us, 0) << "a refused seed opens no window";
 }
 
 TEST(EngineTalkTest, AnOfferedTalkIsSomethingToSend)
@@ -775,33 +561,34 @@ TEST(EngineTalkTest, TheWireBytesAreTheTalksOnlyWhileItIsTheOneShot)
 {
     static ecuio_request_engine e;
     engine(&e);
+    Ecu ecu;
     int64_t now = 0;
+    ecu.now = &now;
     ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0xD310));
-    const Bytes key = key_for(0x03);
+    const Bytes talk = long_read();
     /* a row and a scanned DID: their own bytes, a talk offered or not */
     EXPECT_EQ(wire(&e, 0, 0), kRow);
-    ASSERT_EQ(offer(&e, key, 2, true), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer(&e, talk, 2), ecuio_talk_offer::taken);
     EXPECT_EQ(wire(&e, 0, 0), kRow);
-    const int32_t r = ecuio_engine_due(&e, 0, now);
+    const int32_t r = next_once(&e, &now, &ecu);
     ASSERT_EQ(r, ECUIO_ENGINE_ONCE);
     EXPECT_EQ(ecuio_engine_due(&e, 0, now), ECUIO_ENGINE_ONCE)
         << "taken: it stays the one-shot until it is sent";
     const ecuio_request& once = ecuio_engine_request_of(&e, 0, r);
-    EXPECT_EQ(Bytes(once.bytes, once.bytes + once.len), (Bytes{0x27, 0x04}))
+    EXPECT_EQ(Bytes(once.bytes, once.bytes + once.len), (Bytes{0x2C, 0x01}))
         << "the one-shot holds the echo bytes its reply is matched on";
     uint32_t len = 0;
     const uint8_t* out =
         ecuio_engine_pdu_of(e.chans[0].talk, true, once.bytes, once.len, &len);
-    EXPECT_NE(out, key.data()) << "the talk's own copy, not the caller's bytes";
+    EXPECT_NE(out, talk.data())
+        << "the talk's own copy, not the caller's bytes";
     ASSERT_EQ(len, 18u);
-    EXPECT_EQ(Bytes(out, out + len), key);
+    EXPECT_EQ(Bytes(out, out + len), talk);
     EXPECT_EQ(wire(&e, 0, 0), kRow)
         << "a row's are its own while a talk is out";
     ecuio_engine_sent(&e, 0, r, false, now);
     ASSERT_EQ(taken(&e), ecuio_talk_end::unsent);
     now += ECUIO_ENGINE_GAP_US;
-    Ecu ecu;
-    ecu.now = &now;
     const int32_t s = next_once(&e, &now, &ecu);
     ASSERT_EQ(s, ECUIO_ENGINE_ONCE);
     EXPECT_EQ(wire(&e, 0, s), (Bytes{0x22, 0xD3, 0x10}))
@@ -811,9 +598,9 @@ TEST(EngineTalkTest, TheWireBytesAreTheTalksOnlyWhileItIsTheOneShot)
     static ecuio_request_engine two;
     ASSERT_TRUE(ecuio_engine_init(&two, 2));
     two.pdu_max = ECUIO_ENGINE_PDU_MAX;
-    ASSERT_EQ(offer(&two, key, 2, true, 1), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer(&two, talk, 2, 1), ecuio_talk_offer::taken);
     EXPECT_EQ(ecuio_engine_due(&two, 0, now), ECUIO_ENGINE_NONE);
     ASSERT_EQ(ecuio_engine_due(&two, 1, now), ECUIO_ENGINE_ONCE);
     EXPECT_EQ(ecuio_engine_request_of(&two, 1, ECUIO_ENGINE_ONCE).channel, 1);
-    EXPECT_EQ(wire(&two, 1, ECUIO_ENGINE_ONCE), key);
+    EXPECT_EQ(wire(&two, 1, ECUIO_ENGINE_ONCE), talk);
 }

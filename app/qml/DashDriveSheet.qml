@@ -15,17 +15,17 @@ Rectangle {
     required property DashboardPage host
     objectName: "driveToolsBackdrop"
     readonly property bool wide: driveSheet.host.width > driveSheet.host.height
-    visible: driveSheet.host.driving && driveSheet.host.barsShown > 0
+    visible: driveSheet.host.drivePart.driving && driveSheet.host.drivePart.barsShown > 0
     z: 3
     x: 0
-    y: driveSheet.host.height - driveSheet.host.barsShown * (driveSheet.host.driveTabBarHeight + height)
+    y: driveSheet.host.height - driveSheet.host.drivePart.barsShown * (driveSheet.host.driveTabBarHeight + height)
     width: driveSheet.host.width
     height: sheetGrid.implicitHeight + 2 * Theme.barGap
     color: Theme.bg
     // Keeps a press between the controls off the gauges; driveToolsTouch counts it
     MouseArea {
         anchors.fill: parent
-        enabled: driveSheet.host.driving
+        enabled: driveSheet.host.drivePart.driving
     }
     Rectangle {
         anchors { left: parent.left; right: parent.right; top: parent.top }
@@ -152,7 +152,7 @@ Rectangle {
                 flat: true
                 text: qsTr("Exit drive")
                 Accessible.name: qsTr("Exit drive: leave the full-screen gauges")
-                onClicked: driveSheet.host.leaveDrive(true)
+                onClicked: driveSheet.host.drivePart.leaveDrive(true)
             }
             Item { Layout.fillWidth: true; visible: !driveSheet.wide }
             SheetButton {
@@ -163,7 +163,7 @@ Rectangle {
             }
             Loader {
                 objectName: "driveNight"
-                active: driveSheet.host.driving
+                active: driveSheet.host.drivePart.driving
                 sourceComponent: driveSheet.host.nightSwitch
             }
             Item { Layout.fillWidth: true; visible: driveSheet.wide }
@@ -174,9 +174,9 @@ Rectangle {
         objectName: "driveToolsTouch"
         anchors.fill: parent
         z: 1
-        enabled: driveSheet.host.driving
+        enabled: driveSheet.host.drivePart.driving
         onPressed: mouse => {
-            driveSheet.host.barTouched()
+            driveSheet.host.drivePart.barTouched()
             mouse.accepted = false
         }
     }

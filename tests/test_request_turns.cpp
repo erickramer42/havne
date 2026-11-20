@@ -3,185 +3,9 @@
 //          that asks one channel at a time, request_turns.h, and each
 //          channel's walk budget, with the time passed in)
 
-#include <gtest/gtest.h>
+#include "request_turns_support.h"
 
-#include "../core/src/obd2_reply.h"
-#include "../core/src/request_engine.h"
-#include "../core/src/request_turns.h"
-
-#include <cstdint>
-#include <functional>
-#include <initializer_list>
-#include <memory>
-#include <set>
-#include <vector>
-
-namespace {
-
-using Bytes = std::vector<uint8_t>;
-constexpr int64_t kMs = 1000;
-
-/* What a channel's ECU answers a request: the reply, empty for silence */
-using Ecus = std::function<Bytes(uint32_t, const Bytes&)>;
-
-struct Sent {
-    uint32_t c;
-    Bytes bytes;
-    int64_t at_us;
-};
-
-/* An adapter that asks one channel at a time, as the ELM327 worker does:
- * each pass expires the waits, takes a turn, sends and reads the answer,
- * an answered exchange taking exchange_us and silence the engine's wait */
-struct Adapter {
-    ecuio_request_engine e;
-    ecuio_engine_turns turns;
-    int64_t now = 0;
-    int64_t exchange_us = 90 * kMs;
-    uint32_t held = 0;
-    int64_t last_wait_us = 0;
-    Ecus ecus;
-    /* A write that fails: the request is taken back, the try costs an
-     * exchange */
-    std::function<bool(uint32_t, const Bytes&)> unsent;
-    std::vector<Sent> sent;
-
-    void pass()
-    {
-        for (uint32_t c = 0; c < e.chan_count; ++c) {
-            (void)ecuio_engine_expire(&e, c, now);
-        }
-        uint32_t c = 0;
-        int64_t wait = 0;
-        const int32_t r =
-            ecuio_engine_take_turn(&e, turns, held, now, &c, &wait);
-        if (r == ECUIO_ENGINE_NONE) {
-            last_wait_us = wait;
-            const int64_t next =
-                wait > 0 ? wait : ecuio_engine_next_event_us(&e, now);
-            now += (next == 0 || next == INT64_MAX) ? kMs : next;
-            return;
-        }
-        const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
-        const Bytes bytes(q.bytes, q.bytes + q.len);
-        if (unsent && unsent(c, bytes)) {
-            ecuio_engine_sent(&e, c, r, false, now);
-            now += exchange_us;
-            return;
-        }
-        ecuio_engine_sent(&e, c, r, true, now);
-        sent.push_back({c, bytes, now});
-        const Bytes reply = ecus(c, bytes);
-        if (reply.empty()) {
-            now += ECUIO_ENGINE_WAIT_US;
-            return;
-        }
-        now += exchange_us;
-        (void)ecuio_engine_on_frame(&e, c, reply.data(),
-                                    static_cast<uint16_t>(reply.size()), now,
-                                    nullptr);
-    }
-
-    /* Passes until n requests have gone out in all */
-    void asks(size_t n)
-    {
-        for (int i = 0; sent.size() < n && i < 100000; ++i) {
-            pass();
-        }
-        ASSERT_GE(sent.size(), n);
-    }
-
-    /* Passes until the time is past t_us */
-    void until(int64_t t_us)
-    {
-        for (int i = 0; now < t_us && i < 100000; ++i) {
-            pass();
-        }
-    }
-
-    /* The channels of the requests sent, in order, from the ith on */
-    std::vector<uint32_t> channels(size_t from = 0) const
-    {
-        std::vector<uint32_t> out;
-        for (size_t i = from; i < sent.size(); ++i) {
-            out.push_back(sent[i].c);
-        }
-        return out;
-    }
-};
-
-std::unique_ptr<Adapter> adapter(uint32_t chans)
-{
-    std::unique_ptr<Adapter> a(new Adapter);
-    EXPECT_TRUE(ecuio_engine_init(&a->e, chans));
-    return a;
-}
-
-void add(ecuio_request_engine* e, uint32_t c, const Bytes& q)
-{
-    ASSERT_EQ(ecuio_engine_add(e, c, q.data(), static_cast<uint8_t>(q.size())),
-              ecuio_engine_add_result::added);
-}
-
-/* n DIDs on channel c, from 1E00 + first on */
-void dids(ecuio_request_engine* e, uint32_t c, int n, int first = 0)
-{
-    for (int i = first; i < first + n; ++i) {
-        add(e, c, {0x22, 0x1E, static_cast<uint8_t>(i)});
-    }
-}
-
-/* An ECU answering every DID and every Service 01 request: J1979's
- * lengths, packs whole, each bitmap listing every PID and the next
- * bitmap, but the one at last */
-Bytes answer(const Bytes& q, uint8_t last = 0xE0)
-{
-    if (q.size() == 3 && q[0] == 0x22) {
-        return {0x62, q[1], q[2], 0x12, 0x34};
-    }
-    if (q.size() < 2 || q[0] != 0x01) {
-        return {0x7F, q.empty() ? uint8_t{0} : q[0], 0x11};
-    }
-    Bytes out = {0x41};
-    for (size_t i = 1; i < q.size(); ++i) {
-        const uint8_t pid = q[i];
-        out.push_back(pid);
-        if (pid % 0x20 == 0) {
-            const uint8_t end = pid == last ? 0xFE : 0xFF;
-            out.insert(out.end(), {0xFF, 0xFF, 0xFF, end});
-        } else {
-            out.insert(out.end(), ECUIO_OBD2_PID_BYTES[pid], uint8_t{0x2A});
-        }
-    }
-    return out;
-}
-
-/* answer(), and the extended session's entry and tester present */
-Bytes in_session(const Bytes& q)
-{
-    if (q.size() == 2 && q[0] == 0x10) {
-        return {0x50, q[1], 0x00, 0x32, 0x01, 0xF4};
-    }
-    if (q.size() == 2 && q[0] == 0x3E) {
-        return {0x7E, 0x00};
-    }
-    return answer(q);
-}
-
-/* Runs of one channel in a list of channels: {channel, length} */
-std::vector<std::pair<uint32_t, int>> runs(const std::vector<uint32_t>& cs)
-{
-    std::vector<std::pair<uint32_t, int>> out;
-    for (uint32_t c : cs) {
-        if (out.empty() || out.back().first != c) {
-            out.push_back({c, 0});
-        }
-        ++out.back().second;
-    }
-    return out;
-}
-
-} // namespace
+using namespace request_turns_test;
 
 /* Six rows on channel 0, one on channel 1: channel 0 asks each of its
  * rows, then channel 1 its one, so every row is asked once a lap and the
@@ -455,6 +279,84 @@ TEST(RequestTurnsTest, ADueKeepAliveEndsATurn)
         keeps += x.bytes[0] == 0x3E ? 1 : 0;
     }
     EXPECT_GE(keeps, 5);
+    EXPECT_EQ(a->e.chans[1].session_lost, 0u);
+}
+
+/* A channel inside its key's window (request_talk.h) has nothing due
+ * until the window ends: its keep-alive, due meanwhile, ends no other
+ * channel's turn, and goes out within an exchange of the window's end */
+TEST(RequestTurnsTest, AChannelInsideItsKeysWindowEndsNoTurnUntilItCloses)
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 4);
+    dids(&a->e, 1, 1, 0x40);
+    ASSERT_TRUE(
+        ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MIN_US));
+    const Bytes seed = {0x27, 0x01};
+    a->ecus = [&seed](uint32_t, const Bytes& q) -> Bytes {
+        return q == seed ? Bytes{0x67, 0x01, 0x5A, 0x17, 0xC3, 0x08}
+                         : in_session(q);
+    };
+    a->until(1000 * kMs);
+    ecuio_talk_request q;
+    q.pdu = seed.data();
+    q.len = 2;
+    q.echo = 2;
+    q.kind = ecuio_talk_kind::seed;
+    q.window_us = 3000 * kMs;
+    ASSERT_EQ(ecuio_engine_offer_talk(&a->e, 1, q, a->now),
+              ecuio_talk_offer::taken);
+    ecuio_talk_result settled;
+    for (int i = 0;
+         i < 100 && !ecuio_engine_talk_take(a->e.chans[1].talk, &settled);
+         ++i) {
+        a->pass();
+    }
+    ASSERT_EQ(settled.end, ecuio_talk_end::answered);
+    const ecuio_engine_channel& waiting = a->e.chans[1];
+    const int64_t until = waiting.key.until_us;
+    ASSERT_GT(until, a->now + 2000 * kMs);
+    EXPECT_EQ(ecuio_engine_turn_next_us(&a->e, waiting), until)
+        << "not its keep-alive's time, " << ECUIO_ENGINE_KEEPALIVE_MIN_US
+        << " after the seed";
+    /* with its key offered the channel asks at once: the window holds
+     * everything but the key */
+    ecuio_engine_channel keyed = waiting;
+    const Bytes key = {0x27, 0x02, 0x11, 0x22, 0x33, 0x44};
+    ecuio_talk_request k;
+    k.pdu = key.data();
+    k.len = 6;
+    k.echo = 2;
+    k.kind = ecuio_talk_kind::key;
+    ASSERT_EQ(ecuio_engine_talk(keyed.talk, keyed.key, 7, k, a->now),
+              ecuio_talk_offer::taken);
+    EXPECT_EQ(ecuio_engine_turn_next_us(&a->e, keyed), keyed.next_send_us);
+    EXPECT_LT(keyed.next_send_us, until);
+
+    const size_t from = a->sent.size();
+    std::set<int64_t> turns_begun;
+    while (a->now < until - 2 * a->exchange_us) {
+        a->pass();
+        turns_begun.insert(a->turns.since_us);
+    }
+    const size_t in_window = a->sent.size() - from;
+    ASSERT_GE(in_window, 20u);
+    for (size_t i = from; i < a->sent.size(); ++i) {
+        ASSERT_EQ(a->sent[i].c, 0u) << "request " << i;
+    }
+    EXPECT_LE(turns_begun.size(), in_window / 4 + 2)
+        << "channel 0 kept each turn for its four rows";
+
+    a->until(until + 4 * a->exchange_us);
+    const Sent* next = nullptr;
+    for (size_t i = from; i < a->sent.size() && next == nullptr; ++i) {
+        next = a->sent[i].c == 1 ? &a->sent[i] : nullptr;
+    }
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->bytes, (Bytes{0x3E, 0x00}));
+    EXPECT_GE(next->at_us, until);
+    EXPECT_LE(next->at_us, until + 2 * a->exchange_us)
+        << "channel 1's keep-alive ended channel 0's turn";
     EXPECT_EQ(a->e.chans[1].session_lost, 0u);
 }
 

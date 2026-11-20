@@ -38,7 +38,7 @@ ColumnLayout {
 
     // Bridge.gaugeSignals as plain arrays, made once (it is CONSTANT):
     // each read of a bridge map makes a new JS wrapper
-    readonly property var gaugeSets: DashboardBook.copySets(Bridge.gaugeSignals)
+    readonly property var gaugeSets: DashboardEdit.copySets(Bridge.gaugeSignals)
 
     // The rows a term can bind: numbers and named states with references,
     // copied once into plain objects (a bridge map read per delegate
@@ -53,7 +53,7 @@ ColumnLayout {
         return o
     }
     function refreshRows() {
-        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.offlineUri),
+        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.uriPart.offlineUri),
                           r => root.plainRow(r))
                    .filter(r => r.ref !== "" && !r.isText)
     }
@@ -129,7 +129,7 @@ ColumnLayout {
     function levelsOf(row) {
         const g = ConditionBook.gaugeLevels(row.gauge)
         const levels = Object.keys(g).length > 0
-                       ? g : DashboardBook.zonesFor(DashboardBook.keyOfRef(row.ref, gaugeSets))
+                       ? g : DashboardBook.zonesFor(DashboardEdit.keyOfRef(row.ref, gaugeSets))
         delete levels.coldBelow
         return Object.keys(levels).length > 0 ? levels : null
     }
@@ -137,14 +137,14 @@ ColumnLayout {
         const g = row.gauge ?? ({})
         if (typeof g.min === "number" && typeof g.max === "number")
             return { from: g.min, to: g.max }
-        return DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        return DashboardEdit.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
     }
     function addFromSignal(row) {
         const levels = levelsOf(row)
         if (levels === null)
             return
         const range = rangeOf(row)
-        const c = ConditionBook.alertFromLevels(row.name, DashboardBook.counterparts(row.ref, gaugeSets),
+        const c = ConditionBook.alertFromLevels(row.name, DashboardEdit.counterparts(row.ref, gaugeSets),
                                                 row.decodedUnit, levels, range.from, range.to,
                                                 ConditionBook.keysOf(doc))
         pickingSignal = false
@@ -160,7 +160,7 @@ ColumnLayout {
                ? String(Number(v.toFixed(decimals ?? 3))).replace(".", Qt.locale().decimalPoint) : ""
     }
     function rowOfRefs(refs) {
-        const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
+        const all = DashboardEdit.lookupRefs(refs ?? [], gaugeSets)
         return rows.find(r => all.indexOf(r.ref) >= 0) ?? null
     }
     function nameOfRefs(refs) {

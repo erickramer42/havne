@@ -5525,6 +5525,7 @@ TEST_F(Elm327SessionTest,
 TEST_F(Elm327SessionTest, AHealthyUnpickedSessionSendsNothingMore)
 {
     const CarProfile profile("elm327-idle-car");
+    const CheckEvery checks(kCheckMs);
     Session s;
     ASSERT_EQ(s.create(uri("?profile=elm327-idle-car")), ECUIO_OK)
         << ecuio_last_error_detail();
@@ -5534,8 +5535,8 @@ TEST_F(Elm327SessionTest, AHealthyUnpickedSessionSendsNothingMore)
     const uint32_t commands = adapter_commands();
     const uint32_t requests = adapter_requests();
     /* Two of the intervals a check would take */
-    const auto end =
-        std::chrono::steady_clock::now() + std::chrono::milliseconds(10000);
+    const auto end = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(2 * kCheckMs);
     while (std::chrono::steady_clock::now() < end) {
         ASSERT_EQ(s.state(), ECUIO_OK);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));

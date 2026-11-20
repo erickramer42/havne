@@ -45,7 +45,7 @@ Item {
         return out
     }
     function startAdd() {
-        if (!DashboardBook.canAddCell(part.host.doc, part.host.pageIndex))
+        if (!DashboardEdit.canAddCell(part.host.doc, part.host.pageIndex))
             return
         part.host.commitTyping()
         part.host.selected = -1
@@ -64,15 +64,15 @@ Item {
         if (part.host.changingKind) {
             if (part.host.selected < 0)
                 return
-            let next = DashboardBook.setKind(part.host.doc, part.host.pageIndex, part.host.selected, kind)
+            let next = DashboardEdit.setKind(part.host.doc, part.host.pageIndex, part.host.selected, kind)
             // A shift band isn't a dial's range: on an rpm signal, going to
             // Shift lights takes the band and leaving takes the default range
             // (another signal keeps its range both ways)
             if ((kind === "shift-light") !== (part.host.selectedCell.kind === "shift-light")
                     && (part.host.selectedCell.unit ?? "").toLowerCase() === "rpm") {
                 const range = kind === "shift-light" ? Object.assign({}, DashboardBook.shiftBand)
-                                                     : DashboardBook.defaultRange(part.host.selectedCell.unit)
-                next = DashboardBook.setOptions(next, part.host.pageIndex, part.host.selected, range)
+                                                     : DashboardEdit.defaultRange(part.host.selectedCell.unit)
+                next = DashboardEdit.setOptions(next, part.host.pageIndex, part.host.selected, range)
             }
             if (part.host.edit(next, part.host.historyPart.stepOf("", qsTr("changed %1's kind").arg(part.host.cellName(part.host.selectedCell)),
                                   part.host.selected, part.host.selected)))
@@ -81,7 +81,7 @@ Item {
         }
         if (kind === "blank") {
             const span = part.host.newSpans[kind]
-            if (part.host.edit(DashboardBook.addCell(part.host.doc, part.host.pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
+            if (part.host.edit(DashboardEdit.addCell(part.host.doc, part.host.pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
                      part.host.historyPart.stepOf("", qsTr("added %1").arg(part.host.kindNames[kind]), -1, part.host.shownCells.length)))
                 part.host.select(part.host.shownCells.length - 1)
             return
@@ -108,7 +108,7 @@ Item {
     function startOptions(kind, row) {
         const g = row.gauge ?? ({})
         const hasGauge = g.min !== undefined && g.max !== undefined
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        const r = DashboardEdit.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
         const options = hasGauge ? { from: g.min, to: g.max } : { from: r.from, to: r.to }
         const key = part.host.keyOfRef(row.ref)
         if (kind === "shift-light") {
@@ -154,7 +154,7 @@ Item {
     function pickSignal(row) {
         if (part.host.addKind !== "") {
             const cell = newCell(part.host.addKind, row)
-            if (part.host.edit(DashboardBook.addCell(part.host.doc, part.host.pageIndex, cell),
+            if (part.host.edit(DashboardEdit.addCell(part.host.doc, part.host.pageIndex, cell),
                      part.host.historyPart.stepOf("", qsTr("added %1").arg(part.host.cellName(cell)), -1, part.host.shownCells.length))) {
                 part.host.addKind = ""
                 part.host.select(part.host.shownCells.length - 1)
@@ -167,14 +167,14 @@ Item {
         // Another signal: its name, unit, range and zones as a new gauge on
         // it would start, and none of the old signal's steps, words or
         // decimals, which were its own
-        let next = DashboardBook.setCell(part.host.doc, part.host.pageIndex, part.host.selected, {
+        let next = DashboardEdit.setCell(part.host.doc, part.host.pageIndex, part.host.selected, {
             refs: part.host.counterparts(row.ref), unit: row.decodedUnit, label: part.host.labelFor(row) })
         const cleared = {
             majorStep: null, minorStep: null, labelDivisor: null, caption: null,
             description: null, peakLabel: null, decimals: null }
         for (const zone of DashboardBook.zoneOptions)
             cleared[zone] = null
-        next = DashboardBook.setOptions(next, part.host.pageIndex, part.host.selected,
+        next = DashboardEdit.setOptions(next, part.host.pageIndex, part.host.selected,
                                         Object.assign(cleared, startOptions(part.host.selectedCell.kind, row)))
         part.host.edit(next, part.host.historyPart.stepOf("", qsTr("changed %1's signal").arg(part.host.cellName(part.host.selectedCell)), part.host.selected, part.host.selected))
         part.host.panel = "cell"
@@ -213,7 +213,7 @@ Item {
         const cells = plan.adding.map(r => newCell(part.host.addKind, r))
         const words = cells.length === 1 ? qsTr("added 1 signal of %1").arg(listedName)
                                          : qsTr("added %1 signals of %2").arg(cells.length).arg(listedName)
-        if (part.host.edit(DashboardBook.addCells(part.host.doc, part.host.pageIndex, cells), part.host.historyPart.stepOf("", words, -1, -1))) {
+        if (part.host.edit(DashboardEdit.addCells(part.host.doc, part.host.pageIndex, cells), part.host.historyPart.stepOf("", words, -1, -1))) {
             part.host.addKind = ""
             part.host.panel = ""
         }

@@ -74,7 +74,7 @@ ColumnLayout {
     // Dashboard's zones are where the unit system converted it
     function stored(unit, typed) {
         const v = Bridge.decodedValue(unit, typed)
-        return v === typed ? v : DashboardBook.roundStored(v)
+        return v === typed ? v : DashboardEdit.roundStored(v)
     }
 
     function textsOf(t) {
@@ -121,7 +121,7 @@ ColumnLayout {
 
     // ---- Terms
     function rowOf(t) {
-        const all = DashboardBook.lookupRefs(t.signal ?? [], root.alerts.gaugeSets)
+        const all = DashboardEdit.lookupRefs(t.signal ?? [], root.alerts.gaugeSets)
         for (const r of root.alerts.rows) {
             if (all.indexOf(r.ref) >= 0)
                 return r
@@ -184,7 +184,7 @@ ColumnLayout {
     // The picked row's refs as a Dashboard cell builds them, and its unit
     function setSignal(i, row) {
         const t = ConditionBook.copy(terms[i])
-        t.signal = DashboardBook.counterparts(row.ref, root.alerts.gaugeSets).slice(0, ConditionBook.maxRefs)
+        t.signal = DashboardEdit.counterparts(row.ref, root.alerts.gaugeSets).slice(0, ConditionBook.maxRefs)
         t.unit = row.decodedUnit
         // Another unit reads the shown texts afresh
         if (t.unit !== terms[i].unit) {

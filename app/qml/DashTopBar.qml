@@ -17,7 +17,7 @@ ColumnLayout {
     required property DashboardPage host
     // The page strip's Loader, for the page
     readonly property Loader stripLoader: stripHost
-    visible: !topBar.host.driving
+    visible: !topBar.host.drivePart.driving
     // Over the pages, so the shown tab covers the panel's top line
     z: 1
     x: (topBar.host.width - width) / 2
@@ -58,11 +58,11 @@ ColumnLayout {
             visible: topBar.host.phoneForm
             enabled: Bridge.connected && !topBar.host.editing
             text: !Bridge.connected ? qsTr("Connect first")
-                : topBar.host.driving ? qsTr("Exit drive") : qsTr("Drive")
+                : topBar.host.drivePart.driving ? qsTr("Exit drive") : qsTr("Drive")
             Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
-                           : topBar.host.driving ? qsTr("Exit drive: leave the full-screen gauges")
+                           : topBar.host.drivePart.driving ? qsTr("Exit drive: leave the full-screen gauges")
                                           : qsTr("Drive: show the gauges full screen")
-            onClicked: topBar.host.driving ? topBar.host.leaveDrive(true) : topBar.host.drivePart.enterDrive()
+            onClicked: topBar.host.drivePart.driving ? topBar.host.drivePart.leaveDrive(true) : topBar.host.drivePart.enterDrive()
         }
         Item {
             objectName: "toolRowStart"
@@ -103,7 +103,7 @@ ColumnLayout {
             objectName: "dashEdit"
             compact: topBar.host.compact || topBar.host.phoneForm
             horizontalPadding: topBar.host.phoneForm ? 18 : (compact ? 6 : 8)
-            visible: !topBar.host.editing && !topBar.host.driving
+            visible: !topBar.host.editing && !topBar.host.drivePart.driving
             text: qsTr("Edit")
             onClicked: topBar.host.startEditing()
         }
@@ -150,7 +150,7 @@ ColumnLayout {
         ThemedButton {
             objectName: "dashAdd"
             compact: topBar.host.form === "phone"
-            enabled: DashboardBook.canAddCell(topBar.host.doc, topBar.host.pageIndex)
+            enabled: DashboardEdit.canAddCell(topBar.host.doc, topBar.host.pageIndex)
             text: topBar.host.compact ? qsTr("Add") : qsTr("Add gauge")
             Accessible.name: qsTr("Add a gauge")
             onClicked: topBar.host.addFlowPart.startAdd()
@@ -263,7 +263,7 @@ ColumnLayout {
             id: moreAddPage
             objectName: "moreAddPage"
             visible: topBar.host.phoneForm
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("Add page")
             Accessible.name: qsTr("Add a page: choose a blank page or a preset")
             onClicked: topBar.host.editsPart.openPresets("add")
@@ -294,7 +294,7 @@ ColumnLayout {
         ThemedButton {
             id: moreRemovePage
             objectName: "moreRemovePage"
-            enabled: DashboardBook.canRemovePage(topBar.host.doc)
+            enabled: DashboardEdit.canRemovePage(topBar.host.doc)
             text: qsTr("Remove page")
             onClicked: topBar.host.confirmRemovePage = true
         }
@@ -439,7 +439,7 @@ ColumnLayout {
             objectName: "preset_blank"
             compact: topBar.host.form === "phone"
             visible: presetFlow.adding
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("Blank page")
             Accessible.name: qsTr("Add a blank page")
             onClicked: topBar.host.editsPart.addBlankPage()
@@ -450,7 +450,7 @@ ColumnLayout {
                 required property var modelData
                 objectName: "preset_" + modelData.key
                 compact: topBar.host.form === "phone"
-                enabled: !presetFlow.adding || DashboardBook.canAddPage(topBar.host.doc)
+                enabled: !presetFlow.adding || DashboardEdit.canAddPage(topBar.host.doc)
                 text: modelData.label
                 Accessible.name: presetFlow.adding
                     ? qsTr("Add the %1 preset as a new page").arg(modelData.label)
@@ -463,7 +463,7 @@ ColumnLayout {
             objectName: "preset_file"
             compact: topBar.host.form === "phone"
             visible: presetFlow.adding
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("From a file...")
             onClicked: {
                 topBar.host.layoutFilePart.noteLayout("")
@@ -479,6 +479,7 @@ ColumnLayout {
             onClicked: topBar.host.editsPart.closePresets()
         }
     }
+    DashPluginPages { host: topBar.host }
     RowLayout {
         objectName: "dashReplaceConfirm"
         readonly property real touchMin: Theme.touchTarget
@@ -579,7 +580,7 @@ ColumnLayout {
                 pages: topBar.host.pages
                 current: topBar.host.pageIndex
                 editing: topBar.host.editing
-                canAddPage: DashboardBook.canAddPage(topBar.host.doc)
+                canAddPage: DashboardEdit.canAddPage(topBar.host.doc)
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
                 onAddRequested: topBar.host.editsPart.openPresets("add")

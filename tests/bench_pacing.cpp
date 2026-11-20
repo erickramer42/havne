@@ -1,10 +1,10 @@
 // File/layer: tests/bench_pacing.cpp | bench_pacing, Qt-free, C++17
 // Testing: BENCH (not in ctest): the figures for docs/performance.md
 //
-// The pacing bench's table (tests/pacing_bench.h): each pick through each
-// adapter model at each setting, with log's summary figures, on the
-// simulated car's timing. Uncalibrated until the constants are set from a
-// car run.
+// The pacing bench's tables (tests/pacing_bench.h): each pick through
+// each adapter model at each setting, with log's summary figures, on the
+// simulated car's timing; then the car's runs of
+// docs/bench-sessions/2026-11-18-pacing-car.md, each against its model.
 //
 //   build/tests/Release/bench_pacing.exe [seconds, default 70]
 
@@ -74,7 +74,7 @@ struct row {
     std::vector<uint8_t> supported; /* none: the simulated car's own */
 };
 
-void print(const row& r, int64_t seconds)
+pacing::bench_config config_of(const row& r, int64_t seconds)
 {
     pacing::bench_config cfg;
     cfg.model = r.model;
@@ -85,7 +85,12 @@ void print(const row& r, int64_t seconds)
     cfg.picks = r.picks;
     cfg.supported = r.supported;
     cfg.seconds = seconds;
-    pacing::bench b(cfg);
+    return cfg;
+}
+
+void print(const row& r, int64_t seconds)
+{
+    pacing::bench b(config_of(r, seconds));
     std::string why;
     if (!b.open(&why)) {
         std::printf("%-32s refused: %s\n", r.label, why.c_str());
@@ -98,6 +103,25 @@ void print(const row& r, int64_t seconds)
                 f.signals > 0 ? res.values_per_s() / f.signals : 0.0, f.signals,
                 f.median_p50_us / 1000.0, f.worst_p50_us / 1000.0,
                 static_cast<unsigned long long>(res.timeouts));
+}
+
+// A car run's shape and its replies a second on the car
+struct car_row {
+    row shape;
+    double car;
+};
+
+void print_car(const car_row& c)
+{
+    pacing::bench b(config_of(c.shape, 60));
+    std::string why;
+    if (!b.open(&why)) {
+        std::printf("%-32s refused: %s\n", c.shape.label, why.c_str());
+        return;
+    }
+    const double model = b.run().requests_per_s();
+    std::printf("%-32s %8.1f %8.1f %+7.1f%%\n", c.shape.label, model, c.car,
+                100.0 * (model - c.car) / c.car);
 }
 
 } // namespace
@@ -138,6 +162,32 @@ int main(int argc, char** argv)
                 "values/s", "sweeps/s", "sigs", "P50 ms", "worst ms", "t/out");
     for (const row& r : rows) {
         print(r, seconds);
+    }
+
+    /* D9-D11 ask one DID a module, registered sets: PacingTest's pins */
+    const std::vector<uint16_t> eight = {id_of("RPM"),
+                                         id_of("Engine Load"),
+                                         id_of("Coolant Temp"),
+                                         id_of("Vehicle Speed"),
+                                         id_of("Intake Air Temp"),
+                                         id_of("Throttle Position"),
+                                         id_of("MAF"),
+                                         id_of("Timing Advance")};
+    const std::vector<car_row> cars = {
+        {{"D1 VX, obd2", vx_j2534(), -1, true, {}, 0, car}, 58.7},
+        {{"D2 VX, obd2, pack=0", vx_j2534(), -1, false, {}, 0, car}, 140.8},
+        {{"D4 VX, obd2, gap=0", vx_j2534(), 0, true, {}, 0, car}, 52.7},
+        {{"D5 VX, obd2, gap=20", vx_j2534(), 20, true, {}, 0, car}, 48.2},
+        {{"D6 VX, RPM, pack=0", vx_j2534(), -1, false, rpm, 0, car}, 140.3},
+        {{"D7 VX, 8 signals, pack=0", vx_j2534(), -1, false, eight, 0, car},
+         138.4},
+        {{"D3 MX+, obd2", mx, -1, true, {}, 0, car}, 40.9},
+        {{"D8 MX+, obd2, gap=0", mx, 0, true, {}, 0, car}, 41.9},
+    };
+    std::printf("\n%-32s %8s %8s %8s\n", "the car's run", "model", "car",
+                "off");
+    for (const car_row& c : cars) {
+        print_car(c);
     }
     return 0;
 }

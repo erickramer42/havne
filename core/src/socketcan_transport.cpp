@@ -483,9 +483,9 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             for (uint32_t c = 0; c < r.chan_count; ++c) {
                 r.ext29[c] = ecuio_channel_is_29bit(r.rx_ids[c], r.tx_ids[c]);
             }
-            const ecuio_status_t st =
-                ecuio_build_requests(session, set, req, r.rx_ids, r.chan_count,
-                                     &r.engine, &r.probe, &r.identify);
+            const ecuio_status_t st = ecuio_build_requests(
+                session, set, req, r.rx_ids, r.tx_ids, r.chan_count, &r.engine,
+                &r.probe, &r.identify);
             if (st != ECUIO_OK) {
                 return st;
             }

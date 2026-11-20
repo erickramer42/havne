@@ -55,8 +55,8 @@ struct ecuio_j2534_sur_handle {
      * now fails at once (a teardown would otherwise pay a timeout each) and
      * close kills the child without the polite shutdown. */
     bool unresponsive = false;
-    /* Batch cache: one OP_READ returns up to 16 messages, dispensed one per
-     * read_msg. Worker-thread-only. */
+    /* Batch cache: an OP_READ's frames (ECUIO_SUR_MAX_FRAMES_PER_READ at
+     * most), dispensed one per read_msg. Worker-thread-only. */
     ecuio_pt_rx_t pending[ECUIO_SUR_MAX_FRAMES_PER_READ];
     uint32_t pending_count = 0;
     uint32_t pending_next = 0;

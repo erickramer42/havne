@@ -121,11 +121,11 @@ SwipeView {
             readonly property bool shown: index === swipe.host.pageIndex
             // In edit mode the page ends with a "+" cell while it has room
             readonly property bool addCell: swipe.host.editing && swipe.host.shown
-                                            && DashboardBook.canAddCell(swipe.host.doc, index)
+                                            && DashboardEdit.canAddCell(swipe.host.doc, index)
             // While a held cell moves, the order its drop would make
             readonly property bool reflowing: swipe.host.shown && swipe.host.dropAt >= 0
             readonly property var ordered: reflowing
-                ? DashboardBook.reordered(cells, swipe.host.held, swipe.host.dropAt) : cells
+                ? DashboardEdit.reordered(cells, swipe.host.held, swipe.host.dropAt) : cells
             readonly property var placed: addCell
                 ? ordered.concat([{ w: swipe.host.spanScale, h: 2 * swipe.host.spanScale }]) : ordered
             // Edit mode and a held cell show the true sizes
@@ -184,7 +184,7 @@ SwipeView {
                 pressedAt = scene
                 finger = scene
                 leftHome = false
-                dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
+                dropCenters = DashboardEdit.dropBoxes(cells, i, columns).map(
                     d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
                 swipe.host.held = i
             }
@@ -196,7 +196,7 @@ SwipeView {
                 const at = grid.mapFromItem(null, scene.x, scene.y)
                 dragX = at.x - grab.x
                 dragY = at.y - grab.y
-                swipe.host.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
+                swipe.host.dropAt = DashboardEdit.nearest(dropCenters, dragX + heldSize.width / 2,
                                                     dragY + heldSize.height / 2)
                 if (swipe.host.dropAt !== swipe.host.held)
                     leftHome = true
@@ -210,11 +210,11 @@ SwipeView {
                 // menu; a drag elsewhere and back changes nothing
                 if (to < 0 || (to === from && !strayed))
                     swipe.host.select(from)
-                else if (swipe.host.edit(DashboardBook.moveCell(swipe.host.doc, swipe.host.pageIndex, from, to),
+                else if (swipe.host.edit(DashboardEdit.moveCell(swipe.host.doc, swipe.host.pageIndex, from, to),
                                    swipe.host.historyPart.stepOf("", qsTr("moved %1").arg(swipe.host.cellName(pageView.cells[from])),
                                                from, to))
                          && swipe.host.selected >= 0)
-                    swipe.host.selected = DashboardBook.movedIndex(swipe.host.selected, from, to)
+                    swipe.host.selected = DashboardEdit.movedIndex(swipe.host.selected, from, to)
             }
             // Near the view's top or bottom edge the page scrolls, at
             // up to a quarter of the edge's width per tick
@@ -344,7 +344,7 @@ SwipeView {
                         host: swipe.host
                         required property int index
                         readonly property var box: pageView.boxes[pageView.reflowing
-                            ? DashboardBook.movedIndex(index, swipe.host.held, swipe.host.dropAt) : index]
+                            ? DashboardEdit.movedIndex(index, swipe.host.held, swipe.host.dropAt) : index]
                         readonly property bool carried: pageView.reflowing && swipe.host.held === index
                         objectName: "dashCell_" + pageView.index + "_" + index
                         cell: pageView.cells[index]

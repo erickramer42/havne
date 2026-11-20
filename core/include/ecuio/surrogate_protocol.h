@@ -16,7 +16,12 @@
                                            (whole SCONFIG pairs), and reply
                                            payload */
 #define ECUIO_SUR_FILTER_PATTERN_MAX 12    /* mask/pattern/flow-control bytes */
-#define ECUIO_SUR_MAX_FRAMES_PER_READ 16   /* frames in one OP_READ reply */
+#define ECUIO_SUR_MAX_FRAMES_PER_READ 1    /* frames in one OP_READ reply: a
+                                              read asks the vendor for one
+                                              message, since a call for more
+                                              waits out the vendor's hold
+                                              (docs/surrogate.md, "Data
+                                              plane") */
 #define ECUIO_SUR_TEXT_MAX 80              /* one vendor text: PassThruGetLastError's,
                                               or one PassThruReadVersion string */
 #define ECUIO_SUR_TEXT_FIELDS 3            /* texts in one reply */
@@ -123,8 +128,8 @@ typedef struct ecuio_sur_request {
 /* Every reply is one ecuio_sur_response_t followed by num_frames
  * ecuio_pt_rx_t (j2534_ptypes.h): the vendor's messages whole, CAN ID
  * in front, stamp untranslated. Only a READ's reply carries frames, so
- * a reply costs the frames it holds, not ECUIO_SUR_MAX_FRAMES_PER_READ
- * of them. Fields an opcode doesn't use are zero. */
+ * a reply costs the frames it holds. Fields an opcode doesn't use are
+ * zero. */
 typedef struct ecuio_sur_response {
     uint32_t request_id;         /* the request's, for pairing */
     int32_t  status;             /* vendor J2534 status, or STATUS_FAILED */

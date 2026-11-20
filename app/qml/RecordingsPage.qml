@@ -177,7 +177,7 @@ Page {
         // The maximized chart's strip of the cursor's values folded to a
         // tab, so the plot has the width
         property bool stripFolded: false
-        // Each recording's pane arrangement (ChartLayout.viewsParse): the
+        // Each recording's pane arrangement (ChartViews.viewsParse): the
         // panes its signals sit in and the panes' heights once a seam is
         // dragged, by the recording's folder name
         property string views: "{}"
@@ -211,7 +211,7 @@ Page {
     property var paneRanges: ({})
     // The pane arrangement kept with the open recording, by its folder's
     // name; another recording opens with the panes its units make
-    readonly property var viewsBook: ChartLayout.viewsParse(viewerSettings.views)
+    readonly property var viewsBook: ChartViews.viewsParse(viewerSettings.views)
     readonly property string viewName: recording.state === RecordingView.Open ? panesPart.viewNameOf(recording.folder) : ""
     readonly property var viewEntry: viewName !== "" ? viewsBook[viewName] : undefined
     // Pane id (paneIdOf; a name an earlier version kept) -> pane key, and

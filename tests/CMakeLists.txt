@@ -29,7 +29,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
+    test_key_window_setup.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -127,7 +128,9 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp test_request_pack.cpp
+    test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
+    test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
+    test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_sim_car.cpp test_sim_timing.cpp test_scan_retry.cpp)
 
 target_include_directories(test_obd2 PRIVATE
@@ -225,8 +228,9 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # section 2.4, SocketCanTalkTest).
 # test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
 # pace doesn't wait on another's (SocketCanTurnsTest).
-# RUN_SERIAL: the cases share the bus, and an error frame passes every
-# session's ID filter.
+# RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
+# every session's ID filter; every vcan0 user takes the lock, so they run
+# one at a time while the rest of the suite runs beside them.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
                    test_vcan_requests.cpp test_vcan_isotp.cpp
@@ -240,7 +244,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # core/src: isotp.h, pure and internal (test_socketcan's precedent)
     target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RESOURCE_LOCK vcan0)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
@@ -529,7 +533,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
                         candump $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliTransferRunTest.candump PROPERTIES
-                TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                TIMEOUT 90 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
@@ -581,7 +585,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
                         sim $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
-                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # A clear through core's gate against the fake DLL's ECU (Windows)
         # or the simulated ECU on vcan0 (Linux; skipped without it unless
@@ -599,7 +603,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
                         TheSimulatedEcuIsCleared $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliClearRunTest.TheSimulatedEcuIsCleared
-                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # Every path havne-cli takes, under a folder named outside any one
         # code page: on Windows its arguments come as UTF-16
@@ -1066,7 +1070,7 @@ if(TARGET havne-cli)
                         $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins
                         ${_cli_plugins}/repeat)
             set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
-                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
             # python/examples/isotp_fuzz.py against havne-cli's sim on
             # vcan0 (ADR-0053's appendix "the examples as built"): outside
             # pytest, so the sanitizer tree runs it on its ASan havne-cli
@@ -1074,7 +1078,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_isotp_fuzz.py
                         $<TARGET_FILE:havne-cli>)
             set_tests_properties(ExampleTest.isotp_fuzz_cli
-                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "python")
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0 LABELS "python")
         endif()
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
@@ -1122,7 +1126,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${_cli_make} vcan $<TARGET_FILE:havne-cli>
                         ${_cli_signals})
             set_tests_properties(CliPluginMakeTest.AWrappedFileDecodesAsTheFileOnVcan
-                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         app_cli_golden(PluginsCheckNamesEachVariantsLicense plugins-check-licenses.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_made}/plugins-put-renamed.json)
@@ -1388,7 +1392,8 @@ if(TARGET havne-cli)
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
-    app_cli_usage(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|")
+    app_cli_usage_says(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|"
+        "--signal takes a signal's name")
     # The names are checked against the session's set after the connect,
     # before any line: a typo and a repeat are usage with nothing written
     app_cli_usage(LogAnUnknownSignalIsUsage "log|mock://x|f|--signal|Nothing")
@@ -1895,7 +1900,7 @@ endif()
 # Windows the J2534 case finds the fake DLL and this tree's surrogate
 # (x64, or build-win32's x86) through the environment, as a wheel's
 # package sets the surrogates from its own folder. test_vcan shares vcan0
-# with test_vcan's suites: RUN_SERIAL. Only where the tests' Python has
+# with test_vcan's suites: RESOURCE_LOCK vcan0. Only where the tests' Python has
 # the tree's pointer size: a 64-bit Python can't load build-win32's x86
 # core, so that tree registers them only when configured with a 32-bit
 # Python (verify.sh's cross-arch step, HAVNE_PYTHON32).
@@ -1933,7 +1938,7 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
         if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")   # vcan0
-            set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
+            set_tests_properties(PythonTest.${_app_name} PROPERTIES RESOURCE_LOCK vcan0)
         endif()
     endforeach()
 
@@ -2143,8 +2148,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
 
     # Listing its cases loads Qt's DLLs first, which on a loaded machine
-    # took past the default 5 s and failed the build
-    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
+    # took past the default 5 s and failed the build. The "qt" label marks
+    # this block's tests, which linux-build runs
+    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "qt")
 
     # The GUI thread's cost per frame by profile size, a measurement for
     # docs/performance.md; built with the tests, never run by ctest
@@ -2296,6 +2302,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
             set_tests_properties(QmlTest.${_qml_name} PROPERTIES
                 ENVIRONMENT "${_qml_test_env}"
                 TIMEOUT 180
+                LABELS "qt"
             )
             if(DEFINED _qml_cost_${_qml_name})
                 set_tests_properties(QmlTest.${_qml_name} PROPERTIES
@@ -2346,6 +2353,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                     ENVIRONMENT "${_qml_test_env}"
                     TIMEOUT 180
                     COST ${_qml_cost_${_qml_name}}
+                    LABELS "qt"
                 )
                 unset(_qml_share_${_qml_share})
             endforeach()
@@ -2556,6 +2564,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
     )
