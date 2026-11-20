@@ -145,7 +145,7 @@ struct Reader {
 };
 
 /* The fixture's hour (recording_hour.h), made once for the binary */
-const Hour& fixture_hour()
+inline const Hour& fixture_hour()
 {
     static std::string why;
     static const Hour h = [] {
