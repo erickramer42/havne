@@ -188,6 +188,44 @@ TEST(J2534HoldTest, AKeyWaitsOnlyForTheExchangeInFlight)
         << "the others ask on after the key's reply";
 }
 
+/* Two keys waiting at once don't wait on each other: offered on channels
+ * 0 and 1 while channel 2's segmented exchange is out, both are written
+ * in the pass at that exchange's end, and both are answered */
+TEST(J2534HoldTest, TwoKeysOnTwoChannelsGoTogether)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(key_modules(b, 3, 1u << 2));
+    b.until(300 * kMs);
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 0, 500));
+    ASSERT_NO_FATAL_FAILURE(seed_answered(b, 1, 500));
+    for (int i = 0; i < 800 && !j2534_hold_on_bus(&b.e, 2); ++i) {
+        b.pass();
+    }
+    ASSERT_TRUE(j2534_hold_on_bus(&b.e, 2));
+    const size_t flight = out_on(b, 2);
+    ASSERT_LT(flight, b.exchanges.size());
+    ASSERT_TRUE(b.exchanges[flight].segmented);
+    ASSERT_EQ(offer_key(b, 0), ecuio_talk_offer::taken);
+    ASSERT_EQ(offer_key(b, 1), ecuio_talk_offer::taken);
+    const size_t from = b.exchanges.size();
+    ASSERT_TRUE(next_write(b));
+    ASSERT_EQ(b.exchanges.size(), from + 2) << "both in one pass";
+    for (size_t i = from; i < from + 2; ++i) {
+        EXPECT_EQ(b.exchanges[i].bytes, kKeyEcho) << i;
+        EXPECT_EQ(b.exchanges[i].sent_us, b.exchanges[from].sent_us) << i;
+    }
+    EXPECT_NE(b.exchanges[from].c, b.exchanges[from + 1].c);
+    EXPECT_GE(b.exchanges[from].sent_us, b.exchanges[flight].ended_us);
+    EXPECT_LE(b.exchanges[from].sent_us - b.exchanges[flight].ended_us,
+              kStepUs)
+        << "at that exchange's end";
+    for (const uint32_t c : {0u, 1u}) {
+        ecuio_talk_result r;
+        ASSERT_NO_FATAL_FAILURE(talk_ended(b, c, &r));
+        EXPECT_EQ(r.end, ecuio_talk_end::answered) << c;
+    }
+}
+
 /* While a key waits no other channel starts a request: one due in the
  * same pass, ahead of the key's channel in the pass's order, would put a
  * segmented reply on the bus for the key to wait out */
