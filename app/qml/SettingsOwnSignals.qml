@@ -17,7 +17,7 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
 
-    // ---- The vehicle's own signals (ADR-0051's form) ----
+    // The vehicle's own signals (ADR-0051's form)
     Label {
         objectName: "ownSignalsTitle"
         visible: root.host.pickedVehicle !== null

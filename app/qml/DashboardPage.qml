@@ -194,7 +194,7 @@ Page {
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
     onStoredTextChanged: problemDismissed = false
 
-    // ---- Edit mode (section 5). Each edit is stored as it's made, so
+    // Edit mode (section 5). Each edit is stored as it's made, so
     // Done leaves edit mode and ends the undo history, and nothing waits
     // to be saved
 
@@ -219,7 +219,7 @@ Page {
     // preset list's From a file) or replaces every page (Load layout)
     property bool fileAdds: false
 
-    // ---- The gesture (section 4): hold, then release or drag
+    // The gesture (section 4): hold, then release or drag
 
     property int held: -1            // the cell lifted on the page shown, -1 for none
     property int dropAt: -1          // the place a drag would drop it; -1 until it moves
@@ -430,7 +430,7 @@ Page {
     property alias driveLogTime: drive.driveLogTime
     property alias driveOrientation: drive.driveOrientation
     property alias driveTabBarHeight: drive.driveTabBarHeight
-    // ---- Copy and paste (section 5)
+    // Copy and paste (section 5)
 
     function copySelected() {
         const c = DashboardEdit.copyCell(doc, pageIndex, selected)
@@ -476,7 +476,7 @@ Page {
         id: edits
         host: root
     }
-    // ---- Pages
+    // Pages
 
     property int pageIndex: 0
     property bool restored: false
@@ -545,7 +545,7 @@ Page {
         onActivated: history.redo()
     }
 
-    // ---- The sweep and the peaks, on every page
+    // The sweep and the peaks, on every page
 
     signal sweepRequested()
     signal peaksResetRequested()
@@ -603,7 +603,7 @@ Page {
         function onUnitSystemChanged() { root.resetPeaks() }
     }
 
-    // ---- Units
+    // Units
 
     // Scale ends and zones are written in the unit the signal decodes
     // to and shown in the current unit system through core (ADR-0022).
@@ -630,7 +630,7 @@ Page {
         return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p
     }
 
-    // ---- Edit mode's panels
+    // Edit mode's panels
 
     DashPages {
         id: swipe
@@ -703,7 +703,7 @@ Page {
         width: root.width - 2 * Theme.barGap
     }
 
-    // ---- The drive view's controls (ADR-0059's appendix "the reveal from
+    // The drive view's controls (ADR-0059's appendix "the reveal from
     // the bottom"): a sheet that rises with the tab bar, over the panel's
     // foot, so the top row and the status line stay in view. Upright the
     // session's row over the view's, Exit drive nearest the tabs; on its
@@ -714,7 +714,7 @@ Page {
         host: root
     }
 
-    // ---- The header: on the desktop the title, the link state and the
+    // The header: on the desktop the title, the link state and the
     // tools, on the phone the tools alone (the tab bar names the page and
     // the top bar has the link state); why the stored layout isn't shown;
     // last, the desktop's page strip, on the panel's upper edge. The drive
@@ -773,7 +773,7 @@ Page {
         }
     }
 
-    // ---- The pages: one SwipeView, swiped on the phone form, moved by
+    // The pages: one SwipeView, swiped on the phone form, moved by
     // the strip's tabs and the keys on the desktop form
 
     PageIndicator {

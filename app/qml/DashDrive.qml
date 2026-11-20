@@ -13,7 +13,7 @@ Item {
     required property DashboardPage host
     visible: false
 
-    // ---- The drive view (ADR-0059): this page with every bar hidden
+    // The drive view (ADR-0059): this page with every bar hidden
 
     property bool driving: false
     property bool barsUp: false          // the reveal

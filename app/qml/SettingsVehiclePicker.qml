@@ -18,9 +18,9 @@ ColumnLayout {
     // Whether the row of the less common actions shows
     property bool moreShown: false
 
-    // ---- Vehicle (ADR-0027): picked before a connect, its
+    // Vehicle (ADR-0027): picked before a connect, its
     // connection filling the field; every change to the list is
-    // made here. Locked while a session is up or in flight ----
+    // made here. Locked while a session is up or in flight
     // A later Havne's vehicle list is never written over: nothing here
     // changes it
     enabled: !root.host.bookLater

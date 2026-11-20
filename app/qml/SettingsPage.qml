@@ -145,7 +145,7 @@ Pane {
         sessionSettings.adapterVersions = JSON.stringify(next)
     }
 
-    // ---- Vehicles (ADR-0027): VehicleBook's document, stored as JSON
+    // Vehicles (ADR-0027): VehicleBook's document, stored as JSON
     // under vehicles/book (format 2, ADR-0064). A stored text that doesn't
     // parse leaves no vehicles, and is overwritten only by the next
     // change. The earlier format's key, vehicles/document, is an older
@@ -194,8 +194,8 @@ Pane {
 
     readonly property SettingsOwn ownPart: own
 
-    // ---- The vehicle's own signals (ADR-0051's form, ADR-0064 Q7): the
-    // variant the form writes, in a plugin of the user's own ----
+    // The vehicle's own signals (ADR-0051's form, ADR-0064 Q7): the
+    // variant the form writes, in a plugin of the user's own
     // Where the own variant is, null for none or one the store lost
     readonly property var ownPlace: pickedVehicle === null || pickedVehicle.own === "" ? null
         : picker.placeOf(pickedVehicle.own)
@@ -211,11 +211,11 @@ Pane {
 
     readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
 
-    // ---- Navigation: the list of pages, and the page shown. A phone shows
+    // Navigation: the list of pages, and the page shown. A phone shows
     // one at a time (the list is the root, a page pushes over it); 900 and
     // wider shows the list at the left and a page beside it. The pages are
     // all made once and shown or hidden, so the state in them (a typed
-    // URI, a half-filled form) survives a visit elsewhere ----
+    // URI, a half-filled form) survives a visit elsewhere
     property string pageKey: ""    // "" is the list, on a phone
     readonly property bool twoPane: width >= 900
     readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
@@ -408,7 +408,7 @@ Pane {
     readonly property SettingsConnectFrom connectFromPart: connectFrom
 
 
-    // ---- The last URI that connected, the recent ones, the Record switch
+    // The last URI that connected, the recent ones, the Record switch
     // and each device's versions (seenVersions, as JSON), kept between runs
     // as Main.qml keeps the zoom and units. Only a URI that connected is
     // stored, so a typo or a refused query doesn't come back

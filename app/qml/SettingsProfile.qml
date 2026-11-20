@@ -16,7 +16,7 @@ ColumnLayout {
 
     property alias didField: didField
 
-    // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
+    // Profile: the URI's query (ADR-0013, ADR-0020)
     // The chosen button is drawn as the primary color
     // On the tab-bar form the three common profiles are one segmented row
     // (a closed set, a tap takes effect), the others buttons under it

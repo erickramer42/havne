@@ -8,9 +8,9 @@ pragma ComponentBehavior: Bound
 Item {
     required property SettingsPage host
 
-    // ---- One Import (ADR-0064 Q4): a package goes in as it is, a signal
+    // One Import (ADR-0064 Q4): a package goes in as it is, a signal
     // file waits for As a new plugin or Into one of the user's own, an
-    // OBDb set shows its report first ----
+    // OBDb set shows its report first
     // The file read and not yet kept: null, { kind: "signals", name, id,
     // variant } or { kind: "obdb" }
     property var pendingImport: null
@@ -163,8 +163,8 @@ Item {
         return p !== undefined && p.variants.indexOf(id) >= 0 ? qsTr("replaces %1").arg(id) : ""
     }
 
-    // ---- An OBDb set imported (ADR-0051's appendix "the OBDb import in
-    // the app", ADR-0064 Q3) ----
+    // An OBDb set imported (ADR-0051's appendix "the OBDb import in
+    // the app", ADR-0064 Q3)
     // The report of the set read and not yet kept (the bridge's map, null
     // for none) and the vehicle it was read for ("" for none)
     property var obdbReport: null

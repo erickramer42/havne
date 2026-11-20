@@ -16,7 +16,7 @@ ColumnLayout {
 
     property alias vinLookupField: vinLookupField
 
-    // ---- A VIN looked up (ADR-0043): decoded here, never kept ----
+    // A VIN looked up (ADR-0043): decoded here, never kept
     LabeledFlow {
         label: qsTr("Look up a VIN:")
 

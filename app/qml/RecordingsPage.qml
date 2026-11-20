@@ -701,7 +701,7 @@ Page {
             text: root.importNote
         }
 
-        // ---- The list ----
+        // The list
         Label {
             objectName: "recordingsHint"
             visible: !root.viewing
@@ -722,8 +722,8 @@ Page {
             host: root
         }
 
-        // ---- The viewer: the chart and its signals first, then what
-        // applies to the whole recording under "About this recording" ----
+        // The viewer: the chart and its signals first, then what
+        // applies to the whole recording under "About this recording"
         RecordingViewerTitle { id: recordingViewerTitle; host: root }
 
         ColumnLayout {

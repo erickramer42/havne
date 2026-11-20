@@ -8,8 +8,8 @@ pragma ComponentBehavior: Bound
 Item {
     required property SettingsPage host
 
-    // ---- The plugin store (ADR-0064): every import is a plugin, and a
-    // vehicle picks variants of them ----
+    // The plugin store (ADR-0064): every import is a plugin, and a
+    // vehicle picks variants of them
     // Raised after each change of the store and when the session's VIN
     // comes or goes, so what the bridge answered is asked again
     property int storeRev: 0

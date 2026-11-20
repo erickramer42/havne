@@ -94,7 +94,7 @@ QtObject {
         return accents.indexOf(name) >= 0
     }
 
-    // ---- Reading and writing the stored text
+    // Reading and writing the stored text
 
     // { doc, problem, dropped }: problem "" (read), "dropped" (read,
     // with pages or cells left out: dropped holds their counts, { pages,
@@ -145,7 +145,7 @@ QtObject {
         return { doc: d, problem: "" }
     }
 
-    // ---- The layout file (ADR-0057's appendix on the layout file)
+    // The layout file (ADR-0057's appendix on the layout file)
     //
     // A layout file is the form's stored document with two more
     // document-level keys, which a stored text never holds: "form" (the
@@ -330,7 +330,7 @@ QtObject {
         return { text: serialize(doc), unread: keep ? String(stored) : "" }
     }
 
-    // ---- The fields' rules
+    // The fields' rules
 
     // "" when a page's own fields may be kept, else why not
     function pageProblem(p) {
@@ -422,7 +422,7 @@ QtObject {
         return cell.options === undefined ? {} : cell.options
     }
 
-    // ---- The built-in layout
+    // The built-in layout
 
     function builtIn(form) {
         return { format: format, pages: [{ name: qsTr("Engine"),
@@ -542,7 +542,7 @@ QtObject {
         return builtIn(form)
     }
 
-    // ---- Presets: layout files (format 2) of one page each, compiled into
+    // Presets: layout files (format 2) of one page each, compiled into
     // the app as app/layouts/<form>/<key>.json and held valid by `havne-cli
     // layout check` in CI. Standard is the built-in page's cells
 
@@ -616,7 +616,7 @@ QtObject {
         })
     }
 
-    // ---- Placement (section 4)
+    // Placement (section 4)
 
     // [{ x, y, w, h }] in the cells' order: each at the first free block
     // of its span, rows top to bottom, columns left to right; a span
@@ -785,7 +785,7 @@ QtObject {
         })
     }
 
-    // ---- Helpers
+    // Helpers
 
     // change(copy) edits a copy and says whether it applies. The result is
     // the copy as stored text reads it back (a key holding undefined left

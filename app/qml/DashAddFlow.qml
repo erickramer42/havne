@@ -13,7 +13,7 @@ Item {
     required property DashboardPage host
     visible: false
 
-    // ---- Add: a kind, then a signal
+    // Add: a kind, then a signal
 
     property var profileRows: []
     // The address the rows were listed for with no session

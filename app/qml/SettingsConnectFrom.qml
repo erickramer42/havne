@@ -60,9 +60,9 @@ Item {
     readonly property var connectAdapters: host.devices.map(d => ({
             uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
-    // ---- A connect from a list (Home's, Dash's): an address that names
+    // A connect from a list (Home's, Dash's): an address that names
     // no profile reads the picked vehicle's plugin where obd2 is asked
-    // (ADR-0064 Q5) ----
+    // (ADR-0064 Q5)
     // The first pick that loads and reads all of obd2, null for none
     readonly property var listStandIn:
         (host.picksPart.storeRev >= 0 ? Bridge.pickRow(host.picksPart.picks, true) : []).find(r => r.standIn) || null

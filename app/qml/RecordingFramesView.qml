@@ -10,7 +10,7 @@ import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
 
-// ---- The frames of the part in view, read from frames.csv ----
+// The frames of the part in view, read from frames.csv
 ColumnLayout {
     id: root
     objectName: "viewerFrames"

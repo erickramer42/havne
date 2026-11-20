@@ -8,7 +8,7 @@ pragma ComponentBehavior: Bound
 Item {
     required property SettingsPage host
 
-    // ---- A row's actions ----
+    // A row's actions
     // The row whose actions show (its profile, "" for none), and within
     // it Copy's choice of where and Export's share-alike note
     property string openRow: ""
@@ -149,7 +149,7 @@ Item {
         return r.ok
     }
 
-    // ---- Saves out of the app, through the one save dialog: a variant
+    // Saves out of the app, through the one save dialog: a variant
     // as a signal file, a plugin's packed copy, a file that didn't move.
     // { kind: "variant" | "plugin" | "unmigrated", sha256, variant, name,
     // file }, null for none
@@ -234,9 +234,9 @@ Item {
         return r.ok
     }
 
-    // ---- The signal files the move into the plugin store left behind
+    // The signal files the move into the plugin store left behind
     // (ADR-0064 Q6): the picked vehicle's, then the book's own, each
-    // { sha256, name, words, kept, loose } ----
+    // { sha256, name, words, kept, loose }
     readonly property var unmigratedRows:
         (host.pickedVehicle !== null && host.pickedVehicle.unmigrated !== undefined
          ? host.pickedVehicle.unmigrated.map(r => ({ sha256: r.sha256, name: r.name, words: r.words,
@@ -279,7 +279,7 @@ Item {
             Bridge.removeUnmigratedFile(record.sha256)
     }
 
-    // ---- The VIN's matches ----
+    // The VIN's matches
     // The session's matches kept on the vehicle its VIN identified, so
     // they are marked with no session (ADR-0052's appendix of 2026-11-13);
     // only that vehicle's: a replay of another car names none

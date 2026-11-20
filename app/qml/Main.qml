@@ -303,7 +303,7 @@ ApplicationWindow {
         }
     }
 
-    // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
+    // Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
     // (Theme.developerMode), kept between runs
     Settings {
         id: uiSettings
@@ -352,7 +352,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.ZoomOut]; onActivated: Theme.stepZoom(-1) }
     Shortcut { sequence: "Ctrl+0"; onActivated: Theme.zoom = 1 }
 
-    // ---- A phone in developer mode logs its display's form and
+    // A phone in developer mode logs its display's form and
     // orientation when either changes; sizes, scale and insets stay out
     // (a shared log or report would narrow the device)
     function orientationName(o) {
@@ -447,7 +447,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 0
 
-                // ---- Sidebar (>= 720px): one full-height panel ----
+                // Sidebar (>= 720px): one full-height panel
                 Rectangle {
                     visible: !root.isCompact && !root.driving
                     Layout.fillHeight: true
@@ -643,7 +643,7 @@ ApplicationWindow {
         Timer { id: zoomBadgeTimer; interval: 1200; onTriggered: zoomBadge.opacity = 0 }
     }
 
-    // ---- Developer mode: the window's drawn frames per second, read in
+    // Developer mode: the window's drawn frames per second, read in
     // the header (frameRate). Qt draws only when something changed, so an
     // idle page reads 0 (the readout's own change is a frame at most each
     // second) and a chart being panned or pinched reads its rate: the

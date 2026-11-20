@@ -114,7 +114,7 @@ ColumnLayout {
             mapSaved()
     }
 
-    // ---- The time column and its unit ----
+    // The time column and its unit
     Label {
         objectName: "guessTime"
         Layout.fillWidth: true
@@ -180,7 +180,7 @@ ColumnLayout {
         text: preview.waiting
     }
 
-    // ---- The columns ----
+    // The columns
     Repeater {
         id: rows
         objectName: "guessRows"
@@ -293,7 +293,7 @@ ColumnLayout {
         }
     }
 
-    // ---- What the guess noted ----
+    // What the guess noted
     ThemedButton {
         objectName: "guessNotesToggle"
         visible: preview.guess !== null && preview.guess.notes.length > 0
@@ -312,7 +312,7 @@ ColumnLayout {
         text: preview.guess === null ? "" : preview.guess.notes.join("\n")
     }
 
-    // ---- Keep the map ----
+    // Keep the map
     RowLayout {
         visible: preview.guess !== null
         Layout.fillWidth: true
