@@ -418,6 +418,204 @@ uint32_t held_channels(const transport* t, int64_t now, int64_t* left)
     return held;
 }
 
+/* What the worker keeps across its passes, made in this order */
+struct worker_state {
+    link_health h;
+    ecuio_unpicked_check unpicked_check;
+    uint32_t published[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    ecuio_engine_turns turns;    /* which channel asks next */
+    const bool passive;
+    /* A requesting worker's waits to the engine's next event end on
+     * time (precise_wait.h) */
+    ecuio_precise_wait precise;
+    uint32_t relisten_ms = 0;
+    int64_t timing_at = 0;
+
+    explicit worker_state(transport* t)
+        : h(t->session->last_error, t->session->error_count,
+            t->session->record_link.get(), t->session, t->epoch),
+          passive(asks_nothing(t)), precise(!passive)
+    {}
+};
+
+/* The pass's start: the waits that ran out end; the time, read once */
+int64_t expire_waits(transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = t->engine;
+    link_judge_waiting(w.h);
+    const int64_t now = now_us(t);
+    ecuio_key_windows_judge(&e, w.h);
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        if (ecuio_engine_expire(&e, c, now)) {
+            ecuio_request_timed_out(e, w.h);
+        }
+    }
+    return now;
+}
+
+/* The port and the setup again; false when the session closed meanwhile */
+bool setup_pass(transport* t, worker_state& w)
+{
+    const bool ready = reconnect(t);
+    if (t->stop_requested.load()) {
+        return false;
+    }
+    if (!ready) {
+        /* The adapter answered wrongly or not at all: start over
+         * from the port */
+        close_port(t);
+    }
+    /* The adapter answering its setup ends the backoff */
+    link_on_read(w.h, !ready, false, false);
+    return true;
+}
+
+/* One monitor, and AT MA again at once or on the relisten backoff;
+ * stopped when the session closed in that wait */
+elm327_io listen_pass(transport* t, worker_state& w)
+{
+    const monitor_end m = listen(t, w.h);
+    const elm327_io io = m.io;
+    if (m.heard) {
+        w.relisten_ms = 0;
+    }
+    if (io == elm327_io::prompt && !m.at_once) {
+        link_on_read(w.h, false, false, true);
+        w.relisten_ms = (w.relisten_ms == 0) ? LINK_BACKOFF_BASE_MS
+                                             : link_backoff_next(w.relisten_ms);
+        if (backoff_sleep(t, w.relisten_ms)) {
+            return elm327_io::stopped;
+        }
+    }
+    return io;
+}
+
+/* Request r of channel c asked, and its reply judged for the link */
+elm327_io ask_pass(transport* t, worker_state& w, uint32_t c, int32_t r)
+{
+    reply_seen seen;
+    elm327_io io = ask(t, c, r, seen);
+    if (io == elm327_io::prompt) {
+        if (seen.reset) {
+            io = elm327_io::reset;
+        } else if (seen.no_bus || seen.refused) {
+            /* never reached the bus: not sent */
+            ecuio_engine_sent(&t->engine, c, r, false, now_us(t));
+            link_on_write(w.h, false);
+        } else {
+            link_on_write(w.h, true);
+            link_on_read(w.h, false, seen.matched, false);
+        }
+    }
+    return io;
+}
+
+/* Nothing due: the wait to the next event, or with nothing left to ask
+ * the idle read, then what came unasked */
+elm327_io idle_pass(transport* t, worker_state& w, int64_t now,
+                    int64_t floor_us, int64_t held_left)
+{
+    ecuio_request_engine& e = t->engine;
+    /* the turn's channel waits out its own floor */
+    int64_t next_us =
+        (floor_us > 0) ? floor_us : ecuio_engine_next_event_us(&e, now);
+    if (next_us == 0 && held_left != INT64_MAX) {
+        /* what's due is a held channel's: until its hold ends */
+        next_us = held_left;
+    }
+    const bool asking = next_us != INT64_MAX;
+    uint32_t wait = ELM327_IDLE_READ_MS;
+    if (asking) {
+        const int64_t ms = (next_us + 999) / 1000;
+        wait = (ms < 1)                      ? 1u
+               : (ms > ELM327_WAIT_SLICE_MS) ? ELM327_WAIT_SLICE_MS
+                                             : static_cast<uint32_t>(ms);
+    }
+    elm327_io io = elm327_io::prompt;
+    if (asking) {
+        /* No command is out (ask reads to the prompt), so the adapter is
+         * idle until the engine's next event: wait for it on time, then
+         * take what came unasked */
+        w.precise.sleep_for(std::chrono::milliseconds(wait));
+        io = t->stop_requested.load() ? elm327_io::stopped : drain(t, 0);
+    } else {
+        io = drain(t, wait);
+    }
+    if (io == elm327_io::prompt && !asking) {
+        if (ecuio_engine_unpicked(&e)) {
+            ecuio_unpicked_pass(&e, w.h, w.unpicked_check, now_us(t));
+        } else {
+            link_on_read(w.h, false, false, true);
+        }
+    }
+    return io;
+}
+
+/* A pass on a set-up adapter: the turn taken, then the monitor, the
+ * request or the wait */
+elm327_io adapter_pass(transport* t, worker_state& w, int64_t now)
+{
+    int64_t held_left = INT64_MAX;
+    const uint32_t held = held_channels(t, now, &held_left);
+    uint32_t c = 0;
+    int64_t floor_us = 0;
+    const int32_t r =
+        ecuio_engine_take_turn(&t->engine, w.turns, held, now, &c, &floor_us);
+    if (w.passive) {
+        return listen_pass(t, w);
+    }
+    if (r != ECUIO_ENGINE_NONE) {
+        return ask_pass(t, w, c, r);
+    }
+    return idle_pass(t, w, now, floor_us, held_left);
+}
+
+/* The pass's end: a failed port or silence closes it, a reset runs the
+ * setup again */
+void judge_io(transport* t, worker_state& w, elm327_io io)
+{
+    if (io == elm327_io::failed || io == elm327_io::silent) {
+        close_port(t);
+        link_on_read(w.h, true, false, false);
+    } else if (io == elm327_io::reset) {
+        /* setup again next pass; hard only if that fails */
+        elm327_log_write(t->log, "the adapter reset: the setup runs again");
+        t->configured = false;
+    }
+}
+
+/* What the session asked for since the last pass, and what it's told */
+void serve_session(transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = t->engine;
+    if (w.h.recovered) {
+        w.h.recovered = false;
+        if (t->probe) {
+            ecuio_engine_probe(&e);
+        }
+        /* the scan's and identification's unanswered requests */
+        ecuio_engine_rescan(&e);
+    }
+    ecuio_take_diag_request(t->session, &e, w.diag_seen);
+    ecuio_take_clear_requests(t->session, &e, w.clear_seen);
+    ecuio_take_test_talk(t->session, &e, now_us(t));
+    ecuio_take_focus(t->session, &e, w.focus_seen);
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        ecuio_publish_support(t->session, e, c, t->rx_ids[c], w.published[c]);
+        ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
+                               w.published_identity[c]);
+        ecuio_publish_diagnostics(t->session, e, c, t->rx_ids[c],
+                                  w.published_diagnostics[c]);
+    }
+    ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), w.timing_at,
+                         false);
+}
+
 } // namespace
 
 /* The worker (ADR-0026 section 3): the request engine driven as the J2534
@@ -444,169 +642,37 @@ uint32_t held_channels(const transport* t, int64_t now, int64_t* left)
 void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
-    link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get(), t->session, t->epoch);
-    ecuio_unpicked_check unpicked_check;
-    uint32_t published[ECUIO_MAX_CHANNELS] = {};
-    uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
-    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
-    uint32_t diag_seen = 0;
-    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
-    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
-    ecuio_engine_turns turns;    /* which channel asks next */
-    const bool passive = asks_nothing(t);
-    /* A requesting worker's waits to the engine's next event end on
-     * time (precise_wait.h) */
-    ecuio_precise_wait precise(!passive);
-    uint32_t relisten_ms = 0;
-    int64_t timing_at = 0;
+    worker_state w(t);
     if (t->probe) {
         ecuio_engine_probe(&e);
     }
     /* A focus set before start applies from the first request */
-    ecuio_take_focus(t->session, &e, focus_seen);
+    ecuio_take_focus(t->session, &e, w.focus_seen);
 
     while (!t->stop_requested.load()) {
-        link_judge_waiting(h);
-        const int64_t now = now_us(t);
-        ecuio_key_windows_judge(&e, h);
-        for (uint32_t c = 0; c < e.chan_count; ++c) {
-            if (ecuio_engine_expire(&e, c, now)) {
-                ecuio_request_timed_out(e, h);
-            }
-        }
-
+        const int64_t now = expire_waits(t, w);
         if (!t->configured) {
-            const bool ready = reconnect(t);
-            if (t->stop_requested.load()) {
+            if (!setup_pass(t, w)) {
                 break;
             }
-            if (!ready) {
-                /* The adapter answered wrongly or not at all: start over
-                 * from the port */
-                close_port(t);
-            }
-            /* The adapter answering its setup ends the backoff */
-            link_on_read(h, !ready, false, false);
         } else {
-            int64_t held_left = INT64_MAX;
-            const uint32_t held = held_channels(t, now, &held_left);
-            uint32_t c = 0;
-            int64_t floor_us = 0;
-            const int32_t r =
-                ecuio_engine_take_turn(&e, turns, held, now, &c, &floor_us);
-            elm327_io io = elm327_io::prompt;
-            if (passive) {
-                const monitor_end m = listen(t, h);
-                io = m.io;
-                if (m.heard) {
-                    relisten_ms = 0;
-                }
-                if (io == elm327_io::prompt && !m.at_once) {
-                    link_on_read(h, false, false, true);
-                    relisten_ms = (relisten_ms == 0)
-                                      ? LINK_BACKOFF_BASE_MS
-                                      : link_backoff_next(relisten_ms);
-                    if (backoff_sleep(t, relisten_ms)) {
-                        break;
-                    }
-                }
-            } else if (r != ECUIO_ENGINE_NONE) {
-                reply_seen seen;
-                io = ask(t, c, r, seen);
-                if (io == elm327_io::prompt) {
-                    if (seen.reset) {
-                        io = elm327_io::reset;
-                    } else if (seen.no_bus || seen.refused) {
-                        /* never reached the bus: not sent */
-                        ecuio_engine_sent(&e, c, r, false, now_us(t));
-                        link_on_write(h, false);
-                    } else {
-                        link_on_write(h, true);
-                        link_on_read(h, false, seen.matched, false);
-                    }
-                }
-            } else {
-                /* the turn's channel waits out its own floor */
-                int64_t next_us = (floor_us > 0)
-                                      ? floor_us
-                                      : ecuio_engine_next_event_us(&e, now);
-                if (next_us == 0 && held_left != INT64_MAX) {
-                    /* what's due is a held channel's: until its hold ends */
-                    next_us = held_left;
-                }
-                const bool asking = next_us != INT64_MAX;
-                uint32_t wait = ELM327_IDLE_READ_MS;
-                if (asking) {
-                    const int64_t ms = (next_us + 999) / 1000;
-                    wait = (ms < 1) ? 1u
-                           : (ms > ELM327_WAIT_SLICE_MS)
-                               ? ELM327_WAIT_SLICE_MS
-                               : static_cast<uint32_t>(ms);
-                }
-                if (asking) {
-                    /* No command is out (ask reads to the prompt), so
-                     * the adapter is idle until the engine's next event:
-                     * wait for it on time, then take what came unasked */
-                    precise.sleep_for(std::chrono::milliseconds(wait));
-                    io = t->stop_requested.load() ? elm327_io::stopped
-                                                  : drain(t, 0);
-                } else {
-                    io = drain(t, wait);
-                }
-                if (io == elm327_io::prompt && !asking) {
-                    if (ecuio_engine_unpicked(&e)) {
-                        ecuio_unpicked_pass(&e, h, unpicked_check, now_us(t));
-                    } else {
-                        link_on_read(h, false, false, true);
-                    }
-                }
-            }
+            const elm327_io io = adapter_pass(t, w, now);
             if (io == elm327_io::stopped) {
                 break;
             }
-            if (io == elm327_io::failed || io == elm327_io::silent) {
-                close_port(t);
-                link_on_read(h, true, false, false);
-            } else if (io == elm327_io::reset) {
-                /* setup again next pass; hard only if that fails */
-                elm327_log_write(t->log, "the adapter reset: the setup runs "
-                                         "again");
-                t->configured = false;
-            }
+            judge_io(t, w, io);
         }
-
-        if (h.recovered) {
-            h.recovered = false;
-            if (t->probe) {
-                ecuio_engine_probe(&e);
-            }
-            /* the scan's and identification's unanswered requests */
-            ecuio_engine_rescan(&e);
-        }
-        ecuio_take_diag_request(t->session, &e, diag_seen);
-        ecuio_take_clear_requests(t->session, &e, clear_seen);
-        ecuio_take_test_talk(t->session, &e, now_us(t));
-        ecuio_take_focus(t->session, &e, focus_seen);
-        for (uint32_t c = 0; c < t->chan_count; ++c) {
-            ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
-            ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
-                                   published_identity[c]);
-            ecuio_publish_diagnostics(t->session, e, c, t->rx_ids[c],
-                                      published_diagnostics[c]);
-        }
-        ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at,
-                             false);
-
-        if (h.backoff_ms > 0) {
-            if (backoff_sleep(t, h.backoff_ms)) {
+        serve_session(t, w);
+        if (w.h.backoff_ms > 0) {
+            if (backoff_sleep(t, w.h.backoff_ms)) {
                 break;
             }
-            h.backoff_ms = link_backoff_next(h.backoff_ms);
+            w.h.backoff_ms = link_backoff_next(w.h.backoff_ms);
         }
     }
     leave_sessions(t);
-    ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), timing_at, true);
+    ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), w.timing_at,
+                         true);
 }
 
 } // namespace ecuio_elm327
