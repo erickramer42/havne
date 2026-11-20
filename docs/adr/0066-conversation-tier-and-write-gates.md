@@ -1319,6 +1319,16 @@ taken only when the user runs them. This record does not build them.
   the same way, so a plan that reads the field as a raw data size does not
   overrun by two bytes. From ISO 14229 and a real-vehicle capture (reply
   1026, 1024 bytes of data).
+- **2026-11-19, the cut: v0.9.0 and v0.9.1.** v0.9.0 ships tier 2 through
+  commit 10a (and 10b, if it is handed over before the release's review
+  pass) as built and inert: the format accepts a conversation part, core
+  reads and checks its module, and no module binds before commit 11, so a
+  conversation-tier plugin is data only in v0.9.0 (a test pins it). Commit
+  11 on (10c, 11, 12), part C's front ends and the consent gate, gates 1 to
+  3, the flash mechanics, the multi-step plan, the second simulated
+  bootloader and the car's unlock and flash tests are v0.9.1's. Where this
+  record says v0.9.0 carries them or checks that the consent gate is in,
+  read v0.9.1.
 
 ### Step 1 as built: the runtime and the sandbox (2026-11-17)
 
@@ -1705,6 +1715,53 @@ don't say:
       nothing of it; no module binds before the consent gate of the
       conversation tier's front end, and the v0.9.0 release checks that
       gate is in.
+29. **The key's window as built** (`core/src/request_talk.h`). Between a
+    security-access seed and its key the engine sends nothing else to that
+    ECU, and nothing to a functional address while any ECU's window is
+    open. A talk is offered as one of three kinds, judged at the engine's
+    door: plain, a seed (with the time its key may take, 50 ms to 4 s) or a
+    key. The window opens when the seed's first frame is on the bus, to S3
+    less a second (4 s) from that write; the seed's positive reply brings
+    its end forward to the reply plus the seed's own time; a seed refused,
+    unanswered or unsent opens none. It ends when the key is sent (or its
+    write fails), when the session is entered again or lost, when the link
+    is not OK, when its time passes, and when the caller ends it (a seed of
+    all zeroes). A key offered outside a window is refused; one offered in
+    time whose window ends before its turn settles unsent. The key goes
+    ahead of everything.
+    - **A key is its seed's:** `27` with the seed's sub-function plus one,
+      while that seed's window is open.
+    - **Stricter than the plan approved on 2026-11-18:** a plain talk is
+      never a `27`; the door takes a `27` only as a seed or a key, so a
+      lapsed seed gets no key whatever its caller calls a request.
+    - **Also at the door:** a reply must echo at least its service's own
+      bytes (`22` three, `2A` one, the rest two), so a read can't be
+      answered by another DID's reply; a functional channel takes no seed,
+      no key and no request longer than a frame.
+    - **No seed while a functional channel was asked into a session.**
+      Another channel's window would hold the functional channel's
+      keep-alive, a long one past S3, and the `10 03` that follows returns
+      every module that hears it to a new session, the unlocked one too.
+      The one way to such a session is `uds-generic` with `did=7E7:...` (a
+      reply ID of 7E7 gives the request ID 0x7DF) and `?session=03`.
+    - **A key under the hold and on an ELM327:** on J2534 with two or more
+      modules a key waits one exchange at most, for a segmented reply
+      already on the bus (Known Issue #42's hold), and on an ELM327 for the
+      exchange under way; a key window shorter than that exchange (about
+      100 ms on a slow module) can still lapse, and a lapsed key is settled
+      unsent at its window's end and never written, counting nothing.
+    - **SocketCAN's long request and link health:** no Flow Control within
+      N_Bs counts as a request unanswered, an overflow or a Flow Control
+      that can't be followed as nothing, and only a refused write or an
+      unechoed frame as a failed write
+      ([ADR-0040](0040-socketcan-requests-isotp.md)'s appendix of
+      2026-11-19).
+    - **The simulated ECU's strict mode:** off by default; with it a key
+      that doesn't directly follow its seed answers `7F 27 24` (ISO 14229-1
+      allows a server that), and a functional request spends a strict node's
+      seed too. Test-only (`ecuio_sim_test_set_strict`).
+    - **Moved to commit 11:** a session whose only work is a conversation
+      (attach counts a bound module as asking).
 
 ### Appendix: the write plan's shape beyond one download (2026-11-18)
 

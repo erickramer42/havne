@@ -21,7 +21,7 @@ This file is the present state: what works, how far it's verified, what's planne
 
 **Verified:** 2711 tests on Windows and the cross-arch subset (111) at v0.8.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
 
-**Next, v0.9.0:** a profile sized for a whole car (up to 32 modules a session) and a vehicle's plugins read together; sessions a plugin declares; the viewer's panes chosen by hand, the Dashboard's presets and computed signals you write; then the conversation tier: security access, the safety gates, and the write mechanics behind them ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)). [Roadmap](#roadmap).
+**Next, v0.9.0:** a profile sized for a whole car (up to 32 modules a session), the viewer's panes chosen by hand, the Dashboard's presets and a plugin's pages, computed signals you write, a hold that stops the VX losing a second module's replies, and a simulated car of many modules. Then v0.9.1: a vehicle's plugins read together in one session, and the conversation tier (security access, the safety gates and the write mechanics behind them, [ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)). [Roadmap](#roadmap).
 
 ---
 
@@ -119,6 +119,12 @@ an issue is resolved it is removed, and its number is not reused.
     delivered 55% of the second module's replies (596 of 1,082 on the
     bus), against 76% on 2026-11-11
     ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
+    **A hold is built, to confirm on the car:** with two or more modules
+    through the VX, no other module is asked while one module's reply
+    comes in segments (`?hold=0` switches it off,
+    [ADR-0065](docs/adr/0065-car-sized-profile.md)'s appendix). The fake
+    DLL and the pacing model show it losing no reply; no car run has yet.
+    The issue closes after the car run.
 - **#43. On a phone with gesture navigation, leaving the drive view
     takes three back swipes.** The view hides Android's bars, and
     Android spends the first swipe from the edge showing them; the
@@ -127,14 +133,6 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#45. A scan DID whose reply was lost is never asked again.**
-    Through the OBDX Pro VX, 0x7E8's single-frame reply to one DID of a
-    scan block was on the bus while 0x7E9's segmented reply was coming in,
-    and the VX did not deliver it. The DID went out once, and the scan sat
-    at 511 of 512 for the 84 s that remained
-    ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
-    The same block through the MX+ found all 43. In the poll after a scan a
-    lost reply's request goes out again on its next turn.
 - **#46. The VIN can switch the picked vehicle without changing the
     session's profile.** Connected with a two-channel vehicle picked, the
     VIN switched the pick to the four-channel vehicle the VIN was
@@ -169,7 +167,9 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
 | v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
-| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: what v0.8.0 left out, a profile sized for every module, a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), sessions a plugin declares, and the simulated ECU answering as many modules; then the conversation tier, a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: a sandbox for that access, and gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built. v0.9.1, writes over more transports behind the same gates: a WiFi or Bluetooth network adapter, J2534 on Linux through a library named by path, and DoIP. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
+| v0.9.0 | The whole car's groundwork: a profile sized for every module (up to 32), keys for signals, computed signals, the viewer's and the Dashboard's work (a plugin's pages among it), a hold that stops the VX losing a second module's replies, the simulated ECU answering as a car of many modules, and the conversation tier's sandbox as built and inert | In progress |
+| v0.9.1 | The whole car's read and the conversation tier: a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), the modules opened by what is picked, sessions a plugin declares; a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built | Planned |
+| v0.9.2-v0.11.0 | v0.9.2, writes over more transports behind the same gates: a WiFi or Bluetooth network adapter, J2534 on Linux through a library named by path, and DoIP. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -201,9 +201,21 @@ A feature release: the C ABI grows, append-only except the recording format and 
   - a profile sized for a whole car: up to 32 modules a session, a plugin variant's files read together, and a session that asks only the signals picked when a set derives more than 1024 requests ([ADR-0065](docs/adr/0065-car-sized-profile.md));
   - a signal's key, so two signals of one name stay two: recording format 4, `--signal` and the viewer, a vehicle's ticks and Compare's pairs by key, and a validator that takes a repeated name;
   - computed signals written in the signal form, and `havne-cli signals expr`;
-  - the conversation tier's first part ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)): the sandbox that runs a plugin's module, tier 2's service ceiling, a request longer than a frame on SocketCAN and J2534, the simulated ECU's security access, and the manifest's format 2 read at load. Core reads such a plugin's manifest and module; nothing runs the module yet, and the app's store takes the plugin and shows nothing of the tier.
-- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it.
-- **Left:** the conversation tier's session, its consent gate and its front ends; the simulated car with several modules; and a car run of the request engine's turns.
+  - the conversation tier's first part ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)): the sandbox that runs a plugin's module, tier 2's service ceiling, a request longer than a frame on SocketCAN and J2534, the key's window between a security-access seed and its key, the simulated ECU's security access (strict, for the tests), and the manifest's format 2 read at load. Core reads such a plugin's manifest and module; no module binds, so such a plugin is data only, and the app's store takes it and shows nothing of the tier;
+  - a plugin may carry Dashboard pages (ADR-0052's appendix on pages): core, `plugins check`, the bridge's store entries and the Dashboard's Add page list, which copies a page into the user's book. Replace this page offers presets only;
+  - the hold for Known Issue #42 (`?hold=0` switches it off), a scan that asks a lost DID once more, and the surrogate's one-frame read;
+  - the simulated car: faults, a pace, a busy module and a shared bus for each module, and `example-car`, a made-up car of 18 modules.
+- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it. The pacing model matches the car's runs of 2026-11-18 within 10% (the MX+ within 5%).
+- **Left:** the review pass, its fixes, the docs pass and the release; the owner's screen-reader pass of the variant button; a car run with the hold on.
+
+### v0.9.1: the whole car's read and the conversation tier
+
+The conversation tier is v0.9.1's; v0.9.0 ships what is built.
+- **Planned:**
+  - the whole car's read: a vehicle's plugins merged into one set, modules opened by what is picked, the bridge and the store for it, a faster default, sessions a plugin declares, and the simulated car's last step;
+  - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, no module bound before the consent gate; the gate, the store showing the tier, the app's unlock dialog and Python's `unlock()`;
+  - the safety gates, then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
+- **The release gate:** the consent gate is in; until then a conversation-tier plugin is data only, pinned by a test.
 
 ### Waiting on a tester: an iPhone download
 
@@ -226,7 +238,7 @@ filed and the 0.11.x releases have gone a stated stretch with no
 high-severity issue: full featured on Windows, Linux and Android, as
 much macOS and iOS as is manageable, with a signed Windows executable
 and an installer that checks for updates. The write mechanics (security access, a dump, the
-flash) come in v0.9.0 behind their gates (ADR-0066); the public write
+flash) come in v0.9.1 behind their gates (ADR-0066); the public write
 product (map definitions, editors, tune management) is 2.0.
 
 ## Backlog

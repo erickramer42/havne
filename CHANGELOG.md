@@ -33,6 +33,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **The simulated ECU's faults can be aimed at one module** (`faults=late:3@7EA`), and each module counts its own: a profile's modules no longer share one count.
 - **A second example plugin, `example-car`,** is a whole made-up car of 18 modules that `plugins check` reads with no car.
 - **C API:** `ecuio_sim_reply_t` gains `fc_us` and `cf_us` in its reserved words (size and other offsets unchanged). **Python:** `Sim.ask`'s replies carry them.
+- **The simulated ECU can be busy and share a bus:** `busy=ignore|21` makes a module that is still answering ignore another request or answer it `7F <service> 21`, and `bus=<kbit/s>` makes the simulated modules' frames share the bus one at a time; `busy=` can be aimed at one module (`@<reply ID>`).
+- **A plugin can carry Dashboard pages,** one page for one form each, and `havne-cli plugins check` checks them as a layout file is checked. The Dashboard's Add page list offers the pages a plugin carries for the window's form: a page is added as your own copy, and its gauges read the plugin's signals once the plugin's variant is picked.
+- **C API:** `ecuio_plugin_info_t.page_count` (in its reserved words), `ecuio_plugin_page` and `ecuio_plugin_page_text`. **Python:** `Plugin.pages()` gives each page's path, form and text.
+- A plugin's manifest may be format 2, with a conversation part (a module, the services it may use and its security levels). Havne reads and checks the part and runs no module in this version: such a plugin loads as data only, and its code runs from v0.9.1.
 
 ### Changed
 
@@ -67,6 +71,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- Through the OBDX Pro VX, which loses a second module's single-frame reply that arrives beside another module's long one, Havne now waits out a long reply before asking the other modules (not yet confirmed on a car). `j2534://...?hold=0` turns this off.
+- A DID scan whose reply was lost on a healthy link asks that DID once more after the rest, so the scan completes instead of stopping one or two short (`?did=` ranges).
 - An expression refused at a character outside ASCII (such as "a + é") shows the character in the refusal's words, not '?'.
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
 - A plugin made from a signal file names the oldest Havne that reads it, not the version that made it, so the same file makes the same plugin on every version and the store keeps one copy of it. (ADR-0064)
