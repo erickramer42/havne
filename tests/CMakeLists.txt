@@ -2052,6 +2052,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_live.cpp
         test_bridge_fake.cpp
         test_bridge_signals.cpp
+        test_bridge_signals_trace.cpp
         test_bridge_ticks.cpp
         test_bridge_recorder.cpp
         test_bridge_conditions.cpp
