@@ -701,6 +701,15 @@ std::string too_deep_words(const std::string& name, uint32_t depth)
            std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most";
 }
 
+std::string reads_deep_base_words(const std::string& base, uint32_t depth)
+{
+    return "the program reads " + q(base) + ", which sits " +
+           std::to_string(depth - 1) +
+           " computed signals deep: that puts the program " +
+           std::to_string(depth) + " deep, and a chain goes " +
+           std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most";
+}
+
 namespace {
 
 /* A node as a refusal names it: one with no key is the expression a
