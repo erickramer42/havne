@@ -98,7 +98,7 @@ QVariantList RecordingView::columns(const QVariantList& signalIndexes,
 }
 
 // The reader takes no time before the start, so a window from before it
-// is split as havne-cli view splits one (cli/view_lines.h, window_of):
+// is split as havne-cli view splits one (cli/view_axis.h, window_of):
 // the columns wholly before the start stay empty, the one across it is a
 // query of its own from 0, and the rest another. Columns of a second or
 // more place whole seconds, each in the column it starts in, the first
