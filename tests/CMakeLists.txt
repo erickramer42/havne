@@ -27,7 +27,9 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
     test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_reader.cpp
+    test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
+    test_recorder_attach.cpp test_recorder_file.cpp
+    test_recording.cpp test_recording_reader.cpp
     test_recording_hour.cpp test_recording_stats.cpp
     test_recording_stretches.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
@@ -235,7 +237,9 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
 # that ECU (ADR-0040, SocketCanRequestTest), and against the test car's
 # recording as the ECU, its replies broken at the ISO-TP level
-# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
+# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest); it is in
+# parts by theme (test_vcan_requests_*.cpp, helpers in
+# test_vcan_requests_support.h).
 # test_vcan_isotp.cpp: core's ISO-TP against the kernel's
 # (IsoTpConformanceTest).
 # test_vcan_talk.cpp: a request longer than a frame through a requesting
@@ -248,7 +252,9 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # one at a time while the rest of the suite runs beside them.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
-                   test_vcan_requests.cpp test_vcan_isotp.cpp
+                   test_vcan_requests.cpp test_vcan_requests_focus.cpp
+                   test_vcan_requests_close.cpp
+                   test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
                    test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
@@ -2067,6 +2073,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_ticks.cpp
         test_bridge_recorder.cpp
         test_bridge_conditions.cpp
+        test_bridge_conditions_firing.cpp
+        test_bridge_conditions_stale.cpp
+        test_bridge_conditions_tones.cpp
+        test_bridge_conditions_alloc.cpp
         test_recording_view.cpp
         test_recording_view_stretches.cpp
         test_recording_view_stats.cpp
@@ -2078,6 +2088,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_import.cpp
         test_recording_export.cpp
         test_one_store.cpp
+        test_one_store_update.cpp
+        test_one_store_index.cpp
+        test_one_store_wrap.cpp
         test_bridge_variantshape.cpp
         test_bridge_plugincopies.cpp
         test_bridge_pluginpages.cpp
@@ -2300,15 +2313,22 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set(_qml_cost_phone_frame 35)
     set(_qml_cost_phone_headers 25)
     set(_qml_cost_phone_connect 40)
-    set(_qml_cost_recordings 25)
+    set(_qml_cost_recordings 4)
+    set(_qml_cost_recordings_export 3)
+    set(_qml_cost_recordings_layout 3)
+    set(_qml_cost_recordings_cursors 4)
+    set(_qml_cost_recordings_panes 3)
+    set(_qml_cost_recordings_stretches 4)
+    set(_qml_cost_recordings_compare 3)
+    set(_qml_cost_recordings_baseline 3)
     set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
         # A file's bound is a hang guard, not a measurement: each case
-        # waits for what it checks with tryVerify, and tst_recordings
-        # alone opens a 10,200-frame recording, which a machine building
+        # waits for what it checks with tryVerify, and the recordings
+        # files open a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
         # A file near the bound runs as _qml_parts ctest entries, each
         # a disjoint share of its cases (every nth one, so the slow
