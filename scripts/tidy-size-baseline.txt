@@ -6,10 +6,10 @@
 # --update-size-baseline), and a line is added by hand only.
 app/bridge_connect.cpp	applyConnectedState
 app/bridge_connect.cpp	disconnectSession
-app/bridge_diagnostics.cpp	channelDiagnosticsText
 app/bridge_diagnostics.cpp	clearDiagnostics
-app/bridge_diagnostics.cpp	diagnosticsEntry
-app/bridge_diagnostics.cpp	inspectionEntry
+app/bridge_diagnostics_entries.cpp	diagnosticsEntry
+app/bridge_diagnostics_entries.cpp	inspectionEntry
+app/bridge_diagnostics_text.cpp	channelDiagnosticsText
 app/bridge_recordings.cpp	recordingRowOf
 app/bridge_sessioninfo.cpp	sessionInfoText
 app/bridge_store.cpp	readImport
@@ -37,7 +37,7 @@ cli/elm327_emulator.h	at_command
 cli/elm327_emulator.h	from_host
 cli/health_lines.h	parse_health
 cli/layout_check.h	check
-cli/layout_check.h	value
+cli/layout_json.h	value
 cli/log_lines.h	parse_log
 cli/main.cpp	cmd_plugins
 cli/signal_file_lines.h	def_line
