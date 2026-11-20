@@ -162,11 +162,18 @@ Page {
     function cursorSample(samples) {
         if (isNaN(cursorMs))
             return -1
-        let best = -1
-        for (let i = 0; i + 1 < samples.length; i += 2) {
-            if (best < 0 || Math.abs(samples[i] - cursorMs) < Math.abs(samples[best] - cursorMs))
-                best = i
+        // The samples are in time order: the nearest is beside the first
+        // one at or after the cursor (the earlier of two equally near)
+        let lo = 0, hi = samples.length >> 1
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            if (samples[mid * 2] < cursorMs) lo = mid + 1
+            else hi = mid
         }
+        let best = lo > 0 ? (lo - 1) * 2 : -1
+        if (lo < samples.length >> 1
+                && (best < 0 || Math.abs(samples[lo * 2] - cursorMs) < Math.abs(samples[best] - cursorMs)))
+            best = lo * 2
         return best >= 0 && Math.abs(samples[best] - cursorMs) <= staleMs ? best : -1
     }
     // The snapshot's samples in view, thinned to each column's lowest,
@@ -180,18 +187,25 @@ Page {
         for (const s of snapshot) {
             const sp = s.samples
             const picked = []
-            let col = -1, lo = -1, hi = -1, last = -1
+            let col = NaN, lo = -1, hi = -1, last = -1
             const flush = () => {
                 const keep = [lo, hi, last].filter((v, k, all) => all.indexOf(v) === k)
                 for (const i of keep.sort((a, b) => a - b))
                     picked.push(sp[i], sp[i + 1])
             }
-            for (let i = 0; i + 1 < sp.length; i += 2) {
-                if (sp[i] < t0 || sp[i] > t1)
-                    continue
+            // Samples are in time order: start at the first one in view
+            let first = 0, end = sp.length >> 1
+            while (first < end) {
+                const mid = (first + end) >> 1
+                if (sp[mid * 2] < t0) first = mid + 1
+                else end = mid
+            }
+            for (let i = first * 2; i + 1 < sp.length; i += 2) {
+                if (sp[i] > t1)
+                    break
                 const c = Math.floor(sp[i] / colMs)
                 if (c !== col) {
-                    if (col >= 0)
+                    if (!isNaN(col))
                         flush()
                     col = c
                     lo = hi = last = i
@@ -201,7 +215,7 @@ Page {
                 if (sp[i + 1] > sp[hi + 1]) hi = i
                 last = i
             }
-            if (col >= 0)
+            if (!isNaN(col))
                 flush()
             const series = { row: s.row, unit: s.unit, decimals: s.decimals, samples: picked }
             const at = cursorSample(sp)
