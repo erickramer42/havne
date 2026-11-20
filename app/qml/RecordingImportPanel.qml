@@ -10,7 +10,7 @@ import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
 
-// ---- Import: the file picked, its kind, a CSV's column map ----
+// Import: the file picked, its kind, a CSV's column map
 ColumnLayout {
     id: root
     objectName: "importPanel"

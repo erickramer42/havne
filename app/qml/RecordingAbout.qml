@@ -18,7 +18,7 @@ ColumnLayout {
     parent: root.host.currentHead && root.host.aboutShown ? root.host.currentHead.toolsSlot : root.host.aboutHome
     Layout.fillWidth: true
     spacing: 10
-    // ---- About this recording: what applies to it as a whole ----
+    // About this recording: what applies to it as a whole
     Heading {
         objectName: "aboutHeading"
         visible: root.host.recording.state === RecordingView.Open && !root.host.chartMaximized && !root.host.pinnedViewer

@@ -42,7 +42,7 @@ QtObject {
         return Math.round(decoded * 1e6) / 1e6
     }
 
-    // ---- The built-in sets' refs (Bridge.gaugeSignals): a page copies the
+    // The built-in sets' refs (Bridge.gaugeSignals): a page copies the
     // map once with copySets and passes the copy, never the bridge's map,
     // since each read of that makes a new JS wrapper
 
@@ -78,7 +78,7 @@ QtObject {
         return ""
     }
 
-    // ---- A drag (section 4): one cell's order while it's held
+    // A drag (section 4): one cell's order while it's held
 
     // The list with the item at from moved to place to
     function reordered(list, from, to) {
@@ -117,7 +117,7 @@ QtObject {
         return best
     }
 
-    // ---- Writes: each returns a new document, or an unchanged copy
+    // Writes: each returns a new document, or an unchanged copy
 
     function canAddPage(doc) {
         return DashboardBook.documentProblem(doc) === "" && doc.pages.length < DashboardBook.maxPages

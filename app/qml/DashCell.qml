@@ -7,7 +7,7 @@ import QtQuick.Controls
 
 pragma ComponentBehavior: Bound
 
-// ---- A cell: its gauge's inputs, from the cell and its entry
+// A cell: its gauge's inputs, from the cell and its entry
 
 GaugeCard {
     id: card

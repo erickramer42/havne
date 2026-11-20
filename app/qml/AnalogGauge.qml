@@ -68,7 +68,7 @@ GaugeBase {
     function px(deg, radius) { return cx + radius * Math.cos(deg * Math.PI / 180) }
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
 
-    // ---- Chapter ring and zone washes behind the ticks
+    // Chapter ring and zone washes behind the ticks
     Shape {
         anchors.fill: parent
         preferredRendererType: Shape.CurveRenderer
@@ -142,7 +142,7 @@ GaugeBase {
         }
     }
 
-    // ---- Progress ring: track, two-step glow, core
+    // Progress ring: track, two-step glow, core
     Shape {
         anchors.fill: parent
         visible: gauge.showProgress
@@ -173,7 +173,7 @@ GaugeBase {
         }
     }
 
-    // ---- Ticks: full-size items rotated about the dial center
+    // Ticks: full-size items rotated about the dial center
     Repeater {
         model: gauge.minorCount
         delegate: Item {
@@ -218,7 +218,7 @@ GaugeBase {
         }
     }
 
-    // ---- Peak tell-tale: an amber wedge between ring and rim
+    // Peak tell-tale: an amber wedge between ring and rim
     Item {
         width: gauge.width; height: gauge.height
         visible: gauge.showPeak && !isNaN(gauge.peakValue)
@@ -240,7 +240,7 @@ GaugeBase {
         }
     }
 
-    // ---- Readout: caption above the hub, value below it
+    // Readout: caption above the hub, value below it
     Text {
         Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
@@ -311,7 +311,7 @@ GaugeBase {
         }
     }
 
-    // ---- Needle: flat, tapered, drawn pointing at 3 o'clock
+    // Needle: flat, tapered, drawn pointing at 3 o'clock
     Shape {
         id: needle
         objectName: "needle"
@@ -348,7 +348,7 @@ GaugeBase {
         }
     }
 
-    // ---- Hub cap
+    // Hub cap
     Rectangle {
         objectName: "hub"
         anchors.centerIn: parent

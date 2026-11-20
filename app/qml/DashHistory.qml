@@ -13,7 +13,7 @@ Item {
     required property DashboardPage host
     visible: false
 
-    // ---- Undo (ADR-0057's appendix "undo in edit mode as built"). An
+    // Undo (ADR-0057's appendix "undo in edit mode as built"). An
     // entry keeps the text stored before its step, so an undo stores what
     // was there: "" (nothing, the built-in layout) included
 

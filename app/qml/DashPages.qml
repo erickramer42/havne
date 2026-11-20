@@ -161,7 +161,7 @@ SwipeView {
             function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * swipe.host.cellGap }
             function boxHeight(b) { return Math.max(0, b.h * pitch - swipe.host.cellGap) }
 
-            // ---- The held cell (section 4)
+            // The held cell (section 4)
 
             property var dropCenters: []     // the held cell's center at each place
             property size heldSize: Qt.size(0, 0)

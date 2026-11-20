@@ -326,7 +326,7 @@ Rectangle {
             }
         }
 
-        // ---- Empty state ----
+        // Empty state
         Label {
             anchors.centerIn: parent
             width: Math.min(implicitWidth, parent.width - 16)

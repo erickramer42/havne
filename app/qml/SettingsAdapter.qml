@@ -21,7 +21,7 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
 
-    // ---- Adapters: J2534 interfaces and serial ports ----
+    // Adapters: J2534 interfaces and serial ports
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
@@ -56,8 +56,8 @@ ColumnLayout {
         }
     }
 
-    // ---- Bluetooth (Android): why the list is short, and a
-    // scan for BLE adapters, which aren't paired ----
+    // Bluetooth (Android): why the list is short, and a
+    // scan for BLE adapters, which aren't paired
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
@@ -172,9 +172,9 @@ ColumnLayout {
         }
     }
 
-    // ---- Relay (the phone, developer mode; ADR-0047): the
+    // Relay (the phone, developer mode; ADR-0047): the
     // selected Bluetooth adapter relayed to a computer over USB,
-    // for havne-cli there ----
+    // for havne-cli there
     ColumnLayout {
         objectName: "relayBox"
         visible: Relay.available && Theme.developerMode
@@ -231,8 +231,8 @@ ColumnLayout {
         }
     }
 
-    // ---- Presets: the URI's base, for what the list doesn't show. Closed
-    // until the row is tapped: five buttons would fill a phone's page ----
+    // Presets: the URI's base, for what the list doesn't show. Closed
+    // until the row is tapped: five buttons would fill a phone's page
     property bool presetsOpen: false
     // A J2534 interface is a Windows driver
     property bool j2534Offered: Qt.platform.os === "windows"

@@ -119,7 +119,7 @@ ColumnLayout {
         root.alerts.refreshRows()
     }
 
-    // ---- Terms
+    // Terms
     function rowOf(t) {
         const all = DashboardEdit.lookupRefs(t.signal ?? [], root.alerts.gaugeSets)
         for (const r of root.alerts.rows) {
@@ -202,7 +202,7 @@ ColumnLayout {
         picking = -1
     }
 
-    // ---- Save: the condition built from the fields, null with problem set
+    // Save: the condition built from the fields, null with problem set
     function build() {
         const c = ConditionBook.copy(root.alerts.draft)
         c.name = nameInput.text.trim()
@@ -313,7 +313,7 @@ ColumnLayout {
         root.alerts.problem = ""
     }
 
-    // ---- The page
+    // The page
     LabeledFlow {
         label: qsTr("Name:")
         ThemedTextField {
@@ -535,7 +535,7 @@ ColumnLayout {
         onClicked: root.addTerm()
     }
 
-    // ---- How long: a hold before it turns on, and before it clears
+    // How long: a hold before it turns on, and before it clears
     LabeledFlow {
         label: qsTr("On after:")
         ThemedTextField {
@@ -566,7 +566,7 @@ ColumnLayout {
         }
     }
 
-    // ---- What it does
+    // What it does
     ThemedCheckBox {
         id: alertCheck
         objectName: "alertUseAlert"

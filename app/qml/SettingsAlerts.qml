@@ -90,7 +90,7 @@ ColumnLayout {
         saveDoc(ConditionBook.withEnabled(doc, i, on))
     }
 
-    // ---- The editor's way in
+    // The editor's way in
     signal editRequested()
     function openEditor(i, c) {
         editIndex = i
@@ -125,7 +125,7 @@ ColumnLayout {
         return ""
     }
 
-    // ---- Levels: a signal file's gauge, else the zone table's
+    // Levels: a signal file's gauge, else the zone table's
     function levelsOf(row) {
         const g = ConditionBook.gaugeLevels(row.gauge)
         const levels = Object.keys(g).length > 0
@@ -151,7 +151,7 @@ ColumnLayout {
         openDraft(c)
     }
 
-    // ---- Words
+    // Words
     // A number as shown: up to three decimals (or decimals), the locale's
     // point. The editor's fields keep three, so a saved level reads back as
     // it was; the list says a level in its signal's own decimals
@@ -250,7 +250,7 @@ ColumnLayout {
         }
     }
 
-    // ---- The page
+    // The page
     Label {
         objectName: "alertsNote"
         text: qsTr("An alert watches the session's signals and says when one passes its level. "
@@ -330,7 +330,7 @@ ColumnLayout {
         }
     }
 
-    // ---- A question that waits for its answer
+    // A question that waits for its answer
     ColumnLayout {
         objectName: "alertConfirm"
         visible: root.confirming !== ""
@@ -390,7 +390,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // ---- Add from a signal's levels
+    // Add from a signal's levels
     ColumnLayout {
         objectName: "alertSignalPanel"
         visible: root.pickingSignal
@@ -414,7 +414,7 @@ ColumnLayout {
         }
     }
 
-    // ---- The list
+    // The list
     Label {
         objectName: "alertsNone"
         visible: root.conditions.length === 0 && !root.unreadable

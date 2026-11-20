@@ -65,6 +65,8 @@ TestCase {
 
     // The readouts group digits with the system locale, as Live and the gauges do.
     function grouped(n) { return Number(n).toLocaleString(Qt.locale(), 'f', 0) }
+    // A change or rate with decimals, in the system locale's form ("-9,5" under a comma locale)
+    function decimal(n, places) { return Number(n).toLocaleString(Qt.locale(), 'f', places) }
 
     function find(item, name) {
         const found = findChild(item, name)
@@ -2301,10 +2303,10 @@ profile  raw
         compare(find(row, "statLow").text, grouped(1982) + " rpm")
         compare(find(row, "statHigh").text, grouped(2012) + " rpm")
         compare(find(row, "statMean").text, grouped(2003) + " rpm")
-        compare(find(row, "statRate").text, "-9.5 rpm/s")
+        compare(find(row, "statRate").text, decimal(-9.5, 1) + " rpm/s")
         // A rising signal's change and rate carry their sign
         const up = page.textsPart.changeText(12.5, 1, "kPa")
-        compare(up, "+12.5 kPa")
+        compare(up, "+" + decimal(12.5, 1) + " kPa")
 
         // Text has B and no change; a row not plotted has both
         const vin = rowOf(page, "VIN")

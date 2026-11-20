@@ -13,7 +13,7 @@ Item {
     required property DashboardPage host
     visible: false
 
-    // ---- The cell's panel
+    // The cell's panel
 
     // The selected cell's options, on `base` when given (a write already
     // composed for the same step). A run of a stepped option on one cell
@@ -58,7 +58,7 @@ Item {
         }
     }
 
-    // ---- The pages' edits
+    // The pages' edits
 
     function addPage() {
         if (part.host.edit(DashboardEdit.addPage(part.host.doc, qsTr("Page %1").arg(part.host.pages.length + 1)),

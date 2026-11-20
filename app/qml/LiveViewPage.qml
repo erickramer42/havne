@@ -766,7 +766,7 @@ Page {
             }
         }
 
-        // ---- Strip chart: per-signal rolling history, one repaint per
+        // Strip chart: per-signal rolling history, one repaint per
         // coalesced batch. Each trace takes its list row's color
         // (root.seriesColor), so the list is the legend. ChartLayout
         // works out where everything goes; StripChart strokes it.

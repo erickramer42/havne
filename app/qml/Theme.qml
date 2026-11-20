@@ -22,7 +22,7 @@ import QtQuick
 // (tests/qml/tst_theme.qml measures each).
 QtObject {
     id: theme
-    // ---- The look, Night and its style (ADR-0058). Three controls give
+    // The look, Night and its style (ADR-0058). Three controls give
     // the palette on screen, `active`, which every role reads through:
     // the look (Dark or Light), Night (off, on, or on a
     // schedule) and the style Night takes (amber or red). All are kept

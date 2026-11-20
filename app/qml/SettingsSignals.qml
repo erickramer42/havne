@@ -85,7 +85,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // ---- A file read and not yet kept ----
+    // A file read and not yet kept
     ColumnLayout {
         id: importPanel
         objectName: "importPanel"
@@ -353,9 +353,9 @@ ColumnLayout {
         }
     }
 
-    // ---- The list: a row for each variant of each plugin. A press picks
+    // The list: a row for each variant of each plugin. A press picks
     // it for the picked vehicle or undoes the pick; More opens the row's
-    // actions in place ----
+    // actions in place
     // The model is the rows' count: a pick changes a row's data and not
     // their number, so the items stay and a press keeps its focus
     Repeater {
@@ -623,7 +623,7 @@ ColumnLayout {
         }
     }
 
-    // ---- The signal files the move into the plugin store left behind ----
+    // The signal files the move into the plugin store left behind
     Label {
         objectName: "unmigratedTitle"
         visible: root.host.rowActionsPart.unmigratedRows.length > 0

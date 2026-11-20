@@ -13,7 +13,7 @@ Item {
     required property DashboardPage host
     visible: false
 
-    // ---- The layout file (ADR-0057's appendix on the layout file)
+    // The layout file (ADR-0057's appendix on the layout file)
 
     // What the last export or load said, in words; layoutNoteBad when it
     // is a refusal

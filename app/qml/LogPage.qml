@@ -27,7 +27,7 @@ Pane {
     property string backName: qsTr("Back")
     signal backRequested
 
-    // ---- The Frames view's table (framefilter.h) ----
+    // The Frames view's table (framefilter.h)
     // By ID instead of the frames; the filter's panel open
     property bool byId: false
     property bool filterOpen: false
@@ -204,8 +204,8 @@ Pane {
             onActivated: page.copySelectedFrames()
         }
 
-        // ---- The activity log: every connect, link change, ECU and
-        // session line the bridge logs ----
+        // The activity log: every connect, link change, ECU and
+        // session line the bridge logs
         ScrollView {
             id: activityScroll
             objectName: "activityView"
@@ -230,7 +230,7 @@ Pane {
             }
         }
 
-        // ---- The raw frames ----
+        // The raw frames
         ColumnLayout {
             objectName: "frameView"
             visible: page.showingFrames
@@ -238,10 +238,10 @@ Pane {
             Layout.fillHeight: true
             spacing: Theme.spacing
 
-            // ---- Pause and Clear; while rows are selected, the selection
+            // Pause and Clear; while rows are selected, the selection
             // bar in their place (Copy and Select none take no room until
             // they're of use). A Flow, so on a phone's width they wrap
-            // rather than lay the page out past its edge ----
+            // rather than lay the page out past its edge
             Flow {
                 objectName: "frameTools"
                 visible: Bridge.model.selectedCount === 0
@@ -326,7 +326,7 @@ Pane {
                 }
             }
 
-            // ---- The table's view, and the filter ----
+            // The table's view, and the filter
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
@@ -358,14 +358,14 @@ Pane {
                 }
             }
 
-            // ---- The filter: the columns a bus is read by ----
+            // The filter: the columns a bus is read by
             FrameFilterPanel {
                 id: filterPanel
                 visible: page.filterOpen
                 frames: Bridge.model
             }
 
-            // ---- Status and bridge counters, wrapping on a phone ----
+            // Status and bridge counters, wrapping on a phone
             Flow {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
@@ -438,7 +438,7 @@ Pane {
 
             }
 
-            // ---- Frame table ----
+            // Frame table
             FrameTable {
                 visible: !page.byId
                 frames: Bridge.model          // the bridge's FrameListModel
@@ -457,7 +457,7 @@ Pane {
                 }
             }
 
-            // ---- By ID: one row per ID over the frames the table shows ----
+            // By ID: one row per ID over the frames the table shows
             FrameIdList {
                 id: idTable
                 visible: page.byId

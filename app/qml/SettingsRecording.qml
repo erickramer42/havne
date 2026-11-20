@@ -14,7 +14,7 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
-    // ---- Recording (ADR-0017) ----
+    // Recording (ADR-0017)
     // Off until switched on, and kept between runs. It takes effect
     // at the next connect, so it's fixed while a session is up and
     // each recording covers a whole session.
