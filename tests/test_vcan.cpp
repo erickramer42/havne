@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -185,6 +186,8 @@ TEST_F(VcanTest, ARecordingPlaysOntoTheBus)
     vcan_bus::Fd listener = vcan_bus::open_raw();
     ASSERT_TRUE(listener.ok());
     std::vector<can_frame> heard;
+    heard.reserve(messages.size());
+    std::atomic<size_t> count{0};
     std::atomic<bool> done{false};
     /* Read as they come: vcan has no flow control, so a listener that
      * falls behind loses frames from its socket's queue */
@@ -194,14 +197,34 @@ TEST_F(VcanTest, ARecordingPlaysOntoTheBus)
             if (vcan_bus::read_for(listener.get(), &f, sizeof(f), 50)
                 == static_cast<long>(sizeof(f))) {
                 heard.push_back(f);
+                count.store(heard.size());
             } else if (done.load()) {
                 return;
             }
         }
     });
-    EXPECT_EQ(vcan_bus::play(messages, 0), messages.size());
+    /* A block at a time, each heard before the next goes out: a socket
+     * queue holds a few hundred frames, and a slow listener (ASan, a
+     * loaded runner) loses what the player puts past it. The block is
+     * a count, so load moves nothing. */
+    const size_t kBlock = 100;
+    size_t sent = 0;
+    bool kept_up = true;
+    for (size_t at = 0; at < messages.size() && kept_up; at += kBlock) {
+        const size_t end = std::min(at + kBlock, messages.size());
+        const std::vector<vcan_bus::Message> block(messages.begin() + at,
+                                                   messages.begin() + end);
+        sent += vcan_bus::play(block, 0);
+        const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (count.load() < end && std::chrono::steady_clock::now() < limit) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        kept_up = count.load() >= end;
+    }
     done = true;
     reader.join();
+    EXPECT_EQ(sent, messages.size());
+    EXPECT_TRUE(kept_up) << "the listener heard " << heard.size() << " frames";
 
     ASSERT_EQ(heard.size(), messages.size());
     for (size_t i = 0; i < heard.size(); ++i) {

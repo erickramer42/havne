@@ -55,10 +55,14 @@ RecordingsKit {
         Bridge.disconnectSession()
         tryVerify(() => list.count === Math.min(before + 1, page.recordingsListed), 10000,
                   "the recording that ended is listed")
-        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        compare(find(list.itemAtIndex(0), "recordingDetail").text, "mock://recordings-page",
+        // Its row by address, not by place: a CSV import made in the same
+        // second sorts above it ("<stamp> CSV import" after "<stamp>")
+        const at = page.recordings.findIndex(r => r.source === "mock://recordings-page")
+        verify(at >= 0, "the recording that ended is in the list")
+        tryVerify(() => list.itemAtIndex(at) !== null, 2000, "the row has a delegate")
+        compare(find(list.itemAtIndex(at), "recordingDetail").text, "mock://recordings-page",
                 "a mock address replays as mock: the address alone")
-        verify(page.recordings[0].folder !== "", "a row knows its folder")
+        verify(page.recordings[at].folder !== "", "a row knows its folder")
     }
 
     // A CSV import (ADR-0054's appendix "the CSV import as built") is
