@@ -103,7 +103,8 @@ add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_compute
     test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
     test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_plugin_conversation_gate.cpp test_base64.cpp
-    test_condition_file.cpp test_condition_eval.cpp)
+    test_condition_file.cpp test_condition_file_resolve.cpp
+    test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
 # programs' checker and stack machine, which are internal
