@@ -2065,6 +2065,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_view_keys.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
+        test_recording_import_map.cpp
         test_recording_export.cpp
         test_recording_export_estimate.cpp
         test_one_store.cpp
