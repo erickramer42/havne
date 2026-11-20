@@ -36,9 +36,12 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_export_csv.cpp test_export_folder.cpp test_export_range.cpp
     test_export_frames.cpp test_export_cancel.cpp
     test_recording_keys.cpp
-    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
-    test_condition_session.cpp test_condition_recording.cpp
+    test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
+    test_health_baseline.cpp test_csv_import.cpp
+    test_frames_read.cpp test_csv_guess.cpp test_csv_guess_rows.cpp
+    test_csv_guess_call.cpp test_recording_aids.cpp
+    test_condition_session.cpp test_condition_session_link.cpp
+    test_condition_recording.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp)
@@ -104,7 +107,7 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
+add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
     test_plugin.cpp test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
@@ -2061,6 +2064,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge.cpp
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
+        test_bridge_frames_filter.cpp
         test_bridge_readonce.cpp
         test_bridge_expr.cpp
         test_bridge_obdb.cpp
@@ -2069,11 +2073,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_replay_end.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
+        test_bridge_signalfiles_plugin.cpp
+        test_bridge_signalfiles_picks.cpp
         test_bridge_live.cpp
         test_bridge_fake.cpp
+        test_bridge_fake_pick.cpp
         test_bridge_signals.cpp
         test_bridge_ticks.cpp
         test_bridge_recorder.cpp
+        test_bridge_recorder_armed.cpp
         test_bridge_conditions.cpp
         test_bridge_conditions_firing.cpp
         test_bridge_conditions_stale.cpp
@@ -2098,6 +2106,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_pluginpages.cpp
         test_bridge_gate.cpp
         test_store_migration.cpp
+        test_store_migration_marks.cpp
         test_store_removal.cpp
         ../app/recordingview.cpp
         ../app/recordingview_asks.cpp
