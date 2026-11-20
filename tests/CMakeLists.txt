@@ -2146,8 +2146,9 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
 
     # Listing its cases loads Qt's DLLs first, which on a loaded machine
-    # took past the default 5 s and failed the build
-    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
+    # took past the default 5 s and failed the build. The "qt" label marks
+    # this block's tests, which linux-build runs
+    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "qt")
 
     # The GUI thread's cost per frame by profile size, a measurement for
     # docs/performance.md; built with the tests, never run by ctest
@@ -2299,6 +2300,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
             set_tests_properties(QmlTest.${_qml_name} PROPERTIES
                 ENVIRONMENT "${_qml_test_env}"
                 TIMEOUT 180
+                LABELS "qt"
             )
             if(DEFINED _qml_cost_${_qml_name})
                 set_tests_properties(QmlTest.${_qml_name} PROPERTIES
@@ -2349,6 +2351,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                     ENVIRONMENT "${_qml_test_env}"
                     TIMEOUT 180
                     COST ${_qml_cost_${_qml_name}}
+                    LABELS "qt"
                 )
                 unset(_qml_share_${_qml_share})
             endforeach()

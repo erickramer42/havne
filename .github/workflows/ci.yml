@@ -235,8 +235,8 @@ jobs:
           ECUIO_VCAN_REQUIRED: '1'
         run: ctest --test-dir build --output-on-failure --no-tests=error
 
-      # The interface down and up again needs CAP_NET_ADMIN, as in
-      # linux-build
+      # The interface down and up again needs CAP_NET_ADMIN: CI's one run
+      # of SocketCanBusTest.TheInterfaceGoingDown...
       - name: SocketCAN as root (the interface down and up)
         env:
           UBSAN_OPTIONS: print_stacktrace=1
@@ -906,9 +906,14 @@ jobs:
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Two runners, each with its own build, run alternate halves of ctest
-    # (-I k,,2: every case once across the two); the steps after the tests
-    # run on the first
+    # The app and its Qt tests (the "qt" label: the bridge's and QML's)
+    # under GCC, the Python package against SocketCAN, the USDT probes and
+    # the load test. The Qt-free suites run in core-and-tests (optimized,
+    # with jsonschema and pytest) and core-sanitizers (ASan, UBSan and
+    # vcan0), so this job builds none of their programs. Two runners,
+    # each with its own build, run alternate halves of the Qt tests
+    # (-I k,,2); the first runs the probes and the load test, the second
+    # the Python package's vcan0 cases
     strategy:
       fail-fast: false
       matrix:
@@ -1002,17 +1007,17 @@ jobs:
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
       # and bpftrace: core's USDT probes and the step that traces them;
-      # can-utils: candump, which CliTransferRunTest.candump logs vcan0
-      # with (ECUIO_VCAN_REQUIRED fails it without one); ninja-build and
-      # mold: the build's scheduler and linker, for its time
-      - name: Build full app
+      # ninja-build and mold: the build's scheduler and linker, for its
+      # time. The targets: the app, the Qt tests, havne-cli (the probes)
+      # and the shared core (the Python package)
+      - name: Build the app and its Qt tests
         id: build
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
-            systemtap-sdt-dev bpftrace can-utils ninja-build mold
+            systemtap-sdt-dev bpftrace ninja-build mold
           cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python" \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_LINKER_TYPE=MOLD
-          cmake --build build
+          cmake --build build --target havne test_bridge bench_bridge test_qml havne-cli ecuio
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
@@ -1030,16 +1035,13 @@ jobs:
       # frames (the mock's 16-byte telemetry), whatever the kernel's
       # default; it's set before the link goes up, as vcan requires
       - name: Bring up vcan0
+        if: matrix.shard == 2
         run: |
           sudo modprobe vcan
           sudo modprobe can-isotp
           sudo ip link add dev vcan0 type vcan
           sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
-      # ECUIO_VCAN_REQUIRED: test_vcan's suites, CliPluginRunTest and
-      # PythonTest.test_vcan (v0.6.0's "a Python script opens SocketCAN")
-      # fail rather than skip without vcan0; ECUIO_PYTEST_REQUIRED:
-      # PythonTest.* fail rather than skip without pytest
       # ctest starts the cases that took longest last time first (its cost
       # data), so the slowest don't finish the run alone
       - name: Restore the tests' cost data
@@ -1048,28 +1050,25 @@ jobs:
           path: build/Testing/Temporary/CTestCostData.txt
           key: ctest-cost-linux-${{ matrix.shard }}-${{ github.run_id }}
           restore-keys: ctest-cost-linux-${{ matrix.shard }}-
-      - name: Run tests
+      - name: Run the Qt tests
+        run: ctest --test-dir build --output-on-failure --no-tests=error -L qt -I ${{ matrix.shard }},,2
+      # The Python package's SocketCAN cases, which no other job has both
+      # pytest and vcan0 for. ECUIO_VCAN_REQUIRED and ECUIO_PYTEST_REQUIRED:
+      # they fail rather than skip without vcan0 or pytest
+      - name: Run the Python package's vcan0 cases
+        if: matrix.shard == 2
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
+        run: >-
+          ctest --test-dir build --output-on-failure --no-tests=error
+          -R '^PythonTest\.test_(vcan|did_scan|isotp_fuzz)$'
       - name: Save the tests' cost data
         if: success() || failure()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/Testing/Temporary/CTestCostData.txt
           key: ctest-cost-linux-${{ matrix.shard }}-${{ github.run_id }}
-      # The one SocketCAN case that sets the interface down and up again
-      # needs CAP_NET_ADMIN; it skips in the run above, and runs here
-      - name: SocketCAN as root (the interface down and up)
-        if: matrix.shard == 1
-        env:
-          ECUIO_VCAN_REQUIRED: '1'
-          ECUIO_VCAN_ROOT_REQUIRED: '1'
-        run: >-
-          sudo --preserve-env=ECUIO_VCAN_REQUIRED,ECUIO_VCAN_ROOT_REQUIRED
-          build/tests/test_vcan
-          --gtest_filter='SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers'
       # Core's probes fire in a running program (ADR-0034 section 4): bpftrace
       # attaches to havne-cli's and counts a mock:// stream's
       - name: USDT probes under bpftrace
