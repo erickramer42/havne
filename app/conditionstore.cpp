@@ -127,10 +127,9 @@ QVariantMap ConditionStore::save(const QByteArray& bytes)
         m_failWrite = false;
         QString said = QStringLiteral("the conditions can't be saved");
         if (!aside.isEmpty()) {
-            said += QStringLiteral(
-                         "; the file that didn't load is kept as %1, "
-                         "and is now the only copy")
-                         .arg(aside);
+            said += QStringLiteral("; the file that didn't load is kept as %1, "
+                                   "and is now the only copy")
+                        .arg(aside);
         }
         return refuse(said);
     }

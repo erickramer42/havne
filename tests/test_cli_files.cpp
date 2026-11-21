@@ -502,7 +502,8 @@ TEST(CliPluginTest, ANumberWithNoGaugeGetsANoteAndNothingElseDoes)
         << line;
     EXPECT_NE(line.find("\"kind\":\"computed\""), std::string::npos) << line;
     EXPECT_NE(line.find("no gauge block"), std::string::npos) << line;
-    EXPECT_NE(line.find("\"key\":null"), std::string::npos) << "a key field: " << line;
+    EXPECT_NE(line.find("\"key\":null"), std::string::npos)
+        << "a key field: " << line;
     cli::Line keyed(buf.data(), buf.size());
     cli::no_gauge_line(keyed, "base", d, "boost");
     EXPECT_NE(text_of(keyed).find("\"key\":\"boost\""), std::string::npos)

@@ -140,8 +140,10 @@ TEST(BridgeTest, AReplayOfAOneLineSignalsCsvSaysItHoldsNoValues)
     Played played;
     ASSERT_TRUE(playUnder(bridge, played, QStringLiteral("obd2"), false, true))
         << played.log.join(QLatin1Char('\n')).toStdString();
-    const QStringList made = played.log.filter(QStringLiteral("recorded under"));
-    ASSERT_EQ(made.size(), 1) << played.log.join(QLatin1Char('\n')).toStdString();
+    const QStringList made =
+        played.log.filter(QStringLiteral("recorded under"));
+    ASSERT_EQ(made.size(), 1)
+        << played.log.join(QLatin1Char('\n')).toStdString();
     EXPECT_TRUE(made.first().contains(QStringLiteral("holds no signal values")))
         << made.first().toStdString();
 }

@@ -579,7 +579,10 @@ public:
                    ? m_listener->serverPort()
                    : 0;
     }
-    Q_INVOKABLE int listenerConnections() const { return m_listenerConnections; }
+    Q_INVOKABLE int listenerConnections() const
+    {
+        return m_listenerConnections;
+    }
 
     // How many of the emulator's client lines carried this event
     // (connected, closed, refused): it serves one host at a time, so a

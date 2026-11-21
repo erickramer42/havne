@@ -280,7 +280,8 @@ TEST(BridgeTest, AFailedSaveAfterTheMoveAsideNamesTheKeptFile)
     const QVariantMap r = store.save(mockConditions());
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     const QString said = r.value(QStringLiteral("words")).toString();
-    EXPECT_TRUE(said.contains(QStringLiteral("conditions.json.bad-1"))) << said.toStdString();
+    EXPECT_TRUE(said.contains(QStringLiteral("conditions.json.bad-1")))
+        << said.toStdString();
     EXPECT_EQ(readFile(ConditionStore::path() + QStringLiteral(".bad-1")), big);
     // With nothing moved aside the words are the plain ones
     QFile::remove(ConditionStore::path() + QStringLiteral(".bad-1"));

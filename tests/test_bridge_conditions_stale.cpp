@@ -74,7 +74,8 @@ TEST(BridgeTest, ASetAttachedMidApplyEndsTheWalk)
     EXPECT_EQ(emits, 1);
     ASSERT_EQ(model.count(), 3);
     for (int i = 0; i < 3; ++i) {
-        EXPECT_FALSE(model.data(model.index(i), ConditionModel::LiveRole).toBool())
+        EXPECT_FALSE(
+            model.data(model.index(i), ConditionModel::LiveRole).toBool())
             << "row " << i << " of the new set holds no old state";
     }
 }
