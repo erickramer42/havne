@@ -271,7 +271,27 @@ TEST(IsoTpTest, ANewFirstFrameOrSingleFrameOnABusyIdDropsTheOldMessage)
               isotp_result::malformed);
 }
 
-TEST(IsoTpTest, ANinthMessageEvictsTheOldest)
+// Every module a session reads has a message under way at once: as many
+// First Frames from as many IDs, and each completes
+TEST(IsoTpTest, EachModuleASessionReadsHasAMessageUnderWay)
+{
+    isotp_rx& r = fresh_rx(true);
+    isotp_message m;
+    for (uint32_t i = 0; i < ECUIO_MAX_CHANNELS; ++i) {
+        ASSERT_EQ(isotp_take(r, can(0x700 + i, {0x10, 0x09, 1, 2, 3, 4, 5, 6}),
+                             0, &m),
+                  isotp_result::first);
+    }
+    for (uint32_t i = 0; i < ECUIO_MAX_CHANNELS; ++i) {
+        EXPECT_EQ(isotp_take(r, can(0x700 + i, {0x21, 7, 8, 9}), 0, &m),
+                  isotp_result::complete)
+            << i;
+    }
+    EXPECT_EQ(r.dropped, 0u);
+    EXPECT_EQ(r.completed, ECUIO_MAX_CHANNELS);
+}
+
+TEST(IsoTpTest, AMessagePastTheSlotsEvictsTheOldest)
 {
     isotp_rx& r = fresh_rx(true);
     isotp_message m;
@@ -285,8 +305,28 @@ TEST(IsoTpTest, ANinthMessageEvictsTheOldest)
               isotp_result::malformed);
     EXPECT_EQ(isotp_take(r, can(0x701, {0x21, 7, 8, 9}), 0, &m),
               isotp_result::complete);
-    EXPECT_EQ(isotp_take(r, can(0x708, {0x21, 7, 8, 9}), 0, &m),
+    EXPECT_EQ(
+        isotp_take(r, can(0x700 + ECUIO_ISOTP_SLOTS, {0x21, 7, 8, 9}), 0, &m),
+        isotp_result::complete);
+}
+
+// A receiver of fewer slots (a simulated module's: its request ID and the
+// functional one) keeps the same rules at its own size
+TEST(IsoTpTest, AReceiverOfTwoSlotsEvictsAtItsThird)
+{
+    isotp_rx_of<2> r;
+    r.timed = true;
+    isotp_message m;
+    for (uint32_t id : {0x7E0u, 0x7DFu, 0x7E1u}) {
+        ASSERT_EQ(isotp_take(r, can(id, {0x10, 0x09, 1, 2, 3, 4, 5, 6}), 0, &m),
+                  isotp_result::first);
+    }
+    EXPECT_EQ(r.dropped, 1u);
+    EXPECT_EQ(isotp_take(r, can(0x7E0, {0x21, 7, 8, 9}), 0, &m),
+              isotp_result::malformed);
+    EXPECT_EQ(isotp_take(r, can(0x7DF, {0x21, 7, 8, 9}), 0, &m),
               isotp_result::complete);
+    EXPECT_EQ(isotp_expire(r, ECUIO_ISOTP_N_CR_US + 1), 1u);
 }
 
 TEST(IsoTpTest, AConsecutiveFrameLaterThanNcrDropsTheMessage)
