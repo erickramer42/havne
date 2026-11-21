@@ -478,8 +478,8 @@ void remove_unfinished(const std::string& made, const bool opened[3]) noexcept
             }
         }
         ecuio_files::remove_folder(made);
-    } catch (...) {
-        /* out of memory naming them: the folder stays */
+    } catch (...) { // NOLINT(bugprone-empty-catch): out of memory
+        /* naming them: the folder stays */
     }
 }
 
