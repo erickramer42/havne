@@ -2453,6 +2453,9 @@ endif()
 if(WIN32)
     add_library(fake_j2534 SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534.def
     )
 
@@ -2482,6 +2485,9 @@ if(WIN32)
     # fallback resolver.
     add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534_legacy.def
     )
 
