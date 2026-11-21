@@ -32,10 +32,17 @@ Item {
     // field reads it, so the row always shows the URI's
     readonly property bool adapterUri: VehicleBook.isAdapterUri(host.connectPart.uriField.text)
     readonly property var standIn: host.picksPart.pickRows.find(r => r.standIn) || null
+    // The picked vehicle's first pick that Default doesn't read on an
+    // adapter: with no stand-in, Default is plain obd2 (ADR-0064 Q5)
+    readonly property var unreadPick: adapterUri && standIn === null
+        ? host.picksPart.pickRows.find(r => !r.missing) || null : null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
-        hint: qsTr("Default reads OBD-II values on an adapter; a recording or a "
-                   + "CAN interface shows its frames") })
+        hint: unreadPick !== null && host.pickedVehicle !== null
+              ? qsTr("Plain OBD-II, without the signals of %1; choose %2 to read them")
+                    .arg(host.pickedVehicle.label).arg(host.picksPart.profileName(unreadPick.profile))
+              : qsTr("Default reads OBD-II values on an adapter; a recording or a "
+                     + "CAN interface shows its frames") })
 
     // A pick as the row's entry: one that extends obd2 says so on an
     // adapter, where obd2 is what Default reads

@@ -454,6 +454,32 @@ SettingsKit {
         verify(find(page, "profile_default"))
     }
 
+    // A pick that doesn't read all of obd2 has no stand-in, so on an
+    // adapter Default is plain obd2: its hint and the list's Signals
+    // summary say so, and only there
+    function test_defaultOnAnAdapterSaysItReadsPlainObd2WhenAPickIsLeftOut() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const field = find(page, "uriField")
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.picksPart.picks, ["plugin.extras.base"])
+        field.text = "elm327://COM9"
+        compare(page.uriPart.standIn, null)
+        verify(find(page, "profile_default").checked)
+        compare(find(page, "profileHint").text,
+                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
+        verify(page.picksPart.signalsSummary().endsWith("(Default reads plain obd2)"),
+               page.picksPart.signalsSummary())
+
+        // Another profile chosen, or an address that isn't an adapter's: the
+        // ordinary words
+        page.uriPart.chooseProfile("plugin.extras.base")
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
+        field.text = "mock://demo"
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values on an adapter"))
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
+    }
+
     // A pick no plugin here has (a version that dropped the variant, a
     // plugin removed elsewhere) is listed so it can be seen and undone,
     // and the list's Signals row says so, in the danger color
