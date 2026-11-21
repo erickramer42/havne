@@ -29,6 +29,11 @@
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
+# fuzz_sur_reply's are scripts of requests and the replies the surrogate
+# child would send (sur_seeds()), in the wire's layout: a whole READ
+# reply, empty READs with each kind of status, a bare one, a cut one, a
+# skewed count (late too), a wrong ID, a late reply,
+# an IOCTL past its limit and texts with no terminator.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -594,7 +599,59 @@ def main(argv):
         store = {"havne_security_store": 1, "entries": entries}
         write(out, "fuzz_security_store", name + ".json",
               json.dumps(store, indent=2).encode())
+    for name, data in sur_seeds().items():
+        write(out, "fuzz_sur_reply", name, data)
     return 0
+
+
+# surrogate_protocol.h's reply (328 bytes) and j2534_ptypes.h's frame
+# (4140), as fuzz_sur_reply's static_asserts pin them
+SUR_TEXT = 80
+SUR_DATA = 64
+PT_DATA = 4128
+
+
+def sur_reply(rid, status=0, num_frames=0, data=b"", data_len=None, text=b""):
+    texts = b"".join(text.ljust(SUR_TEXT, b"\0")[:SUR_TEXT] for _ in range(3))
+    return (struct.pack("<IiII", rid, status, 0, 0) + texts +
+            data.ljust(SUR_DATA, b"\0")[:SUR_DATA] +
+            struct.pack("<II", len(data) if data_len is None else data_len,
+                        num_frames))
+
+
+def sur_frame(payload):
+    return struct.pack("<III", 0, 0x1234, len(payload)) + payload.ljust(PT_DATA, b"\0")
+
+
+def sur_seeds():
+    """fuzz_sur_reply's inputs: [count - 1][kind, cap] per request, then
+    the pipe. Kinds: 0 READ, 1 IOCTL, 2 text, 3 plain; 0x04 late"""
+    def script(*ops):
+        return bytes([len(ops) - 1]) + b"".join(bytes(op) for op in ops)
+
+    frame = sur_frame(bytes.fromhex("000007E8") + bytes.fromhex("0641000000"))
+    return {
+        "read-one": script((0, 0)) + sur_reply(1, num_frames=1) + frame,
+        "read-empty-then-one": script((0, 0), (0, 0)) +
+        sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame,
+        "read-empty-statuses": script((0, 0), (0, 0), (0, 0), (0, 0)) +
+        sur_reply(1, status=0x09) + sur_reply(2, status=0x10) +
+        sur_reply(3, status=0x00) + sur_reply(4, status=0x07),
+        "bare": script((3, 0)) + sur_reply(1),
+        "cut": script((0, 0)) + sur_reply(1, num_frames=1) + frame[:100],
+        "skewed-read": script((0, 0)) + sur_reply(1, num_frames=2),
+        "skewed-plain": script((3, 0)) + sur_reply(1, num_frames=1),
+        "wrong-id": script((3, 0)) + sur_reply(2),
+        "late": script((3 | 0x04, 0), (3, 0)) + sur_reply(1) + sur_reply(2),
+        "late-wrong-id": script((3 | 0x04, 0), (3, 0)) + sur_reply(5) + sur_reply(2),
+        "late-skewed": script((3 | 0x04, 0), (3, 0)) +
+        sur_reply(1, num_frames=2) + frame + sur_reply(2),
+        "late-read": script((0 | 0x04, 0), (3, 0)) +
+        sur_reply(1, num_frames=1) + frame + sur_reply(2),
+        "ioctl": script((1, 8)) + sur_reply(1, data=bytes(range(12))),
+        "ioctl-past": script((1, 64)) + sur_reply(1, data=bytes(64), data_len=65),
+        "texts": script((2, 0)) + sur_reply(1, text=b"A" * SUR_TEXT),
+    }
 
 
 # sim_security.h's levels: the seed request's sub-function and its seed
