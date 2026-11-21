@@ -202,6 +202,57 @@ TEST(RequestEngineTest, SilenceEndsTheWalkAndDropsNothing) {
     EXPECT_EQ(e.chans[0].requests, 2u);
 }
 
+/* A stray single frame answers the first bitmap's ask and its wait runs
+ * out: the retry is due, so the support report says nothing was asked
+ * yet (a front end reads PROBED with no range as "no answer"). Answered
+ * on the retry, it reports the chain. */
+TEST(RequestEngineTest, ARetryDueIsNotAMissedSupportQuery) {
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    ecuio_engine_probe(&e);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
+    const uint8_t stray[3] = {0x41, 0x05, 0x46};
+    (void)ecuio_engine_on_frame(&e, 0, stray, sizeof stray, 4 * kMs, nullptr);
+    ASSERT_TRUE(e.chans[0].walk_stray);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US));
+    ASSERT_TRUE(e.chans[0].walking) << "the retry is due";
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.flags & ECUIO_SUPPORT_PROBED, 0u);
+
+    const int64_t now = ECUIO_ENGINE_WAIT_US + ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+    ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00100000u, now + 4 * kMs),
+              ecuio_reply::positive);
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
+    EXPECT_EQ(s.ranges, 0x1u);
+}
+
+/* The retry is used up when a stray comes again: the walk gives up and
+ * the report says the query was asked and not answered. */
+TEST(RequestEngineTest, AWalkThatGivesUpAfterItsRetryIsReportedUnanswered) {
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    ecuio_engine_probe(&e);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
+    const uint8_t stray[3] = {0x41, 0x05, 0x46};
+    (void)ecuio_engine_on_frame(&e, 0, stray, sizeof stray, 4 * kMs, nullptr);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, ECUIO_ENGINE_WAIT_US));
+    int64_t now = ECUIO_ENGINE_WAIT_US + ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, now));
+    (void)ecuio_engine_on_frame(&e, 0, stray, sizeof stray, now + 4 * kMs,
+                                nullptr);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
+    ASSERT_FALSE(e.chans[0].walking);
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED);
+    EXPECT_EQ(s.ranges, 0u);
+}
+
 /* A bitmap whose wait ends after a reply naming another PID is asked
  * once more: on the car, 01 00 drew 41 1F 00 01, the run time's answer
  * (docs/bench-sessions/2026-10-29-android.md). Asked again, it's
