@@ -2581,6 +2581,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_clock.cpp
         ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
