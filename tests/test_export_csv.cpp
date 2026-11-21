@@ -25,7 +25,7 @@ TEST(CsvExportTest, TextAndIdentificationSignalsAreLeftOut)
               header);
     CsvExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes,
+    EXPECT_EQ(unbommed(e.bytes),
               csv_head("a scrubbed export",
                        "2 values of 1 signals, 0.002000 s to 0.004000 s", 1,
                        3) +
@@ -142,7 +142,7 @@ TEST(CsvExportTest, WideWritesARowPerSweepOverEveryNumberSignal)
     fs::remove(f.path / "rec" / "frames.csv");
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
                        "160,800,0,10.5\r\n"
                        "260,801,0,11.5\r\n"
                        "360,802,1,12.5\r\n");
@@ -156,11 +156,11 @@ TEST(CsvExportTest, WideWritesARowPerSweepOverEveryNumberSignal)
     WideExported mid(f, {}, 0, ECUIO_UNITS_METRIC, 0, 200000, 300000,
                      "mid.csv");
     ASSERT_EQ(mid.rc, ECUIO_OK) << mid.detail;
-    EXPECT_EQ(mid.bytes, "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
+    EXPECT_EQ(unbommed(mid.bytes), "Time (ms),RPM (rpm),Speed (km/h),Throttle (%)\r\n"
                          "260,801,0,11.5\r\n");
     WideExported none(f, {}, 0, ECUIO_UNITS_METRIC, 0, 9000000, 0, "none.csv");
     ASSERT_EQ(none.rc, ECUIO_OK) << none.detail;
-    EXPECT_EQ(none.bytes, "Time (ms)\r\n");
+    EXPECT_EQ(unbommed(none.bytes), "Time (ms)\r\n");
     EXPECT_EQ(none.report.rows, 0u);
 }
 
@@ -361,7 +361,7 @@ TEST(CsvExportTest, WideColumnsSparseAlikeAllKeepTheRule)
     recording(f, "", sample_rows(s));
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),A,B,C\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),A,B,C\r\n"
                        "900,0,0,0\r\n"
                        "2900,1,1,1\r\n"
                        "4900,2,2,2\r\n"
@@ -481,7 +481,7 @@ TEST(CsvExportTest, WideAGridHoldsTheNewestValuesAndSkipsAnEmptyStep)
               "530000,RPM,820,rpm\n");
     WideExported e(f, {}, 100);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm),Speed (km/h)\r\n"
                        "100,800,3\r\n"
                        "200,810,3\r\n"
                        "600,820,3\r\n");
@@ -491,7 +491,7 @@ TEST(CsvExportTest, WideAGridHoldsTheNewestValuesAndSkipsAnEmptyStep)
     /* A --from past the zero keeps the grid on the zero's multiples */
     WideExported late(f, {}, 100, ECUIO_UNITS_METRIC, 0, 55000, 0, "late.csv");
     ASSERT_EQ(late.rc, ECUIO_OK) << late.detail;
-    EXPECT_EQ(late.bytes, "Time (ms),Speed (km/h),RPM (rpm)\r\n"
+    EXPECT_EQ(unbommed(late.bytes), "Time (ms),Speed (km/h),RPM (rpm)\r\n"
                           "100,3,\r\n"
                           "200,3,810\r\n"
                           "600,3,820\r\n");
@@ -508,7 +508,7 @@ TEST(CsvExportTest, WideASweepRowsTimeIsTheCompletingSamplesToTheNearestMs)
               "200000,RPM,801,rpm\n200500,Speed,4,km/h\n");
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm),Speed (km/h)\r\n"
                        "101,800,3\r\n"
                        "201,801,4\r\n");
 }
@@ -524,7 +524,7 @@ TEST(CsvExportTest, WideAGridAppliesTheSilenceAtTheStepItWrites)
               "1050000,RPM,810,rpm\n1250000,RPM,820,rpm\n");
     WideExported e(f, {}, 100);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm),Speed (km/h)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm),Speed (km/h)\r\n"
                        "100,800,3\r\n"
                        "1100,810,\r\n"
                        "1300,820,\r\n");
@@ -540,7 +540,7 @@ TEST(CsvExportTest, WideAGridJumpsAGapWithNothingNew)
     const auto begun = std::chrono::steady_clock::now();
     WideExported e(f, {}, 1);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm)\r\n"
                        "0,800\r\n"
                        "1000000000000,801\r\n");
     EXPECT_EQ(e.report.rows, 2u);
@@ -554,7 +554,7 @@ TEST(CsvExportTest, WideAValuePastTheFixedDigitsIsWrittenAsRecorded)
     recording(f, "", "100000,RPM,1e17,rpm\n200000,RPM,-2.5e16,rpm\n");
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),RPM (rpm)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),RPM (rpm)\r\n"
                        "100,1e+17\r\n"
                        "200,-2.5e+16\r\n");
     EXPECT_EQ(e.report.values, 2u);
@@ -569,12 +569,12 @@ TEST(CsvExportTest, WideCellsFollowTheHeadersDecimalsAndTheUnits)
     recording(f, "", "1000,Speed,100,km/h\n2000,Boost,101.3,kPa\n", header);
     WideExported metric(f);
     ASSERT_EQ(metric.rc, ECUIO_OK) << metric.detail;
-    EXPECT_EQ(metric.bytes, "Time (ms),Speed (km/h),Boost (kPa)\r\n"
+    EXPECT_EQ(unbommed(metric.bytes), "Time (ms),Speed (km/h),Boost (kPa)\r\n"
                             "2,100,101.3\r\n");
     WideExported imperial(f, {}, 0, ECUIO_UNITS_IMPERIAL, 0, 0, 0,
                           "imperial.csv");
     ASSERT_EQ(imperial.rc, ECUIO_OK) << imperial.detail;
-    EXPECT_EQ(imperial.bytes, "Time (ms),Speed (mph),Boost (psi)\r\n"
+    EXPECT_EQ(unbommed(imperial.bytes), "Time (ms),Speed (mph),Boost (psi)\r\n"
                               "2,62,14.69\r\n");
 }
 
@@ -626,13 +626,13 @@ TEST(CsvExportTest, WideTakesTheFocusLinesColumnsWhenNoneAreNamed)
     recording(f, "", polled_rows(2), "profile  raw\nfocus  Speed,RPM\n");
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),Speed (km/h),RPM (rpm)\r\n"
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),Speed (km/h),RPM (rpm)\r\n"
                        "130,0,800\r\n"
                        "230,0,801\r\n");
     WideExported all(f, {"Throttle"}, 0, ECUIO_UNITS_METRIC, 0, 0, 0,
                      "all.csv");
     ASSERT_EQ(all.rc, ECUIO_OK) << all.detail;
-    EXPECT_EQ(all.bytes, "Time (ms),Throttle (%)\r\n160,10.5\r\n260,11.5\r\n");
+    EXPECT_EQ(unbommed(all.bytes), "Time (ms),Throttle (%)\r\n160,10.5\r\n260,11.5\r\n");
 }
 
 /* A front end's default pick names no columns: a recording with a pick
@@ -708,7 +708,7 @@ TEST(CsvExportTest, WideTextAndIdentificationSignalsAreNeverColumns)
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
     /* Extra, in the rule from the start, holds the rows until its first
      * sample, which completes the one row */
-    EXPECT_EQ(e.bytes, "Time (ms),DID D803,Extra\r\n7,4661,7\r\n");
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),DID D803,Extra\r\n7,4661,7\r\n");
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION], 1u);
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES], 3u);
 }
@@ -722,7 +722,7 @@ TEST(CsvExportTest, WideQuotesAHeadAndRefusesAFormula)
               "1000,\"Trim, bank 1\",3.1,%\n2000,\"Trim, bank 1\",3.2,%\n");
     WideExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes, "Time (ms),\"Trim, bank 1 (%)\"\r\n1,3.1\r\n2,3.2\r\n");
+    EXPECT_EQ(unbommed(e.bytes), "Time (ms),\"Trim, bank 1 (%)\"\r\n1,3.1\r\n2,3.2\r\n");
     Folder g;
     recording(g, "", "1000,=RPM,5,rpm\n");
     WideExported bad(g);

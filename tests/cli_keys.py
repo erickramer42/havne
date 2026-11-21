@@ -125,7 +125,7 @@ def recording(cli):
                                     "--signal", RPM2, "--signal", "Boost",
                                     "--signal", "Nothing"])
         done = [r for r in rows if r["type"] == "exported"]
-        head = Path(out).read_text("utf-8").splitlines()[0] if done else ""
+        head = Path(out).read_text("utf-8-sig").splitlines()[0] if done else ""
         if code != 0 or len(done) != 1 or done[0]["missing"] != 1 or \
                 head != "Time (ms),RPM (rpm),Boost (kPa),Nothing" or \
                 "'Nothing'" not in err:

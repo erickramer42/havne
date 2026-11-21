@@ -5,6 +5,39 @@
 
 namespace {
 
+/* Excel reads a CSV without a byte order mark as ANSI, so the units
+ * ("%", "psi", a degree sign) show garbled: both user CSVs start with one,
+ * once, and the long one's comment line follows it */
+TEST(ExportTest, EachUserCsvStartsWithAByteOrderMark)
+{
+    Folder f;
+    recording(f, "", polled_rows(5));
+    const std::string folder = f.utf8("rec");
+    for (const uint32_t layout : {ECUIO_CSV_LONG, ECUIO_CSV_WIDE}) {
+        for (const uint32_t flags : {0u, uint32_t{ECUIO_EXPORT_RAW}}) {
+            SCOPED_TRACE(layout);
+            const std::string name =
+                "bom" + std::to_string(layout) + std::to_string(flags);
+            ecuio_export_options_t o{};
+            o.format = ECUIO_EXPORT_CSV;
+            o.layout = layout;
+            o.flags = flags;
+            const std::string out = f.utf8(name);
+            o.folder_utf8 = folder.c_str();
+            o.out_path_utf8 = out.c_str();
+            ecuio_export_report_t r{};
+            ASSERT_EQ(ecuio_export(&o, &r), ECUIO_OK)
+                << ecuio_last_error_detail();
+            const std::string bytes = read_file(f.path / name);
+            ASSERT_GT(bytes.size(), 8u);
+            EXPECT_EQ(bytes.substr(0, 3), kBom);
+            EXPECT_NE(bytes.substr(3, 3), kBom) << "written once";
+            EXPECT_EQ(bytes.substr(3, 1), layout == ECUIO_CSV_LONG ? "#" : "T")
+                << "the comment line, or the header, right after it";
+        }
+    }
+}
+
 /* The estimate answers several intervals in one pass with what each
  * export then writes: the rows, the bytes exactly, the columns */
 TEST(ExportTest, TheEstimateMatchesTheFileForEachInterval)

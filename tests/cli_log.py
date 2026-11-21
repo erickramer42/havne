@@ -264,7 +264,7 @@ def demo(cli):
         if code != 0:
             print(f"FAIL  export exit {code}\n{err}")
             return 1
-        text = out.read_bytes().decode("utf-8")
+        text = out.read_bytes().decode("utf-8-sig")
         lines = text.split("\r\n")
         if lines[0] != HEAD:
             print(f"FAIL  the wide header {lines[0]!r}, want {HEAD!r}")
