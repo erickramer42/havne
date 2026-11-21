@@ -6,10 +6,4 @@
 # added by hand only. Exempt: data tables, generated files, core/include/ecuio/
 # (the public headers) and third_party/.
 app/sessionbridge.h	1352
-core/src/j2534_surrogate_client.cpp	1346
-tests/fake_j2534.cpp	1256
 tests/test_c_abi.c	1389
-tests/test_j2534_health.cpp	1893
-tests/test_j2534_stream.cpp	3855
-tests/test_j2534_surrogate.cpp	1546
-tests/test_obd2.cpp	7966
