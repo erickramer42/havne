@@ -2615,6 +2615,9 @@ endif()
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_health_vx.cpp
+        test_j2534_health_replies.cpp
+        test_j2534_health_overflow.cpp
         test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
