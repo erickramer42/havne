@@ -51,17 +51,26 @@ def count_lines(full):
     return n + (1 if data and not data.endswith(b"\n") else 0)
 
 
-def tracked(root):
-    """The tracked source files and the new ones not yet added (a local run
-    sees what CI will), less any tracked file deleted in the working tree
-    (a split under way)."""
-    out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--cached", "--others",
-                          "--exclude-standard"], capture_output=True)
+def ls_files(root, *flags):
+    out = subprocess.run(["git", "-C", root, "ls-files", "-z"] + list(flags),
+                         capture_output=True)
     if out.returncode != 0:
         raise SystemExit("filelength: git ls-files failed: "
                          + out.stderr.decode("utf-8", "replace").strip())
-    paths = sorted(set(out.stdout.decode("utf-8", "surrogateescape").split(chr(0))))
-    return [p for p in paths if p and p.lower().endswith(SUFFIXES)
+    return [p for p in out.stdout.decode("utf-8", "surrogateescape").split(chr(0)) if p]
+
+
+def tracked(root):
+    """The tracked source files and the new ones not yet added (a local run
+    sees what CI will), less any tracked file deleted in the working tree
+    (a split under way). A new file counts only under a top-level folder git
+    already tracks: CI's Qt kit sits untracked and unignored in the checkout."""
+    cached = ls_files(root, "--cached")
+    roots = {p.split("/")[0] for p in cached if "/" in p}
+    new = [p for p in ls_files(root, "--others", "--exclude-standard")
+           if "/" in p and p.split("/")[0] in roots]
+    paths = sorted(set(cached) | set(new))
+    return [p for p in paths if p.lower().endswith(SUFFIXES)
             and os.path.isfile(os.path.join(root, p))]
 
 
@@ -233,6 +242,15 @@ def selftest():
     rc = judge_run(d)
     expect("a new file not yet added is judged", rc[0], 1)
     expect("and named", "a/new.cpp" in rc[1], True)
+    d = tree({"a/y.cpp": 10}, {})
+    os.makedirs(os.path.join(d, "Qt/inc"))
+    with open(os.path.join(d, "Qt/inc/big.h"), "w", newline="\n") as fh:
+        fh.write("x\n" * 1200)
+    expect("an untracked top-level folder is not judged", judge_run(d)[0], 0)
+    d = tree({"core/y.cpp": 10}, {})
+    with open(os.path.join(d, "core/new.cpp"), "w", newline="\n") as fh:
+        fh.write("x\n" * 1200)
+    expect("a long untracked file under a tracked folder fails", judge_run(d)[0], 1)
     d = tree({"a/y.cpp": 10}, {})
     with open(os.path.join(d, ".gitignore"), "w") as fh:
         fh.write("out/\n")
