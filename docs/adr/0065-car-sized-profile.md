@@ -1153,3 +1153,20 @@ back-off clause stays as the fallback for a loss the hold doesn't cover.
   module loses next to nothing, the first keeps about 0.64 of its rate) is
   the pacing model's. Known Issue #42 stays open until a car run confirms
   it.
+
+### The order is per signal (2026-11-20)
+
+The channels that wait for the bus are ranked by the age of each channel's
+next fast row (the time since that row was last written), not by turns,
+so a module with more rows takes more turns and each signal is asked
+about as often as every other. Channels whose last write was a Single
+Frame go first; a Single Frame channel whose reply outlasts its channel's
+floor takes one extra turn for each segmented exchange, so a big Single
+Frame module keeps up with the segmented ones. A row waits at most for the
+Single Frames in flight, one extra pass and each older row once. Whether a
+row's first ask shares the bus is judged by its defs and, for a Service 01
+PID, by J1979's length, until a reply shows its frames. On the pacing
+model's four-module shape through the VX, equal turns gave 102.8 values a
+second with the slowest signal's median at 1,573 ms; the order gives 137.4
+and 721 ms, and the first laps lose no reply. The figures are the model's;
+no car run has measured them.

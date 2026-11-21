@@ -52,9 +52,12 @@ extern "C" {
 typedef struct ecuio_plugin ecuio_plugin_t; /* opaque */
 
 /* The host's reader for a folder package: the bytes of the file at a
- * manifest-relative path (forward slashes, no "..", checked before the
+ * manifest-relative path (forward slashes, no "..", no part a Windows
+ * device name such as con.json or ending in a dot, checked before the
  * call), valid until the next call or the load's return. Returns 0 with
- * *bytes and *length set, nonzero when the file can't be read. */
+ * *bytes and *length set, nonzero when the file can't be read. A packed
+ * file's paths are keys in its text, which nothing opens, and may take
+ * such a name. */
 typedef int (*ecuio_plugin_read_t)(void* user, const char* path,
                                    const char** bytes, size_t* length);
 
@@ -347,6 +350,31 @@ static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
               "plugin security level delay_ms offset is ABI");
 static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
               "plugin security level flags offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_conversation_t) == 64,
+               "ecuio_plugin_conversation_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_t, budget) == 40,
+               "plugin conversation budget offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_conversation_ecu_t) == 64,
+               "ecuio_plugin_conversation_ecu_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12,
+               "plugin conversation ecu id offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44,
+               "plugin conversation ecu flags offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_service_t) == 32,
+               "ecuio_plugin_service_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_service_t, subs) == 6,
+               "plugin service subs offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_service_t, flags) == 20,
+               "plugin service flags offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_security_level_t) == 40,
+               "ecuio_plugin_security_level_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, level) == 8,
+               "plugin security level level offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
+               "plugin security level delay_ms offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
+               "plugin security level flags offset is ABI");
 #endif
 
 /* The conversation tier's part of plugin. ECUIO_ERR_NULL_ARGUMENT for a
@@ -458,8 +486,9 @@ _Static_assert(offsetof(ecuio_plugin_wrap_options_t, id) == 40,
  * - "source" and "ecus": the file's, moved to the manifest. "match":
  *   one entry, options->wmi's codes with options->years, only with wmi.
  * - One variant (options->variant, or "base") of one data file,
- *   "data/<variant>.json": the file without its "source" and "ecus",
- *   every other member as it was read.
+ *   "data/<variant>.json" ("data/<variant>-2.json" and on when that
+ *   names a Windows device, as aux does): the file without its
+ *   "source" and "ecus", every other member as it was read.
  * The variant's set is the file's own, table by table, and its keys
  * the file's. A file at the edge of the loader's bounds may load and
  * not wrap: the plugin holds it two levels deeper, and the variant's
@@ -487,9 +516,10 @@ ecuio_status_t ecuio_plugin_wrap(const char* file, size_t length,
  *   "name", "lineage", "source", "match" and every other
  *   variant: as they were.
  * - The data file is "data/<variant>.json" ("data/<variant>-2.json"
- *   and on while a file that stays has the path): the signal file
- *   without its "ecus", its own "source" kept, which then names where
- *   that variant comes from in every recording of it.
+ *   and on while a file that stays has the path or it names a Windows
+ *   device): the signal file without its "ecus", its own "source"
+ *   kept, which then names where that variant comes from in every
+ *   recording of it.
  * - The file's ECUs join the manifest's, which all variants share. One
  *   at the addresses (rx and tx) of an ECU the manifest has is that
  *   ECU, under the manifest's id; any other is added, under its own id

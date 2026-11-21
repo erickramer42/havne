@@ -42,7 +42,7 @@ Bytes bytes_of(const isotp_can& f)
     return Bytes(f.data, f.data + f.len);
 }
 
-/* 4 KB and 32 KB: kept off the stack, fresh for each case */
+/* Too big for a stack (isotp.h): kept off it, fresh for each case */
 isotp_tx& fresh_tx()
 {
     static isotp_tx t;

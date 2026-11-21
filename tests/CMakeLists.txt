@@ -161,7 +161,8 @@ add_executable(test_obd2 test_obd2.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
-    test_j2534_hold_order.cpp test_sim_car.cpp test_sim_timing.cpp
+    test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
+    test_sim_timing.cpp
     test_scan_retry.cpp test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE
@@ -204,7 +205,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_stream.cpp test_elm327_session_links.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
-    test_elm327_pack.cpp)
+    test_elm327_pack.cpp test_elm327_gate.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -2592,6 +2593,7 @@ if(WIN32)
         ../tests/test_j2534_stream_stamps.cpp
         ../tests/test_j2534_stream_focus.cpp
         ../tests/test_j2534_stream_condition.cpp
+        ../tests/test_j2534_clock.cpp
         ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).

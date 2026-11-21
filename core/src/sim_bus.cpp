@@ -35,6 +35,9 @@
 
 namespace {
 
+/* Frames read per pass before the stop, the clock and the waiting
+ * replies are looked at again, as SocketCAN's kReadBurst */
+constexpr int kReadBurst = 256;
 constexpr int64_t kTickUs = ECUIO_SIM_TICK_US;
 static_assert(kTickUs == static_cast<int64_t>(ecuio_mock::kTickS * 1e6f + 0.5f),
               "one drive cycle step per tick");
@@ -299,10 +302,11 @@ void flow(sim_node& n, const isotp_can& f, int64_t now)
     }
 }
 
-/* Reads every frame waiting. False when the bus failed. */
+/* Reads the frames waiting, kReadBurst at most. False when the bus
+ * failed. */
 bool drain(ecuio_sim* s)
 {
-    for (;;) {
+    for (int read_n = 0; read_n < kReadBurst; ++read_n) {
         struct can_frame c;
         const ssize_t got = read(s->fd, &c, sizeof c);
         if (got < 0) {
@@ -341,6 +345,7 @@ bool drain(ecuio_sim* s)
             }
         }
     }
+    return true;
 }
 
 void run(ecuio_sim* s)

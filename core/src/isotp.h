@@ -15,6 +15,7 @@
 #define ECUIO_ISOTP_H
 
 #include "ecuio/core.h"
+#include "ecuio/signals.h"
 
 #include <cstdint>
 #include <cstring>
@@ -26,9 +27,12 @@ constexpr int64_t ECUIO_ISOTP_N_AS_US = 25000;
 constexpr int64_t ECUIO_ISOTP_N_BS_US = 75000;
 constexpr int64_t ECUIO_ISOTP_N_CR_US = 150000;
 
-/* Messages under way at once: one per reply ID, and ISO 15765-4 has up
- * to eight ECUs answering in parallel. Past this the oldest gives way. */
-constexpr uint32_t ECUIO_ISOTP_SLOTS = 8;
+/* Messages under way at once: one per reply ID, a slot for each module a
+ * session reads, since a requesting SocketCAN session has a request out
+ * on every module at once. Past this the oldest gives way. */
+constexpr uint32_t ECUIO_ISOTP_SLOTS = ECUIO_MAX_CHANNELS;
+static_assert(ECUIO_ISOTP_SLOTS >= ECUIO_MAX_CHANNELS,
+              "a message under way for each module a session reads");
 
 /* The longest message: a First Frame's 12-bit length. ISO 15765-2's
  * escape to a 32-bit length isn't taken, since a longer message doesn't
@@ -146,9 +150,11 @@ struct isotp_rx_slot {
     uint8_t data[ECUIO_ISOTP_MAX] = {};
 };
 
-/* 32 KB: it lives with its transport, never on a worker's stack. */
-struct isotp_rx {
-    isotp_rx_slot slots[ECUIO_ISOTP_SLOTS];
+/* A receiver of Slots messages under way at once; isotp_rx, a session's,
+ * is about 132 KB and lives on the heap with its holder, never on a
+ * worker's stack. */
+template <uint32_t Slots> struct isotp_rx_of {
+    isotp_rx_slot slots[Slots];
     /* N_Cr applies: frames carry the times they arrived. An ELM327's
      * lines come in a burst at its prompt, which ends a reply instead
      * (isotp_end_all). */
@@ -163,6 +169,8 @@ struct isotp_rx {
      * Consecutive Frame with nothing begun. */
     uint32_t malformed = 0;
 };
+
+using isotp_rx = isotp_rx_of<ECUIO_ISOTP_SLOTS>;
 
 /* A whole message: its CAN ID and its bytes, the service byte first.
  * data points into the frame given (a Single Frame) or the slot (a
@@ -183,7 +191,8 @@ enum class isotp_result : uint8_t {
     dropped    /* it ended a message unfinished */
 };
 
-inline isotp_rx_slot* isotp_rx_find(isotp_rx& r, uint32_t id)
+template <uint32_t Slots>
+inline isotp_rx_slot* isotp_rx_find(isotp_rx_of<Slots>& r, uint32_t id)
 {
     for (isotp_rx_slot& s : r.slots) {
         if (s.active && s.id == id) {
@@ -196,8 +205,9 @@ inline isotp_rx_slot* isotp_rx_find(isotp_rx& r, uint32_t id)
 /* A frame received at now_us. Frames shorter than 8 bytes are taken when
  * they hold what their PCI says (ECUs outside legislated OBD needn't
  * pad), except a First Frame, which ISO 15765-2 has fill its frame. */
-inline isotp_result isotp_take(isotp_rx& r, const isotp_can& f, int64_t now_us,
-                               isotp_message* out)
+template <uint32_t Slots>
+inline isotp_result isotp_take(isotp_rx_of<Slots>& r, const isotp_can& f,
+                               int64_t now_us, isotp_message* out)
 {
     isotp_rx_slot* s = isotp_rx_find(r, f.id);
     switch (isotp_kind(f)) {
@@ -293,7 +303,8 @@ inline isotp_result isotp_take(isotp_rx& r, const isotp_can& f, int64_t now_us,
 
 /* Ends every message whose next Consecutive Frame is later than N_Cr at
  * now_us; a timed receiver's worker calls it each pass. Returns how many. */
-inline uint32_t isotp_expire(isotp_rx& r, int64_t now_us)
+template <uint32_t Slots>
+inline uint32_t isotp_expire(isotp_rx_of<Slots>& r, int64_t now_us)
 {
     uint32_t n = 0;
     if (!r.timed) {
@@ -311,7 +322,7 @@ inline uint32_t isotp_expire(isotp_rx& r, int64_t now_us)
 
 /* Ends every message under way (an ELM327's prompt: it no longer
  * listens). Returns how many. */
-inline uint32_t isotp_end_all(isotp_rx& r)
+template <uint32_t Slots> inline uint32_t isotp_end_all(isotp_rx_of<Slots>& r)
 {
     uint32_t n = 0;
     for (isotp_rx_slot& s : r.slots) {

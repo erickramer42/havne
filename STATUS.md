@@ -121,7 +121,8 @@ an issue is resolved it is removed, and its number is not reused.
     ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
     **A hold is built, to confirm on the car:** with two or more modules
     through the VX, no other module is asked while one module's reply
-    comes in segments (`?hold=0` switches it off,
+    comes in segments, and the modules waiting share the bus by signal
+    (`?hold=0` switches it off,
     [ADR-0065](docs/adr/0065-car-sized-profile.md)'s appendix). The fake
     DLL and the pacing model show it losing no reply; no car run has yet.
     The issue closes after the car run.

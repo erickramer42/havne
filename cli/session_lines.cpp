@@ -16,6 +16,7 @@
 #include "scan_line.h"
 #include "signal_file_lines.h"
 
+#include "partial_file.h"
 #include "profile_source.h"
 #include "session_lines.h"
 #include "common.h"
@@ -569,6 +570,20 @@ void write_recording(Output& out, const char* state, const char* key,
     write_line(out, l);
 }
 
+// A recorder that never attached: its folder holds only the open's three
+// files, empty, so it goes as the app's goes and no list shows it
+void remove_unattached(const std::string& folder)
+{
+    for (const char* file : {"/frames.csv", "/signals.csv", "/events.log"}) {
+        cli::remove_file(folder + file);
+    }
+#ifdef _WIN32
+    RemoveDirectoryW(cli::utf8_to_wide(folder.c_str()).c_str());
+#else
+    rmdir(folder.c_str());
+#endif
+}
+
 } // namespace
 
 // stream --record and log: a recorder opened under root (with the label)
@@ -606,8 +621,18 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
         why = ecuio_last_error_detail();
     }
     if (st != ECUIO_OK) {
+        char made[4096] = "";
+        uint32_t made_len = 0;
+        const bool named =
+            !armed &&
+            ecuio_recorder_get_folder(*recorder, made, sizeof made,
+                                      &made_len) == ECUIO_OK &&
+            made_len < sizeof made;
         ecuio_recorder_close(*recorder, "the session couldn't be recorded");
         *recorder = nullptr;
+        if (named) {
+            remove_unattached(made);
+        }
         write_recording(out, "failed", "reason",
                         armed && !why.empty() ? why.c_str()
                                               : ecuio_status_string(st));

@@ -59,6 +59,27 @@ inline uint8_t ecuio_engine_reply_frames(uint32_t len)
     return frames < 255u ? static_cast<uint8_t>(frames) : uint8_t{255};
 }
 
+/* Row q's frames from an answer, its wait run out no more */
+inline void ecuio_engine_row_frames(ecuio_request& q, uint8_t frames)
+{
+    q.reply_frames = frames;
+    q.ran_out = 0;
+}
+
+/* Channel c's rows whose wait ran out before any answer go back to no
+ * answer, so their defs judge them again: the module was asleep, not
+ * leaving them unanswered */
+inline void ecuio_engine_forget_ran_out(ecuio_request_engine* e, uint32_t c)
+{
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& q = e->requests[i];
+        if (q.channel == c && q.ran_out != 0) {
+            q.reply_frames = 0;
+            q.ran_out = 0;
+        }
+    }
+}
+
 /* A found DID joins channel c's rotation, room permitting, a new row
  * knowing the frames its scan's reply of reply_len bytes took (0: none
  * seen) */
@@ -71,8 +92,8 @@ inline void ecuio_engine_scan_poll(ecuio_request_engine* e, uint32_t c,
     s.polled = (r == ecuio_engine_add_result::added ||
                 r == ecuio_engine_add_result::duplicate) ? 1 : 0;
     if (r == ecuio_engine_add_result::added && reply_len > 0) {
-        e->requests[e->count - 1].reply_frames =
-            ecuio_engine_reply_frames(reply_len);
+        ecuio_engine_row_frames(e->requests[e->count - 1],
+                                ecuio_engine_reply_frames(reply_len));
     }
 }
 
@@ -175,10 +196,18 @@ inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
 
 /* Asks every unanswered scan entry, identification item and diagnostics
  * item again: the driver's call when the link returns to ok, as the walk
- * resumes. Silence wasn't an answer. A channel mid-clear keeps its
+ * resumes. Silence wasn't an answer: a row whose wait ran out before any
+ * answer is judged by its defs again. A channel mid-clear keeps its
  * report as the caller saved it until the clear ends. */
 inline void ecuio_engine_rescan(ecuio_request_engine* e)
 {
+    for (uint32_t i = 0; i < e->count; ++i) {
+        ecuio_request& q = e->requests[i];
+        if (q.ran_out != 0) {
+            q.reply_frames = 0;
+            q.ran_out = 0;
+        }
+    }
     for (uint32_t i = 0; i < e->scan_count; ++i) {
         ecuio_scan_entry& s = e->scan[i];
         s.retried = 0; /* the link's return starts a round of its own */

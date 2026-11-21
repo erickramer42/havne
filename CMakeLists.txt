@@ -99,11 +99,13 @@ if(MSVC)
     # Reproducible binaries (ADR-0035): /Brepro replaces the PE timestamp and
     # the debug GUID with a content hash; /d1trimfile drops the source
     # folder from __FILE__ and the debug info, so a build elsewhere matches.
+    # The compile options take the dash spelling: sccache reads an unknown
+    # "/" option as a second input file and caches nothing.
     option(HAVNE_REPRODUCIBLE "MSVC Release: /Brepro and trimmed source paths" ON)
     if(HAVNE_REPRODUCIBLE)
         file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}" _src_native)
-        add_compile_options("$<$<CONFIG:Release>:/Brepro>"
-                            "$<$<CONFIG:Release>:/d1trimfile:${_src_native}\>")
+        add_compile_options("$<$<CONFIG:Release>:-Brepro>"
+                            "$<$<CONFIG:Release>:-d1trimfile:${_src_native}\>")
         add_link_options("$<$<CONFIG:Release>:/Brepro>")
     endif()
     # The Visual Studio generator hands MSBuild one project at a time and

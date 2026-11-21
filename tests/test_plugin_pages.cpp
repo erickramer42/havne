@@ -473,6 +473,71 @@ TEST(PluginPagesTest, APageIsAPathListedOnceAndFound)
               std::string::npos);
 }
 
+/* A Windows device name (any case, any extension, in any part) or a part
+ * ending in a dot, which Windows drops, opens the device or another file
+ * from disk: a folder's read refuses it before the host reads, a page or
+ * a data file alike. A packed file's paths are keys in its text, so a
+ * plugin installed with one still loads */
+TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
+{
+    const char* const names[] = {"con.json", "p/nul", "Com1.tar.json",
+                                 "p./q.json", "AUX.json"};
+    for (const char* name : names) {
+        SCOPED_TRACE(name);
+        Package k;
+        k.pages = {{name, kPhone}};
+        EXPECT_EQ(load_packed(k).status, ECUIO_OK) << load_packed(k).detail;
+        const Loaded folder = load_folder(k);
+        EXPECT_EQ(folder.status, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(folder.detail.find("page '" + std::string(name) +
+                                     "' is a Windows device name (con, nul, "
+                                     "com1, ...) or ends in a dot: a "
+                                     "folder's file isn't read by such a "
+                                     "name"),
+                  std::string::npos)
+            << folder.detail;
+    }
+    Package data;
+    data.data = {
+        {"data/aux.json", plugin_wrap_test::data(sig("oil", "F40D", "pcm"))}};
+    data.variants = R"({"id": "base", "files": ["data/aux.json"]})";
+    EXPECT_EQ(load_packed(data).status, ECUIO_OK) << load_packed(data).detail;
+    const Loaded folder = load_folder(data);
+    EXPECT_EQ(folder.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(folder.detail.find("file 'data/aux.json' is a Windows device "
+                                 "name"),
+              std::string::npos)
+        << folder.detail;
+
+    /* a fixture the host opens itself (plugins check), refused at load */
+    Package fixtures;
+    fixtures.more = R"("fixtures": ["values.json"], )";
+    EXPECT_EQ(load_folder(fixtures).status, ECUIO_OK)
+        << load_folder(fixtures).detail;
+    fixtures.more = R"("fixtures": ["values.json", "t/Aux.json"], )";
+    const Loaded fixture = load_folder(fixtures);
+    EXPECT_EQ(fixture.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(fixture.detail.find("fixture 't/Aux.json' is a Windows device "
+                                  "name (con, nul, com1, ...) or ends in a "
+                                  "dot"),
+              std::string::npos)
+        << fixture.detail;
+}
+
+// A name that only starts like a Windows device is a path like any other
+TEST(PluginPagesTest, ANameLikeADevicesIsAPath)
+{
+    Package k;
+    k.pages = {{"console.json", kPhone},
+               {"com10.json", kPhone},
+               {"lpt/nully.json", kPhone},
+               {"p.a/aux_page.json", kPhone}};
+    const Loaded both[] = {load_folder(k), load_packed(k)};
+    for (const Loaded& l : both) {
+        EXPECT_EQ(l.status, ECUIO_OK) << l.detail;
+    }
+}
+
 // A file is a page or a data file: a variant naming a page is refused,
 // and a packed page no "pages" entry names is a file in no variant
 TEST(PluginPagesTest, APageIsNeverAVariantsFile)

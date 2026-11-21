@@ -69,7 +69,7 @@ Reassembled reassemble(const std::string& bytes,
                        const std::vector<size_t>& chunks)
 {
     elm327_reader r;
-    static isotp_rx iso; /* 32 KB: kept off the stack */
+    static isotp_rx iso; /* too big for a stack (isotp.h) */
     iso = isotp_rx();
     Reassembled out;
     size_t at = 0;

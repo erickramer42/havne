@@ -541,6 +541,59 @@ TEST(J2534HoldTest, AChosenRowGoesUnlessTheFocusParkedItMeanwhile)
     }
 }
 
+/* A chosen pack one of whose rows the focus parked while it waited is
+ * dropped, not written: no value goes out for a signal the pick left */
+TEST(J2534HoldTest, AChosenPackWithARowParkedMeanwhileIsNotWritten)
+{
+    Bus b;
+    ASSERT_TRUE(ecuio_engine_init(&b.e, 2));
+    b.e.gap_us = 5 * kMs;
+    b.e.pack = true;
+    const uint8_t pids[] = {0x0C, 0x0D, 0x05, 0x0F, 0x11, 0x0B};
+    for (const uint8_t pid : pids) {
+        const uint8_t q[2] = {0x01, pid};
+        ASSERT_EQ(ecuio_engine_add(&b.e, 0, q, 2),
+                  ecuio_engine_add_result::added);
+    }
+    const uint8_t did[3] = {0x22, 0x1E, 0x80};
+    ASSERT_EQ(ecuio_engine_add(&b.e, 1, did, 3),
+              ecuio_engine_add_result::added);
+    ecuio_engine_probe(&b.e);
+    b.reply_of = [](uint32_t, const ecuio_request& q) { return obd2_ecu(q); };
+    for (int i = 0; i < 100000 && b.hold.chosen[0] != ECUIO_ENGINE_PACK &&
+                    b.now < 2000 * kMs;
+         ++i) {
+        b.pass();
+    }
+    ASSERT_EQ(b.hold.chosen[0], ECUIO_ENGINE_PACK) << "no pack waited";
+    ecuio_engine_channel& ch = b.e.chans[0];
+    ASSERT_EQ(ch.pack_count, 6u);
+    const uint32_t row = ch.pack_rows[2];
+    const uint8_t pid = b.e.requests[row].bytes[1];
+    b.e.requests[row].parked = 1;
+    --ch.requests;
+    const size_t from = b.exchanges.size();
+    for (int i = 0; i < 100000 && b.hold.chosen[0] != ECUIO_ENGINE_NONE &&
+                    b.now < 4000 * kMs;
+         ++i) {
+        b.pass();
+    }
+    ASSERT_EQ(b.hold.chosen[0], ECUIO_ENGINE_NONE);
+    b.until(b.now + 200 * kMs);
+    size_t writes = 0;
+    for (size_t i = from; i < b.exchanges.size(); ++i) {
+        const Exchange& x = b.exchanges[i];
+        if (x.c != 0) {
+            continue;
+        }
+        ++writes;
+        EXPECT_EQ(std::find(x.bytes.begin() + 1, x.bytes.end(), pid),
+                  x.bytes.end())
+            << "write " << i << " asks the parked PID";
+    }
+    EXPECT_GT(writes, 0u) << "channel 0 goes on with the rest";
+}
+
 /* A request in a pending wait (7F 22 78: 5.05 s) holds no one. Under
  * ?session=03 the other channel goes on asking and keeps its session;
  * waiting out the pending reply would stop its data for 5 s and lapse its
@@ -639,7 +692,7 @@ TEST(J2534HoldTest, AChannelIsSilentFromItsSecondWaitInARow)
             << "silent, channel 0 holds no one";
         e.chans[1].outstanding = ECUIO_ENGINE_NONE;
         if (how == 0) {
-            j2534_hold_answered(hold, 0);
+            j2534_hold_answered(hold, &e, 0);
         } else {
             j2534_hold_recovered(hold);
         }

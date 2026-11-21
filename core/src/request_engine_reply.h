@@ -69,7 +69,8 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
  * A scanned DID, an identification item, a diagnostics item or a
  * clear's request that times out is unanswered. A table row that times
  * out never answered counts one frame from then (reply_segmented), until
- * an answer, a late one too (ecuio_engine_late_frames), teaches it. */
+ * an answer, a late one too (ecuio_engine_late_frames), teaches it, or a
+ * recovery or its module's waking takes it back (ran_out). */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -97,6 +98,7 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
         if (static_cast<uint32_t>(out) < e->count &&
             e->requests[out].reply_frames == 0) {
             e->requests[out].reply_frames = 1;
+            e->requests[out].ran_out = 1;
         }
     } else if (pack) {
         for (uint32_t k = 0; k < ch.pack_count; ++k) {
@@ -167,7 +169,10 @@ inline void ecuio_engine_once_answered(ecuio_request_engine* e, uint32_t c,
 }
 
 /* The positive reply to request r, out on channel c: it completes the
- * request and puts the channel back in step */
+ * request and puts the channel back in step. Out of step a Service 01
+ * PID's reply teaches r only at J1979's length for it alone, as
+ * ecuio_engine_late_frames: the match reads the PID alone, so a late
+ * pack's reply that starts with r's PID would give r the pack's. */
 inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
                                               uint32_t c, int32_t out,
                                               const ecuio_request& r,
@@ -175,16 +180,21 @@ inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
                                               int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    const bool pid = r.len == 2 && r.bytes[0] == 0x01;
+    const bool learns =
+        out >= 0 &&
+        (ch.in_step || !pid || len == 2u + ECUIO_OBD2_PID_BYTES[r.bytes[1]]);
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = true;
     if (out >= 0) {
         ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true, false,
                                 now_us);
     }
-    if (out >= 0) {
-        e->requests[out].reply_frames = ecuio_engine_reply_frames(len);
+    if (learns) {
+        ecuio_engine_row_frames(e->requests[out],
+                                ecuio_engine_reply_frames(len));
     }
-    if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
+    if (learns && pid) {
         ecuio_engine_learn_pid_len(ch, r, len);
     }
     if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
@@ -219,7 +229,8 @@ inline void ecuio_engine_late_frames(ecuio_request_engine* e, uint32_t c,
                             did ? data[2] : uint8_t{0}};
     const int32_t row = ecuio_engine_find(e, c, req, did ? 3 : 2);
     if (row >= 0) {
-        e->requests[row].reply_frames = ecuio_engine_reply_frames(len);
+        ecuio_engine_row_frames(e->requests[row],
+                                ecuio_engine_reply_frames(len));
     }
 }
 
@@ -293,7 +304,7 @@ inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
     ecuio_engine_channel& ch = e->chans[c];
     /* Out of step a negative reply may be another row's */
     if (out >= 0 && ch.in_step) {
-        e->requests[out].reply_frames = 1; /* 7F <sid> <code> */
+        ecuio_engine_row_frames(e->requests[out], 1); /* 7F <sid> <code> */
     }
     if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
         ch.outstanding = ECUIO_ENGINE_NONE;
@@ -349,6 +360,10 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
     }
     const int32_t out = ch.outstanding;
     if (out == ECUIO_ENGINE_PACK) {
+        if (data[0] != 0x41) {
+            /* a 41 reply is the pack's own; another a late row's */
+            ecuio_engine_late_frames(e, c, data, len);
+        }
         if (ecuio_engine_scan_late(e, c, data, len)) {
             return ecuio_reply::none;
         }

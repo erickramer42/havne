@@ -164,7 +164,7 @@ TEST(RequestEngineTest, AWaitRunOutOrAnAnswerOutweighsTheDefs)
 }
 
 /* A positive reply after its row's wait ran out teaches the row its
- * frames, whether nothing is out or another row is: a DID's by its key, a
+ * frames, whether nothing, another row or a pack is out: a DID's by its key, a
  * PID's at J1979's length for it alone. A reply shaped as a pack, or
  * naming no row, teaches nothing */
 TEST(RequestEngineTest, ALateReplyTeachesItsRowsFrames)
@@ -211,6 +211,78 @@ TEST(RequestEngineTest, ALateReplyTeachesItsRowsFrames)
     const Bytes pack = {0x41, 0x0C, 0x1A, 0xF8, 0x68, 0x2A};
     EXPECT_EQ(late(pack, now + ECUIO_ENGINE_WAIT_US), ecuio_reply::none);
     EXPECT_EQ(e.requests[3].reply_frames, 0u) << "a pack's reply";
+
+    /* A pack out (set by hand): a late DID reply is no pack's, so it
+     * teaches its row and the pack waits on */
+    e.requests[0].reply_frames = 1;
+    ecuio_engine_channel& ch = e.chans[0];
+    ch.pack = ecuio_request{};
+    ch.pack.bytes[0] = 0x01;
+    ch.pack.bytes[1] = 0x0C;
+    ch.pack.bytes[2] = 0x68;
+    ch.pack.len = 3;
+    ch.pack_rows[0] = 3;
+    ch.pack_rows[1] = 2;
+    ch.pack_count = 2;
+    ch.outstanding = ECUIO_ENGINE_PACK;
+    now += 2 * ECUIO_ENGINE_WAIT_US;
+    ch.deadline_us = now + ECUIO_ENGINE_WAIT_US;
+    EXPECT_EQ(late(did_reply(0x1E01, 10), now + kMs), ecuio_reply::none);
+    EXPECT_EQ(e.requests[0].reply_frames, 2u) << "a pack out";
+    EXPECT_EQ(ch.outstanding, ECUIO_ENGINE_PACK) << "the pack is still out";
+    const Bytes own = {0x41, 0x0C, 0x1A, 0xF8};
+    (void)late(own, now + 2 * kMs);
+    EXPECT_EQ(e.requests[3].reply_frames, 0u) << "a 41 is the pack's own";
+}
+
+/* A recovery's rescan takes back a wait run out before any answer, so the
+ * defs judge the row again; an answer it had stays, a refusal too, and
+ * the module's waking does the same for its own rows */
+TEST(RequestEngineTest, ARecoveryTakesBackAWaitRunOutBeforeAnyAnswer)
+{
+    const std::vector<ecuio_signal_def_t> defs = {
+        def(0x621E01, 3, 3, 0, 0, 10), def(0x621E02, 3, 3, 0, 0, 10)};
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    ASSERT_TRUE(ecuio_engine_derive(&e, &set, &rx, 1, nullptr));
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_FALSE(segmented(e, 0)) << "its wait ran out: one frame";
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E02, 4)), 1);
+    ASSERT_FALSE(segmented(e, 1)) << "answered in one frame";
+
+    ecuio_engine_rescan(&e);
+    EXPECT_TRUE(segmented(e, 0)) << "the defs judge it again";
+    EXPECT_EQ(e.requests[0].reply_frames, 0u);
+    EXPECT_FALSE(segmented(e, 1)) << "an answer stays";
+
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_FALSE(segmented(e, 0));
+    ecuio_engine_forget_ran_out(&e, 0);
+    EXPECT_TRUE(segmented(e, 0)) << "its module woke";
+    EXPECT_FALSE(segmented(e, 1));
+
+    /* A late answer after a wait run out is an answer: a rescan keeps it */
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, did_reply(0x1E02, 4)), 1);
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    const Bytes late = did_reply(0x1E01, 4);
+    (void)ecuio_engine_on_frame(&e, 0, late.data(),
+                                static_cast<uint16_t>(late.size()), now + kMs,
+                                nullptr);
+    ecuio_engine_rescan(&e);
+    EXPECT_EQ(e.requests[0].reply_frames, 1u) << "the late answer stays";
 }
 
 /* A row's last answer sets it: 7 bytes are a Single Frame, 8 a First

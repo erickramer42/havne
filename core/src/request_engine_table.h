@@ -136,9 +136,11 @@ inline int32_t ecuio_engine_check_row(const ecuio_request_engine* e, uint32_t c)
 /* Has channel c ask one request once (ecuio_engine_check_row), parked
  * or not and outside the rotation: the driver's check that an ECU
  * answers, for a table that asks nothing (ecuio_engine_unpicked) while
- * the link is down. Its reply is the request's own, timed and decoded
- * as any. A pick or the link's recovery before it goes out withdraws
- * it. False, nothing changed, for a channel with no such request. */
+ * the link is down. Its reply is the request's own, decoded as any and
+ * timed only at a row a focus once kept: the check takes no pool row, so
+ * its turn around the table spends none on rows nobody picked. A pick or
+ * the link's recovery before it goes out withdraws it. False, nothing
+ * changed, for a channel with no such request. */
 inline bool ecuio_engine_ask_check(ecuio_request_engine* e, uint32_t c)
 {
     if (c >= e->chan_count || ecuio_engine_check_row(e, c) < 0) {

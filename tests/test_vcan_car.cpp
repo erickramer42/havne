@@ -329,6 +329,38 @@ TEST_F(SimCarBusTest, TwoModulesSegmentedRepliesAreUnderWayAtOnce)
     EXPECT_EQ(sim.stats().unflowed, 0u);
 }
 
+// A session asking nine modules at once, each reply longer than a frame
+// and slowed by cf=, so all nine are under way together: every module's
+// name arrives, and no message gives way to another's First Frame
+TEST_F(SimCarBusTest, NineSegmentedRepliesUnderWayAtOnceAllArrive)
+{
+    constexpr uint32_t kModules = 9;
+    Modules m("sim-car-bus-nine", kModules);
+    Sim sim("mock://sim?profile=sim-car-bus-nine&cf=30000");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    std::vector<uint16_t> names;
+    for (uint32_t i = 0; i < kModules; ++i) {
+        names.push_back(static_cast<uint16_t>(200 + i));
+    }
+    Values values;
+    Session s("?profile=sim-car-bus-nine&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ASSERT_EQ(
+        ecuio_register_values_callback(s.get(), &Values::on_values, &values),
+        ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s.get()), ECUIO_OK);
+    EXPECT_TRUE(wait_for([&] { return values.has_all(names); }, 5000ms))
+        << "every module's name";
+    ecuio_session_close(s.get()); /* the timing's final snapshot */
+    ecuio_session_timing_t timing{};
+    uint32_t rows = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s.get(), &timing, nullptr, 0, &rows),
+              ECUIO_OK);
+    EXPECT_GE(timing.isotp_first_frames, kModules);
+    EXPECT_EQ(timing.isotp_dropped, 0u)
+        << "a message gave way to another's First Frame";
+}
+
 // silent:1@741 on the bus: the module answering on 0x741 says nothing,
 // asked directly or functionally, and every other module answers
 TEST_F(SimCarBusTest, AFaultAimedAtOneModuleSilencesItAlone)

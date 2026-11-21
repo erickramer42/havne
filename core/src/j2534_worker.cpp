@@ -469,7 +469,7 @@ void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
                 e.stamp_breaks = t->clock.host_steps;
                 (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                             engine_now_us(t), nullptr);
-                j2534_hold_answered(hold, o.chan);
+                j2534_hold_answered(hold, &e, o.chan);
             }
             const bool unpicked = !asking && ecuio_engine_unpicked(&e);
             update_health(h, o, !asking && !unpicked);

@@ -471,6 +471,61 @@ TEST(RequestTableTest, TimingRecordsAtThePoolRow)
     EXPECT_EQ(timing->rows[1].refused, 1u);
 }
 
+/* The last module's answering bit is its own: set by its frame, cleared
+ * by its row's silence, and never channel 15's, which shares its low
+ * bits */
+TEST(RequestTableTest, TheLastModulesAnsweringBitIsItsOwn)
+{
+    constexpr uint32_t last = ECUIO_MAX_CHANNELS - 1;
+    auto e = std::make_unique<ecuio_request_engine>();
+    ASSERT_TRUE(ecuio_engine_init(e.get(), ECUIO_MAX_CHANNELS));
+    const uint8_t a[3] = {0x22, 0x10, 0x01};
+    const uint8_t b[3] = {0x22, 0x20, 0x01};
+    ASSERT_EQ(ecuio_engine_add(e.get(), 15, a, 3),
+              ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(e.get(), last, b, 3),
+              ecuio_engine_add_result::added);
+    int64_t now = 0;
+    ASSERT_EQ(ask(e.get(), last, now), 1);
+    EXPECT_EQ(e->answering, 1u << last);
+    ASSERT_EQ(ask(e.get(), 15, now), 0);
+    EXPECT_EQ(e->answering, (1u << last) | (1u << 15));
+    ASSERT_EQ(ask(e.get(), last, now, false), 1);
+    EXPECT_EQ(e->answering, 1u << 15) << "channel 31's wait ran out";
+}
+
+/* A check's reply is timed only at a row a focus once kept: a row no
+ * pick has kept has no pool row, and the check takes none, so a pick-only
+ * table's checks spend no pool on rows nobody picked */
+TEST(RequestTableTest, ACheckIsTimedOnlyAtARowAFocusOnceKept)
+{
+    const std::vector<ecuio_signal_def_t> defs = two_full_modules();
+    auto e = std::make_unique<ecuio_request_engine>();
+    ASSERT_NO_FATAL_FAILURE(pick_only_table(e.get(), defs));
+    auto timing = std::make_unique<ecuio_timing_table>();
+    e->timing = timing.get();
+    int64_t now = 0;
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_EQ(ask(e.get(), 0, now), 0);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_EQ(ask(e.get(), 0, now, false), 0);
+    EXPECT_EQ(e->timing_taken, 0u);
+    EXPECT_EQ(e->timing_of[0], ECUIO_TIMING_NONE);
+    EXPECT_EQ(timing->rows[0].answered + timing->rows[0].timeouts, 0u);
+
+    keep_rows(e.get(), {kMost});
+    keep_rows(e.get(), {});
+    ASSERT_TRUE(ecuio_engine_unpicked(e.get()));
+    ASSERT_EQ(e->timing_of[kMost], 0u);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    ASSERT_EQ(ask(e.get(), 1, now), static_cast<int32_t>(kMost));
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    ASSERT_EQ(ask(e.get(), 1, now, false), static_cast<int32_t>(kMost));
+    EXPECT_EQ(timing->rows[0].answered, 1u);
+    EXPECT_EQ(timing->rows[0].timeouts, 1u);
+    EXPECT_EQ(e->timing_taken, 1u);
+}
+
 /* Past the pool a kept request is asked all the same, with no timing
  * row, and counted once however often a focus keeps it */
 TEST(RequestTableTest, PastThePoolAKeptRequestIsAskedUntimed)
