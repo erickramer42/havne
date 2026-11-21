@@ -1980,8 +1980,11 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         endif()
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
-        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")   # vcan0
-            set_tests_properties(PythonTest.${_app_name} PROPERTIES RESOURCE_LOCK vcan0)
+        # The cases that need vcan0 take its lock and the "vcan" label, which
+        # linux-build's run of them selects (-L vcan): a new one is named here only
+        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")
+            set_tests_properties(PythonTest.${_app_name} PROPERTIES
+                RESOURCE_LOCK vcan0 LABELS "python;vcan")
         endif()
     endforeach()
 

@@ -202,13 +202,28 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 endif()
 
 # Core never links Qt (ADR-0001). This runs after every subdirectory, so
-# it sees links added from anywhere. It reads core's link lists, because
-# Qt's imported targets are scoped to the directory that found them and a
+# it sees links added from anywhere. It reads the link lists of the Qt-free
+# targets and, following them, of every target they link, because Qt's
+# imported targets are scoped to the directory that found them and a
 # TARGET Qt6::Core test can't see them from here.
-foreach(_app_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-    get_target_property(_app_libs ecuio-core ${_app_prop})
-    if(_app_libs AND _app_libs MATCHES "Qt[0-9]*::")
-        message(FATAL_ERROR
-            "ecuio-core must not link Qt (${_app_prop}: ${_app_libs})")
+set(_app_qtfree_todo ecuio-core ecuio ecuio-core-mt ecuio-wamr ecuio-wamr-mt
+    ecuio-j2534-surrogate havne-cli)
+set(_app_qtfree_seen)
+while(_app_qtfree_todo)
+    list(POP_FRONT _app_qtfree_todo _app_target)
+    if(NOT TARGET ${_app_target} OR _app_target IN_LIST _app_qtfree_seen)
+        continue()
     endif()
-endforeach()
+    list(APPEND _app_qtfree_seen ${_app_target})
+    foreach(_app_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(_app_libs ${_app_target} ${_app_prop})
+        if(NOT _app_libs)
+            continue()
+        endif()
+        if(_app_libs MATCHES "Qt[0-9]*::")
+            message(FATAL_ERROR
+                "${_app_target} must not link Qt (${_app_prop}: ${_app_libs})")
+        endif()
+        list(APPEND _app_qtfree_todo ${_app_libs})
+    endforeach()
+endwhile()

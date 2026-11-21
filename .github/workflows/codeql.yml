@@ -49,11 +49,12 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # third_party/ is built into core but is another project's code:
-          # its alerts are that project's to triage, not listed as Havne's
+          # third_party/wamr is built into core but is another project's
+          # code: its alerts are that project's to triage, not listed as
+          # Havne's. third_party/wamr_port.c is Havne's own and is analyzed
           config: |
             paths-ignore:
-              - third_party
+              - third_party/wamr
 
       - name: Build core, the J2534 layer and the surrogate
         if: matrix.build-mode == 'manual'

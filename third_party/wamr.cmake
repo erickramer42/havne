@@ -14,8 +14,11 @@
 
 set(_wamr ${CMAKE_CURRENT_LIST_DIR}/wamr/core)
 
+# Havne's own file among WAMR's: built with the project's warnings and
+# checked by clang-tidy and CodeQL, which skip the vendored sources
+set(_wamr_port ${CMAKE_CURRENT_LIST_DIR}/wamr_port.c)
+
 set(_wamr_sources
-    ${CMAKE_CURRENT_LIST_DIR}/wamr_port.c
     ${_wamr}/iwasm/common/wasm_runtime_common.c
     ${_wamr}/iwasm/common/wasm_native.c
     ${_wamr}/iwasm/common/wasm_exec_env.c
@@ -153,7 +156,7 @@ set(WAMR_INCLUDE_DIR ${_wamr}/iwasm/include)
 set(WAMR_EMBED_DEFINITIONS "WASM_RUNTIME_API_EXTERN=")
 
 function(app_wamr_objects target)
-    add_library(${target} OBJECT ${_wamr_sources})
+    add_library(${target} OBJECT ${_wamr_sources} ${_wamr_port})
     target_include_directories(${target} PRIVATE
         ${_wamr}/iwasm/include
         ${_wamr}/iwasm/common
@@ -166,8 +169,9 @@ function(app_wamr_objects target)
     set_target_properties(${target} PROPERTIES
         C_STANDARD 99
         POSITION_INDEPENDENT_CODE ON)
-    # Upstream's code, built without warnings: the warnings-as-errors
-    # builds and verify's MSVC count stay first-party's. /U_MSC_BUILD:
+    # Upstream's code is built without warnings, source by source: the
+    # warnings-as-errors builds and verify's MSVC count stay first-party's,
+    # and wamr_port.c gets the project's. /U_MSC_BUILD:
     # WAMR's headers read that macro only to mark its API dllexport, which
     # would export it from every program and library that links core.
     # -fno-sanitize=alignment does nothing without a sanitizer. With one,
@@ -177,9 +181,18 @@ function(app_wamr_objects target)
     # (build-scripts/config_common.cmake); upstream's pull request 5062
     # aligns that stack. The flag goes when a WAMR release carries the fix.
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W0 /U_MSC_BUILD)
+        target_compile_options(${target} PRIVATE /U_MSC_BUILD)
+        set_source_files_properties(${_wamr_sources} PROPERTIES COMPILE_OPTIONS /W0)
+        set_source_files_properties(${_wamr_port} PROPERTIES COMPILE_OPTIONS /W4)
     else()
-        target_compile_options(${target} PRIVATE -w -fno-sanitize=alignment)
+        target_compile_options(${target} PRIVATE -fno-sanitize=alignment)
+        set(_wamr_port_warnings -Wall -Wextra)
+        if(HAVNE_WARNINGS_AS_ERRORS)
+            list(APPEND _wamr_port_warnings -Werror)
+        endif()
+        set_source_files_properties(${_wamr_sources} PROPERTIES COMPILE_OPTIONS -w)
+        set_source_files_properties(${_wamr_port} PROPERTIES
+            COMPILE_OPTIONS "${_wamr_port_warnings}")
     endif()
     # WAMR finds how much native stack is left from the address of a local.
     # GCC's AddressSanitizer keeps such a local in its fake stack on the

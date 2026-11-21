@@ -563,8 +563,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The Windows build twice from the tag, byte for byte (ADR-0035)
+  repro:
+    needs: gate
+    uses: ./.github/workflows/repro-windows.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
   publish:
-    needs: [gate, windows, android, linux, macos]
+    needs: [gate, windows, android, linux, macos, repro]
     runs-on: ubuntu-latest
     defaults:
       run:

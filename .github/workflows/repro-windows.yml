@@ -8,12 +8,17 @@ name: Reproducible Windows build
 # on build/** branches and dev. A manual run needs the file on main
 # (GitHub dispatches only workflows the default branch has):
 #   gh workflow run repro-windows.yml --ref <branch>
-# release.yml may call it with `uses: ./.github/workflows/repro-windows.yml`.
+# release.yml calls it (`uses: ./.github/workflows/repro-windows.yml`) and
+# publishing needs it.
 on:
   push:
     branches: ['build/**', dev]
     paths:
       - CMakeLists.txt
+      - core/**
+      - app/**
+      - surrogate/**
+      - third_party/wamr.cmake
       - packaging/windows/**
       - .github/workflows/repro-windows.yml
   workflow_dispatch:

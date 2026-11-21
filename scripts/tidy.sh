@@ -134,10 +134,11 @@ root=$(pwd -W 2>/dev/null || pwd)
 # C and C++ sources in the source tree only (app/ in a tree with Qt): the database also lists
 # generated files, such as the version resource in the tree's own
 # surrogate/ folder, which clang-tidy can't read. third_party/ is another
-# project's code (WAMR's own tree has a core/ folder): never checked.
+# project's code (WAMR's own tree has a core/ folder): never checked, but for
+# wamr_port.c, which is Havne's own.
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
-    tr '\\' '/' | grep -E "/(core|surrogate|cli|app)/" | grep -E '\.(c|cc|cpp|cxx)$' |
-    grep -vF "/$TREE/" | grep -vF "/third_party/" | sort -u)
+    tr '\\' '/' | grep -E '/(core|surrogate|cli|app)/|/third_party/wamr_port\.c$' | grep -E '\.(c|cc|cpp|cxx)$' |
+    grep -vF "/$TREE/" | grep -vE '/third_party/(wamr/|[^w])' | sort -u)
 if [ -z "$files" ]; then
     echo "no core/, surrogate/, cli/ or app/ sources in $DB" >&2
     exit 2
