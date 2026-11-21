@@ -7,7 +7,8 @@
 # written to Testing/tidy/size.txt and judged against the committed baseline
 # scripts/tidy-size-baseline.txt (scripts/tidy-size-ratchet.sh): a function
 # past a threshold that the baseline doesn't list fails, and so does a
-# baseline line that no longer applies, so the list only shrinks.
+# baseline line that no longer applies or a listed function that grew, so
+# the list and its numbers only shrink.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
@@ -175,6 +176,9 @@ all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
 sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
 found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
 printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
+# The size check's line count is in a note that follows its warning
+cat "$LOGDIR"/*.log | grep -E 'note: [0-9]+ lines including whitespace' | tr '\\' '/' |
+    sed "s#^$root/##" | sort -u > "$LOGDIR/size-notes.txt"
 nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
@@ -195,7 +199,7 @@ printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##" > "$LOGDIR/checked.txt"
 sharded=0
 [ -z "${HAVNE_TIDY_SHARD:-}" ] || sharded=1
 if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-baseline.txt \
-        "$LOGDIR/checked.txt" "$sharded" "$UPDATE"; then
+        "$LOGDIR/checked.txt" "$sharded" "$UPDATE" "$LOGDIR/size-notes.txt"; then
     exit 1
 fi
 printf 'tidy        ok    %4s s  %s files, no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \

@@ -4,7 +4,10 @@
 # Runs scripts/tidy-size-ratchet.sh over fixtures and checks its exit code:
 # a clean run, a function the baseline doesn't list, a repeated name with too
 # few baseline lines, a size line the script can't read, a stale line and
-# the update that removes one. Skips (77) where no bash is found.
+# the update that removes one; a listed function that grew in lines or in
+# complexity, one that shrank (passes, and the update lowers its numbers) and
+# one past a threshold its line lists it within. Skips (77) where no bash
+# is found.
 import os
 import shutil
 import subprocess
@@ -36,16 +39,22 @@ def warn(path, line, name, kind="size"):
     return "%s:%d:1: warning: function '%s' %s" % (path, line, name, msg)
 
 
-def run(bash, size_lines, base_lines, files, update=0):
+def note(path, line, n):
+    return ("%s:%d:1: note: %d lines including whitespace and comments (threshold 80)"
+            % (path, line, n))
+
+
+def run(bash, size_lines, base_lines, files, update=0, notes=()):
     with tempfile.TemporaryDirectory() as d:
         for f in files:
             os.makedirs(os.path.dirname(os.path.join(d, f)) or d, exist_ok=True)
             open(os.path.join(d, f), "w").write("\n")
         for name, lines in (("size.txt", size_lines), ("base.txt", base_lines),
-                            ("checked.txt", files)):
+                            ("checked.txt", files), ("notes.txt", notes)):
             with open(os.path.join(d, name), "w", newline="\n") as fh:
                 fh.write("".join(x + "\n" for x in lines))
-        p = subprocess.run([bash, SCRIPT, "size.txt", "base.txt", "checked.txt", "0", str(update)],
+        p = subprocess.run([bash, SCRIPT, "size.txt", "base.txt", "checked.txt", "0", str(update),
+                            "notes.txt"],
                            cwd=d, capture_output=True, text=True)
         base_after = open(os.path.join(d, "base.txt"), newline="").read().splitlines()
         return p.returncode, p.stdout + p.stderr, base_after
@@ -65,7 +74,8 @@ def main():
 
     rc, out, _ = run(bash, [warn(f, 10, "run")], ["%s\trun" % f], [f])
     expect("a listed function passes", rc, 0, out)
-    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 10, "run", "cx")], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 10, "run", "cx")],
+                     ["%s\trun\t-\t50" % f], [f])
     expect("size and complexity on one function pass with one line", rc, 0, out)
     rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "go")], ["%s\trun" % f], [f])
     expect("an unlisted function fails", rc, 1, out)
@@ -86,6 +96,56 @@ def main():
                         ["%s\trun" % f, "%s\trun" % f], [f], update=1)
     expect("update drops one of two lines", rc, 0, out)
     expect("update leaves the other line", base, ["%s\trun" % f], str(base))
+
+    # Measured numbers: a listed function may stay or shrink, never grow
+    def sized(lines, cx=None):
+        w = [warn(f, 10, "run")] if lines else []
+        if cx:
+            w.append(warn(f, 10, "run", "cx").replace("of 50", "of %d" % cx))
+        return w, ([note(f, 10, lines)] if lines else [])
+
+    def line(lines, cx):
+        return "%s	run	%s	%s" % (f, lines, cx)
+
+    w, n = sized(96)
+    rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=n)
+    expect("a listed function at its lines passes", rc, 0, out)
+    rc, out, _ = run(bash, w, [line(97, "-")], [f], notes=n)
+    expect("a listed function under its lines passes", rc, 0, out)
+    rc, out, _ = run(bash, w, [line(95, "-")], [f], notes=n)
+    expect("a listed function over its lines fails", rc, 1, out)
+    w, n = sized(0, 52)
+    rc, out, _ = run(bash, w, [line("-", 52)], [f], notes=n)
+    expect("a listed function at its complexity passes", rc, 0, out)
+    rc, out, _ = run(bash, w, [line("-", 51)], [f], notes=n)
+    expect("a listed function over its complexity fails", rc, 1, out)
+    w, n = sized(96, 52)
+    rc, out, _ = run(bash, w, [line(96, 52)], [f], notes=n)
+    expect("both measures at their numbers pass", rc, 0, out)
+    rc, out, _ = run(bash, w, [line(96, 51)], [f], notes=n)
+    expect("one measure over with the other at its number fails", rc, 1, out)
+    rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=n)
+    expect("a function past a threshold its line lists it within fails", rc, 1, out)
+    rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=[])
+    w, n = sized(90)
+    rc, out, base = run(bash, w, [line(96, 52)], [f], update=1, notes=n)
+    expect("a shrunk function that is still listed passes", rc, 0, out)
+    expect("update lowers the lines and drops the complexity it is within",
+           base, [line(90, "-")], str(base))
+    w, n = sized(96)
+    rc, out, base = run(bash, w, [line(96, "-")], [f], update=1, notes=n)
+    expect("update at the same numbers changes nothing", base, [line(96, "-")], str(base))
+    rc, out, base = run(bash, w, [line(80, "-")], [f], update=1, notes=n)
+    expect("update never raises a number", base, [line(80, "-")], str(base))
+
+    # A run that lowers one function and finds another grown writes the grown
+    # one back at its old number
+    rc, out, base = run(bash, [warn(f, 10, "run"), warn(f, 40, "go")],
+                        ["%s	run	96	-" % f, "%s	go	85	-" % f], [f], update=1,
+                        notes=[note(f, 10, 90), note(f, 40, 99)])
+    expect("a grown function fails beside a shrunk one", rc, 1, out)
+    expect("update keeps the grown number and lowers the shrunk",
+           base, ["%s	go	85	-" % f, "%s	run	90	-" % f], str(base))
 
     for m in fails:
         print("FAIL " + m)
