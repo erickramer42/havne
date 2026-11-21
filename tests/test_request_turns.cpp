@@ -282,6 +282,39 @@ TEST(RequestTurnsTest, ADueKeepAliveEndsATurn)
     EXPECT_EQ(a->e.chans[1].session_lost, 0u);
 }
 
+/* Four channels with rows ahead of a fifth with none, the keep-alive at
+ * its longest: the fifth's keep-alive goes out next when it falls due,
+ * not after one exchange on each channel between */
+TEST(RequestTurnsTest, ADueKeepAliveIsAskedNextPastEveryChannelBetween)
+{
+    auto a = adapter(5);
+    for (uint32_t c = 0; c < 4; ++c) {
+        dids(&a->e, c, 40, static_cast<int>(c) * 0x40);
+    }
+    ASSERT_TRUE(
+        ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MAX_US));
+    a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
+    a->until(30000 * kMs);
+    int keeps = 0;
+    int64_t last = -1;
+    for (const Sent& x : a->sent) {
+        if (x.c != 4) {
+            continue;
+        }
+        if (last >= 0) {
+            EXPECT_LE(x.at_us - last,
+                      ECUIO_ENGINE_KEEPALIVE_MAX_US + 2 * a->exchange_us)
+                << "channel 4 waited on the channels between";
+        }
+        last = x.at_us;
+        keeps += x.bytes[0] == 0x3E ? 1 : 0;
+    }
+    EXPECT_GE(keeps, 5);
+    for (uint32_t c = 0; c < 5; ++c) {
+        EXPECT_EQ(a->e.chans[c].session_lost, 0u) << "channel " << c;
+    }
+}
+
 /* A channel inside its key's window (request_talk.h) has nothing due
  * until the window ends: its keep-alive, due meanwhile, ends no other
  * channel's turn, and goes out within an exchange of the window's end */
@@ -553,4 +586,53 @@ TEST(RequestTurnsTest, AKeepAliveDueWithARequestOutEndsNoTurn)
     }
     ASSERT_GE(window.size(), 4u);
     EXPECT_LE(runs(window).size(), 3u) << "the turns ended at each exchange";
+}
+
+/* The last module's bits are its own: held, channel 31 is passed over,
+ * the turn it holds too, and a channel that shares its low bits (15)
+ * still asks; its walk away from the turn is bit 31 alone */
+TEST(RequestTurnsTest, TheLastModulesBitsAreItsOwn)
+{
+    constexpr uint32_t last = ECUIO_MAX_CHANNELS - 1;
+    auto a = adapter(ECUIO_MAX_CHANNELS);
+    dids(&a->e, 15, 4);
+    dids(&a->e, last, 4, 0x40);
+    a->ecus = [](uint32_t, const Bytes& q) { return answer(q); };
+    for (int i = 0; i < 1000 && (a->sent.empty() || a->sent.back().c != last);
+         ++i) {
+        a->pass();
+    }
+    ASSERT_EQ(a->sent.back().c, last) << "channel 31 holds the turn";
+    a->held = 1u << last;
+    const size_t from = a->sent.size();
+    a->asks(from + 12);
+    for (const uint32_t c : a->channels(from)) {
+        EXPECT_EQ(c, 15u) << "a held channel 31 asks nothing";
+    }
+
+    auto w = adapter(ECUIO_MAX_CHANNELS);
+    add(&w->e, last, {0x01, 0x0C});
+    ecuio_engine_probe(&w->e);
+    ecuio_engine_turns t;
+    ecuio_engine_channel& ch = w->e.chans[last];
+    int64_t now = 100 * kMs;
+    ASSERT_EQ(ecuio_engine_turn_due(&w->e, t, last, now), ECUIO_ENGINE_ONCE);
+    ecuio_engine_sent(&w->e, last, ECUIO_ENGINE_ONCE, true, now);
+    const Bytes r = answer({0x01, 0x00});
+    now += 90 * kMs;
+    ASSERT_EQ(ecuio_engine_on_frame(&w->e, last, r.data(),
+                                    static_cast<uint16_t>(r.size()), now,
+                                    nullptr),
+              ecuio_reply::positive);
+    ASSERT_TRUE(ch.walking);
+    ecuio_engine_turn_left(&w->e, t, last, now);
+    EXPECT_EQ(t.walk_away, 1u << last);
+    const int64_t until = ch.walk_until_us;
+    ch.next_send_us = now + 400 * kMs;
+    EXPECT_EQ(ecuio_engine_turn_due(&w->e, t, last, now + 100 * kMs),
+              ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ch.walk_until_us, until + 100 * kMs) << "its second stands still";
+    ASSERT_EQ(ecuio_engine_turn_due(&w->e, t, last, now + 400 * kMs),
+              ECUIO_ENGINE_ONCE);
+    EXPECT_EQ(t.walk_away, 0u) << "it asks: away no more";
 }

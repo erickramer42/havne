@@ -36,11 +36,13 @@
 //      out is never sent. One past its window is settled lapsed at the
 //      next pass, whoever holds the turn.
 // Then the next channel in order with something due takes it, starting
-// at a channel with a key offered. A channel the driver holds (held, a
-// bit for each channel) is passed over. The walk keeps the turn until it
-// ends or rule 4 or 5 takes it. Its budget (each channel's own second)
-// stands still from a turn's end to the channel's next request, so it
-// holds only the channel's own exchanges, whoever asks in between.
+// at a channel with a key offered, else at the first whose session
+// request is due, so a keep-alive waits on no channel between. A channel
+// the driver holds (held, a bit for each channel) is passed over. The
+// walk keeps the turn until it ends or rule 4 or 5 takes it. Its budget
+// (each channel's own second) stands still from a turn's end to the
+// channel's next request, so it holds only the channel's own exchanges,
+// whoever asks in between.
 //
 // SocketCAN and J2534 don't use this: their channels' exchanges overlap
 // (each channel's one outstanding request), so a busy channel's pace never
@@ -152,6 +154,23 @@ inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
     return e->chan_count;
 }
 
+/* The first channel not held, but for skip, whose session entry or
+ * keep-alive is due at now_us (rule 4); the channel count for none */
+inline uint32_t ecuio_engine_turn_session(const ecuio_request_engine* e,
+                                          uint32_t held, uint32_t skip,
+                                          int64_t now_us)
+{
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const ecuio_engine_channel& o = e->chans[k];
+        if (k != skip && (held & (1u << k)) == 0 &&
+            o.outstanding == ECUIO_ENGINE_NONE &&
+            ecuio_engine_session_next_us(e, o) <= now_us) {
+            return k;
+        }
+    }
+    return e->chan_count;
+}
+
 /* Channel k's turn ended at now_us: a walk it was asking is away from
  * then */
 inline void ecuio_engine_turn_left(const ecuio_request_engine* e,
@@ -203,15 +222,7 @@ inline bool ecuio_engine_turn_over(const ecuio_request_engine* e,
     if (keyed < e->chan_count && keyed != c) {
         return true;
     }
-    for (uint32_t k = 0; k < e->chan_count; ++k) {
-        const ecuio_engine_channel& o = e->chans[k];
-        if (k != c && (held & (1u << k)) == 0 &&
-            o.outstanding == ECUIO_ENGINE_NONE &&
-            ecuio_engine_session_next_us(e, o) <= now_us) {
-            return true;
-        }
-    }
-    return false;
+    return ecuio_engine_turn_session(e, held, c, now_us) < e->chan_count;
 }
 
 /* Request r just chosen on channel c counts toward the turn (rule 1) */
@@ -229,7 +240,8 @@ inline void ecuio_engine_turn_count(const ecuio_request_engine* e,
 /* What goes out next and on which channel (*c), at now_us: the turn's
  * channel's next request while its turn lasts, else the first of the
  * channels after it with something due, which takes the turn; a channel
- * with a key offered is asked ahead of that order. NONE when
+ * with a key offered, then one with its session request due, is asked
+ * ahead of that order. NONE when
  * nothing is due; *wait_us is then the time until the turn's channel's
  * floor passes when the turn waits it out (rule 2), else 0, and the driver
  * waits for the engine's next event. Like ecuio_engine_due, it moves the
@@ -264,7 +276,10 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
         t.chan = (k + 1) % n;
     }
     const uint32_t keyed = ecuio_engine_turn_key(e, held);
-    const uint32_t from = keyed < n ? keyed : t.chan;
+    const uint32_t sessioned = ecuio_engine_turn_session(e, held, n, now_us);
+    const uint32_t from = keyed < n       ? keyed
+                          : sessioned < n ? sessioned
+                                          : t.chan;
     for (uint32_t i = 0; i < n; ++i) {
         const uint32_t k = (from + i) % n;
         if ((held & (1u << k)) != 0) {
