@@ -194,7 +194,8 @@ TEST_F(J2534HealthTest, AnOverflowBitWithNothingAfterItWaitsForTheNextMessage)
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
     ASSERT_TRUE(
         post_reply(page, 1, ECUIO_PT_TX_INDICATION | ECUIO_PT_BUFFER_OVERFLOW));
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ASSERT_TRUE(after_reads(2, 5000))
+        << "the worker never read the indication and the empty read after";
     ASSERT_TRUE(post_reply(page, 2));
     ASSERT_TRUE(wait_for_frames(1, 2000));
     int32_t le = 0;
@@ -482,7 +483,8 @@ TEST_F(J2534HealthTest, AnEmptyOverflowReadFlagsTheNextMessage)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "0x12"));
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ASSERT_TRUE(after_reads(2, 5000))
+        << "the worker never read under the forced status";
     int32_t le = 0;
     uint32_t ec = 0;
     (void)ecuio_session_get_error_state(session, &le, &ec);
