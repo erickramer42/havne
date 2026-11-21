@@ -692,7 +692,7 @@ TEST(J2534HoldTest, AChannelIsSilentFromItsSecondWaitInARow)
             << "silent, channel 0 holds no one";
         e.chans[1].outstanding = ECUIO_ENGINE_NONE;
         if (how == 0) {
-            j2534_hold_answered(hold, 0);
+            j2534_hold_answered(hold, &e, 0);
         } else {
             j2534_hold_recovered(hold);
         }

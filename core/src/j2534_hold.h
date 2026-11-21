@@ -43,7 +43,19 @@
 // that runs out (j2534_hold_answered and j2534_hold_recovered end the
 // run), so one lost reply leaves it protected; and the request after
 // every eighth is asked under the hold all the same, so a module that
-// answers late, inside another's segmented reply, is found again.
+// answers late, inside another's segmented reply, is found again. That
+// probe counts as one frame whatever its defs read, and so does every
+// request of a channel never heard once a wait of its own has run out
+// (j2534_hold_long): each module's first ask is judged by its defs, so a
+// present module costs no reply at connect, and an absent one holds the
+// bus only for that first ask's wait, 100 ms once if it reads long (four
+// present modules beside 14 absent ones of long rows answer 40% of their
+// own count in the first 3 s, 92% when those rows are short). The cost: a
+// module that wakes with a long reply can lose another module's Single
+// Frame once. A channel's first frame
+// after a run of J2534_HOLD_ASLEEP_MISSES waits takes back its rows'
+// waits run out before any answer (ecuio_engine_forget_ran_out), as a
+// recovery's rescan does, so the defs judge each row's first answer again.
 //
 // A session request (10 03, 3E 00) waits for the hold like any request,
 // since its reply can be lost too, except in its session with S3 300 ms
@@ -87,6 +99,7 @@ struct j2534_hold {
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
     uint32_t misses[ECUIO_MAX_CHANNELS] = {}; /* waits run out in a row */
+    uint32_t heard = 0; /* a bit for each channel a frame has come from */
 
     j2534_hold()
     {
@@ -98,6 +111,10 @@ struct j2534_hold {
 
 constexpr uint32_t J2534_HOLD_SILENT_MISSES = 2; /* waits in a row */
 constexpr uint32_t J2534_HOLD_PROBE_EVERY = 8;   /* a silent channel's */
+/* A run this long is the module asleep, not rows it leaves unanswered */
+constexpr uint32_t J2534_HOLD_ASLEEP_MISSES = 8;
+static_assert(J2534_HOLD_ASLEEP_MISSES > J2534_HOLD_SILENT_MISSES,
+              "a module asleep is silent first");
 /* A hold lasts about a segmented wait; the window opens past the longest
  * keep-alive, so no keep-alive is let through at its own due time */
 constexpr int64_t J2534_HOLD_S3_MARGIN_US = 300000;
@@ -130,6 +147,17 @@ inline bool j2534_hold_silent(const j2534_hold& h, uint32_t k)
     return m >= J2534_HOLD_SILENT_MISSES && m % J2534_HOLD_PROBE_EVERY != 0;
 }
 
+/* Whether channel k's request r holds the others as segmented: the
+ * engine's judgment, but a channel never heard once a wait of its own has
+ * run out, or past its first waits run out (its probe), counts one frame */
+inline bool j2534_hold_long(const j2534_hold& h, const ecuio_request_engine* e,
+                            uint32_t k, int32_t r)
+{
+    return (((h.heard >> k) & 1u) != 0 || h.misses[k] == 0) &&
+           h.misses[k] < J2534_HOLD_SILENT_MISSES &&
+           ecuio_engine_reply_segmented(e, k, r);
+}
+
 /* Whether a channel but c, not silent, has a request on the bus, or
  * (segmented) one whose reply is expected segmented */
 inline bool j2534_hold_other_out(const j2534_hold& h,
@@ -138,8 +166,7 @@ inline bool j2534_hold_other_out(const j2534_hold& h,
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         if (k != c && !j2534_hold_silent(h, k) && j2534_hold_on_bus(e, k) &&
-            (!segmented ||
-             ecuio_engine_reply_segmented(e, k, e->chans[k].outstanding))) {
+            (!segmented || j2534_hold_long(h, e, k, e->chans[k].outstanding))) {
             return true;
         }
     }
@@ -380,7 +407,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
     }
     const int32_t r = ecuio_engine_due(e, c, now_us);
     if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, c) ||
-        !ecuio_engine_reply_segmented(e, c, r) ||
+        !j2534_hold_long(h, e, c, r) ||
         !(j2534_hold_other_out(h, e, c, false) ||
           j2534_hold_other_row(h, e, c))) {
         return r;
@@ -396,10 +423,17 @@ inline void j2534_hold_pass_end(j2534_hold& h, uint32_t held_now)
     h.held = held_now;
 }
 
-/* A frame matched on channel c: its run of waits run out ends */
-inline void j2534_hold_answered(j2534_hold& h, uint32_t c)
+/* A frame matched on channel c: its run of waits run out ends, the
+ * channel is heard, and after a run that long its rows' waits run out
+ * are taken back */
+inline void j2534_hold_answered(j2534_hold& h, ecuio_request_engine* e,
+                                uint32_t c)
 {
+    if (h.misses[c] >= J2534_HOLD_ASLEEP_MISSES) {
+        ecuio_engine_forget_ran_out(e, c);
+    }
     h.misses[c] = 0;
+    h.heard |= 1u << c;
 }
 
 /* The link recovered: every channel is asked again, none silent */
@@ -447,7 +481,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         if (r == ECUIO_ENGINE_NONE) {
             continue;
         }
-        const bool segmented = ecuio_engine_reply_segmented(e, c, r);
+        const bool segmented = j2534_hold_long(h, e, c, r);
         ahead = ahead || (!segmented && j2534_hold_other_row(h, e, c));
         write(c, r);
         h.segmented = segmented ? h.segmented | 1u << c
