@@ -20,34 +20,6 @@
 
 namespace ecuio_plugin_loader {
 
-namespace {
-
-/* Whether a part names a Windows device whatever its case and extension
- * (con.json, NUL, com1.txt), or ends in a dot, which Windows drops: a
- * host on Windows would open the device or another file */
-bool windows_reserved(const std::string& part)
-{
-    if (part.back() == '.') {
-        return true;
-    }
-    std::string stem = part.substr(0, part.find('.'));
-    for (char& c : stem) {
-        c = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
-    }
-    static const char* const kDevices[] = {"CON", "PRN",    "AUX",
-                                           "NUL", "CONIN$", "CONOUT$"};
-    for (const char* d : kDevices) {
-        if (stem == d) {
-            return true;
-        }
-    }
-    return stem.size() == 4 &&
-           (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) &&
-           stem[3] >= '0' && stem[3] <= '9';
-}
-
-} // namespace
-
 bool path_ok(const std::string& p)
 {
     if (p.empty() || p.size() > ECUIO_PLUGIN_PATH_MAX || p.front() == '/') {
@@ -57,8 +29,7 @@ bool path_ok(const std::string& p)
     for (size_t i = 0; i <= p.size(); ++i) {
         if (i == p.size() || p[i] == '/') {
             const std::string part = p.substr(start, i - start);
-            if (part.empty() || part == "." || part == ".." ||
-                windows_reserved(part)) {
+            if (part.empty() || part == "." || part == "..") {
                 return false;
             }
             start = i + 1;
@@ -470,9 +441,7 @@ void loader::read_files(const Value& root, const ecuio_plugin& p)
             if (!path_ok(m.key)) {
                 refuse(m, "file " + q(m.key) +
                               " isn't a path in the package: relative, forward "
-                              "slashes, no \".\" or \"..\" part, and no part a "
-                              "Windows device name (con, nul, com1, ...) or "
-                              "ending in a dot");
+                              "slashes, no \".\" or \"..\" part");
             }
             if (m.value.type == Type::object &&
                 m.value.find("kind") != nullptr) {
@@ -569,6 +538,21 @@ loader::read_variants(const Value& root, ecuio_plugin& p)
 
 /* The package's file at path: a packed one by name, a folder's read
  * through the host's callback the first time it's named */
+void loader::read_folder_file(const Value& at, const std::string& name,
+                              const std::string& path, const char** bytes,
+                              size_t* length)
+{
+    if (names_a_device(path)) {
+        refuse(at, name + " is a Windows device name (con, nul, com1, ...) "
+                          "or ends in a dot: a folder's file isn't read by "
+                          "such a name");
+    }
+    if (read_(user_, path.c_str(), bytes, length) != 0 ||
+        (*bytes == nullptr && *length > 0)) {
+        refuse(at, name + " couldn't be read");
+    }
+}
+
 const data_file* loader::file_at(const Value& at, const std::string& path)
 {
     for (const data_file& f : files_) {
@@ -587,10 +571,7 @@ const data_file* loader::file_at(const Value& at, const std::string& path)
     }
     const char* bytes = nullptr;
     size_t length = 0;
-    if (read_(user_, path.c_str(), &bytes, &length) != 0 ||
-        (bytes == nullptr && length > 0)) {
-        refuse(at, "file " + q(path) + " couldn't be read");
-    }
+    read_folder_file(at, "file " + q(path), path, &bytes, &length);
     if (length > ECUIO_SIGNAL_FILE_MAX_BYTES) {
         refuse(at, "file " + q(path) + " is over 1 MiB");
     }

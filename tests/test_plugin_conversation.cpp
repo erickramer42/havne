@@ -12,6 +12,7 @@
 #include <ecuio/core.h>
 #include <ecuio/plugin.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -432,6 +433,22 @@ TEST(PluginConversationTest, AFoldersModuleIsReadCountedAndJudged)
                       .find("file 'guest.wasm' has SHA-256 "),
                   std::string::npos)
             << ecuio_last_error_detail();
+    }
+    {
+        /* a module named like a Windows device is never asked for */
+        Made aux;
+        aux.group.code =
+            R"({"file": "aux.wasm", "sha256": ")" + sha_of(aux.module) + "\"}";
+        Folder f = folder_of(aux);
+        f.files["aux.wasm"] = f.files["guest.wasm"];
+        ecuio_status_t s = ECUIO_OK;
+        Plugin p = load_folder(f, &s);
+        EXPECT_EQ(s, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(std::string(ecuio_last_error_detail())
+                      .find("file 'aux.wasm' is a Windows device name"),
+                  std::string::npos)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(std::count(f.asked.begin(), f.asked.end(), "aux.wasm"), 0);
     }
     {
         /* a module with a NUL and bytes past 0x7F is read as bytes */

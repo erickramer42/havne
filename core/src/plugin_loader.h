@@ -33,6 +33,7 @@ using ecuio_json::Type;
 using ecuio_json::Value;
 using ecuio_plugin_rules::core_version;
 using ecuio_plugin_rules::id_ok;
+using ecuio_plugin_rules::names_a_device;
 using ecuio_plugin_rules::older;
 using ecuio_plugin_rules::parse_version;
 using ecuio_plugin_rules::wmi_ok;
@@ -143,10 +144,9 @@ struct placed {
 placed placed_json(const std::string& prefix, const ecuio_json::Error& error);
 
 /* Whether p is a path in a package: relative, forward slashes, no "."
- * or ".." part, no empty part, no part a Windows device name in any case
- * with any extension or ending in a dot, 1 to ECUIO_PLUGIN_PATH_MAX
- * printable ASCII bytes but backslash and colon. path_of reads one from
- * v (what a view, as text_of's). */
+ * or ".." part, no empty part, 1 to ECUIO_PLUGIN_PATH_MAX printable ASCII
+ * bytes but backslash and colon. path_of reads one from v (what a view,
+ * as text_of's). */
 bool path_ok(const std::string& p);
 const std::string& path_of(const Value& v, std::string_view what);
 
@@ -162,6 +162,10 @@ public:
 
 private:
     bool packed() const { return read_ == nullptr; }
+    /* A folder's file through the host's read; name is the refusal's */
+    void read_folder_file(const Value& at, const std::string& name,
+                          const std::string& path, const char** bytes,
+                          size_t* length);
 
     std::string where_manifest() const;
     std::string place(const refused& r) const;
