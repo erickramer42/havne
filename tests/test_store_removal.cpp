@@ -97,26 +97,42 @@ QStringList namesIn(const QString& folder)
     return QDir(folder).entryList(QDir::Files, QDir::Name);
 }
 
-// Copies named a, b, c, d (by their own hashes) and an old book; a's
-// record is a vehicle's with kept false, b's the book's own with kept
-// false, c's kept (its bytes in plugins/unmigrated too), d no one's
-struct Four {
-    QString a, b, c, d;
+// A copy of a signal file that moved: a plugin made from its bytes
+QString keepMoved(const OldState& old, const QString& name)
+{
+    const QByteArray bytes = signalFile(name);
+    PluginStore store;
+    const QVariantMap made = store.wrap(bytes, {});
+    EXPECT_TRUE(made.value(QStringLiteral("ok")).toBool())
+        << made.value(QStringLiteral("words")).toString().toStdString();
+    return old.keep(bytes);
+}
+
+// Copies named a to e (by their own hashes) and an old book; a's record
+// is a vehicle's with kept false, b's the book's own with kept false,
+// c's kept (its bytes in plugins/unmigrated too), d no one's, e moved
+struct Five {
+    QString a, b, c, d, e;
 };
 
-Four stageFour(const OldState& old)
+Five stageFive(const OldState& old)
 {
-    Four f;
+    Five f;
     f.a = old.keep("a's bytes");
     f.b = old.keep("b's bytes");
     f.c = old.keep("c's bytes");
     f.d = old.keep("d's bytes");
+    f.e = keepMoved(old, QStringLiteral("E"));
     writeBytes(keptPath(f.c), "c's bytes");
     old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
     old.set(kBook, book2({record(f.a, false), record(f.c, true)},
                          {record(f.b, false)}));
     return f;
 }
+
+const QString kLeftUnnamed1 =
+    QStringLiteral("Signal files no plugin was made from, left in the "
+                   "earlier version's folder: 1");
 
 // Every bridge call that imports, keeps, saves or removes in the stores,
 // each once and each answered ok; what it saves goes to out
@@ -253,13 +269,14 @@ TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
 
 /* A record with kept false spares its copy whether a vehicle lists it or
  * the book's own list does; a kept record's old copy goes (its bytes are
- * in plugins/unmigrated), and so does a copy no record names. A copy is
- * judged by its name alone: a's bytes no longer hash to it */
+ * in plugins/unmigrated), and so does a moved copy (a plugin was made
+ * from it); a copy no record names, with no plugin made from it, stays.
+ * A copy is judged by its name alone: a's bytes no longer hash to it */
 TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    const Four f = stageFour(old);
+    const Five f = stageFive(old);
     writeBytes(old.copyOf(f.a), "a, edited by hand since");
     markDone();
     const QByteArray cKept = readBytes(keptPath(f.c));
@@ -268,13 +285,16 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
     EXPECT_TRUE(r.oldBook);
     EXPECT_EQ(r.removed, 2);
     EXPECT_EQ(r.spared, 2);
+    EXPECT_EQ(r.unnamed, 1);
     EXPECT_EQ(r.stuck, 0);
     EXPECT_FALSE(old.has(kOldBook));
     QStringList left{f.a + QStringLiteral(".json"),
-                     f.b + QStringLiteral(".json")};
+                     f.b + QStringLiteral(".json"),
+                     f.d + QStringLiteral(".json")};
     left.sort();
     EXPECT_EQ(namesIn(old.signalsRoot()), left);
     EXPECT_EQ(readBytes(old.copyOf(f.a)), "a, edited by hand since");
+    EXPECT_EQ(readBytes(old.copyOf(f.d)), "d's bytes");
     EXPECT_EQ(StoreMigration::unmigrated(), QStringList{f.c});
     EXPECT_EQ(readBytes(keptPath(f.c)), cKept);
     EXPECT_EQ(r.lines,
@@ -283,19 +303,54 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
                                           "removed: 2"),
                            QStringLiteral("Signal files that weren't moved, "
                                           "kept in the earlier version's "
-                                          "folder for Save: 2")}));
+                                          "folder for Save: 2"),
+                           kLeftUnnamed1}));
 }
 
-/* With nothing spared and nothing else there, the folder goes with its
- * last copy; a second start then has nothing to do and says nothing */
+/* A book that records no file that didn't move, with the mark set (an
+ * earlier version's move, which recorded none, or a book written by hand)
+ * takes no copy whose bytes are nowhere else: a copy with no plugin made
+ * from it stays through two starts, and only the first says so */
+TEST(BridgeTest, OneStoreRemovalNeverTakesACopyOnTheBooksWordAlone)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString stray = old.keep("stray's bytes");
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({}, {}));
+    markDone();
+
+    const Removal first = removal(old);
+    EXPECT_EQ(first.removed, 1);
+    EXPECT_EQ(first.unnamed, 1);
+    EXPECT_EQ(first.lines,
+              (QStringList{kListRemoved,
+                           QStringLiteral("The earlier version's signal files "
+                                          "removed: 1"),
+                           kLeftUnnamed1}));
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
+    const Removal second = removal(old);
+    EXPECT_EQ(second.removed, 0);
+    EXPECT_EQ(second.unnamed, 1);
+    EXPECT_TRUE(second.lines.isEmpty());
+    EXPECT_EQ(namesIn(old.signalsRoot()),
+              QStringList{stray + QStringLiteral(".json")});
+    EXPECT_EQ(readBytes(old.copyOf(stray)), "stray's bytes");
+}
+
+/* With every copy's bytes elsewhere and nothing else there, the folder
+ * goes with its last copy; a second start then has nothing to do and
+ * says nothing */
 TEST(BridgeTest, OneStoreRemovalTakesTheFolderWithItsLastCopy)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    old.keep("one");
-    old.keep("two");
+    keepMoved(old, QStringLiteral("One"));
+    const QString two = old.keep("two");
+    writeBytes(keptPath(two), "two");
     old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
-    old.set(kBook, book2({}, {}));
+    old.set(kBook, book2({record(two, true)}, {}));
     markDone();
 
     const Removal r = removal(old);
@@ -308,9 +363,9 @@ TEST(BridgeTest, OneStoreRemovalTakesTheFolderWithItsLastCopy)
 }
 
 /* A second start with a spared copy left changes nothing and says
- * nothing; once its record is removed (the page's Remove), the next start
- * takes its copy and the folder */
-TEST(BridgeTest, OneStoreRemovalTakesACopyOnceItsRecordIsRemoved)
+ * nothing; once its record is removed (the page's Remove), its bytes are
+ * still only in the old folder, so the next start leaves it there */
+TEST(BridgeTest, OneStoreRemovalKeepsACopyOnceItsRecordIsRemoved)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
@@ -327,8 +382,10 @@ TEST(BridgeTest, OneStoreRemovalTakesACopyOnceItsRecordIsRemoved)
 
     old.set(kBook, book2({}, {}));
     const Removal after = removal(old);
-    EXPECT_EQ(after.removed, 1);
-    EXPECT_FALSE(QFileInfo::exists(old.signalsRoot()));
+    EXPECT_EQ(after.removed, 0);
+    EXPECT_EQ(after.unnamed, 1);
+    EXPECT_TRUE(after.lines.isEmpty());
+    EXPECT_EQ(filesUnder(old.signalsRoot()), kept);
 }
 
 /* Nothing is touched without the mark, or without a book this version
@@ -380,7 +437,7 @@ TEST(BridgeTest, OneStoreRemovalStoppedAfterEachStepEndsTheSame)
                         bool* bookLeft) {
         OldState old;
         ASSERT_TRUE(old.valid());
-        stageFour(old);
+        stageFive(old);
         markDone();
         if (stop != Step::None) {
             StoreMigration::stopAfterForTesting(stop, n);
@@ -419,7 +476,7 @@ TEST(BridgeTest, OneStoreRemovalWithPreferencesThatCantBeWrittenDeletesNothing)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    stageFour(old);
+    stageFive(old);
     markDone();
     const auto before = filesUnder(old.signalsRoot());
     const QFile::Permissions was = QFile::permissions(old.prefsPath());
@@ -507,7 +564,7 @@ TEST(BridgeTest, OneStoreRemovalStopsWhileTheOldBookIsReadStill)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    stageFour(old);
+    stageFive(old);
     markDone();
     {
         QSettings orgWide(old.path() + QStringLiteral("/Havne.ini"),
