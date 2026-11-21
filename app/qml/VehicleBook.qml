@@ -422,8 +422,10 @@ QtObject {
 
     // ADR-0027 section 4: the VIN key settles which vehicle this is. Returns
     // { doc, outcome, label, previous }: outcome "same", "learned",
-    // "switched" or "new"; label the vehicle now picked; previous the
-    // one picked before, "" for none
+    // "switched" or "new"; label the vehicle the VIN names; previous the
+    // one picked, "" for none. The pick never changes: the session reads
+    // the picked vehicle's profile, so a vehicle the VIN names is offered
+    // (the pick at the next connect), and a new one is added unpicked
     function recognize(doc, key, uri) {
         const before = picked(doc)
         const previous = before === null ? "" : before.label
@@ -431,16 +433,18 @@ QtObject {
             return { doc: doc, outcome: "same", label: previous, previous: previous }
         const other = doc.list.find(v => v.vinKey === key)
         if (other)
-            return { doc: pick(doc, other.id), outcome: "switched", label: other.label,
+            return { doc: doc, outcome: "switched", label: other.label,
                      previous: previous }
         if (before !== null && before.vinKey === "")
             return { doc: change(doc, v => v.vinKey = key), outcome: "learned",
                      label: previous, previous: previous }
         const label = defaultNewLabel(doc)
         const d = add(doc, label)
-        picked(d).vinKey = key
+        const v = picked(d)
+        v.vinKey = key
         if (isAdapterUri(uri))
-            picked(d).uri = withoutFileProfile(uri)
+            v.uri = withoutFileProfile(uri)
+        d.picked = before === null ? "" : before.id
         return { doc: d, outcome: "new", label: label, previous: previous }
     }
 
@@ -479,15 +483,16 @@ QtObject {
         return s + sep + "profile=" + profile
     }
 
-    // Beside the vehicles, for a recognize() that picked another: the
-    // pick is the car's, not the user's, so the section says so until
-    // the user picks; "" for any other result
+    // Beside the vehicles, for a recognize() that named another saved
+    // vehicle: the session keeps the pick, so the section offers the
+    // named one; "" for any other result
     function pickNote(r) {
         if (r.outcome !== "switched")
             return ""
         return r.previous === ""
-                ? qsTr("The connected car's VIN picked %1").arg(r.label)
-                : qsTr("The connected car's VIN picked %1 (%2 was picked)").arg(r.label, r.previous)
+                ? qsTr("The connected car's VIN is %1's: pick it to read its signals at the next connect").arg(r.label)
+                : qsTr("The connected car's VIN is %1's, but this session reads %2: pick %1 for the next connect")
+                      .arg(r.label, r.previous)
     }
 
     // The activity log's line for a recognize() result
@@ -498,12 +503,15 @@ QtObject {
         case "learned":
             return qsTr("Vehicle: %1 (recognized from now on)").arg(r.label)
         case "switched":
-            return r.previous === "" ? qsTr("Vehicle: %1 (picked)").arg(r.label)
-                                     : qsTr("Vehicle: %1 (picked; %2 was)").arg(r.label, r.previous)
+            return r.previous === ""
+                    ? qsTr("Vehicle: %1 (recognized, not picked; pick it for the next connect)").arg(r.label)
+                    : qsTr("Vehicle: %1 (recognized; this session reads %2, pick %1 for the next connect)")
+                          .arg(r.label, r.previous)
         default:
             return r.previous === ""
-                    ? qsTr("Vehicle: saved as %1").arg(r.label)
-                    : qsTr("Vehicle: not %1 (its VIN differs); saved as %2").arg(r.previous, r.label)
+                    ? qsTr("Vehicle: saved as %1 (not picked)").arg(r.label)
+                    : qsTr("Vehicle: not %1 (its VIN differs); saved as %2, not picked for this session")
+                          .arg(r.previous, r.label)
         }
     }
 }

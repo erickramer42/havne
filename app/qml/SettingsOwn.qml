@@ -275,8 +275,8 @@ Item {
                                                   Bridge.signalModel.unplottedKeys()))
     }
 
-    // Said beside the vehicles while the car's VIN, not the user, made
-    // the pick (VehicleBook.pickNote); "" once the user picks
+    // Said beside the vehicles while the car's VIN names a vehicle the
+    // user hasn't picked (VehicleBook.pickNote); "" once the user picks
     property string vinPickNote: ""
 
     // The VIN settled which vehicle this is (ADR-0027 section 4)
@@ -291,14 +291,6 @@ Item {
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         host.saveVehicles(r.doc)
         vinPickNote = VehicleBook.pickNote(r)
-        if (r.outcome === "new" && host.plottedApplied) {
-            // This session's ticks are the new vehicle's; what the one
-            // picked before kept for other sets stays its own
-            Bridge.signalModel.dropCarriedChoices()
-            rememberPlotting()
-        }
-        else if (r.outcome === "switched" && host.plottedApplied)
-            Bridge.signalModel.setPlotChoices(host.pickedVehicle.plotted, host.pickedVehicle.unplotted)
         Bridge.logEvent(VehicleBook.logLine(r))
     }
 
