@@ -163,7 +163,9 @@ Item {
         const said = named.length === 0 ? (n === 0 ? qsTr("none yet") : qsTr("%1, none picked").arg(plugins))
                    : named.length === 1 ? qsTr("%1: %2").arg(plugins, first)
                    : qsTr("%1: %2 and %3 more").arg(plugins, first).arg(named.length - 1)
-        return said + (missing === 0 ? "" : missing === 1 ? qsTr(", 1 pick missing")
+        const unread = named.length > 0 && host.uriPart.unreadPick !== null
+                       && host.uriPart.profileChoice === "default" ? qsTr(" (Default reads plain OBD-II)") : ""
+        return said + unread + (missing === 0 ? "" : missing === 1 ? qsTr(", 1 pick missing")
                                                            : qsTr(", %1 picks missing").arg(missing))
     }
 

@@ -114,8 +114,11 @@ Item {
     // gauges read not in profile, and the note counts them
     function addPluginPage(id, index) {
         const entry = pluginPageList.find(e => e.id === id)
-        const plugin = entry ? entry.name : id
-        const r = DashboardBook.importProblem(Bridge.pluginPageText(id, index), part.host.form, [])
+        return addPluginPageText(entry ? entry.name : id, Bridge.pluginPageText(id, index))
+    }
+    // The text is a plugin's page file's: one page, or nothing is added
+    function addPluginPageText(plugin, text) {
+        const r = DashboardBook.importProblem(text, part.host.form, [])
         part.host.presetList = ""
         if (!DashboardEdit.canAddPage(part.host.doc)) {
             part.host.layoutFilePart.noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)

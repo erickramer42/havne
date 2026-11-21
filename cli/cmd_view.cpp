@@ -260,8 +260,7 @@ int use_view_signals(Output& out, ViewArgs& args)
     }
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // The start of a recording's nth pull (1 the first) under its rules, over

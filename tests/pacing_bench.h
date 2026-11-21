@@ -117,6 +117,13 @@ struct bench_config {
     std::vector<uint16_t> picks;
     std::vector<uint8_t> supported;
     int64_t seconds = 70;
+    /* Replies in the first settle_s seconds (the connect's walk and
+     * one-shots) reach the engine and the decoder but not the tally */
+    int64_t settle_s = 0;
+    /* The channels' order by reply ID (the rest after, as they stand):
+     * an ELM327 asks in its set's order, where the mock's session puts
+     * the engine ECU's channel first */
+    std::vector<uint32_t> channel_order;
 };
 
 // What a run reached: the log's tally, each request's time, and the waits
@@ -195,6 +202,26 @@ inline std::vector<uint8_t> test_car_pids()
         }
     }
     return pids;
+}
+
+// The session's channels put in order's order by reply ID, the ones it
+// doesn't name after them as they stood
+inline void order_channels(ecuio_session_info_t& info,
+                           const std::vector<uint32_t>& order)
+{
+    uint32_t at = 0;
+    for (uint32_t rx : order) {
+        for (uint32_t k = at; k < info.channel_count; ++k) {
+            if (info.rx_ids[k] == rx) {
+                std::rotate(info.rx_ids + at, info.rx_ids + k,
+                            info.rx_ids + k + 1);
+                std::rotate(info.tx_ids + at, info.tx_ids + k,
+                            info.tx_ids + k + 1);
+                ++at;
+                break;
+            }
+        }
+    }
 }
 
 class bench
@@ -310,6 +337,7 @@ private:
     std::vector<flight> m_flights;
     bench_result m_result;
     uint64_t m_seq = 0;
+    int64_t m_settled_us = 0;
     int64_t m_look = INT64_MAX;
     int64_t m_bus_free = 0;
     std::vector<uint32_t> m_segments; /* J2534: reply IDs with a segmented
@@ -337,6 +365,7 @@ inline bool bench::open(std::string* why)
         return false;
     }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(m_session);
+    order_channels(m_session->info, m_cfg.channel_order);
     m_engine = std::make_unique<ecuio_request_engine>();
     bool probe = false;
     bool identify = false;
@@ -388,6 +417,7 @@ inline bench_result bench::run()
 {
     const int64_t start = 1000000;
     const int64_t end = start + m_cfg.seconds * 1000000;
+    m_settled_us = start + m_cfg.settle_s * 1000000;
     look_at(start);
     while (!m_events.empty() && m_events.top().at <= end) {
         const event ev = m_events.top();
@@ -610,8 +640,10 @@ inline void bench::on_deliver(const event& ev)
         std::min<size_t>(f.data.size(), sizeof frame.data));
     std::memcpy(frame.data, f.data.data(), frame.data_length);
     const uint32_t count = m_session->decoder.decode(&frame);
-    m_result.tally.on_frame();
-    if (count > 0) {
+    if (ev.at >= m_settled_us) {
+        m_result.tally.on_frame();
+    }
+    if (count > 0 && ev.at >= m_settled_us) {
         ecuio_value_batch_t batch{};
         batch.timestamp_us = frame.timestamp_us;
         batch.arbitration_id = frame.arbitration_id;

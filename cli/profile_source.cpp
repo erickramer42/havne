@@ -85,8 +85,7 @@ int use_signal_file(const char* path, const char* uri, std::string* opened)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream replay:// with neither --signals nor --plugin (ADR-0051
@@ -184,8 +183,7 @@ int use_recording_signals(const char* uri, std::string* opened)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream replay:// with no --conditions (ADR-0063 section 8): the
@@ -499,8 +497,7 @@ int use_plugin(const char* path, const char* uri)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream's and log's profile source: a plugin's variants registered, a

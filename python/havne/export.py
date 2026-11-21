@@ -264,7 +264,9 @@ def export_csv(folder, out, *, layout="wide", signals=None, row_ms=0, units="met
     is an empty column, named in Exported.missing. layout "long" has a row
     for each value (time_s,signal,unit,value, and key in a recording kept
     by key, after a comment line: pandas skiprows=1) and takes none of
-    signals, row_ms or units. Returns an Exported."""
+    signals, row_ms or units. Both layouts start with a UTF-8 byte order
+    mark, so Excel shows the units: read one with encoding="utf-8-sig".
+    Returns an Exported."""
     layout, names, row_ms, units = _csv_args(layout, signals, row_ms, units)
     return _write(e.ECUIO_EXPORT_CSV, "csv", folder, out, raw, from_us, to_us, cancel,
                   (layout, row_ms, units), names)

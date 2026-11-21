@@ -172,7 +172,12 @@ TestCase {
         b.text = "100"
         compare(find(page, "formPreview").text, "= 80 kPa")
         b.text = "abc"
-        verify(find(page, "formPreview").text.indexOf("not a number") >= 0)
+        compare(find(page, "formPreview").text, "abc is not a number", "the typed text is named")
+        // A value typed with the locale's decimal point reads, whichever it is
+        b.text = "100" + Qt.locale().decimalPoint + "5"
+        verify(find(page, "formPreview").text.indexOf("= 79") === 0, find(page, "formPreview").text)
+        verify(find(page, "formPreview").text.indexOf("not a number") < 0)
+        b.text = "abc"
         find(page, "formExpr").text = "obd2.map / (obd2.baro - obd2.baro)"
         compare(find(page, "formTest_0").text, "180", "a value stays for a signal still read")
         find(page, "formTest_1").text = "100"

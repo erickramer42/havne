@@ -134,24 +134,6 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#46. The VIN can switch the picked vehicle without changing the
-    session's profile.** Connected with a two-channel vehicle picked, the
-    VIN switched the pick to the four-channel vehicle the VIN was
-    recognized for, and the session kept the two-channel profile, so the
-    log names one vehicle and the session reads the other's channels
-    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
-- **#47. With an adapter's address, the "Default" profile reads plain
-    `obd2`, not the picked vehicle's plugin.** A user who picks a plugin's
-    vehicle and connects on Default reads `obd2` without the plugin's
-    signals; only picking the plugin's profile in Settings forms the URI
-    with it. A wording issue: the row names "Default" without saying what
-    it is for an adapter
-    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
-- **#48. A connect may log "no answer to the supported-PID query" before
-    the support line.** The walk's first `01 00` met a stray single frame,
-    asked again 0.4 s later, and the log shows the first line, then the
-    right one 0.3 s after, which a user reads as a fault. Low
-    ([2026-11-18-stall-fix-car](docs/bench-sessions/2026-11-18-stall-fix-car.md)).
 - **#49. The ELM327 worker's 5 s watchdog does not fire across a host's
     sleep.** It counts the host's clock, so it fired only on the wake: a
     session stood stalled for 19 minutes until the laptop woke, then

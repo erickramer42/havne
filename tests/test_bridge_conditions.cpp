@@ -259,6 +259,39 @@ TEST(BridgeTest,
         QFile::exists(ConditionStore::path() + QStringLiteral(".bad-2")));
 }
 
+// A save that moved the unreadable file aside and then can't write says where
+// the user's only copy now is
+TEST(BridgeTest, AFailedSaveAfterTheMoveAsideNamesTheKeptFile)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QByteArray big = mockConditions();
+    big.append(QByteArray(ECUIO_CONDITION_FILE_MAX_BYTES, ' '));
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(file).absolutePath()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(big);
+    }
+    ConditionStore store;
+    QString words;
+    ASSERT_FALSE(store.load(&words));
+    store.failNextWriteForTesting();
+    const QVariantMap r = store.save(mockConditions());
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    const QString said = r.value(QStringLiteral("words")).toString();
+    EXPECT_TRUE(said.contains(QStringLiteral("conditions.json.bad-1")))
+        << said.toStdString();
+    EXPECT_EQ(readFile(ConditionStore::path() + QStringLiteral(".bad-1")), big);
+    // With nothing moved aside the words are the plain ones
+    QFile::remove(ConditionStore::path() + QStringLiteral(".bad-1"));
+    ConditionStore plain;
+    plain.failNextWriteForTesting();
+    const QString plainWords =
+        plain.save(mockConditions()).value(QStringLiteral("words")).toString();
+    EXPECT_EQ(plainWords, QStringLiteral("the conditions can't be saved"));
+}
+
 // The file that didn't load may be gone by the time the user saves (moved
 // or deleted by hand): the save has nothing to keep aside and goes through,
 // where a refusal would block every save until a restart

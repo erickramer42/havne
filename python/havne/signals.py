@@ -25,6 +25,7 @@
 import collections
 import ctypes
 import itertools
+import math
 import os
 import threading
 
@@ -149,7 +150,6 @@ def _value_id(file, name):
 
 
 def _evaluate(file, expr, values, key):
-    program = _checked(file, expr, key).program
     inputs = (e.ecuio_eval_input_t * max(len(values), 1))()
     named = {}
     for i, (name, given) in enumerate(values.items()):
@@ -163,7 +163,11 @@ def _evaluate(file, expr, values, key):
                              f"and {name!r}")
         named[inputs[i].def_id] = name
         inputs[i].value = float(value)
+        if not math.isfinite(inputs[i].value):
+            raise ValueError(f"a value for {name!r}: the number must be finite")
         inputs[i].age_us = age_us
+    # The values are judged before the expression, as havne-cli signals expr does
+    program = _checked(file, expr, key).program
     out = e.ecuio_eval_result_t()
     out.struct_size = ctypes.sizeof(out)
     check(lib.ecuio_signal_file_evaluate(file, ctypes.byref(program), inputs, len(values),
@@ -313,7 +317,9 @@ class SignalFile:
         at the chain's bound is given by its own text with key=. key as
         check_expr takes it. ExprRefused for an
         expression that doesn't compile; ValueError for a value whose
-        name reads no number of the file, or two values for one signal."""
+        name reads no number of the file, one that isn't finite, or two
+        values for one signal. The values are judged first, so a bad
+        value and a refused expression give the value's words."""
         return _evaluate(self._handle, expr, values, key)
 
     @property
@@ -426,6 +432,14 @@ class Plugin:
                         text(lib.ecuio_plugin_page_text(self._handle, index))))
         return out
 
+    def _expr_variant(self, variant):
+        """A variant's index for an expression call: a plugin of several
+        variants needs one named, as havne-cli signals expr --plugin does"""
+        if variant is None and len(self.variants) > 1:
+            raise ValueError("a plugin of several variants needs variant= to name one of "
+                             "its variants: " + ", ".join(self.variants))
+        return self.variant_index(variant)
+
     def variant_index(self, variant=None):
         """A variant's index by its id; the first's when None"""
         return 0 if variant is None else self.variants.index(variant)
@@ -454,21 +468,22 @@ class Plugin:
 
     def check_expr(self, expr, key=None, variant=None):
         """expr checked as a computed signal's expression in a variant's
-        file (the first variant when None), as SignalFile.check_expr"""
+        file, as SignalFile.check_expr; variant is needed by a plugin of
+        several (ValueError listing them)"""
         return _check_expr(
-            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)), expr, key)
+            lib.ecuio_plugin_variant_file(self._handle, self._expr_variant(variant)), expr, key)
 
     def expr_ref(self, signal, variant=None):
-        """The name a variant's expressions read a signal by (the first
-        variant when None), as SignalFile.expr_ref"""
+        """The name a variant's expressions read a signal by, as
+        SignalFile.expr_ref; variant as check_expr takes it"""
         return _expr_ref(
-            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)), signal)
+            lib.ecuio_plugin_variant_file(self._handle, self._expr_variant(variant)), signal)
 
     def evaluate(self, expr, values, key=None, variant=None):
-        """expr worked out over a variant's set from values (the first
-        variant when None), as SignalFile.evaluate"""
+        """expr worked out over a variant's set from values, as
+        SignalFile.evaluate; variant as check_expr takes it"""
         return _evaluate(
-            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
+            lib.ecuio_plugin_variant_file(self._handle, self._expr_variant(variant)),
             expr, values, key)
 
     def keys(self, variant=None):

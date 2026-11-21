@@ -87,6 +87,7 @@ Button {
     // Given less than its text's width, the text wraps and the button
     // grows taller
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.text
         font.pixelSize: Theme.fontBody
         color: control.textColor

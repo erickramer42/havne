@@ -470,7 +470,11 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_SUPPORT_MAX_DROPPED        8
 
 /* flags */
-#define ECUIO_SUPPORT_PROBED             0x00000001u   /* the chain was asked */
+#define ECUIO_SUPPORT_PROBED             0x00000001u   /* a walk of the chain has
+                                                          ended, answered or not
+                                                          (ranges 0: no bitmap
+                                                          answered); clear while a
+                                                          first walk is asking */
 #define ECUIO_SUPPORT_COMPLETE           0x00000002u   /* answered to its end,
                                                           so every PID is judged */
 #define ECUIO_SUPPORT_SCAN_COMPLETE      0x00000004u   /* every scanned DID was

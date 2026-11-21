@@ -275,6 +275,7 @@ Pane {
                 }
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "exportWords"
                 visible: Bridge.model.heldCount > 0 || page.exportNote !== ""
                 Layout.fillWidth: true
@@ -303,6 +304,7 @@ Pane {
                 spacing: Theme.spacing
 
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "selectedLabel"
                     height: Theme.controlHeight
                     verticalAlignment: Text.AlignVCenter
@@ -374,6 +376,7 @@ Pane {
                 // still reaches is said, so a pause never reads as frames
                 // lost from the recording, nor kept when nothing records
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "frameStatus"
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
@@ -393,6 +396,7 @@ Pane {
 
                 // What the filter leaves of the table
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "filterStatus"
                     visible: Bridge.model.filterTerms > 0
                     width: Math.min(implicitWidth, parent.width)
@@ -403,6 +407,7 @@ Pane {
                 }
 
                 Label {
+                    textFormat: Text.PlainText
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
                     text: qsTr("%1 dropped").arg(Bridge.droppedFrames)
@@ -414,6 +419,7 @@ Pane {
                 // Frames that came after the adapter lost some (its buffer
                 // overflowed), as against the ones dropped above
                 Label {
+                    textFormat: Text.PlainText
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
                     objectName: "overflowLabel"
@@ -428,6 +434,7 @@ Pane {
                 // queued call each, ADR-0005's per-frame baseline) and the
                 // coalesced signal batches. Left out at phone width.
                 Label {
+                    textFormat: Text.PlainText
                     text: qsTr("notify %1 · batch %2")
                         .arg(Bridge.guiNotifyCount)
                         .arg(Bridge.signalBatchCount)

@@ -158,6 +158,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "formOrderLabel"
             visible: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum"
             text: qsTr("Byte order:")
@@ -290,6 +291,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formReadResult"
         visible: text !== ""
         text: root.host.ownPart.readResultText(root.host.ownPart.readResult)
@@ -298,6 +300,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "formProblem"
         visible: text !== ""
         text: root.host.ownPart.formProblem
@@ -306,6 +309,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "formNote"
         visible: text !== ""
         text: root.host.ownPart.formNote

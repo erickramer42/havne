@@ -26,6 +26,20 @@ RecordingsKit {
         Harness.clickStamped(item, x, y, clickStamp + 100)
     }
 
+    // Each box and menu the page feeds with a name from a file is the
+    // plain-text one: a stock delegate draws AutoText, which crashes Qt 6.12
+    // on an img tag (the components' own cases are in tst_plaintext.qml)
+    function test_theBoxesAndTheMenuFedByFilesDrawPlainText() {
+        const page = openEarly()
+        for (const name of ["decodeChoice", "compareChoice", "alignMarker", "alignSignal", "savedMaps"]) {
+            const box = find(page, name)
+            compare(box.contentItem.textFormat, Text.PlainText, name)
+        }
+        page.paneMenuItems = [{ text: "<b>x</b>", key: "", checked: false }]
+        tryVerify(() => page.paneMenu.count === 1, 2000, "the menu has its item")
+        compare(page.paneMenu.itemAt(0).contentItem.textFormat, Text.PlainText)
+    }
+
     // A decode chosen while comparing on pulls asks again for the pulls
     // and aligns on them
     function test_aDecodeWhileComparingOnPullsAsksAgain() {

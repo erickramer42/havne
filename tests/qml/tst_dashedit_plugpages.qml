@@ -161,6 +161,23 @@ DashEditKit {
         compare(page.doc.pages.length, 1)
     }
 
+    // Core refuses a page file of two pages at the import, so the text is
+    // handed over directly: one page is added, two (or none) are not
+    function test_aTextOfTwoPagesAddsNothing() {
+        const page = pageWithPicks({}, [])
+        page.startEditing()
+        const one = pageJson("desktop", "Engine", ["key:oil"])
+        const two = pageJson("desktop", "Engine", ["key:oil"])
+        two.pages.push(pageJson("desktop", "Second", ["key:oil"]).pages[0])
+        verify(!page.editsPart.addPluginPageText("Two", JSON.stringify(two)))
+        compare(page.layoutFilePart.layoutNote, "The page couldn't be read")
+        verify(page.layoutFilePart.layoutNoteBad)
+        verify(!page.historyPart.canUndo)
+        compare(page.doc.pages.length, 1)
+        verify(page.editsPart.addPluginPageText("One", JSON.stringify(one)))
+        compare(page.doc.pages.length, 2)
+    }
+
     function test_aRemovedPluginLeavesTheCopyAsItWas() {
         const p = importPlugin("paged", "Paged")
         const page = pageWithPicks({}, [p.profiles[1]])
@@ -185,6 +202,29 @@ DashEditKit {
             verify(right <= bar.width + 0.5, name + " ends inside the bar: " + right + " of " + bar.width)
         }
         verify(find(page, "plugpage_name_0").width > 0)
+    }
+
+    // A name from a file is text, never markup: an <img> in it would make
+    // the engine fetch the URL
+    function test_aPluginsNameIsDrawnAsTextAndFetchesNothing() {
+        const port = Harness.startListener()
+        verify(port > 0, "the listener is up")
+        const url = "http://127.0.0.1:" + port + "/x.png"
+        const name = "<img src=\"" + url + "\"><b>x</b>"
+        const p = importPlugin("markup", name)
+        const page = pageWithPicks({ form: "phone" }, [p.profiles[0]])
+        openList(page)
+        const label = find(page, "plugpage_name_0")
+        compare(label.text, name)
+        compare(label.textFormat, Text.PlainText)
+        // The button of a page shows the page's own name the same way
+        compare(find(page, "plugpage_0_0").contentItem.textFormat, Text.PlainText)
+        // And the engine itself refuses the network: an image asked of
+        // the listener fails without a connection
+        const probe = Qt.createQmlObject("import QtQuick; Image { asynchronous: true; source: \"" + url + "\" }", testCase)
+        tryVerify(() => probe.status === Image.Error, 5000)
+        compare(Harness.listenerConnections(), 0, "no connection reached the listener")
+        probe.destroy()
     }
 
     function test_theDesktopsPhoneFrameOffersPhonePages() {

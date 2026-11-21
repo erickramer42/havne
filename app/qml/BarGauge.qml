@@ -30,6 +30,7 @@ GaugeBase {
     implicitHeight: vertical ? 180 : 72
 
     Text {
+        textFormat: Text.PlainText
         id: title
         objectName: "gaugeTitle"
         Accessible.ignored: true
@@ -44,6 +45,7 @@ GaugeBase {
     }
     readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: gauge.noteAlone ? parent.left : title.right
@@ -64,6 +66,7 @@ GaugeBase {
         spacing: 3
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             id: valueLabel
             objectName: "readout"
             Accessible.ignored: true
@@ -84,6 +87,7 @@ GaugeBase {
             anchors.verticalCenter: valueLabel.verticalCenter
         }
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             visible: gauge.hasValue
@@ -159,29 +163,26 @@ GaugeBase {
     }
 
     // A flat bar's marks keep every stride-th label (the ends always) when
-    // the bar is too short for them all; the widest label is measured, as
-    // fonts differ in width by platform
-    readonly property string widestMark: {
-        let w = ""
-        for (const m of scaleMarks) {
-            const t = formatScale(m)
-            if (t.length > w.length)
-                w = t
-        }
-        return w
-    }
-    TextMetrics {
+    // the bar is too short for them all; each label is measured, as fonts
+    // differ in width by platform and the longest string isn't always the
+    // widest drawn
+    FontMetrics {
         id: markMetrics
-        text: gauge.widestMark
         font.pixelSize: 10
         font.features: Theme.valueFeatures
+    }
+    readonly property real widestMarkWidth: {
+        let w = 0
+        for (const m of scaleMarks)
+            w = Math.max(w, markMetrics.advanceWidth(formatScale(m)))
+        return w
     }
     readonly property int markStride: {
         const n = scaleMarks.length
         if (vertical || n < 3)
             return 1
         const pitch = bar.width / (n - 1)
-        return Math.max(1, Math.ceil((markMetrics.advanceWidth + 8) / Math.max(1, pitch)))
+        return Math.max(1, Math.ceil((widestMarkWidth + 8) / Math.max(1, pitch)))
     }
 
     Item {
@@ -194,6 +195,7 @@ GaugeBase {
         Repeater {
             model: gauge.scaleMarks
             delegate: Text {
+                textFormat: Text.PlainText
                 required property real modelData
                 required property int index
                 Accessible.ignored: true

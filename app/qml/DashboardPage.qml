@@ -123,7 +123,7 @@ Page {
              : scheme === "replay" || scheme === "socketcan" ? "raw" : "obd2"
     }
     function profileName(profile) {
-        return profileNames[profile] ?? profile
+        return SessionLabel.nameIn(profileNames, profile) ?? profile
     }
     // The session's profile, "" with none
     readonly property string sessionProfile: Bridge.connected ? profileOf(Bridge.currentUri) : ""
@@ -747,6 +747,7 @@ Page {
                       leftMargin: 8; rightMargin: 8 }
             spacing: 10
             Label {
+                textFormat: Text.PlainText
                 objectName: "dashUndoLineText"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -755,6 +756,7 @@ Page {
                 text: history.undoLine
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "dashUndoLineKeys"
                 visible: root.editing && root.form === "desktop"
                 color: Theme.textDim
@@ -797,6 +799,7 @@ Page {
         radius: Theme.radius
         color: Theme.bg
         Label {
+            textFormat: Text.PlainText
             id: driveHintText
             anchors.centerIn: parent
             text: qsTr("Tap for the controls")

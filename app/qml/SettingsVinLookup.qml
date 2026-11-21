@@ -31,6 +31,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         readonly property string summary: Bridge.describeVin(vinLookupField.text)
         objectName: "vinLookupResult"
         visible: summary !== ""
@@ -41,6 +42,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "vinLookupHint"
         text: qsTr("By 49 CFR 565 and NHTSA's vPIC list (%1), on this device; the VIN isn't saved. The connected car's goes in the activity log.")
                   .arg(Bridge.vinSource())

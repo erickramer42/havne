@@ -217,6 +217,11 @@ struct Exported {
             }
             lines.push_back(line);
         }
+        if (rc == ECUIO_OK && !lines.empty()) {
+            /* a user CSV starts with a byte order mark */
+            EXPECT_EQ(lines[0].substr(0, 3), "\xEF\xBB\xBF");
+            lines[0].erase(0, 3);
+        }
     }
 };
 

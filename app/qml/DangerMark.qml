@@ -42,6 +42,7 @@ Item {
         }
     }
     Text {
+        textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         y: mark.size * 0.30
         text: "!"

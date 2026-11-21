@@ -84,6 +84,7 @@ GaugeBase {
 
     // A stale value's word, where the strip leaves room at its end
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { right: parent.right; verticalCenter: parent.verticalCenter }

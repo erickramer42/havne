@@ -108,6 +108,14 @@ def main():
             "stream-bad-uri": lambda n: ["stream", bad_uri],
             "stream-unrecorded": lambda n: ["stream", "mock://write-fail",
                                             "--count", "5", "--record", unmade],
+            "signals-check-unread": lambda n: ["signals", "check", missing],
+            "signals-import-unread": lambda n: [
+                "signals", "import", "obdb", missing, "--out",
+                os.path.join(tmp, n + ".json")],
+            "sim-bad-uri": lambda n: ["sim", bad_uri, "--elm327", "tcp:0", "--seconds", "1"],
+            "clear-bad-uri": lambda n: ["clear", bad_uri, "--yes"],
+            "stream-signals-unread": lambda n: ["stream", "mock://write-fail",
+                                                "--signals", missing],
         }
         # A run into a writable file ends with this exit
         exits = {"layout-refused": 3, "conditions-refused": 3,
@@ -117,7 +125,9 @@ def main():
                  "drop-unread": 3, "match-unread": 3, "check-unread": 3,
                  "log-unread": 3, "log-bad-uri": 3, "log-unrecorded": 1,
                  "health-bad-uri": 3, "stream-unread": 3, "stream-bad-uri": 3,
-                 "stream-unrecorded": 1}
+                 "stream-unrecorded": 1, "signals-check-unread": 3,
+                 "signals-import-unread": 3, "sim-bad-uri": 3,
+                 "clear-bad-uri": 3, "stream-signals-unread": 3}
         if sys.platform.startswith("linux"):
             # play is Linux's alone; elsewhere it is usage, before any line
             commands["play-no-interface"] = lambda n: [

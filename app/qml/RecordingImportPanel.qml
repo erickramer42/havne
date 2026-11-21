@@ -23,6 +23,7 @@ ColumnLayout {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         objectName: "importFileName"
         Layout.fillWidth: true
         wrapMode: Text.WrapAnywhere
@@ -56,6 +57,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importBusy"
             visible: Bridge.recordingImport.busy
             Layout.fillWidth: true
@@ -69,7 +71,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importLabel
             objectName: "importLabel"
@@ -110,6 +112,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -130,6 +133,7 @@ ColumnLayout {
             onClicked: root.host.mapDialog.open()
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importMapName"
             Layout.fillWidth: true
             wrapMode: Text.WrapAnywhere
@@ -144,7 +148,7 @@ ColumnLayout {
                  && (root.host.savedMaps.length > 0 || root.host.importMap.toString() !== "")
         Layout.fillWidth: true
         spacing: Theme.spacing
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -174,6 +178,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "importGuessing"
         visible: root.host.importGuessing
         Layout.fillWidth: true
@@ -194,7 +199,7 @@ ColumnLayout {
         visible: root.host.importKind === RecordingImport.Candump && root.host.importAsksInterface
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importInterface
             objectName: "importInterface"

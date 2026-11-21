@@ -19,6 +19,7 @@ Flow {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalsConfirmText"
         text: root.words
         color: Theme.text

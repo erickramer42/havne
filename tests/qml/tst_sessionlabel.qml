@@ -46,6 +46,18 @@ TestCase {
         compare(SessionLabel.reads("plugin.daily.base", names, ""), "Daily driver extras")
     }
 
+    // A hand-typed profile= is no member of the names object
+    function test_aProfileNamedLikeAnObjectMemberReadsNothing() {
+        compare(SessionLabel.reads("toString", names, "Project car"), "")
+        compare(SessionLabel.reads("constructor", names, ""), "")
+        compare(SessionLabel.reads("__proto__", names, ""), "")
+    }
+
+    function test_aCutPercentEscapeStaysAsTyped() {
+        compare(SessionLabel.decoded("%E0%A4%A"), "%E0%A4%A")
+        compare(SessionLabel.decoded("a%20b"), "a b")
+    }
+
     function test_aBuiltInOrUnknownProfileReadsNothing() {
         compare(SessionLabel.reads("obd2", names, "Project car"), "")
         compare(SessionLabel.reads("plugin.gone.base", names, "Project car"), "")

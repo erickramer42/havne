@@ -21,6 +21,7 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: 10
     Label {
+        textFormat: Text.PlainText
         objectName: "paneFoldNote"
         visible: root.host.paneFoldNote !== "" && root.host.recording.state === RecordingView.Open
         text: root.host.paneFoldNote
@@ -77,6 +78,7 @@ ColumnLayout {
         // On a phone the hint wraps onto two caption lines where the
         // row leaves it little width, instead of eliding to "Tap for …"
         Label {
+            textFormat: Text.PlainText
             objectName: "cursorTime"
             visible: root.host.phoneShape || !root.host.spanLineUp
             Layout.fillWidth: true
@@ -122,6 +124,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "frameTestResult"
         visible: Theme.developerMode && root.host.frameTestResult !== "" && !root.host.chartMaximized
                  && root.host.recording.state === RecordingView.Open

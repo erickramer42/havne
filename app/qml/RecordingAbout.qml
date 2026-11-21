@@ -25,6 +25,7 @@ ColumnLayout {
         text: qsTr("About this recording")
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "recordingInfo"
         visible: root.host.recording.state === RecordingView.Open && !root.host.chartMaximized
         Layout.fillWidth: true
@@ -43,6 +44,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "reportNote"
         // Under Save report...: the title row's on the desktop, About's on a phone
         parent: Theme.compact ? aboutNote : root.host.topNote
@@ -55,7 +57,7 @@ ColumnLayout {
 
     // Where the values come from: offered once it opened, or failed
     // (a profile that can't decode it, a folder with frames alone)
-    ComboBox {
+    PlainComboBox {
         implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                  implicitContentHeight + topPadding + bottomPadding,
                                  implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -96,6 +98,7 @@ ColumnLayout {
             onClicked: root.host.openPart.useAsBaseline()
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "isBaseline"
             visible: root.host.isBaseline
             width: Math.min(implicitWidth, baselineFlow.width)
@@ -123,7 +126,7 @@ ColumnLayout {
         visible: root.host.recording.state === RecordingView.Open
         Layout.fillWidth: true
         spacing: Theme.spacing
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -154,7 +157,7 @@ ColumnLayout {
         visible: root.host.comparing && root.host.recording.state === RecordingView.Open
         Layout.fillWidth: true
         spacing: 6
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -172,7 +175,7 @@ ColumnLayout {
                     { text: qsTr("Align a pull"), value: "pull" }]
             onActivated: root.host.comparePart.setAlignOn(currentValue)
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -190,7 +193,7 @@ ColumnLayout {
                 currentIndex = Qt.binding(() => root.host.alignPullHere)
             }
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -206,7 +209,7 @@ ColumnLayout {
                 currentIndex = Qt.binding(() => root.host.alignPullThere)
             }
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -216,7 +219,7 @@ ColumnLayout {
             model: root.host.recording.state === RecordingView.Open ? root.host.comparePart.markerLabels() : []
             onActivated: root.host.alignLabel = currentText
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -260,6 +263,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "compareStatus"
         parent: root.host.compareSlot
         visible: root.host.comparing && root.host.recording.state === RecordingView.Open
@@ -272,6 +276,7 @@ ColumnLayout {
     // The frames check: what it found, each row centering the view on
     // its finding
     Label {
+        textFormat: Text.PlainText
         objectName: "checkSummary"
         visible: root.host.recording.state === RecordingView.Open && !root.host.chartMaximized
         Layout.fillWidth: true

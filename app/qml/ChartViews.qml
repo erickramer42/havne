@@ -12,7 +12,8 @@ QtObject {
     // The pane arrangements the viewer keeps for each recording, as the
     // settings hold them: { "<recording's folder name>": { used (ms since
     // the epoch, stamped at each write and each open of a kept one),
-    // assign: { <signal name>: <pane key> }, shares: { <pane count>:
+    // assign: { <signal id>: <pane key> } (the key, else the name an earlier
+    // version kept), shares: { <pane count>:
     // [share per pane] } } }. A damaged or oversized text reads as none, a
     // damaged entry is left out and the rest kept; past viewsMax entries
     // the least recently used go first.
@@ -20,6 +21,14 @@ QtObject {
     readonly property int viewsMaxSignals: 64
     readonly property int viewsMaxText: 262144
     readonly property int viewsMaxPanes: 8
+
+    // Whether an assignment holding `assign` can take one more under `id`:
+    // the bounds viewEntry reads back with, so a write is never one a later
+    // read throws away whole
+    function canKeep(assign, id) {
+        return id.length > 0 && id.length <= 200
+            && (assign[id] !== undefined || Object.keys(assign).length < viewsMaxSignals)
+    }
 
     function viewEntry(e) {
         if (e === null || typeof e !== "object" || Array.isArray(e))

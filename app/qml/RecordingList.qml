@@ -54,6 +54,7 @@ ListView {
                 Layout.fillWidth: true
                 spacing: 2
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingTitle"
                     text: recordingRow.modelData.title
                     color: Theme.text
@@ -61,6 +62,7 @@ ListView {
                     Layout.fillWidth: true
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingFacts"
                     visible: text !== ""
                     text: root.host.rowInfoPart.rowFacts(recordingRow.modelData)
@@ -70,6 +72,7 @@ ListView {
                     Layout.fillWidth: true
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingDetail"
                     text: root.host.rowInfoPart.rowDetail(recordingRow.modelData)
                     color: Theme.textDim
@@ -80,6 +83,7 @@ ListView {
             }
             // The picked vehicle's baseline
             Label {
+                textFormat: Text.PlainText
                 objectName: "baselineBadge"
                 visible: root.host.baselineFolder !== ""
                          && recordingRow.modelData.folder === root.host.baselineFolder

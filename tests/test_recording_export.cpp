@@ -77,7 +77,7 @@ TEST(RecordingExportTest, AWideCsvIsCoresFile)
     EXPECT_EQ(bytesOf(out),
               coreBytes(fixture("pull-early"), Options{},
                         dir.filePath(QStringLiteral("core.csv"))));
-    EXPECT_TRUE(bytesOf(out).startsWith("Time (ms),"));
+    EXPECT_TRUE(bytesOf(out).startsWith("\xEF\xBB\xBF" "Time (ms),"));
     EXPECT_GT(r.value(QStringLiteral("rows")).toDouble(), 0.0);
     EXPECT_TRUE(text(r, "summary").contains(QStringLiteral(" rows of ")))
         << text(r, "summary").toStdString();
@@ -105,7 +105,7 @@ TEST(RecordingExportTest, TheIntervalUnitsAndColumnsReachCore)
     const QByteArray bytes = bytesOf(out);
     EXPECT_EQ(bytes, coreBytes(fixture("pull-early"), o,
                                dir.filePath(QStringLiteral("core.csv"))));
-    EXPECT_TRUE(bytes.startsWith("Time (ms),Coolant "))
+    EXPECT_TRUE(bytes.startsWith("\xEF\xBB\xBF" "Time (ms),Coolant "))
         << bytes.left(60).data();
     EXPECT_NE(bytes.left(40).indexOf("F)"), -1) << bytes.left(40).data();
     EXPECT_NE(bytes, coreBytes(fixture("pull-early"), Options{},

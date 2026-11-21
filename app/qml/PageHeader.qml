@@ -20,6 +20,7 @@ RowLayout {
     spacing: 10
 
     Label {
+        textFormat: Text.PlainText
         visible: header.title !== ""
         Layout.fillWidth: header.titleShrinks
         // A whole pixel: the layout rounds a fractional maximum down, which

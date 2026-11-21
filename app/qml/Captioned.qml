@@ -10,6 +10,7 @@ Column {
     property alias caption: captionText.text
     spacing: 2
     Label {
+        textFormat: Text.PlainText
         id: captionText
         color: Theme.textDim
     }

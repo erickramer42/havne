@@ -358,11 +358,13 @@ void write_no_gauge_notes(Output& out, const ecuio_plugin_t* p,
         const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p, v);
         const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
         const std::string id = variant_of(p, v);
+        const std::vector<ecuio_signal_key_t> keys = cli::set_keys(&set, file);
         for (uint32_t i = 0; i < set.count; ++i) {
             if (cli::lacks_gauge(file, set.defs[i],
                                  ecuio_signal_file_gauge(file, &set.defs[i]))) {
                 BigLine b(cli::no_gauge_line_bytes());
-                cli::no_gauge_line(b.line, id.c_str(), set.defs[i]);
+                cli::no_gauge_line(b.line, id.c_str(), set.defs[i],
+                                   i < keys.size() ? keys[i].text : nullptr);
                 write_line(out, b.line);
             }
         }

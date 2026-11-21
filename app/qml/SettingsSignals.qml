@@ -46,6 +46,7 @@ ColumnLayout {
                                     unused: false })
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalLockedNote"
         visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to change what a vehicle reads.")
@@ -69,6 +70,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalProblem"
         visible: text !== ""
         text: root.host.picksPart.signalProblem
@@ -77,6 +79,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "signalNote"
         visible: text !== ""
         text: root.host.picksPart.signalNote
@@ -100,6 +103,7 @@ ColumnLayout {
         // A signal file: a plugin of its own, or a variant of one of the
         // user's
         Label {
+            textFormat: Text.PlainText
             objectName: "importText"
             visible: importPanel.isFile
             text: importPanel.isFile ? qsTr("%1: a signal file").arg(root.host.importPart.pendingImport.name) : ""
@@ -146,6 +150,7 @@ ColumnLayout {
                 inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "importReplaces"
                 visible: text !== ""
                 text: root.host.importPart.importReplaces(importVariantField.text)
@@ -193,6 +198,7 @@ ColumnLayout {
             Layout.fillWidth: true
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "obdbSummary"
                 text: root.host.importPart.obdbSummary(root.host.importPart.obdbReport)
                 color: Theme.text
@@ -200,6 +206,7 @@ ColumnLayout {
                 Layout.fillWidth: true
             }
             Label {
+                textFormat: Text.PlainText
                 visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.changed.length > 0
                 text: qsTr("Differs from OBDb:")
                 color: Theme.text
@@ -210,6 +217,7 @@ ColumnLayout {
                 model: root.host.importPart.obdbReport !== null
                        ? root.host.importPart.obdbReport.changed.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
+                    textFormat: Text.PlainText
                     required property var modelData
                     text: qsTr("%1, %2: %3")
                               .arg(modelData.key !== "" ? modelData.key : modelData.signal)
@@ -220,6 +228,7 @@ ColumnLayout {
                 }
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "obdbChangedMore"
                 readonly property int more: root.host.importPart.obdbReport === null ? 0
                     : root.host.importPart.obdbReport.changed.length - root.host.importPart.obdbRowsShown
@@ -228,6 +237,7 @@ ColumnLayout {
                 color: Theme.textDim
             }
             Label {
+                textFormat: Text.PlainText
                 visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.skipped.length > 0
                 text: qsTr("Left out:")
                 color: Theme.text
@@ -238,6 +248,7 @@ ColumnLayout {
                 model: root.host.importPart.obdbReport !== null
                        ? root.host.importPart.obdbReport.skipped.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
+                    textFormat: Text.PlainText
                     required property var modelData
                     text: qsTr("%1 (line %2): %3")
                               .arg(modelData.signal !== "" ? modelData.signal : qsTr("the set"))
@@ -248,6 +259,7 @@ ColumnLayout {
                 }
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "obdbSkippedMore"
                 readonly property int more: root.host.importPart.obdbReport === null ? 0
                     : root.host.importPart.obdbReport.skipped.length - root.host.importPart.obdbRowsShown
@@ -259,6 +271,7 @@ ColumnLayout {
                 objectName: "obdbFileNotes"
                 model: root.host.importPart.obdbReport !== null ? root.host.importPart.obdbReport.file : []
                 Label {
+                    textFormat: Text.PlainText
                     required property var modelData
                     text: modelData.field !== ""
                           ? qsTr("The set's %1: %2").arg(modelData.field).arg(modelData.text)
@@ -289,6 +302,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalsNone"
         visible: root.host.picksPart.pluginList.length === 0
         text: qsTr("None yet. Import takes a plugin (a .havne-plugin.json file), a signal file "
@@ -310,6 +324,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing
             Label {
+                textFormat: Text.PlainText
                 objectName: "pickMissingText"
                 text: missingRow.modelData.text
                 color: Theme.warning
@@ -337,6 +352,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing
             Label {
+                textFormat: Text.PlainText
                 objectName: "pluginRefusedText"
                 text: qsTr("A plugin that no longer loads: %1").arg(refusedRow.modelData.words)
                 color: Theme.warning
@@ -380,6 +396,7 @@ ColumnLayout {
             }
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "rowCaption"
                 visible: text !== ""
                 text: row.entry.caption
@@ -431,6 +448,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 2
                             Label {
+                                textFormat: Text.PlainText
                                 objectName: "rowTitle"
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
@@ -439,6 +457,7 @@ ColumnLayout {
                                 text: row.title
                             }
                             Label {
+                                textFormat: Text.PlainText
                                 objectName: "rowReads"
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
@@ -542,6 +561,7 @@ ColumnLayout {
             }
             // What Mine does, said before the press
             Label {
+                textFormat: Text.PlainText
                 objectName: "rowMineLine"
                 visible: row.open && !row.entry.mine
                 text: qsTr("Mine marks it as yours, so its variants can be changed here; a newer "
@@ -584,6 +604,7 @@ ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing / 2
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "exportNoteText"
                     text: root.host.rowActionsPart.exportNote
                     color: Theme.text
@@ -607,6 +628,7 @@ ColumnLayout {
                 }
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "rowUnused"
                 visible: row.entry.unused
                 text: root.host.pickedVehicle === null
@@ -625,6 +647,7 @@ ColumnLayout {
 
     // The signal files the move into the plugin store left behind
     Label {
+        textFormat: Text.PlainText
         objectName: "unmigratedTitle"
         visible: root.host.rowActionsPart.unmigratedRows.length > 0
         text: qsTr("Not moved from the earlier version:")
@@ -642,6 +665,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing / 2
             Label {
+                textFormat: Text.PlainText
                 objectName: "unmigratedText"
                 text: root.host.rowActionsPart.unmigratedText(leftRow.modelData)
                 color: Theme.warning

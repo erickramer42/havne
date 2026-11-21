@@ -387,9 +387,21 @@ struct WideExported {
     }
 };
 
-/* A wide file's lines, the CRLFs checked and dropped */
-inline std::vector<std::string> wide_lines(const std::string& bytes)
+/* The byte order mark a user CSV starts with */
+inline const char* const kBom = "\xEF\xBB\xBF";
+
+/* A user CSV without its byte order mark, which it must start with */
+inline std::string unbommed(const std::string& bytes)
 {
+    EXPECT_EQ(bytes.substr(0, 3), kBom) << "no byte order mark";
+    return bytes.compare(0, 3, kBom) == 0 ? bytes.substr(3) : bytes;
+}
+
+/* A wide file's lines, the byte order mark and the CRLFs checked and
+ * dropped */
+inline std::vector<std::string> wide_lines(const std::string& all)
+{
+    const std::string bytes = unbommed(all);
     std::vector<std::string> out;
     size_t at = 0;
     while (at < bytes.size()) {
