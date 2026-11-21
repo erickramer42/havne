@@ -24,7 +24,9 @@ pat="^([^:]+):([0-9]+):[0-9]+: warning: function '(.*)' (exceeds|has cognitive).
 # One function is one file:line:name, whether it trips the size check, the
 # complexity check or both; the line number is dropped after that
 seen=$(sed -nE "s/$pat/\1\t\2\t\3/p" "$size" | sort -u | cut -f1,3 | sort)
-unreadable=$(grep -E ': (warning|error): function ' "$size" | grep -vE "$pat")
+# size.txt holds only the two size checks' warnings, so a line that fails pat
+# (a lambda is worded "lambda has ...", not "function '...'") is unreadable
+unreadable=$(grep -vE "$pat" "$size" | grep .)
 listed=$(tr -d '\r' < "$base" | grep -vE '^[[:space:]]*(#|$)' | sort)
 
 new=$(comm -23 <(printf '%s\n' "$seen") <(printf '%s\n' "$listed") | grep .)

@@ -76,6 +76,10 @@ def main():
     expect("a repeated name with a line for each passes", rc, 0, out)
     rc, out, _ = run(bash, [warn("E:/src/" + f, 10, "go")], [], [f])
     expect("a line it cannot read fails", rc, 1, out)
+    lam = ("%s:10:5: warning: lambda has cognitive complexity of 50 (threshold 40) "
+           "[readability-function-cognitive-complexity]" % f)
+    rc, out, _ = run(bash, [warn(f, 10, "run"), lam], ["%s\trun" % f], [f])
+    expect("a lambda's line fails as unreadable", rc, 1, out)
     rc, out, _ = run(bash, [], ["%s\trun" % f], [f])
     expect("a stale baseline line fails", rc, 1, out)
     rc, out, base = run(bash, [warn(f, 10, "run")],

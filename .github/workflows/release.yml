@@ -25,8 +25,9 @@ name: Release
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
 #
-# Jobs: gate (the tag and CI) -> windows, android, linux and macos, side
-# by side -> publish (the SBOM, checksums, provenance, the release). Each
+# Jobs: gate (the tag and CI) -> windows, android, linux, macos and repro
+# (the reproducible Windows build), side by side -> publish (the SBOM,
+# checksums, provenance, the release). Each
 # build job writes a <download>.components.json beside its download for
 # the SBOM (packaging/sbom.py); those lists are job artifacts only, never
 # release files. Each wheel is installed into a fresh venv and
