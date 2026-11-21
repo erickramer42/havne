@@ -219,8 +219,19 @@ ToolBar {
             implicitHeight: armedButton.implicitHeight
             Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
             readonly property bool explaining: !armedButton.enabled && Bridge.armedWhy !== ""
-            ToolTip.visible: armedHover.hovered && explaining
-            ToolTip.text: Bridge.armedWhy
+            ToolTip {
+                id: armedTip
+                visible: armedHover.hovered && armedHost.explaining
+                text: Bridge.armedWhy
+                // Basic's own content, drawn as plain text
+                contentItem: Text {
+                    text: armedTip.text
+                    textFormat: Text.PlainText
+                    font: armedTip.font
+                    color: armedTip.palette.toolTipText
+                    wrapMode: Text.Wrap
+                }
+            }
             HoverHandler { id: armedHover }
             TapHandler {
                 objectName: "armedExplain"

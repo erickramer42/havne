@@ -157,7 +157,7 @@ ColumnLayout {
         visible: root.host.comparing && root.host.recording.state === RecordingView.Open
         Layout.fillWidth: true
         spacing: 6
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)

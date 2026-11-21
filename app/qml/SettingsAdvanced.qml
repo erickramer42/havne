@@ -49,7 +49,7 @@ ColumnLayout {
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
-        ComboBox {
+        PlainComboBox {
             id: minSweepChoice
             objectName: "minSweepChoice"
             // A touch's height, as Settings' buttons take (SettingsSubpage's touchMin)
