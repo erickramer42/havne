@@ -49,6 +49,7 @@ constexpr size_t kWriteChunk = 1u << 16;
 constexpr uint32_t kIdentification = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION;
 constexpr uint32_t kUnattributable = ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE;
 constexpr uint32_t kTextValues = ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES;
+constexpr const char* kUtf8Bom = "\xEF\xBB\xBF"; /* the user CSVs start with one */
 /* The wide CSV's silence (ADR-0056 section 4): a column with no sample
  * for this long, or 3x its usual interval if longer, leaves the rule */
 /* The most columns a wide CSV has: past it no spreadsheet opens the

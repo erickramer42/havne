@@ -129,7 +129,7 @@ both builds in this order, then the whole suite and the cross-arch
 subset ([Running tests](#running-tests)).
 
 **Reproducible Release builds.** `HAVNE_REPRODUCIBLE` (on by default, MSVC
-Release) adds `/Brepro` and `/d1trimfile`, so two builds of one commit
+Release) adds `-Brepro` and `-d1trimfile:` (the dash spelling, which sccache accepts; spell any new MSVC compile option so), and the link option `/Brepro`, so two builds of one commit
 match byte for byte ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)).
 Turn it off only to compare against a build made without it.
 
