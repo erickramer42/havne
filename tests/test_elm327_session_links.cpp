@@ -682,9 +682,13 @@ TEST_F(Elm327SessionTest, AHealthyUnpickedSessionSendsNothingMore)
     ASSERT_TRUE(goes_quiet(adapter_commands, 300, 5000));
     const uint32_t commands = adapter_commands();
     const uint32_t requests = adapter_requests();
+    uint32_t episodes_before = 0;
+    ASSERT_EQ(s.state(&episodes_before), ECUIO_OK);
     /* One and a half of the intervals a check would take */
     ASSERT_TRUE(goes_quiet(adapter_requests, 3 * kCheckMs / 2, 3 * kCheckMs));
-    EXPECT_EQ(s.state(), ECUIO_OK);
+    uint32_t episodes = 0;
+    EXPECT_EQ(s.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, episodes_before) << "no error episode in the window";
     EXPECT_EQ(adapter_requests(), requests);
     EXPECT_EQ(adapter_commands(), commands);
 }
