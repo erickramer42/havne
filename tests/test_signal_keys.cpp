@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -390,6 +391,47 @@ TEST(SignalKeysTest, AFilesSignalsWithNoAddressOfTheirOwnTakeTheirAuthorsKeys)
     const uint32_t half = static_cast<uint32_t>(
         ecuio_signal_file_find(over.get(), "half") - oset->defs);
     EXPECT_EQ(okeys[half], "half");
+}
+
+/* Of two defs at one address the earlier in the set's order keeps the
+ * address key, whichever was written first: a signal placed ahead of
+ * another at its address takes the key from it */
+TEST(SignalKeysTest, TheEarlierOfTwoAtOneAddressKeepsTheAddressKey)
+{
+    const char* const kGear =
+        R"({"key":"gear","name":"Gear","ecu":"pcm","read":{"service":"22","number":"1E12"},"field":{"byte":0,"bits":8}})";
+    const char* const kWord =
+        R"({"key":"gear_word","name":"Gear position","kind":"enum","ecu":"pcm","read":{"service":"22","number":"1E12"},"field":{"byte":0},"values":{"1":"First"}})";
+    const auto keys = [](const char* first, const char* second) {
+        const File f = load(
+            std::string(
+                R"({"havne_signals":1,"name":"Keys","source":{"name":"t"},)"
+                R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)") +
+            first + "," + second + "]}");
+        EXPECT_NE(f, nullptr);
+        std::map<std::string, std::string> by_author;
+        if (f == nullptr) {
+            return by_author;
+        }
+        const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+        const std::vector<std::string> all = keys_of(set, f.get());
+        for (const char* author : {"gear", "gear_word"}) {
+            const ecuio_signal_def_t* d =
+                ecuio_signal_file_find(f.get(), author);
+            EXPECT_NE(d, nullptr) << author;
+            if (d != nullptr) {
+                by_author[author] = all[static_cast<size_t>(d - set->defs)];
+            }
+        }
+        return by_author;
+    };
+    const std::map<std::string, std::string> gear_first = keys(kGear, kWord);
+    EXPECT_EQ(gear_first.at("gear"), "7E8:621E12:3.0:8");
+    EXPECT_EQ(gear_first.at("gear_word"), "gear_word");
+    const std::map<std::string, std::string> word_first = keys(kWord, kGear);
+    EXPECT_EQ(word_first.at("gear_word"), "7E8:621E12:3.0:8")
+        << "placed ahead, it takes the address";
+    EXPECT_EQ(word_first.at("gear"), "gear");
 }
 
 /* One address has one key in every set, whatever the signal is called
