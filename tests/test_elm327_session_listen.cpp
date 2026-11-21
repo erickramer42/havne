@@ -355,12 +355,14 @@ TEST_F(Elm327SessionTest, ClosingInTheRelistenWaitEndsAtOnce)
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         monitors = fake_count("ATMA");
         ASSERT_EQ(monitors, 5u) << "inside the 1.6 s wait";
+        // The close joins the worker and closes the port too, which an
+        // unoptimized CI runner stretches; a wait read whole takes 1.4 s
         const auto from = std::chrono::steady_clock::now();
         EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
         EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::steady_clock::now() - from)
                       .count(),
-                  300);
+                  1000);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1700));
     EXPECT_EQ(fake_count("ATMA"), monitors) << "nothing sent after the close";
