@@ -337,6 +337,20 @@ DashEditKit {
         verify(!find(cell, "gauge").active, "nor a gauge")
     }
 
+    // Removing a cell releases the page's cells; the selection then moves to
+    // an index a released cell still holds, and that cell stays unchosen
+    function test_aReleasedCellAtTheSelectedIndexIsNotChosen() {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        page.startEditing()
+        page.select(2)
+        const old = find(page, "dashCell_0_1")
+        page.editsPart.removeCell(0)
+        compare(page.selected, 1, "the selection follows its cell")
+        verify(find(page, "dashCell_0_1").chosen, "the new cell is chosen")
+        verify(!old.chosen, "the released cell at that index is not")
+        compare(findChild(old, "cellSelected"), null, "and builds no outline")
+    }
+
     // A page change closes whatever panel was open: a cell's signal, Add
     // and Add's signals
     function test_aPageChangeClosesAnyPanel() {
