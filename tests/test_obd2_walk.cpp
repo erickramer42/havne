@@ -203,9 +203,9 @@ TEST(RequestEngineTest, SilenceEndsTheWalkAndDropsNothing) {
 }
 
 /* A stray single frame answers the first bitmap's ask and its wait runs
- * out: the retry is due, so the support report says nothing was asked
- * yet (a front end reads PROBED with no range as "no answer"). Answered
- * on the retry, it reports the chain. */
+ * out: the retry is due, so the support report is not PROBED yet (a front
+ * end reads PROBED with no range as "no answer"). Answered on the retry,
+ * it reports the chain. */
 TEST(RequestEngineTest, ARetryDueIsNotAMissedSupportQuery) {
     ecuio_request_engine e;
     ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
@@ -228,6 +228,51 @@ TEST(RequestEngineTest, ARetryDueIsNotAMissedSupportQuery) {
     ecuio_engine_support(&e, 0, &s);
     EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
     EXPECT_EQ(s.ranges, 0x1u);
+}
+
+/* A stray on a later bitmap is no more a miss than on the first: with
+ * range 0 answered and the chain going on, a retry due reports no PROBED. */
+TEST(RequestEngineTest, ALaterBitmapsRetryDueIsNotAMissedSupportQueryEither) {
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    ecuio_engine_probe(&e);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
+    ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00100001u, 4 * kMs),
+              ecuio_reply::positive);
+    int64_t now = ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x20, now));
+    const uint8_t stray[3] = {0x41, 0x05, 0x46};
+    (void)ecuio_engine_on_frame(&e, 0, stray, sizeof stray, now + 4 * kMs,
+                                nullptr);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
+    ASSERT_TRUE(e.chans[0].walking) << "the retry is due";
+
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.ranges, 0x1u);
+    EXPECT_EQ(s.flags & ECUIO_SUPPORT_PROBED, 0u);
+}
+
+/* A walk that ended, then resumed after a recovery, keeps the last
+ * walk's word while it asks again. */
+TEST(RequestEngineTest, AResumedWalkKeepsTheLastWalksProbedFlag) {
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0B, 0x0C}));
+    ecuio_engine_probe(&e);
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x00, 0));
+    ASSERT_EQ(answer_bitmap(&e, 0, 0x00, 0x00100001u, 4 * kMs),
+              ecuio_reply::positive);
+    int64_t now = ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_bitmap_request(&e, 0, 0x20, now));
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
+    ASSERT_FALSE(e.chans[0].walking) << "silence ended the walk";
+
+    ecuio_engine_probe(&e);   /* the recovery */
+    ASSERT_TRUE(e.chans[0].walking);
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.ranges, 0x1u);
+    EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED);
 }
 
 /* The retry is used up when a stray comes again: the walk gives up and

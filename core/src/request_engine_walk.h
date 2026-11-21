@@ -20,6 +20,7 @@ inline void ecuio_engine_end_walk(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
     ch.walking = false;
+    ch.walk_ended = true;
     ++ch.generation;
     for (uint32_t i = 0; i < e->count; ++i) {
         const ecuio_request& r = e->requests[i];
@@ -117,11 +118,11 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
 {
     const ecuio_engine_channel& ch = e->chans[c];
     *out = ecuio_channel_support_t{};
-    /* A walk still asking its first bitmap (a retry may be due) has not
-     * failed: it reports not probed until a range answers or it ends. */
-    const bool failed_or_answered = !ch.walking || ch.ranges != 0;
-    out->flags = ((ch.probed && failed_or_answered) ? ECUIO_SUPPORT_PROBED
-                                                    : 0u) |
+    /* PROBED says a walk has ended, answered or not: a first walk under
+     * way (a retry may be due) reports none, a resumed one keeps the
+     * last one's word. */
+    const bool ended = !ch.walking || ch.walk_ended;
+    out->flags = ((ch.probed && ended) ? ECUIO_SUPPORT_PROBED : 0u) |
                  (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u) |
                  (ch.packed ? ECUIO_SUPPORT_PACKED : 0u) |
                  (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u);

@@ -215,6 +215,7 @@ struct ecuio_engine_channel {
                                  * and an untimed walk is inside it */
     bool probed = false;        /* a walk has started */
     bool walked = false;        /* the chain was answered to its end */
+    bool walk_ended = false;    /* a walk has ended, answered or not */
     uint8_t ranges = 0;         /* bit i: the bitmap at 0x20 * i answered */
     uint8_t known[32] = {};     /* PIDs whose support the ECU stated */
     uint8_t supported[32] = {}; /* of those, the ones it supports */
