@@ -684,12 +684,14 @@ if(TARGET havne-cli)
         # A live stream whose reader stalls drops condition lines, and the
         # end line counts each one: the lines received and the count are
         # the recording's cond lines (about 60 s: the rev limiter at 51-56 s)
+        # The script bounds a wedged child at 150 s itself: ctest's bound is
+        # past that, so a wedge ends in the script's words
         add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
-            PROPERTIES TIMEOUT 150 COST 70)
+            PROPERTIES TIMEOUT 200 COST 70)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -2324,10 +2326,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" _qml_fonts)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
-    # Files whose cases together run near ctest's bound on a slow runner
-    set(_qml_split_files)
-    # The shares a file runs as, where not three: set _qml_shares_<name>
-    # Seconds a file's entry (or one share of it) took in a full run's
+    # Seconds a file's entry took in a full run's
     # CTestCostData.txt, so a tree with no history starts the long ones first
     set(_qml_cost_dashboard 8)
     set(_qml_cost_dashboard_pages 54)
@@ -2356,6 +2355,27 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set(_qml_cost_recordings_compare 3)
     set(_qml_cost_recordings_baseline 3)
     set(_qml_cost_diagnostics 7)
+    set(_qml_cost_accessibility 1)
+    set(_qml_cost_alerts 7)
+    set(_qml_cost_chartlayout_panes 1)
+    set(_qml_cost_dashboardbook_files 1)
+    set(_qml_cost_dashboardbook_writes 1)
+    set(_qml_cost_dashedit_plugpages 4)
+    set(_qml_cost_dashedit_side 5)
+    set(_qml_cost_documentpicker 3)
+    set(_qml_cost_home 6)
+    set(_qml_cost_kinds 4)
+    set(_qml_cost_linkhealth 5)
+    set(_qml_cost_liveview 14)
+    set(_qml_cost_liveview_pause 11)
+    set(_qml_cost_log 25)
+    set(_qml_cost_recordings_keys 3)
+    set(_qml_cost_settings 6)
+    set(_qml_cost_settings_devices 9)
+    set(_qml_cost_settings_listobdb 6)
+    set(_qml_cost_settings_plugins 6)
+    set(_qml_cost_settings_vehicle 10)
+    set(_qml_cost_theme 6)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -2364,77 +2384,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         # waits for what it checks with tryVerify, and the recordings
         # files open a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
-        # A file near the bound runs as _qml_parts ctest entries, each
-        # a disjoint share of its cases (every nth one, so the slow
-        # ones spread), named as the TestCase names them; QmlTest.<name>
-        # then reads QmlTest.<name>-<k>of<n>
-        set(_qml_parts 1)
-        if(_qml_name IN_LIST _qml_split_files)
-            set(_qml_parts 3)
-            if(DEFINED _qml_shares_${_qml_name})
-                set(_qml_parts ${_qml_shares_${_qml_name}})
-            endif()
-        endif()
-        if(_qml_parts EQUAL 1)
-            add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+        add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+        set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+            ENVIRONMENT "${_qml_test_env}"
+            TIMEOUT 180
+            LABELS "qt"
+        )
+        if(DEFINED _qml_cost_${_qml_name})
             set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-                ENVIRONMENT "${_qml_test_env}"
-                TIMEOUT 180
-                LABELS "qt"
-            )
-            if(DEFINED _qml_cost_${_qml_name})
-                set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-                    COST ${_qml_cost_${_qml_name}})
-            endif()
-        else()
-            # The shares are read from the file: an edit configures again,
-            # or a case added to it would be in no share and never run
-            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                         ${_qml_test})
-            file(STRINGS ${_qml_test} _qml_title REGEX "^    name: \"")
-            string(REGEX REPLACE "^.*\"(.*)\".*$" "\\1" _qml_title "${_qml_title}")
-            file(STRINGS ${_qml_test} _qml_cases
-                 REGEX "^    function test_[A-Za-z0-9_]+\\(")
-            # A case written another way, or a second TestCase, would drop
-            # out of every share unseen
-            file(STRINGS ${_qml_test} _qml_any REGEX "function test_")
-            list(LENGTH _qml_title _qml_titles)
-            list(LENGTH _qml_cases _qml_found)
-            list(LENGTH _qml_any _qml_all)
-            if(NOT _qml_titles EQUAL 1 OR NOT _qml_found EQUAL _qml_all)
-                message(FATAL_ERROR "${_qml_test}: the split needs one TestCase name "
-                        "and every case as '    function test_x(' "
-                        "(${_qml_titles} names, ${_qml_found} of ${_qml_all} cases read)")
-            endif()
-            set(_qml_index 0)
-            foreach(_qml_case IN LISTS _qml_cases)
-                string(REGEX REPLACE "^    function (test_[A-Za-z0-9_]+)\\(.*$" "\\1"
-                       _qml_case "${_qml_case}")
-                if(NOT _qml_case MATCHES "_data$")
-                    math(EXPR _qml_share "${_qml_index} % ${_qml_parts}")
-                    list(APPEND _qml_share_${_qml_share} "${_qml_title}::${_qml_case}")
-                    math(EXPR _qml_index "${_qml_index} + 1")
-                endif()
-            endforeach()
-            math(EXPR _qml_last "${_qml_parts} - 1")
-            foreach(_qml_share RANGE 0 ${_qml_last})
-                # An empty share would run the whole file
-                if(NOT _qml_share_${_qml_share})
-                    message(FATAL_ERROR "${_qml_test}: ${_qml_parts} shares of "
-                            "${_qml_found} cases leave share ${_qml_share} empty")
-                endif()
-                math(EXPR _qml_k "${_qml_share} + 1")
-                set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
-                add_test(NAME ${_qml_part}
-                         COMMAND test_qml -input ${_qml_test} ${_qml_share_${_qml_share}})
-                set_tests_properties(${_qml_part} PROPERTIES
-                    ENVIRONMENT "${_qml_test_env}"
-                    TIMEOUT 180
-                    COST ${_qml_cost_${_qml_name}}
-                    LABELS "qt"
-                )
-                unset(_qml_share_${_qml_share})
-            endforeach()
+                COST ${_qml_cost_${_qml_name}})
         endif()
     endforeach()
 endif()
