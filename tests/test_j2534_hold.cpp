@@ -106,6 +106,44 @@ TEST(J2534HoldTest, ASegmentedExchangeIsAloneOnTheBus)
     }
 }
 
+/* Channel 0's long row, its def reading past a Single Frame, beside a
+ * short row of its own and two Single Frame modules, the VX's loss on:
+ * its reply holds the bus at its own time but is handed over 103 ms after
+ * the write, past the 100 ms wait, while the short row is out. That late
+ * reply teaches the row its frames, so every ask of it goes alone and no
+ * reply is lost; a row a late reply taught nothing would count one frame
+ * from its first wait on and share the bus at every lap */
+TEST(J2534HoldTest, AReplyHandedOverLateTeachesItsRow)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(two_modules(b, 3));
+    const uint8_t shorter[3] = {0x22, 0x1E, 0x01};
+    ASSERT_EQ(ecuio_engine_add(&b.e, 0, shorter, 3),
+              ecuio_engine_add_result::added);
+    b.e.requests[0].long_defs = 1;
+    b.handed_of_us[0] = 103 * kMs;
+    b.lose = true;
+    b.reply_of = [](uint32_t c, const ecuio_request& q) {
+        Bytes out = {0x62, q.bytes[1], q.bytes[2]};
+        const bool long_row = c == 0 && q.bytes[2] == 0x00;
+        out.insert(out.end(), long_row ? 17u : 2u, uint8_t{0x2A});
+        return out;
+    };
+    b.until(2000 * kMs);
+    size_t asks = 0;
+    for (size_t i = 0; i < b.exchanges.size(); ++i) {
+        const Exchange& x = b.exchanges[i];
+        if (x.c == 0 && x.bytes == Bytes{0x22, 0x1E, 0x00}) {
+            ++asks;
+            EXPECT_FALSE(x.answered) << "handed over past its wait";
+            EXPECT_FALSE(overlaps_another(b.exchanges, i)) << "ask " << asks;
+        }
+    }
+    EXPECT_GE(asks, 5u);
+    EXPECT_EQ(b.lost, 0u);
+    EXPECT_EQ(b.e.requests[0].reply_frames, 3u);
+}
+
 /* The channels take turns: the Single Frame channel goes first when the
  * segmented exchange ends, and the segmented one's request waits for it,
  * so from channel 0's first reply (its frames learned) the writes
@@ -714,23 +752,76 @@ TEST(J2534HoldTest, HeldAndChosenChannelsWaitOnTheOthersReply)
 }
 
 /* Known Issue #42 on the bus, channel 1 answering inside channel 0's
- * segmented reply (8 ms, against its first frame at 3 ms): the first lap,
- * before channel 0's reply is learned, may lose one of channel 1's
- * replies, and that one timeout leaves channel 1 protected, so nothing
- * more is lost and both keep a pace */
+ * segmented reply (8 ms, against its first frame at 3 ms): with no def
+ * marking channel 0's row long, the first lap, before its reply is
+ * learned, may lose one of channel 1's replies, and that one timeout
+ * leaves channel 1 protected; with its def reading past a Single Frame,
+ * its first ask goes alone and none is lost. Either way nothing more is
+ * lost and both keep a pace */
 TEST(J2534HoldTest, AModuleAnsweringInsideTheOthersReplyStaysProtected)
 {
-    Bus b;
-    ASSERT_NO_FATAL_FAILURE(two_modules(b));
-    b.first_of_us[1] = 8 * kMs;
-    b.lose = true;
-    b.until(2000 * kMs);
-    EXPECT_LE(b.lost, 1u);
-    size_t ones = 0;
-    for (const Exchange& x : b.exchanges) {
-        ones += x.c == 1 && x.answered ? 1u : 0u;
+    for (const uint8_t long_defs : {uint8_t{0}, uint8_t{1}}) {
+        Bus b;
+        ASSERT_NO_FATAL_FAILURE(two_modules(b));
+        b.e.requests[0].long_defs = long_defs;
+        b.first_of_us[1] = 8 * kMs;
+        b.lose = true;
+        b.until(2000 * kMs);
+        EXPECT_LE(b.lost, long_defs != 0 ? 0u : 1u) << int{long_defs};
+        size_t ones = 0;
+        for (const Exchange& x : b.exchanges) {
+            ones += x.c == 1 && x.answered ? 1u : 0u;
+        }
+        EXPECT_GT(ones, 50u) << int{long_defs};
     }
-    EXPECT_GT(ones, 50u);
+}
+
+/* Channel 0's row, its def reading past a Single Frame, goes unanswered
+ * at its first ask (its reply lost), beside two Single Frame modules, the
+ * VX's loss on: from then it counts one frame, so its second ask goes
+ * with the Single Frames, and only one ending under its reply is lost.
+ * That reply teaches its length: from the third ask on it is alone on the
+ * bus and nothing more is lost */
+TEST(J2534HoldTest, ARowWhoseFirstReplyWasLostCostsOneExchange)
+{
+    Bus b;
+    ASSERT_NO_FATAL_FAILURE(two_modules(b, 3));
+    b.e.requests[0].long_defs = 1;
+    b.lose = true;
+    size_t asks = 0;
+    b.reply_of = [&asks](uint32_t c, const ecuio_request& q) {
+        if (c == 0 && asks++ == 0) {
+            return Bytes{};
+        }
+        Bytes out = {0x62, q.bytes[1], q.bytes[2]};
+        out.insert(out.end(), c == 0 ? 17u : 2u, uint8_t{0x2A});
+        return out;
+    };
+    b.until(1000 * kMs);
+    std::vector<size_t> row;
+    for (size_t i = 0; i < b.exchanges.size(); ++i) {
+        if (b.exchanges[i].c == 0) {
+            row.push_back(i);
+        }
+    }
+    ASSERT_GE(row.size(), 10u);
+    EXPECT_FALSE(b.exchanges[row[0]].answered);
+    EXPECT_FALSE(overlaps_another(b.exchanges, row[0])) << "the first ask";
+    const Exchange& second = b.exchanges[row[1]];
+    size_t beside = 0;
+    for (const Exchange& y : b.exchanges) {
+        const bool under = y.c != 0 && y.sent_us < second.ended_us &&
+                           second.sent_us < y.ended_us;
+        beside += under ? 1 : 0;
+        EXPECT_TRUE(y.c == 0 || y.answered || y.ended_us == INT64_MAX || under)
+            << "a reply lost away from the second ask, at " << y.sent_us;
+    }
+    EXPECT_GT(beside, 0u) << "the second ask went with the Single Frames";
+    EXPECT_GT(b.lost, 0u);
+    EXPECT_LE(b.lost, beside);
+    for (size_t k = 2; k < row.size(); ++k) {
+        EXPECT_FALSE(overlaps_another(b.exchanges, row[k])) << "ask " << k;
+    }
 }
 
 /* Channel 1 silent for a second (asleep at connect), then answering

@@ -10,6 +10,7 @@
 #ifndef ECUIO_REQUEST_ENGINE_TABLE_H
 #define ECUIO_REQUEST_ENGINE_TABLE_H
 
+#include "isotp.h"
 #include "request_engine_services.h"
 
 /* Section 2: the request whose positive reply carries a def's value. The def's
@@ -38,6 +39,21 @@ inline bool ecuio_engine_request_for_def(const ecuio_signal_def_t* d,
         return true;
     }
     return false;
+}
+
+/* Whether def d's field reaches past a Single Frame's 7 bytes, or runs
+ * to the payload's end (a text kind with byte_length 0): its reply is
+ * that long at least, so the row's first ask is held as segmented */
+inline bool ecuio_engine_def_long(const ecuio_signal_def_t* d)
+{
+    const bool text = d->kind == ECUIO_VALUE_TEXT || d->kind == ECUIO_VALUE_HEX;
+    if (text && d->byte_length == 0) {
+        return true;
+    }
+    const uint32_t bytes =
+        text ? uint32_t{d->byte_length}
+             : (uint32_t{d->bit_offset} + d->bit_length + 7u) / 8u;
+    return isotp_frames(uint32_t{d->start_byte} + bytes) > 1;
 }
 
 /* An empty table of room rows over chan_count channels, at least one: a
@@ -187,6 +203,21 @@ inline bool ecuio_engine_has_room(const ecuio_request_engine* e)
            (e->pick_only || e->timing_taken < e->timing_rows.size());
 }
 
+/* The table row holding request bytes on channel, or -1 */
+inline int32_t ecuio_engine_find(const ecuio_request_engine* e,
+                                 uint32_t channel, const uint8_t* bytes,
+                                 uint8_t len)
+{
+    for (uint32_t i = 0; i < e->count; ++i) {
+        const ecuio_request& r = e->requests[i];
+        if (r.channel == channel && r.len == len && r.bytes[0] == bytes[0] &&
+            r.bytes[1] == bytes[1] && (len < 3 || r.bytes[2] == bytes[2])) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return -1;
+}
+
 /* Adds a request to channel's rotation, after the ones already there.
  * The same request on the same channel is kept once. Refused: a service
  * section 3 doesn't allow, a length other than 2 or 3, a channel past the
@@ -200,12 +231,8 @@ inline ecuio_engine_add_result ecuio_engine_add(ecuio_request_engine* e,
         !ecuio_engine_service_allowed(bytes[0])) {
         return ecuio_engine_add_result::refused;
     }
-    for (uint32_t i = 0; i < e->count; ++i) {
-        const ecuio_request& r = e->requests[i];
-        if (r.channel == channel && r.len == len && r.bytes[0] == bytes[0] &&
-            r.bytes[1] == bytes[1] && (len < 3 || r.bytes[2] == bytes[2])) {
-            return ecuio_engine_add_result::duplicate;
-        }
+    if (ecuio_engine_find(e, channel, bytes, len) >= 0) {
+        return ecuio_engine_add_result::duplicate;
     }
     if (!ecuio_engine_has_room(e)) {
         return ecuio_engine_add_result::full;
@@ -329,8 +356,9 @@ inline ecuio_plan_result ecuio_engine_plan(const ecuio_signal_set_t* set,
 /* ecuio_engine_derive for an empty table and a set ecuio_engine_plan
  * gave rows for: each def whose row is the table's next enrols its
  * request, so the table is derive's without add's search of it, which
- * grows with the square of a car-sized set. False when the table's room
- * ran out first. */
+ * grows with the square of a car-sized set, and a def that reads past a
+ * Single Frame marks its row long_defs. False when the table's room ran
+ * out first. */
 inline bool ecuio_engine_derive_planned(ecuio_request_engine* e,
                                         const ecuio_signal_set_t* set,
                                         const uint32_t* rx_ids,
@@ -342,23 +370,26 @@ inline bool ecuio_engine_derive_planned(ecuio_request_engine* e,
     for (uint32_t i = 0; i < set->count; ++i) {
         uint8_t req[3] = {};
         uint8_t len = 0;
-        if (rows[i] != e->count ||
-            !ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
-            continue;
+        if (rows[i] == e->count &&
+            ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
+            const uint32_t c =
+                ecuio_engine_channel_for(&set->defs[i], rx_ids, rx_count);
+            if (c >= e->chan_count || !ecuio_engine_has_room(e)) {
+                return false;
+            }
+            ecuio_engine_append(e, c, req, len);
         }
-        const uint32_t c =
-            ecuio_engine_channel_for(&set->defs[i], rx_ids, rx_count);
-        if (c >= e->chan_count || !ecuio_engine_has_room(e)) {
-            return false;
+        if (rows[i] < e->count && ecuio_engine_def_long(&set->defs[i])) {
+            e->requests[rows[i]].long_defs = 1;
         }
-        ecuio_engine_append(e, c, req, len);
     }
     return true;
 }
 
 /* Section 2: enrols every request a set's defs derive, in def order, one per
  * distinct request and channel, so several defs read from one reply
- * cost one request. rx_ids holds each channel's receive ID. True when
+ * cost one request, marked long_defs when one of them reads past a
+ * Single Frame. rx_ids holds each channel's receive ID. True when
  * every request fit; otherwise the table holds those that did, and
  * *overflow_def (when not NULL) names the first def whose request
  * didn't. A NULL set enrols nothing. */
@@ -378,12 +409,19 @@ inline bool ecuio_engine_derive(ecuio_request_engine* e,
         }
         const uint32_t c = ecuio_engine_channel_for(&set->defs[i], rx_ids,
                                                     rx_count);
-        if (ecuio_engine_add(e, c, req, len) ==
-            ecuio_engine_add_result::full) {
+        const ecuio_engine_add_result r = ecuio_engine_add(e, c, req, len);
+        if (r == ecuio_engine_add_result::full) {
             if (overflow_def != nullptr) {
                 *overflow_def = i;
             }
             return false;
+        }
+        const int32_t row = r == ecuio_engine_add_result::refused ||
+                                    !ecuio_engine_def_long(&set->defs[i])
+                                ? -1
+                                : ecuio_engine_find(e, c, req, len);
+        if (row >= 0) {
+            e->requests[row].long_defs = 1;
         }
     }
     return true;
