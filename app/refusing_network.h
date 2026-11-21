@@ -68,7 +68,8 @@ class RefusingUrlInterceptor : public QQmlAbstractUrlInterceptor
 public:
     static bool names_another_host(const QUrl& url)
     {
-        if (url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0 &&
+        if (url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) ==
+                0 &&
             !url.host().isEmpty()) {
             return true;
         }
