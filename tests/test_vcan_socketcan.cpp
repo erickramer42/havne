@@ -45,7 +45,8 @@ struct Collector {
     std::mutex mutex;
     std::vector<Seen> frames;
     std::vector<std::vector<double>> values; /* each batch's numbers */
-    std::chrono::milliseconds stall_first{0};
+    std::atomic<bool> hold_first{false}; /* the first frame waits on a gate */
+    std::atomic<bool> gate_open{false};
     std::atomic<unsigned long> news_at_10{0}, news_at_200{0};
     std::atomic<int> count{0};
     std::atomic<int> overflow_at{0}; /* the first frame flagged, 1-based */
@@ -54,8 +55,12 @@ struct Collector {
     {
         auto* c = static_cast<Collector*>(user);
         const int n = ++c->count;
-        if (n == 1 && c->stall_first.count() > 0) {
-            std::this_thread::sleep_for(c->stall_first);
+        if (n == 1 && c->hold_first.load()) {
+            const auto limit = std::chrono::steady_clock::now() + 30s;
+            while (!c->gate_open.load() &&
+                   std::chrono::steady_clock::now() < limit) {
+                std::this_thread::sleep_for(1ms);
+            }
         }
         if ((f->flags & ECUIO_FRAME_FLAG_OVERFLOW) &&
             c->overflow_at.load() == 0) {
@@ -389,11 +394,15 @@ TEST_F(SocketCanBusTest, AQuietBusIsVehicleTimeoutUntilAFrameComes)
 TEST_F(SocketCanBusTest, FramesLostToAFullSocketAreFlagged)
 {
     Collector c;
-    c.stall_first = 500ms; /* the worker stops reading while the bus floods */
+    c.hold_first = true; /* the worker stops reading until the flood is over */
     Session s("?filter=0x5A6", &c);
     ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
     vcan_bus::Fd w = writer();
     std::this_thread::sleep_for(50ms);
+    /* The worker must be inside the gate before the flood: a read made
+     * mid-flood frees a slot, and the next frame queued carries the loss */
+    ASSERT_TRUE(send(w.get(), 0x5A6, {0, 0}));
+    ASSERT_TRUE(wait_for([&] { return c.count.load() >= 1; }));
     constexpr int kSent = 5000;
     for (int i = 0; i < kSent; ++i) {
         const uint8_t b0 = static_cast<uint8_t>(i),
@@ -404,9 +413,16 @@ TEST_F(SocketCanBusTest, FramesLostToAFullSocketAreFlagged)
             --i;
         }
     }
-    ASSERT_TRUE(wait_for([&] { return c.count.load() >= 10; }));
-    std::this_thread::sleep_for(800ms);
-    const int before = c.count.load();
+    c.gate_open = true;
+    /* Drained: the count holds still for a while */
+    int before = -1;
+    ASSERT_TRUE(wait_for([&] {
+        const int n = c.count.load();
+        std::this_thread::sleep_for(300ms);
+        const bool still = n == c.count.load();
+        before = n;
+        return still;
+    }, 20s));
     EXPECT_LT(before, kSent)
         << "the socket held the whole flood: make it bigger";
     EXPECT_EQ(c.overflow_at.load(), 0)
