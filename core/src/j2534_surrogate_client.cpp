@@ -3,6 +3,7 @@
 // Testing: UNIT: CoreTest (test_core); HARNESS: every test_j2534_* binary;
 //          Cross-arch
 
+#include "ecuio/j2534_surrogate.h"
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
