@@ -67,7 +67,7 @@ threads onto the GUI thread.
 
 | Step | Where | Thread |
 |---|---|---|
-| 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, a J2534 read, an ELM327 reply's lines reassembled, or a SocketCAN read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp`, `elm327_worker.cpp`, `socketcan_transport.cpp` | transport worker |
+| 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, a J2534 read, an ELM327 reply's lines reassembled, or a SocketCAN read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_worker.cpp`, `elm327_worker.cpp`, `socketcan_transport.cpp` | transport worker |
 | 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)); each pull queue a caller opened gets a copy of the frame, or of its values, which the caller reads on its own thread ([ADR-0053](adr/0053-python-bindings.md)); a session with a set of conditions attached judges each batch of values against it, on the frame's own time, and an armed recorder opens its window from the events ([ADR-0063](adr/0063-conditions.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `SessionBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
@@ -200,6 +200,16 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   `plugin.<id>.<variant>`, and a VIN's manufacturer code and model year
   propose the variants that fit. A plugin can't be freed while a
   session decodes with one of its sets (`ECUIO_ERR_IN_USE`).
+- **Plugins' conversation tier** ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md);
+  built, inert in v0.9.0): a format 2 manifest may carry a WebAssembly
+  module. Core checks its shape before a runtime loads it
+  (`wasm_check.h`), runs it in a sandbox (`wasm_sandbox.h`: an
+  instruction budget for each call, a memory of a fixed size counted by
+  core's allocator, no import) and lets what it causes reach the car
+  only through tier 2's ceiling (`tier2_ceiling.h`) and the engine's
+  talk door (`request_talk.h`). A security-access attempts' store
+  (`security_store.h`) keeps the failed attempts and their delay across
+  a restart. No module binds in v0.9.0: such a plugin is data only.
 - **Enumerations and computed signals:** an enum def is a raw number
   with a label from the set's table (`ecuio_enum_label`); a computed
   def reads no frame and runs a bounded program over up to four other

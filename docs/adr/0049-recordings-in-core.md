@@ -1661,3 +1661,12 @@ under the mock's frames, for the sanitizers);
 
 A recording's `signals.json` is bounded by `ECUIO_SIGNAL_SET_MAX_BYTES`,
 and its readers load it with `ECUIO_SIGNAL_FILE_LOAD_SET` (ADR-0065).
+
+## Appendix: recording format 4 (2026-11-20)
+
+Format 4 keeps a signal's values under its key, so two signals of one
+name stay two. It is described in [ADR-0065](0065-car-sized-profile.md)
+section 9 (and in ADR-0031's schema for `havne-cli`), not here; this
+record's formats end at 3 above. The reader gives it as
+`ECUIO_RECORDING_FORMAT_KEYS` and still reads formats 1 to 3 as before.
+

@@ -12,7 +12,7 @@ A mark means the tier runs for that area: `yes` (a few words say where, if it is
 | Mock and replay | yes | yes | yes | n/a | n/a | yes (replay reader) | n/a | yes (`mock://demo`) | n/a | n/a | [What is verified](#what-is-verified) |
 | ELM327 | yes (protocol) | yes | yes (URI and Bluetooth picker cases) | yes (every desktop platform) | n/a | yes | n/a | yes (serial-port picker) | yes (VX in ELM mode) | yes (MX+, VX; one car) | [Suites](#suites), [Gaps](#gaps) |
 | SocketCAN | yes (no bus) | yes | yes (Settings) | vcan (Linux CI) | n/a | yes | n/a | n/a | yes (desk bus) | yes (listening, one car) | [Suites](#suites), [Gaps](#gaps) |
-| J2534 and the surrogate | - | - | yes (Windows, link states) | yes (Windows, x64) | yes (dev machine) | - (pipe replies) | n/a | yes (link-health recipe) | yes (VX, x86 DLL) | yes (VX, one car) | [Manual smoke](#manual-smoke-link-health-ui), [Gaps](#gaps) |
+| J2534 and the surrogate | - | - | yes (Windows, link states) | yes (Windows, x64) | yes (dev machine) | yes (the pipe's replies) | n/a | yes (link-health recipe) | yes (VX, x86 DLL) | yes (VX, one car) | [Manual smoke](#manual-smoke-link-health-ui), [Gaps](#gaps) |
 | Decoding, signal files and plugins | yes | yes | yes | n/a | n/a | yes | n/a | - | - (the bench sessions had no bus) | yes (one car) | [What is verified](#what-is-verified) |
 | Request engine and diagnostics (probe, identification, trouble codes, clearing, extended session) | yes | yes | yes (diagnostics page) | yes (the fakes' ECU) | n/a | yes (engine, ISO-TP, replies) | n/a | - | yes | yes (one ECU, or two, per feature) | [Gaps](#gaps) |
 | Recording, exports and imports | yes | yes | yes | n/a | n/a | yes (rows, folders, candump) | n/a | - | yes (recorded on the sessions) | yes (log over ELM327 only) | [What is verified](#what-is-verified) |
@@ -47,7 +47,7 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 - ThreadSanitizer, the Python notebook example and Discovery's registry read (it needs elevation) run by hand or not at all: no CI job carries them.
 
 **Test seams and code**
-- The surrogate pipe's replies have no fuzz target, and its protections (DACL, first-instance flag, remote-client rejection) have no direct test.
+- The surrogate pipe's protections are tested on the pipe alone: nothing connects as another user or looks for a handle leaked to the child.
 - The fake is simpler than J2534: its default read model, no segmented replies, no filter gating.
 - The scrub can't see a VIN sent raw in frames that aren't ISO-TP, and can refuse a folder copy whose marker label looks like a VIN.
 - The Python declarations' signedness isn't checked: the generated types are held to the headers' sizes and offsets only.
@@ -100,6 +100,7 @@ it inside that table.
 | `test_j2534_connect` | `J2534ConnectTest`, `J2534SurrogateConnectTest` | Windows, the fake DLL and the x64 surrogate beside it |
 | `test_j2534_surrogate` | `J2534SurrogateTest` | Windows, the fake DLL and the surrogate exe |
 | `test_j2534_routing` | `J2534RoutingTest` | Windows; the cross-arch case skips unless `ECUIO_FAKE_DLL` is set |
+| `test_sandbox` | `WamrBuildTest`, `WasmCheckTest`, `SandboxTest` | Nothing (Qt-free, internal headers); the cross-arch step runs it against the x86 core |
 | `test_obd2` | `Obd2SetTest`, `Obd2DecodeTest`, `Obd2MuxTest`, `Obd2ReplyTest`, `RequestEngineTest`, `UdsGenericTest`, `Obd2TableTest`, `FakeEcuTest`, `DiagnosticsTest`, `ClearTest`, `DtcTitleTest`, `InspectionTest`, `SimEcuTest`, `SimDidsTest`, `SimAskTest`, `SimRecordingTest`, `PidSupportTest`, `RequestTimingTest`, `SessionControlTest` | Nothing (Qt-free) |
 | `test_elm327` | `Elm327ProtocolTest`, `Elm327SessionTest`, `Elm327LogTest`, `SerialPortsTest`, `Elm327TcpTest`, `Elm327StreamTest`, and on Linux and macOS `Elm327PortTest` | Nothing (Qt-free) |
 | `test_vcan` | `VcanTest`, `SocketCanBusTest`, `SocketCanRequestTest`, `SocketCanFaultTest`, `IsoTpConformanceTest`, `SimBusTest` | Linux, `vcan0` up and `can-isotp` loaded; each case skips without them, and fails under `ECUIO_VCAN_REQUIRED=1` (CI's `linux-build`) |

@@ -144,6 +144,16 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* handle);
  * Valid until ecuio_j2534_sur_close. */
 const char* ecuio_j2534_sur_log_path(const ecuio_j2534_sur_handle_t* handle);
 
+/* The surrogate child's pipe at name (UTF-8, \\.\pipe\...), as
+ * ecuio_j2534_sur_open makes it for each session: local clients only, one
+ * instance and the first of its name, full access for this process's
+ * user alone. *out_pipe is the pipe's HANDLE, the caller's to close.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL pointer; ECUIO_ERR_SURROGATE_FAILED,
+ * *out_pipe NULL and the Windows error in *out_err, when the name, the
+ * security or the create fails. Not Windows: ECUIO_ERR_NOT_IMPLEMENTED. */
+ecuio_status_t ecuio_j2534_sur_create_pipe(const char* name, void** out_pipe,
+                                           uint32_t* out_err);
+
 /* TEST-ONLY: the deadline of this handle's transactions from the next one
  * on (ms); 0 restores 3 s. Not called by the app. */
 void ecuio_j2534_sur_set_transact_ms(ecuio_j2534_sur_handle_t* handle,

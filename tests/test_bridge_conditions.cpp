@@ -398,6 +398,11 @@ TEST(BridgeTest, AConditionsEventsReachTheModelOnTheTick)
         log.indexOf(QStringLiteral("Connected: mock://conditions")));
     const int judging = static_cast<int>(
         log.indexOf(QStringLiteral("Alerts: judging 3 conditions")));
+    // The states come from core's getter, the line from the event the worker
+    // posts: a row can read on a tick before its firing reaches the log
+    ASSERT_TRUE(spinUntil(
+        [&]() { return log.contains(QStringLiteral("Alert: Engine stopped, 0 RPM")); },
+        5000));
     EXPECT_GT(judging, connected) << "after the session's lines";
     EXPECT_TRUE(log.contains(QStringLiteral("Alert: Engine stopped, 0 RPM")))
         << log.join(u'\n').toStdString();
