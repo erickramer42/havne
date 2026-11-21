@@ -488,6 +488,62 @@ TEST_F(Elm327SessionTest, NoPromptWithinThePromptLimitIsAHardFailure)
         << log;
 }
 
+/* A sleep of the machine inside a reply's wait is said in the wire log,
+ * with its length, in place of the 5 s line (the limit here is 2 s). A
+ * sleep before the command was typed is no sleep in its wait. Part 2's
+ * request is typed under `silent` (the fake counts it before it looks at
+ * the knob) before the sleep is added; an add that lands after the wait
+ * ran out lands in the setup's wait after the reopen, which names ATZ and
+ * still satisfies the assertions. */
+TEST_F(Elm327SessionTest, ASleepInsideAReplysWaitIsSaidInTheLog)
+{
+    const LogDir logs("sleep");
+    {
+        ecuio_elm327_test_add_slept(30000000);
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const ShortTimeouts timeouts(2000, 0);
+
+        set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            10000));
+        set_knobs([](fake_elm327::knobs& k) { k.silent = false; });
+        ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 15000));
+
+        uint32_t seen = 0;
+        fake_elm327::with([&](fake_elm327::adapter& a) {
+            seen = a.requests;
+            a.k.silent = true;
+        });
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return on_fake<bool>(
+                    [&](fake_elm327::adapter& a) { return a.requests > seen; });
+            },
+            5000));
+        ecuio_elm327_test_add_slept(90400000);
+        uint32_t episodes = 0;
+        ASSERT_TRUE(wait_for(
+            [&] {
+                (void)s.state(&episodes);
+                return episodes >= 2;
+            },
+            10000));
+    }
+    const std::string log = logs.only_log();
+    EXPECT_NE(log.find("] no line and no prompt for 2 s ("), std::string::npos)
+        << log;
+    const size_t said = log.find("] the machine slept 90.4 s with ");
+    ASSERT_NE(said, std::string::npos) << log;
+    EXPECT_NE(log.find(" out: its reply is lost", said), std::string::npos)
+        << log;
+    EXPECT_EQ(log.find("the machine slept 30"), std::string::npos) << log;
+    EXPECT_EQ(log.find("the machine slept 120"), std::string::npos) << log;
+}
+
 /* A session that asks nothing runs the setup, then AT MA and nothing
  * else; the channel's messages arrive whole, multi-frame too, flagged
  * reassembled, and a line the monitor marks or another ID's frame is no

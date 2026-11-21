@@ -53,7 +53,15 @@ std::atomic<ecuio_elm327_port_open_t> g_opener{nullptr};
 std::atomic<uint32_t> g_prompt_timeout_ms{0};
 std::atomic<uint32_t> g_monitor_check_ms{0};
 
+/* ecuio_elm327_test_add_slept's sleeps, added to the clock's count */
+std::atomic<uint64_t> g_slept_added_us{0};
+
 } // namespace
+
+uint64_t slept_us()
+{
+    return ecuio_clock_slept_us() + g_slept_added_us.load();
+}
 
 uint32_t prompt_timeout_ms()
 {
@@ -434,6 +442,11 @@ extern "C" void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
 {
     g_prompt_timeout_ms.store(prompt_ms);
     g_monitor_check_ms.store(monitor_check_ms);
+}
+
+extern "C" void ecuio_elm327_test_add_slept(uint64_t us)
+{
+    g_slept_added_us.fetch_add(us);
 }
 
 extern "C" void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
