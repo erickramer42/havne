@@ -67,7 +67,9 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
  * times out ends the walk, unless a reply naming another PID came
  * while it waited: then it's asked once more, while the budget lasts.
  * A scanned DID, an identification item, a diagnostics item or a
- * clear's request that times out is unanswered. */
+ * clear's request that times out is unanswered. A table row that times
+ * out never answered counts one frame from then (reply_segmented), until
+ * an answer, a late one too (ecuio_engine_late_frames), teaches it. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -92,6 +94,10 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     if (out >= 0) {
         timed_out(static_cast<uint32_t>(out));
         ch.check_from = static_cast<uint32_t>(out) + 1; /* a check's next row */
+        if (static_cast<uint32_t>(out) < e->count &&
+            e->requests[out].reply_frames == 0) {
+            e->requests[out].reply_frames = 1;
+        }
     } else if (pack) {
         for (uint32_t k = 0; k < ch.pack_count; ++k) {
             timed_out(ch.pack_rows[k]);
@@ -193,6 +199,28 @@ inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
         ecuio_engine_once_answered(e, c, data, len, now_us);
     }
     return ecuio_reply::positive;
+}
+
+/* A positive reply that came after its row's wait ran out, on channel c,
+ * teaches that row its frames as an answer in time does: a DID's by its
+ * key, a Service 01 PID's only at J1979's length for it alone, which a
+ * pack's reply never has (reply_segmented) */
+inline void ecuio_engine_late_frames(ecuio_request_engine* e, uint32_t c,
+                                     const uint8_t* data, uint16_t len)
+{
+    const bool did = len >= 3 && data[0] == 0x62;
+    const bool pid = len >= 2 && data[0] == 0x41 &&
+                     ECUIO_OBD2_PID_BYTES[data[1]] != 0 &&
+                     len == 2u + ECUIO_OBD2_PID_BYTES[data[1]];
+    if (!did && !pid) {
+        return;
+    }
+    const uint8_t req[3] = {static_cast<uint8_t>(data[0] - 0x40), data[1],
+                            did ? data[2] : uint8_t{0}};
+    const int32_t row = ecuio_engine_find(e, c, req, did ? 3 : 2);
+    if (row >= 0) {
+        e->requests[row].reply_frames = ecuio_engine_reply_frames(len);
+    }
 }
 
 /* While the walk's bitmap is out, a reply of its service that isn't the
@@ -315,6 +343,7 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.outstanding == ECUIO_ENGINE_NONE || len == 0) {
+        ecuio_engine_late_frames(e, c, data, len);
         (void)ecuio_engine_scan_late(e, c, data, len);
         return ecuio_reply::none;
     }
@@ -335,6 +364,7 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
         return ecuio_engine_take_positive(e, c, out, r, data, len, now_us);
     }
     ecuio_engine_mark_stray(ch, out, r, data, len);
+    ecuio_engine_late_frames(e, c, data, len);
     if (ecuio_engine_scan_late(e, c, data, len)) {
         return ecuio_reply::none;
     }

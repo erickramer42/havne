@@ -35,8 +35,12 @@ inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
  * lengths, a table row by its last answer, and always an identification
  * or diagnostics item (most answers take several frames, and these go
  * out on every channel at once at connect and on recovery) or any
- * one-shot asking for the VIN (09 02, 22 F1 90: 17 characters); anything
- * not seen yet counts as one frame, and a talk is never judged. */
+ * one-shot asking for the VIN (09 02, 22 F1 90: 17 characters). A table
+ * row with no answer and no wait run out is judged by its defs and, for
+ * a Service 01 PID, J1979's length: segmented when either reaches past a
+ * Single Frame, so its first ask shares the bus with no one while it is
+ * out. A row whose wait ran out before any answer counts as one frame,
+ * as does any other one-shot, and a talk is never judged. */
 inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
                                          uint32_t c, int32_t r)
 {
@@ -53,8 +57,17 @@ inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
         return !ch.talk.out &&
                (ch.identifying || ch.diagnosing || vin_09 || vin_22);
     }
-    return r >= 0 && static_cast<uint32_t>(r) < e->count &&
-           e->requests[r].reply_frames > 1;
+    if (r < 0 || static_cast<uint32_t>(r) >= e->count) {
+        return false;
+    }
+    const ecuio_request& q = e->requests[r];
+    if (q.reply_frames != 0) {
+        return q.reply_frames > 1;
+    }
+    const uint32_t pid_bytes = q.len == 2 && q.bytes[0] == 0x01
+                                   ? ECUIO_OBD2_PID_BYTES[q.bytes[1]]
+                                   : 0u;
+    return q.long_defs != 0 || isotp_frames(2u + pid_bytes) > 1;
 }
 
 /* Request i, due on channel c, alone or as the first of a pack: the

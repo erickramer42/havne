@@ -223,13 +223,13 @@ inline int64_t j2534_hold_age_us(const j2534_hold& h,
 /* Whether channel c may go ahead of the chosen rows at now: no Single
  * Frame channel went ahead since the last segmented write, no key that
  * can still go waits, c's last write was a Single Frame, and its next
- * fast row was answered in one frame (a first ask's length is unknown)
- * and is older than every chosen row. A segmented slow row or pack due
- * then hands c is kept chosen, and goes ahead of the chosen rows only as
- * the older (j2534_hold_order ranks it with them). So a chosen row waits
- * for the Single Frames in flight, one extra pass and each row older
- * than its own once, and the biggest Single Frame modules take the extra
- * turns */
+ * fast row was answered in one frame or had a wait run out before any
+ * answer (a first ask's length is unknown) and is older than every chosen
+ * row. A segmented slow row or pack due then hands c is kept chosen, and
+ * goes ahead of the chosen rows only as the older (j2534_hold_order ranks
+ * it with them). So a chosen row waits for the Single Frames in flight,
+ * one extra pass and each row older than its own once, and the biggest
+ * Single Frame modules take the extra turns */
 inline bool j2534_hold_extra_turn(const j2534_hold& h,
                                   const ecuio_request_engine* e, uint32_t c,
                                   int64_t now_us)

@@ -43,7 +43,11 @@ struct Exchange {
  * 78 keeps the request out). With lose, Known Issue #42: a Single Frame
  * arriving while another module's segmented reply is on the bus (its
  * first frame to its last) is lost, whichever was written first, and
- * counted in lost. The pass is the worker's, j2534_hold_pass, or (plain)
+ * counted in lost. A module's handed_of_us, when set, hands its segmented
+ * replies to the engine that long after the write, as the VX hands a long
+ * reply over whole, while its frames hold the bus at their own time; a
+ * reply handed over after its wait ran out leaves the exchange
+ * unanswered. The pass is the worker's, j2534_hold_pass, or (plain)
  * the pass a worker makes with no hold, written out: each channel's wait
  * ended and its due request written in turn. */
 struct Bus {
@@ -53,6 +57,7 @@ struct Bus {
     int64_t now = 0;
     int64_t first_us = 3 * kMs;
     int64_t first_of_us[ECUIO_MAX_CHANNELS] = {};
+    int64_t handed_of_us[ECUIO_MAX_CHANNELS] = {};
     bool lose = false;
     size_t lost = 0;
     std::function<Bytes(uint32_t, const ecuio_request&)> reply_of;
@@ -62,7 +67,8 @@ struct Bus {
         int64_t at;
         Bytes bytes;
         size_t exchange;
-        int64_t from; /* a segmented reply's first frame, or -1 */
+        int64_t from;    /* a segmented reply's first frame, or -1 */
+        int64_t bus_end; /* its last frame */
     };
     std::vector<Due> due;
 
@@ -77,7 +83,8 @@ struct Bus {
                 &e, due[i].c, due[i].bytes.data(),
                 static_cast<uint16_t>(due[i].bytes.size()), now, nullptr);
             j2534_hold_answered(hold, due[i].c);
-            if (r != ecuio_reply::pending) {
+            if (r != ecuio_reply::pending &&
+                exchanges[due[i].exchange].ended_us == INT64_MAX) {
                 exchanges[due[i].exchange].ended_us = now;
                 exchanges[due[i].exchange].answered = true;
             }
@@ -142,15 +149,17 @@ struct Bus {
         if (lose && frames > 1) {
             drop_under(c, first, at);
         }
-        due.push_back(
-            {c, at, reply, exchanges.size() - 1, frames > 1 ? first : -1});
+        const int64_t handed =
+            frames > 1 && handed_of_us[c] != 0 ? now + handed_of_us[c] : at;
+        due.push_back({c, handed, reply, exchanges.size() - 1,
+                       frames > 1 ? first : -1, at});
     }
 
     /* Whether another channel's segmented reply is on the bus at t */
     bool under_another(uint32_t c, int64_t t) const
     {
         for (const Due& d : due) {
-            if (d.c != c && d.from >= 0 && d.from <= t && t <= d.at) {
+            if (d.c != c && d.from >= 0 && d.from <= t && t <= d.bus_end) {
                 return true;
             }
         }
