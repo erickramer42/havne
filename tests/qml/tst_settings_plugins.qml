@@ -415,10 +415,13 @@ SettingsKit {
         compare(find(page, "profileHint").text,
                 "obd2's signals and those of Plus 1.0.0, picked for this vehicle")
 
-        // Typed back to Default, both show, so the row is the URI's
+        // Typed back to Default, both show, so the row is the URI's; the
+        // pick stands in for Default, so Default's words stay the ordinary ones
         field.text = "elm327://COM9"
         verify(find(page, "profile_default").checked)
         verify(!find(page, "profile_plugin.plus.base").checked)
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"))
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
 
         // A second such pick is read too, but the first still stands in
         verify(importFile(page, "more.json", "More", "D101", true))
@@ -452,6 +455,45 @@ SettingsKit {
         compare(page.uriPart.standIn, null)
         compare(find(page, "profile_plugin.third.base").text, "Third")
         verify(find(page, "profile_default"))
+    }
+
+    // A pick that doesn't read all of obd2 has no stand-in, so on an
+    // adapter Default is plain obd2: its hint and the list's Signals
+    // summary say so, and only there
+    function test_defaultOnAnAdapterSaysItReadsPlainObd2WhenAPickIsLeftOut() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const field = find(page, "uriField")
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.picksPart.picks, ["plugin.extras.base"])
+        field.text = "elm327://COM9"
+        compare(page.uriPart.standIn, null)
+        verify(find(page, "profile_default").checked)
+        compare(find(page, "profileHint").text,
+                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
+        verify(page.picksPart.signalsSummary().endsWith("(Default reads plain OBD-II)"),
+               page.picksPart.signalsSummary())
+
+        // An adapter's address of either kind says it; a pick the store
+        // lacks is nothing for Default to leave out
+        field.text = "j2534://C:/fake.dll"
+        verify(find(page, "profile_default").checked)
+        compare(find(page, "profileHint").text,
+                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"),
+               find(page, "profileHint").text)
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.extras.base"]))
+        field.text = "elm327://COM9"
+
+        // Another profile chosen, or an address that isn't an adapter's: the
+        // ordinary words
+        page.uriPart.chooseProfile("plugin.extras.base")
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
+        field.text = "mock://demo"
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values on an adapter"))
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
     }
 
     // A pick no plugin here has (a version that dropped the variant, a
