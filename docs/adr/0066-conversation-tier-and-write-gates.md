@@ -2,7 +2,11 @@
 
 - **Status:** Accepted 2026-11-16. This record is v0.9.0's write phase
   ("phase 4" in the planning below), built in steps, each proven on the
-  simulated ECU in CI before any car. Nothing here is built.
+  simulated ECU in CI before any car. As of 2026-11-20, step 1 is built
+  and inert in v0.9.0 (the sandbox, tier 2's ceiling, manifest format 2,
+  the key's window, the attempts' machine and its store: the appendices
+  below), with no module bound. The rest is v0.9.1's (the note of
+  2026-11-19 under Notes); nothing past step 1 is built.
 - **Date:** 2026-11-16.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary);

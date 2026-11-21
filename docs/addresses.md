@@ -55,7 +55,8 @@ adapter that doesn't answer, an interface that is down.
 | `serial` | no | no | yes | no | no |
 | `flags` | no | no | no | no | yes |
 | `filter` | no | no | yes | yes | yes |
-| `txid`, `poll`, `probe`, `identify`, `pack`, `packframes`, `scan`, `session`, `keepalive_ms` | no | no | yes | requesting only | yes |
+| `txid`, `poll`, `probe`, `identify`, `pack`, `packframes`, `scan`, `gap`, `session`, `keepalive_ms` | no | no | yes | requesting only | yes |
+| `hold` | no | no | no | no | yes |
 
 "Requesting only" on `socketcan://` means a profile that asks an ECU
 (`obd2`, `uds-generic`, or a signal file's or a plugin's that declares
@@ -295,6 +296,8 @@ They shape what Havne asks the car.
 | `pack` | `0` or `1` | 1 | Ask several Service 01 PIDs in one request, when the car answers that way. Only with the probe on. `0` asks one PID per request. |
 | `packframes` | 1 to 15 | no limit | The most CAN frames a packed request's reply may take: `1` packs only what fits one frame. For an adapter that is slow after a reply of several frames. Refused with `pack=0`, `probe=0` or `poll=`. |
 | `scan` | `turns` or `first` | `turns` | With `uds-generic` ranges: `turns` alternates the scan with the polled DIDs, `first` asks the whole scan before polling. `first` is refused with any other profile. |
+| `gap` | `0` to `1000`, decimal ms | the transport's floor (5 ms on `j2534://`, 20 ms on `elm327://` and `socketcan://`) | The least time between the starts of two requests on a channel. |
+| `hold` | `0` or `1` | 1 | `j2534://` only, with two or more modules: no other module is asked while one module's reply comes in segments, since the OBDX Pro VX loses replies then. `0` turns it off for an adapter that doesn't. |
 | `session` | `01` or `03` | `01` | With `uds-generic`: `03` enters the extended diagnostic session before the reads, keeps it alive, and returns to the default session at the end. A module that refuses it is read in the default session, with the refusal named. `01` sends no session request. `03` is refused with any other profile. The value is a number, so `3` and `0x03` are `03`. |
 | `keepalive_ms` | 500 to 4500 | 2000 | How long with nothing sent before a tester-present goes out. Needs `session=03`. |
 
