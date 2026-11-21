@@ -134,11 +134,6 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#49. The ELM327 worker's 5 s watchdog does not fire across a host's
-    sleep.** It counts the host's clock, so it fired only on the wake: a
-    session stood stalled for 19 minutes until the laptop woke, then
-    closed with a hard-failure line
-    ([2026-11-18-session-close-car](docs/bench-sessions/2026-11-18-session-close-car.md)).
 
 ## Roadmap
 
@@ -151,7 +146,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
 | v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
 | v0.9.0 | The whole car's groundwork: a profile sized for every module (up to 32), keys for signals, computed signals, the viewer's and the Dashboard's work (a plugin's pages among it), a hold that stops the VX losing a second module's replies, the simulated ECU answering as a car of many modules, and the conversation tier's sandbox as built and inert | In progress |
-| v0.9.1 | The whole car's read and the conversation tier: a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), the modules opened by what is picked, sessions a plugin declares; a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built | Planned |
+| v0.9.1 | The whole car's read and the conversation tier: a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), the modules opened by what is picked, sessions a plugin declares, the desktop staying awake while a session is up, and the fixes held over from v0.9.0; a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built | Planned |
 | v0.9.2-v0.11.0 | v0.9.2, writes over more transports behind the same gates: a WiFi or Bluetooth network adapter, J2534 on Linux through a library named by path, and DoIP. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -161,7 +156,7 @@ release raises the minor number; a patch carries fixes and follow-up
 work on its minor's theme, and never breaks the C ABI, `havne-cli`'s
 schema or a plugin format (ADR-0048's appendix "what a PATCH may
 carry"). Earlier releases are in [CHANGELOG.md](CHANGELOG.md). The
-planned releases are in order and hold about three features each; a
+planned releases are in order, each with the scope its row names; a
 release's detail comes in here when its work starts.
 
 ### v0.8.0: conditions
@@ -187,13 +182,15 @@ A feature release: the C ABI grows, append-only except the recording format and 
   - the conversation tier's first part ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)): the sandbox that runs a plugin's module, tier 2's service ceiling, a request longer than a frame on SocketCAN and J2534, the key's window between a security-access seed and its key, the simulated ECU's security access (strict, for the tests), the manifest's format 2 read at load, and the count of failed security-access attempts with its store on disk, which keeps a delay across a restart. Core reads such a plugin's manifest and module; no module binds, so such a plugin is data only, and the app's store takes it and shows nothing of the tier;
   - a plugin may carry Dashboard pages (ADR-0052's appendix on pages): core, `plugins check`, the bridge's store entries and the Dashboard's Add page list, which copies a page into the user's book. Replace this page offers presets only;
   - the hold for Known Issue #42 (`?hold=0` switches it off), a scan that asks a lost DID once more, and the surrogate's one-frame read;
+  - the ELM327 wire log says when the machine slept with a request out, in place of the 5 s quiet line;
   - the simulated car: faults, a pace, a busy module and a shared bus for each module, and `example-car`, a made-up car of 18 modules.
 - **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it. The pacing model matches the car's runs of 2026-11-18 within 10% (the MX+ within 5%).
-- **Left:** the review pass, its fixes, the docs pass and the release; the owner's screen-reader pass of the variant button; a car run with the hold on.
+- **Left:** the docs pass and the release; the owner's screen-reader pass of the variant button; the car gate, a run of the release candidate on the phone (the transmission gauge on the four-channel Dashboard) and on the laptop with the VX and the hold on.
 
 ### v0.9.1: the whole car's read and the conversation tier
 
 The conversation tier is v0.9.1's; v0.9.0 ships what is built.
+- **Held over from v0.9.0:** `?session=03` over many modules, where keep-alives crowd out data; an export's vPIC make list, which lacks most non-US makers, so a refusal fails the whole export; keeping the machine awake while a desktop session runs ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)'s appendix first).
 - **Planned:**
   - the whole car's read: a vehicle's plugins merged into one set, modules opened by what is picked, the bridge and the store for it, a faster default, sessions a plugin declares, and the simulated car's last step;
   - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, no module bound before the consent gate; the gate, the store showing the tier, the app's unlock dialog and Python's `unlock()`;

@@ -232,3 +232,33 @@ build of `27592cf` on the test phone under `mock://`:
 - **A freeze with a sleep inside it** is one gap, longer than its
   "Asleep" line, which counts the sleep alone (357.5 s with 342.1 s
   asleep). Section 6's line reports the machine's sleep, not the app's freeze.
+
+## Appendix: 2026-11-21, a Windows laptop's sleep inside a reply's wait
+
+[2026-11-18-session-close-car](../bench-sessions/2026-11-18-session-close-car.md)'s
+B10 is section 3 on a real machine: a laptop on its power plan's idle
+timer slept with an ELM327 read half answered.
+
+- **The wait had expired at the wake.** The read was typed at
+  19:47:19.582 and its second reply line logged 29 ms later; the next
+  line is the worker's "no line and no prompt for 5 s" at 20:06:19.515.
+  Session time ran 1139.902 s between the two and `havne-cli`'s `slept`
+  line gave 1139.290 s asleep, so the host was awake for 0.61 s of it:
+  no stall came before the sleep, and none could have been timed out
+  during it, since nothing runs on a suspended host.
+- **Session time counted the sleep** (+2.8 s to +1142.7 s), section 1 on
+  Windows, and the `slept` line said its length, section 6.
+- **After it the worker closed the port and published a hard failure,**
+  as for any reply's wait run out; its next step is the reopen and the
+  setup on the backoff, so a session goes on after the wake. That run
+  ended there because `--seconds` counts the same clock.
+- **The wire log says the sleep.** A reply's wait that ends with the
+  slept count risen by a second or more since its command was typed
+  writes "the machine slept N s with <command> out: its reply is lost"
+  in place of the 5 s line, and a read that fails on the wake (an
+  adapter that re-enumerates, a link that drops) says "the port failed
+  on the wake" the same way; the outcome is the same on every platform.
+- **Nothing on a desktop keeps the machine awake through a session.**
+  Android's service holds a wake lock (ADR-0029 section 2); a laptop's
+  idle timer runs while nobody touches it, which is every logged drive.
+  A request to stay awake while a session is up is a later release's.
