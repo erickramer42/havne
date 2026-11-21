@@ -72,6 +72,21 @@ TestCase {
         box.popup.close()
     }
 
+    // A right-to-left layout swaps the paddings: the plain box follows the
+    // stock one there too
+    function test_theBoxKeepsBasicsPaddingsMirrored() {
+        const box = createTemporaryObject(mirroredPlainBox, testCase)
+        const stock = createTemporaryObject(mirroredStockBox, testCase)
+        verify(box)
+        verify(stock)
+        const shown = findText(box, "Two")
+        verify(shown, "the shown name is a Text")
+        verify(stock.mirrored, "the stock box is mirrored")
+        compare(shown.leftPadding, stock.contentItem.leftPadding)
+        compare(shown.rightPadding, stock.contentItem.rightPadding)
+        verify(shown.leftPadding !== shown.rightPadding)
+    }
+
     function test_aComboBoxOfMapsDrawsTheNamesRole() {
         const box = createTemporaryObject(plainMapBox, testCase)
         verify(box)
@@ -188,6 +203,14 @@ TestCase {
     Component {
         id: stockBox
         ComboBox { model: ["One", "Two"]; currentIndex: 1 }
+    }
+    Component {
+        id: mirroredPlainBox
+        PlainComboBox { LayoutMirroring.enabled: true; model: ["One", "Two"]; currentIndex: 1 }
+    }
+    Component {
+        id: mirroredStockBox
+        ComboBox { LayoutMirroring.enabled: true; model: ["One", "Two"]; currentIndex: 1 }
     }
     Component {
         id: plainMapBox
