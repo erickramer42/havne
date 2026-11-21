@@ -50,13 +50,24 @@ const std::string& path_of(const Value& v, std::string_view what)
         refuse(v,
                std::string(what) + " " + q(p) +
                    " isn't a path in the package: relative, forward slashes, "
-                   "no \".\" or \"..\" part, and no part a Windows device "
-                   "name (con, nul, com1, ...) or ending in a dot");
+                   "no \".\" or \"..\" part");
     }
     return p;
 }
 
 namespace {
+
+/* A folder's path that names a Windows device, which a host reading it
+ * from disk would open, refused before anything reads it */
+void refuse_a_device(const Value& at, const std::string& name,
+                     const std::string& path)
+{
+    if (names_a_device(path)) {
+        refuse(at, name + " is a Windows device name (con, nul, com1, ...) "
+                          "or ends in a dot: a folder's file isn't read by "
+                          "such a name");
+    }
+}
 
 year_range years_of(const Value& v, const std::string& what)
 {
@@ -405,6 +416,8 @@ void loader::read_fixtures(const Value& root, ecuio_plugin& p)
         }
         for (const Value& f : fixtures->items) {
             const std::string path = path_of(f, "a fixture");
+            /* the host opens a fixture by its path (plugins check) */
+            refuse_a_device(f, "fixture " + q(path), path);
             for (const std::string& known : p.fixtures) {
                 if (known == path) {
                     refuse(f, "fixture " + q(path) + " is listed twice");
@@ -536,23 +549,19 @@ loader::read_variants(const Value& root, ecuio_plugin& p)
     return lists;
 }
 
-/* The package's file at path: a packed one by name, a folder's read
- * through the host's callback the first time it's named */
 void loader::read_folder_file(const Value& at, const std::string& name,
                               const std::string& path, const char** bytes,
                               size_t* length)
 {
-    if (names_a_device(path)) {
-        refuse(at, name + " is a Windows device name (con, nul, com1, ...) "
-                          "or ends in a dot: a folder's file isn't read by "
-                          "such a name");
-    }
+    refuse_a_device(at, name, path);
     if (read_(user_, path.c_str(), bytes, length) != 0 ||
         (*bytes == nullptr && *length > 0)) {
         refuse(at, name + " couldn't be read");
     }
 }
 
+/* The package's file at path: a packed one by name, a folder's read
+ * through the host's callback the first time it's named */
 const data_file* loader::file_at(const Value& at, const std::string& path)
 {
     for (const data_file& f : files_) {

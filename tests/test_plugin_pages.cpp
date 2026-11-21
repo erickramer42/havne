@@ -508,6 +508,20 @@ TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
                                  "name"),
               std::string::npos)
         << folder.detail;
+
+    /* a fixture the host opens itself (plugins check), refused at load */
+    Package fixtures;
+    fixtures.more = R"("fixtures": ["values.json"], )";
+    EXPECT_EQ(load_folder(fixtures).status, ECUIO_OK)
+        << load_folder(fixtures).detail;
+    fixtures.more = R"("fixtures": ["values.json", "t/Aux.json"], )";
+    const Loaded fixture = load_folder(fixtures);
+    EXPECT_EQ(fixture.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(fixture.detail.find("fixture 't/Aux.json' is a Windows device "
+                                  "name (con, nul, com1, ...) or ends in a "
+                                  "dot"),
+              std::string::npos)
+        << fixture.detail;
 }
 
 // A name that only starts like a Windows device is a path like any other
