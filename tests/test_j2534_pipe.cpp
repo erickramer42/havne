@@ -53,6 +53,19 @@ struct Handle {
     bool ok() const { return h != INVALID_HANDLE_VALUE && h != nullptr; }
 };
 
+/* A security descriptor GetSecurityInfo allocated, freed on every exit */
+struct LocalMem {
+    PSECURITY_DESCRIPTOR p = nullptr;
+    LocalMem() = default;
+    LocalMem(const LocalMem&) = delete;
+    LocalMem& operator=(const LocalMem&) = delete;
+    ~LocalMem()
+    {
+        if (p != nullptr)
+            LocalFree(p);
+    }
+};
+
 /* The session's pipe: INVALID_HANDLE_VALUE, with *err, when refused */
 HANDLE made(const std::string& name, uint32_t* err)
 {
@@ -115,10 +128,10 @@ TEST(J2534PipeTest, OnlyThisUserMayOpenIt)
     ASSERT_TRUE(pipe.ok()) << "Windows error " << err;
 
     PACL dacl = nullptr;
-    PSECURITY_DESCRIPTOR sd = nullptr;
+    LocalMem sd;
     ASSERT_EQ(GetSecurityInfo(pipe.h, SE_KERNEL_OBJECT,
                               DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                              &dacl, nullptr, &sd),
+                              &dacl, nullptr, &sd.p),
               static_cast<DWORD>(ERROR_SUCCESS));
     ASSERT_NE(dacl, nullptr) << "a NULL DACL lets everyone in";
     ACL_SIZE_INFORMATION size = {};
@@ -134,7 +147,6 @@ TEST(J2534PipeTest, OnlyThisUserMayOpenIt)
     std::vector<BYTE> me = user_sid();
     ASSERT_FALSE(me.empty());
     EXPECT_TRUE(EqualSid(const_cast<DWORD*>(&allowed->SidStart), me.data()));
-    LocalFree(sd);
 }
 
 /* One instance: once the child holds it, neither a second instance of
@@ -176,7 +188,8 @@ TEST(J2534PipeTest, ANameTakenFirstIsRefused)
 }
 
 /* A client through the network (here the SMB loopback, \\localhost) is
- * refused (PIPE_REJECT_REMOTE_CLIENTS), while a local one gets in; a
+ * refused with ERROR_ACCESS_DENIED (PIPE_REJECT_REMOTE_CLIENTS), while
+ * a local one, the same user, gets in; a
  * pipe of the test's own, open to remote clients, shows the loopback
  * reaches pipes on this machine, or the case skips with its reason */
 TEST(J2534PipeTest, ARemoteClientIsRefused)
@@ -195,7 +208,9 @@ TEST(J2534PipeTest, ARemoteClientIsRefused)
     Handle pipe(made(name, &err));
     ASSERT_TRUE(pipe.ok()) << "Windows error " << err;
     Handle from_afar(client(remote(name)));
+    const DWORD refused = GetLastError();
     EXPECT_FALSE(from_afar.ok()) << "a remote client got in";
+    EXPECT_EQ(refused, static_cast<DWORD>(ERROR_ACCESS_DENIED));
     Handle local(client(wide(name)));
     EXPECT_TRUE(local.ok()) << "Windows error " << GetLastError();
 }

@@ -115,6 +115,9 @@ sur_reply drain(Pipe& p, uint32_t id)
     check_count(v, stale, ECUIO_SUR_MAX_FRAMES_PER_READ);
     if (v == sur_reply::whole || v == sur_reply::wrong_id) {
         check_whole(stale, p, before);
+        if ((stale.request_id == id) != (v == sur_reply::whole)) {
+            abort();
+        }
     }
     if (v == sur_reply::frames_unasked &&
         stale.num_frames <= ECUIO_SUR_MAX_FRAMES_PER_READ) {
@@ -256,10 +259,24 @@ struct Reader {
         if (status == static_cast<int32_t>(ECUIO_PT_STATUS_BUFFER_OVERFLOW)) {
             loss_owed = true;
         }
-        if (batch.loss_pending != loss_owed ||
-            (st != ECUIO_OK && st != ECUIO_ERR_VEHICLE_TIMEOUT &&
-             st != ECUIO_ERR_TRANSPORT_HARD_FAILURE)) {
+        if (batch.loss_pending != loss_owed || st != empty_verdict(status)) {
             abort();
+        }
+    }
+
+    /* J2534's statuses for a READ with no message: a quiet vehicle,
+     * nothing yet, a loss (the next frame marked), else a hard failure */
+    static ecuio_status_t empty_verdict(int32_t status)
+    {
+        switch (status) {
+        case ECUIO_PT_STATUS_TIMEOUT:
+            return ECUIO_ERR_VEHICLE_TIMEOUT;
+        case ECUIO_PT_STATUS_NOERROR:
+        case ECUIO_PT_STATUS_BUFFER_EMPTY:
+        case ECUIO_PT_STATUS_BUFFER_OVERFLOW:
+            return ECUIO_OK;
+        default:
+            return ECUIO_ERR_TRANSPORT_HARD_FAILURE;
         }
     }
 };

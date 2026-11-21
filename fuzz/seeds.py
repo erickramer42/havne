@@ -31,7 +31,8 @@
 # many of the longest entry as one holds, and of one more.
 # fuzz_sur_reply's are scripts of requests and the replies the surrogate
 # child would send (sur_seeds()), in the wire's layout: a whole READ
-# reply, a bare one, a cut one, a skewed count (late too), a wrong ID, a late reply,
+# reply, empty READs with each kind of status, a bare one, a cut one, a
+# skewed count (late too), a wrong ID, a late reply,
 # an IOCTL past its limit and texts with no terminator.
 #
 #   python3 fuzz/seeds.py corpus
@@ -633,12 +634,16 @@ def sur_seeds():
         "read-one": script((0, 0)) + sur_reply(1, num_frames=1) + frame,
         "read-empty-then-one": script((0, 0), (0, 0)) +
         sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame,
+        "read-empty-statuses": script((0, 0), (0, 0), (0, 0), (0, 0)) +
+        sur_reply(1, status=0x09) + sur_reply(2, status=0x10) +
+        sur_reply(3, status=0x00) + sur_reply(4, status=0x07),
         "bare": script((3, 0)) + sur_reply(1),
         "cut": script((0, 0)) + sur_reply(1, num_frames=1) + frame[:100],
         "skewed-read": script((0, 0)) + sur_reply(1, num_frames=2),
         "skewed-plain": script((3, 0)) + sur_reply(1, num_frames=1),
         "wrong-id": script((3, 0)) + sur_reply(2),
         "late": script((3 | 0x04, 0), (3, 0)) + sur_reply(1) + sur_reply(2),
+        "late-wrong-id": script((3 | 0x04, 0), (3, 0)) + sur_reply(5) + sur_reply(2),
         "late-skewed": script((3 | 0x04, 0), (3, 0)) +
         sur_reply(1, num_frames=2) + frame + sur_reply(2),
         "late-read": script((0 | 0x04, 0), (3, 0)) +
