@@ -234,8 +234,10 @@ RecordingsKit {
             page.openPart.backToList()
             page.openPart.open(lateRow)
             tryVerify(() => find(page, "signalRows").visible, 10000, "the other recording opens")
-            tryVerify(() => chart.drawn && chart.drawn.panes.length === 3, 5000, "three panes")
-            verify(!chart.drawn.panes.some(p => p.key === "own:1"), "the units' panes")
+            // The first recording's chart also has three panes, one of them own:1:
+            // only the other recording's chart has three and none of that key
+            tryVerify(() => chart.drawn && chart.drawn.panes.length === 3
+                      && !chart.drawn.panes.some(p => p.key === "own:1"), 5000, "the units' three panes")
             compare(Object.keys(page.viewAssign).length, 0)
 
             // By unit puts the signal back
