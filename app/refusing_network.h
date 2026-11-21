@@ -93,9 +93,11 @@ public:
     // How many URLs it has emptied, for the tests that show an engine has it
     static int refused() { return refusedCount().load(); }
 
-    QUrl intercept(const QUrl& url, DataType) override
+    QUrl intercept(const QUrl& url, DataType type) override
     {
-        if (!names_another_host(url)) {
+        // Only a string URL (an Image's source): a QML or qmldir file passes,
+        // since an install run from a share has its own qml/ folder there
+        if (type != UrlString || !names_another_host(url)) {
             return url;
         }
         ++refusedCount();

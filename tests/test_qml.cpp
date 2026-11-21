@@ -340,6 +340,21 @@ public:
         return RefusingNetworkManager::stays(url);
     }
 
+    // The interceptor's answer for a URL of the named kind: "string" (an
+    // Image's source), "qml", "js" or "qmldir"
+    Q_INVOKABLE QUrl intercepted(const QUrl& url, const QString& kind) const
+    {
+        RefusingUrlInterceptor interceptor;
+        const auto type = kind == QLatin1String("qml")
+                              ? QQmlAbstractUrlInterceptor::QmlFile
+                          : kind == QLatin1String("js")
+                              ? QQmlAbstractUrlInterceptor::JavaScriptFile
+                          : kind == QLatin1String("qmldir")
+                              ? QQmlAbstractUrlInterceptor::QmldirFile
+                              : QQmlAbstractUrlInterceptor::UrlString;
+        return interceptor.intercept(url, type);
+    }
+
     Q_INVOKABLE bool namesAnotherHost(const QUrl& url) const
     {
         return RefusingUrlInterceptor::names_another_host(url);

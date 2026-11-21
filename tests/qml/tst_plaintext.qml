@@ -108,6 +108,16 @@ TestCase {
             verify(!Harness.namesAnotherHost(u), u)
     }
 
+    // A QML, JS or qmldir file on a host-named URL passes: an install run
+    // from a share keeps its qml/ folder there. A string URL does not.
+    function test_onlyAStringUrlIsEmptied() {
+        const url = "file://host/share/qml/QtQuick/qmldir"
+        for (const kind of ["qml", "js", "qmldir"])
+            compare(Harness.intercepted(url, kind).toString(), url, kind)
+        compare(Harness.intercepted(url, "string").toString(), "")
+        compare(Harness.intercepted("file:///D:/data/a.png", "string").toString(), "file:///D:/data/a.png")
+    }
+
     // A load the interceptor never sees (an XMLHttpRequest) is refused by
     // the network manager on the same rule
     function test_theNetworkManagerRefusesTheSameUrls() {
