@@ -168,8 +168,9 @@ TEST(J2534PipeTest, ItHasOneInstanceForOneClient)
     Handle first(client(wide(name)));
     ASSERT_TRUE(first.ok()) << "Windows error " << GetLastError();
     Handle second(client(wide(name)));
+    const DWORD busy = GetLastError();
     EXPECT_FALSE(second.ok()) << "a second client got in";
-    EXPECT_EQ(GetLastError(), static_cast<DWORD>(ERROR_PIPE_BUSY));
+    EXPECT_EQ(busy, static_cast<DWORD>(ERROR_PIPE_BUSY));
 }
 
 /* A process that made the name first, open to more instances, would

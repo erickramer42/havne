@@ -634,6 +634,9 @@ def sur_seeds():
         "read-one": script((0, 0)) + sur_reply(1, num_frames=1) + frame,
         "read-empty-then-one": script((0, 0), (0, 0)) +
         sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame,
+        "loss-then-two-frames": script((0, 0), (0, 0), (0, 0)) +
+        sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame +
+        sur_reply(3, num_frames=1) + frame,
         "read-empty-statuses": script((0, 0), (0, 0), (0, 0), (0, 0)) +
         sur_reply(1, status=0x09) + sur_reply(2, status=0x10) +
         sur_reply(3, status=0x00) + sur_reply(4, status=0x07),
