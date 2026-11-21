@@ -528,6 +528,28 @@ SettingsKit {
         compare(page.uriPart.standIn.profile, "plugin.plus.base")
     }
 
+    // A record with no name (a copy no vehicle lists) reads as "A signal
+    // file", never as a lone colon, in its row, its question and its Save
+    function test_aRecordWithoutANameReadsAsASignalFile() {
+        const a = "a".repeat(64)
+        const book = VehicleBook.change(VehicleBook.add(VehicleBook.empty(), "Daily driver"), v => {
+            v.unmigrated = [{ sha256: a, name: "", words: "No vehicle lists it", kept: false }]
+        })
+        book.unmigrated = [{ sha256: "b".repeat(64), name: "", words: "No vehicle lists it", kept: false }]
+        storedVehicles.setValue("book", VehicleBook.serialize(book))
+        storedVehicles.sync()
+        const page = createPage()
+        page.open("signals")
+        const expected = "A signal file: No vehicle lists it (its copy is still in the earlier version's folder)"
+        compare(find(find(page, "unmigrated_0"), "unmigratedText").text, expected)
+        compare(find(find(page, "unmigrated_1"), "unmigratedText").text, expected)
+        const row = page.rowActionsPart.unmigratedRows[1]
+        compare(page.rowActionsPart.unmigratedSave(row).name, "A signal file")
+        compare(page.rowActionsPart.unmigratedSave(row).file, "signals.json")
+        page.rowActionsPart.host.confirming = "removeUnmigrated:" + page.rowActionsPart.unmigratedKey(row)
+        compare(page.rowActionsPart.unmigratedQuestion(row), "Remove A signal file? Its kept copy goes with it")
+    }
+
     // The signal files the move into the plugin store left behind are
     // listed with why, the picked vehicle's then the book's own; Save
     // writes one out and Remove drops its record, asking first in the
