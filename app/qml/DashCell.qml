@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashCell.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit{,_panel}, QmlTest.phone_*,
 //          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
@@ -24,10 +24,15 @@ GaugeCard {
     property bool shown: true
     property int pageNo: -1
     property int cellIndex: -1
-    readonly property bool editable: card.host.editing && pageNo === card.host.pageIndex
-    readonly property bool lifted: card.host.held === cellIndex && pageNo === card.host.pageIndex
+    // A cell its Repeater released lives on, bindings running, until its deferred
+    // delete: it takes no part in the page and builds nothing
+    property bool released: false
+    Component.onDestruction: card.released = true
+    readonly property bool current: !released && pageNo === card.host.pageIndex
+    readonly property bool editable: current && card.host.editing
+    readonly property bool lifted: current && card.host.held === cellIndex
     // The panel names this cell, in edit mode or out of it
-    readonly property bool chosen: pageNo === card.host.pageIndex && card.host.selected === cellIndex
+    readonly property bool chosen: current && card.host.selected === cellIndex
                                    && (card.host.editing || card.host.panel !== "")
 
     // What the panel's Digits and Lights show with the option unset: what
@@ -234,6 +239,7 @@ GaugeCard {
         // Editable, the gauge leaves Remove's corner free, so the
         // button covers no title
         anchors.rightMargin: card.editable ? Theme.touchTarget - card.padding + 2 : 0
+        active: !card.released
         asynchronous: card.later
         sourceComponent: card.host.kindComponent(card.kind)
         onLoaded: {
@@ -313,6 +319,7 @@ GaugeCard {
         }
     }
     Loader {
+        objectName: "cellRemoveSlot"
         z: 3
         active: card.editable
         anchors.right: parent.right

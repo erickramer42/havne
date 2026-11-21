@@ -308,6 +308,35 @@ DashEditKit {
         compare(page.addKind, "")
     }
 
+    // Adding or removing a page makes every page again. The cells released
+    // live on, their bindings running, until their deferred delete, one turn
+    // past their page's: such a cell stays out of edit mode and builds nothing,
+    // though the page shown is again the one whose number it holds
+    function test_aReleasedCellTakesNoPartInThePage_data() {
+        return [{ tag: "in the same turn", turn: false },
+                { tag: "once its page is deleted", turn: true }]
+    }
+    function test_aReleasedCellTakesNoPartInThePage(data) {
+        const page = pageOf({}, docOf([cellOf("A"), cellOf("B")]))
+        page.startEditing()
+        const cell = find(page, "dashCell_0_0")
+        verify(cell.editable, "the cell is in edit mode")
+        verify(find(cell, "cellRemoveSlot").active, "with its Remove button")
+        page.editsPart.addPage()
+        compare(page.pageIndex, 1, "the new page shows")
+        verify(find(page, "dashCell_0_0") !== cell, "the first page's cells are new ones")
+        if (data.turn) {
+            wait(0)
+            verify(cell.parent === null, "the page is gone and the cell waits for its own delete")
+        }
+        page.editsPart.removePage()
+        compare(page.pageIndex, 0, "the first page shows again")
+        verify(find(page, "dashCell_0_0").editable, "its own cell is in edit mode")
+        verify(!cell.editable, "the released cell stays out of it")
+        verify(!find(cell, "cellRemoveSlot").active, "and builds no Remove button")
+        verify(!find(cell, "gauge").active, "nor a gauge")
+    }
+
     // A page change closes whatever panel was open: a cell's signal, Add
     // and Add's signals
     function test_aPageChangeClosesAnyPanel() {
