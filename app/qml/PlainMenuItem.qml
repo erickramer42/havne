@@ -5,6 +5,8 @@
 import QtQuick
 import QtQuick.Controls
 
+// Text only: it has no icon, no submenu arrow and no mirroring, which the
+// pane menu's checkable items don't need
 MenuItem {
     id: item
 

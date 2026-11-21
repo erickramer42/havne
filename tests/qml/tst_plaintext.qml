@@ -84,7 +84,8 @@ TestCase {
         for (const url of ["file://127.0.0.1/share/a.ppm", "file:////127.0.0.1/share/a.ppm",
                            "file://localhost.invalid/share/a.ppm"]) {
             const was = Harness.urlsRefused()
-            const probe = Qt.createQmlObject("import QtQuick; Image { source: \"" + url + "\" }", testCase)
+            const probe = Qt.createQmlObject("import QtQuick; Image {}", testCase)
+            probe.source = url
             tryVerify(() => probe.status === Image.Error, 5000, url)
             verify(Harness.urlsRefused() > was, "the interceptor emptied " + url)
             probe.destroy()
@@ -92,12 +93,41 @@ TestCase {
     }
 
     function test_theRuleNamesEveryOtherHost() {
-        const another = ["file://host/share/a.png", "file:////host/share/a.png", "file://127.0.0.1/a.png"]
+        // Win32 reads "/" and "\" alike, so a UNC path may be written with
+        // either, mixed, or percent-encoded; a local extended-length path
+        // (a "\\?\C:" path) is refused with them, which costs nothing here
+        const another = ["file://host/share/a.png", "file:////host/share/a.png", "file://127.0.0.1/a.png",
+                         "file:///\\host\\share\\a.png", "file:///\\\\host/share/a.png",
+                         "file:///%5C%5Chost/share/a.png", "file:///%5Chost%5Cshare%5Ca.png",
+                         "file:///\\\\?\\UNC\\host\\share\\a.png", "file:////?/UNC/host/share/a.png",
+                         "file:///\\\\.\\pipe\\x", "file:////./pipe/x", "file:///\\\\?\\C:\\x\\a.png"]
         for (const u of another)
             verify(Harness.namesAnotherHost(u), u)
         const here = ["file:///D:/data/a.png", "file:///tmp/a.png", "qrc:/qt/qml/App/a.png", "data:image/png;base64,AA=="]
         for (const u of here)
             verify(!Harness.namesAnotherHost(u), u)
+    }
+
+    // A load the interceptor never sees (an XMLHttpRequest) is refused by
+    // the network manager on the same rule
+    function test_theNetworkManagerRefusesTheSameUrls() {
+        verify(Harness.networkStays("file:///D:/data/a.png"))
+        verify(Harness.networkStays("qrc:/qt/qml/App/a.png"))
+        verify(Harness.networkStays("data:text/plain,x"))
+        verify(!Harness.networkStays("file:////host/share/a.png"))
+        verify(!Harness.networkStays("file://host/share/a.png"))
+        verify(!Harness.networkStays("http://127.0.0.1/a.png"))
+    }
+
+    function test_aMixedSeparatorUncPathIsRefusedBeforeALoaderOpensIt() {
+        for (const url of ["file:///\\host\\share\\a.ppm", "file:///%5C%5Chost/share/a.ppm"]) {
+            const was = Harness.urlsRefused()
+            const probe = Qt.createQmlObject("import QtQuick; Image {}", testCase)
+            probe.source = url
+            tryVerify(() => probe.status === Image.Error, 5000, url)
+            verify(Harness.urlsRefused() > was, "the interceptor emptied " + url)
+            probe.destroy()
+        }
     }
 
     Component {

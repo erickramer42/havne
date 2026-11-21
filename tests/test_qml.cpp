@@ -334,6 +334,12 @@ public:
         return RefusingUrlInterceptor::refused();
     }
 
+    // Whether the engines' network manager lets a request for the URL go on
+    Q_INVOKABLE bool networkStays(const QUrl& url) const
+    {
+        return RefusingNetworkManager::stays(url);
+    }
+
     Q_INVOKABLE bool namesAnotherHost(const QUrl& url) const
     {
         return RefusingUrlInterceptor::names_another_host(url);

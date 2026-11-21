@@ -23,6 +23,26 @@
 
 #include <atomic>
 
+// Whether a URL names another host: a file: URL with a host, or a path that
+// is UNC (two leading separators) or a device or extended-length path
+// ("//?/", "//./"). Win32 reads a slash and a backslash alike, and
+// toLocalFile decodes a percent-encoded one, so every spelling is made a
+// slash before the check.
+inline bool url_names_another_host(const QUrl& url)
+{
+    if (url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0 &&
+        !url.host().isEmpty()) {
+        return true;
+    }
+    if (!url.isLocalFile() && !url.scheme().isEmpty()) {
+        return false;
+    }
+    QString path = url.isLocalFile() ? url.toLocalFile()
+                                     : url.toString(QUrl::PreferLocalFile);
+    path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    return path.startsWith(QLatin1String("//"));
+}
+
 class RefusingNetworkManager : public QNetworkAccessManager
 {
 public:
@@ -34,7 +54,7 @@ public:
         if (scheme == QLatin1String("qrc") || scheme == QLatin1String("data")) {
             return true;
         }
-        return scheme == QLatin1String("file") && url.host().isEmpty();
+        return scheme == QLatin1String("file") && !url_names_another_host(url);
     }
 
 protected:
@@ -61,23 +81,13 @@ public:
     }
 };
 
-// Empties a URL that names another host: a file: URL with a host, or a
-// path that is UNC (two leading slashes or backslashes) or an extended-length path
+// Empties a URL that names another host (url_names_another_host)
 class RefusingUrlInterceptor : public QQmlAbstractUrlInterceptor
 {
 public:
     static bool names_another_host(const QUrl& url)
     {
-        if (url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) ==
-                0 &&
-            !url.host().isEmpty()) {
-            return true;
-        }
-        const QString path = url.isLocalFile() || url.scheme().isEmpty()
-                                 ? url.toString(QUrl::PreferLocalFile)
-                                 : QString();
-        return path.startsWith(QLatin1String("\\\\")) ||
-               path.startsWith(QLatin1String("//"));
+        return url_names_another_host(url);
     }
 
     // How many URLs it has emptied, for the tests that show an engine has it

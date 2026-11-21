@@ -12,9 +12,12 @@ ComboBox {
     // qmllint disable unqualified
     delegate: ItemDelegate {
         id: row
+        // The model is an array (of values, or of maps with a textRole): a
+        // ListModel's roles come as `model`, which this delegate doesn't read
         required property var modelData
         required property int index
         width: ListView.view ? ListView.view.width : control.width
+        font.weight: control.currentIndex === row.index ? Font.DemiBold : Font.Normal
         highlighted: control.highlightedIndex === row.index
         hoverEnabled: control.hoverEnabled
         // The text is the row's own, whichever way the model is shaped
@@ -26,7 +29,7 @@ ComboBox {
         contentItem: Text {
             text: row.rowText
             textFormat: Text.PlainText
-            font: control.font
+            font: row.font
             color: row.highlighted ? control.palette.highlightedText : control.palette.text
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
@@ -36,8 +39,10 @@ ComboBox {
     // qmllint enable unqualified
 
     contentItem: Text {
-        leftPadding: 12
-        rightPadding: control.indicator ? control.indicator.width + control.spacing : 0
+        // Basic's own paddings: the ComboBox already keeps its content out of
+        // the indicator's space
+        leftPadding: control.mirrored ? 1 : 12
+        rightPadding: control.mirrored ? 12 : 1
         text: control.displayText
         textFormat: Text.PlainText
         font: control.font
