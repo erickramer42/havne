@@ -143,7 +143,20 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
+add_executable(test_obd2 test_obd2.cpp
+    test_obd2_engine.cpp
+    test_obd2_walk.cpp
+    test_obd2_scan.cpp
+    test_obd2_identification.cpp
+    test_obd2_diagnostics.cpp
+    test_obd2_clear.cpp
+    test_obd2_packing.cpp
+    test_obd2_pid_support.cpp
+    test_obd2_sim_ecu.cpp
+    test_obd2_sim_dids.cpp
+    test_obd2_sim_ask.cpp
+    test_obd2_focus.cpp
+    test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
