@@ -143,8 +143,8 @@ void check_packed(const char* packed, size_t length, const char* prefix)
     ecuio_plugin_free(p);
     if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
         throw refusal{"the plugin has the conversation tier, which a put or "
-                      "a drop doesn't carry over: change its folder and pack "
-                      "it again"};
+                      "a drop doesn't carry over: change the variant in the "
+                      "plugin's folder, which Havne loads as it stands"};
     }
 }
 

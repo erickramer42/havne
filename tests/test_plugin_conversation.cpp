@@ -496,9 +496,12 @@ TEST(PluginConversationTest, APutAndADropRefuseAPluginWithTheTier)
         R"("ecus": [{"id": "pcm", "rx": "7E8"}], "signals": [{"key": "oil2", )"
         R"("name": "Oil 2", "ecu": "pcm", "read": {"service": "22", )"
         R"("number": "F40E"}, "field": {"byte": 0}}]})";
+    /* No Havne tool writes a packed plugin with the tier: the words name
+     * the folder, which loads as it stands */
     const char* const words =
         "the plugin has the conversation tier, which a put or a drop doesn't "
-        "carry over";
+        "carry over: change the variant in the plugin's folder, which Havne "
+        "loads as it stands";
     char* out = reinterpret_cast<char*>(1);
     size_t length = 7;
     EXPECT_EQ(ecuio_plugin_put_variant(packed.data(), packed.size(), "extra",

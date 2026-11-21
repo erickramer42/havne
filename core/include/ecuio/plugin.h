@@ -347,6 +347,31 @@ static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
               "plugin security level delay_ms offset is ABI");
 static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
               "plugin security level flags offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_conversation_t) == 64,
+               "ecuio_plugin_conversation_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_t, budget) == 40,
+               "plugin conversation budget offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_conversation_ecu_t) == 64,
+               "ecuio_plugin_conversation_ecu_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12,
+               "plugin conversation ecu id offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44,
+               "plugin conversation ecu flags offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_service_t) == 32,
+               "ecuio_plugin_service_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_service_t, subs) == 6,
+               "plugin service subs offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_service_t, flags) == 20,
+               "plugin service flags offset is ABI");
+_Static_assert(sizeof(ecuio_plugin_security_level_t) == 40,
+               "ecuio_plugin_security_level_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, level) == 8,
+               "plugin security level level offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12,
+               "plugin security level delay_ms offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_security_level_t, flags) == 20,
+               "plugin security level flags offset is ABI");
 #endif
 
 /* The conversation tier's part of plugin. ECUIO_ERR_NULL_ARGUMENT for a

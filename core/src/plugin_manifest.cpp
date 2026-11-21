@@ -20,6 +20,34 @@
 
 namespace ecuio_plugin_loader {
 
+namespace {
+
+/* Whether a part names a Windows device whatever its case and extension
+ * (con.json, NUL, com1.txt), or ends in a dot, which Windows drops: a
+ * host on Windows would open the device or another file */
+bool windows_reserved(const std::string& part)
+{
+    if (part.back() == '.') {
+        return true;
+    }
+    std::string stem = part.substr(0, part.find('.'));
+    for (char& c : stem) {
+        c = (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    static const char* const kDevices[] = {"CON", "PRN",    "AUX",
+                                           "NUL", "CONIN$", "CONOUT$"};
+    for (const char* d : kDevices) {
+        if (stem == d) {
+            return true;
+        }
+    }
+    return stem.size() == 4 &&
+           (stem.compare(0, 3, "COM") == 0 || stem.compare(0, 3, "LPT") == 0) &&
+           stem[3] >= '0' && stem[3] <= '9';
+}
+
+} // namespace
+
 bool path_ok(const std::string& p)
 {
     if (p.empty() || p.size() > ECUIO_PLUGIN_PATH_MAX || p.front() == '/') {
@@ -29,7 +57,8 @@ bool path_ok(const std::string& p)
     for (size_t i = 0; i <= p.size(); ++i) {
         if (i == p.size() || p[i] == '/') {
             const std::string part = p.substr(start, i - start);
-            if (part.empty() || part == "." || part == "..") {
+            if (part.empty() || part == "." || part == ".." ||
+                windows_reserved(part)) {
                 return false;
             }
             start = i + 1;
@@ -50,7 +79,8 @@ const std::string& path_of(const Value& v, std::string_view what)
         refuse(v,
                std::string(what) + " " + q(p) +
                    " isn't a path in the package: relative, forward slashes, "
-                   "no \".\" or \"..\" part");
+                   "no \".\" or \"..\" part, and no part a Windows device "
+                   "name (con, nul, com1, ...) or ending in a dot");
     }
     return p;
 }
@@ -440,7 +470,9 @@ void loader::read_files(const Value& root, const ecuio_plugin& p)
             if (!path_ok(m.key)) {
                 refuse(m, "file " + q(m.key) +
                               " isn't a path in the package: relative, forward "
-                              "slashes, no \".\" or \"..\" part");
+                              "slashes, no \".\" or \"..\" part, and no part a "
+                              "Windows device name (con, nul, com1, ...) or "
+                              "ending in a dot");
             }
             if (m.value.type == Type::object &&
                 m.value.find("kind") != nullptr) {

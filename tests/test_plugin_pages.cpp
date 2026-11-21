@@ -446,6 +446,15 @@ TEST(PluginPagesTest, APageIsAPathListedOnceAndFound)
         {"an empty list", R"("pages": [], )", "\"pages\" lists none"},
         {"a path out of the package", R"("pages": ["../p.json"], )",
          "a page '../p.json' isn't a path in the package"},
+        /* Windows opens a device for these, or another file for the dot */
+        {"a device name", R"("pages": ["con.json"], )",
+         "a page 'con.json' isn't a path in the package"},
+        {"a device in a folder", R"("pages": ["p/nul"], )",
+         "a page 'p/nul' isn't a path in the package"},
+        {"a numbered device in any case", R"("pages": ["Com1.tar.json"], )",
+         "a page 'Com1.tar.json' isn't a path in the package"},
+        {"a part ending in a dot", R"("pages": ["p./q.json"], )",
+         "a page 'p./q.json' isn't a path in the package"},
         {"listed twice", R"("pages": ["p.json", "p.json"], )",
          "page 'p.json' is listed twice"},
         {"not there", R"("pages": ["q.json"], )", ""},
@@ -471,6 +480,20 @@ TEST(PluginPagesTest, APageIsAPathListedOnceAndFound)
     k.pages.clear();
     EXPECT_NE(load_packed(k).detail.find("page 'q.json' isn't in \"files\""),
               std::string::npos);
+}
+
+// A name that only starts like a Windows device is a path like any other
+TEST(PluginPagesTest, ANameLikeADevicesIsAPath)
+{
+    Package k;
+    k.pages = {{"console.json", kPhone},
+               {"com10.json", kPhone},
+               {"lpt/nully.json", kPhone},
+               {"p.a/aux_page.json", kPhone}};
+    const Loaded both[] = {load_folder(k), load_packed(k)};
+    for (const Loaded& l : both) {
+        EXPECT_EQ(l.status, ECUIO_OK) << l.detail;
+    }
 }
 
 // A file is a page or a data file: a variant naming a page is refused,
