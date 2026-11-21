@@ -299,8 +299,9 @@ void slow_pids(Bus& b,
  * at 6 ms; then two shapes of slow rows at 6 ms, where an extra turn a
  * fast row earns may meet a slow row, which is then kept chosen, not
  * written: six fast PIDs and three slow beside one segmented row, and
- * slow_pids' own, whose rows reach that guard (the first shape's pass
- * whether the guard is there or not) */
+ * slow_pids' own. Whether a shape meets the guard turns on the rate
+ * classes' phase, so ASegmentedRowAnExtraTurnMeetsIsKeptChosen pins it
+ * with the state set by hand */
 TEST(J2534HoldTest, NoLongOrUnaskedRequestGoesAheadOfAChosenOne)
 {
     {
@@ -342,9 +343,8 @@ TEST(J2534HoldTest, NoLongOrUnaskedRequestGoesAheadOfAChosenOne)
  * holds only at some phases of the rate classes: module 0 asks
  * ECUIO_ENGINE_FAST_PER_SLOW fast rows to each slow one, and its count of
  * fast rows sets when the slow row comes due against the segmented
- * module's turns. With 3 s here, five fast PIDs meet the path 21 times;
- * three or eight once; four, six and seven never, nor six fast with
- * three slow beside one segmented row. So the case takes five */
+ * module's turns, so the case takes a count of fast PIDs whose phase
+ * meets the path, and asserts that it does */
 TEST(J2534HoldTest, AChosenRowFromAnExtraTurnGoesOnlyAsTheOlder)
 {
     Bus b;
@@ -354,6 +354,43 @@ TEST(J2534HoldTest, AChosenRowFromAnExtraTurnGoesOnlyAsTheOlder)
     const Ahead n = expect_none_ahead(b, "a late Single Frame", false);
     EXPECT_GT(n.known_segmented, 30u) << "the slow row was asked";
     EXPECT_GT(n.given_back_beside, 0u) << "two rows were chosen at once";
+}
+
+/* An extra turn that meets a segmented row keeps it chosen beside the
+ * other channel's chosen row, with nothing on the bus: written, it would
+ * go ahead of the older row. Channel 0's next fast row is a Single Frame
+ * older than channel 1's chosen row, so it takes the extra turn, and its
+ * rate classes give the slow turn, a row of three frames. */
+TEST(J2534HoldTest, ASegmentedRowAnExtraTurnMeetsIsKeptChosen)
+{
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 2));
+    e.gap_us = 5 * kMs;
+    const uint8_t fast[3] = {0x22, 0x1E, 0x00};
+    const uint8_t slow[3] = {0x22, 0x1E, 0x01};
+    const uint8_t other[3] = {0x22, 0x1E, 0x80};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, fast, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 0, slow, 3), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 1, other, 3),
+              ecuio_engine_add_result::added);
+    e.requests[0].reply_frames = 1;
+    e.requests[1].reply_frames = 3;
+    e.requests[1].slow = 1;
+    e.requests[2].reply_frames = 3;
+    e.chans[0].fast_run = ECUIO_ENGINE_FAST_PER_SLOW;
+    const int64_t now = 100 * kMs;
+    e.asked_us[0] = 10 * kMs;
+    e.asked_us[1] = 20 * kMs;
+    e.asked_us[2] = 60 * kMs;
+    j2534_hold hold;
+    hold.chosen[1] = 2;
+    hold.rotating[1] = true;
+    ASSERT_TRUE(j2534_hold_extra_turn(hold, &e, 0, now));
+    uint32_t held = 0;
+    EXPECT_EQ(j2534_hold_next(hold, &e, 0, now, &held), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(hold.chosen[0], 1) << "the slow row waits as chosen";
+    EXPECT_EQ(held, 0u) << "the extra turn, not a hold";
+    EXPECT_EQ(hold.chosen[1], 2);
 }
 
 /* A module of six rows answering in turn one frame and three, a Single

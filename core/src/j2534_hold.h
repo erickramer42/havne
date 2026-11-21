@@ -32,7 +32,8 @@
 // A chosen request is due's own: the engine moved past it and left the
 // channel with nothing outstanding, so nothing changes in the engine
 // while it waits, and ecuio_engine_sent records it once it is written. A
-// row the focus parked while it waited is dropped, not written.
+// row the focus parked while it waited is dropped, not written, and so is
+// a pack holding one, so no value goes out for a signal the pick left.
 //
 // What holds no one: a silent channel, whose requests neither hold the
 // others nor keep their chosen requests waiting, or an absent module
@@ -315,13 +316,33 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
     return ecuio_engine_session_next_us(e, ch) <= now_us;
 }
 
+/* Whether chosen request r on channel c may still go: a row that was in
+ * the rotation when chosen while it still is, a pack while each of its
+ * rows is, anything else always */
+inline bool j2534_hold_still_asked(const j2534_hold& h,
+                                   const ecuio_request_engine* e, uint32_t c,
+                                   int32_t r)
+{
+    if (r == ECUIO_ENGINE_PACK) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            if (!ecuio_engine_in_rotation(e->requests[ch.pack_rows[k]])) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return r < 0 || !h.rotating[c] || ecuio_engine_in_rotation(e->requests[r]);
+}
+
 /* What channel c writes this pass at now: nothing while its own request
  * is out (and it isn't held); its chosen request once no other channel
  * has one on the bus or a key that can still go (a row the focus parked
- * meanwhile dropped); else its session request near S3; else, unless
- * another's segmented reply is due, another's chosen request waits (unless
- * c takes an extra turn ahead of it) or another has a key that can still
- * go (c is then held, a bit in *held_now), due's request, kept chosen
+ * meanwhile dropped, a pack holding one too); else its session request
+ * near S3; else, unless another's segmented reply is due, another's
+ * chosen request waits (unless c takes an extra turn ahead of it) or
+ * another has a key that can still go (c is then held, a bit in
+ * *held_now), due's request, kept chosen
  * instead when its reply is expected segmented while another channel has
  * one on the bus or a chosen row, and c isn't silent. c's own key waits
  * only for another's segmented reply, and one past its window is settled
@@ -343,8 +364,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         }
         const int32_t r = h.chosen[c];
         h.chosen[c] = ECUIO_ENGINE_NONE;
-        if (r < 0 || !h.rotating[c] ||
-            ecuio_engine_in_rotation(e->requests[r])) {
+        if (j2534_hold_still_asked(h, e, c, r)) {
             return r;
         }
     }
