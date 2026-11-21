@@ -431,3 +431,67 @@ TEST(RequestPackTest, ASentPackStampsEachOfItsRows)
         EXPECT_LT(d->e.asked_us[i], later) << "row " << i;
     }
 }
+
+/* Out of step, a late pack's reply that starts with the PID of a row out
+ * alone answers the row but teaches it nothing: its frames and its PID's
+ * length stay the ones its own replies showed */
+TEST(RequestPackTest, ALatePacksReplyTeachesARowOutAloneNothing)
+{
+    auto d = driver(1, 0);
+    const uint8_t pids[] = {0x0C, 0x10, 0x14, 0x15, 0x16, 0x1F};
+    for (const uint8_t pid : pids) {
+        add(&d->e, 0, pid);
+    }
+    ecuio_engine_probe(&d->e);
+    d->ecus = [](uint32_t, const Bytes& q) { return answer(q); };
+    for (int i = 0;
+         i < 1000 && (d->sent.empty() || d->sent.back().bytes.size() <= 2);
+         ++i) {
+        d->pass();
+    }
+    ASSERT_GT(d->sent.back().bytes.size(), 2u) << "no pack was asked";
+    ecuio_request_engine& e = d->e;
+    int64_t now = d->now;
+    for (uint32_t failed = 0; failed < ECUIO_ENGINE_PACK_FAILURES;) {
+        const int32_t r = ecuio_engine_due(&e, 0, now);
+        if (r == ECUIO_ENGINE_NONE) {
+            now += ECUIO_ENGINE_GAP_US;
+            continue;
+        }
+        ASSERT_EQ(r, ECUIO_ENGINE_PACK) << "pack " << failed;
+        ecuio_engine_sent(&e, 0, r, true, now);
+        now += ECUIO_ENGINE_WAIT_US + 1;
+        ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+        ++failed;
+    }
+    ASSERT_TRUE(e.chans[0].unpacked);
+    ASSERT_FALSE(e.chans[0].in_step);
+    int32_t r = ECUIO_ENGINE_NONE;
+    for (int i = 0; i < 100 && r == ECUIO_ENGINE_NONE; ++i) {
+        now += ECUIO_ENGINE_GAP_US;
+        r = ecuio_engine_due(&e, 0, now);
+    }
+    ASSERT_GE(r, 0) << "a row alone";
+    const uint8_t pid = e.requests[r].bytes[1];
+    const uint8_t frames = e.requests[r].reply_frames;
+    const uint8_t pid_len = e.chans[0].pid_len[pid];
+    ASSERT_EQ(frames, 1);
+    ASSERT_EQ(pid_len, ECUIO_OBD2_PID_BYTES[pid]);
+    ecuio_engine_sent(&e, 0, r, true, now);
+
+    Bytes late_pack = {0x01, pid};
+    for (const uint8_t other : pids) {
+        if (other != pid) {
+            late_pack.push_back(other);
+        }
+    }
+    const Bytes late = answer(late_pack);
+    ASSERT_GT(isotp_frames(static_cast<uint32_t>(late.size())), 1u);
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, late.data(),
+                                    static_cast<uint16_t>(late.size()), now + 1,
+                                    nullptr),
+              ecuio_reply::positive);
+    EXPECT_TRUE(e.chans[0].in_step);
+    EXPECT_EQ(e.requests[r].reply_frames, frames);
+    EXPECT_EQ(e.chans[0].pid_len[pid], pid_len);
+}

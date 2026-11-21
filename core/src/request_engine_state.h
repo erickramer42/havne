@@ -162,6 +162,9 @@ struct ecuio_request {
     uint8_t reply_frames; /* a table row's last answer in CAN frames (a
                              negative one, or a wait run out before any,
                              is one), 0 before any (reply_segmented) */
+    uint8_t ran_out;      /* 1: reply_frames is a wait run out before any
+                             answer, which a recovery or its module's
+                             waking takes back (ecuio_engine_forget_ran_out) */
     uint8_t long_defs;    /* 1: a def it was enrolled for reads past a
                              Single Frame (ecuio_engine_def_long) */
 };
