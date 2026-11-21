@@ -101,9 +101,19 @@ void SessionBridge::logReplayMadeUnder(const QString& uri)
     }
     // A signals.csv is a header row and one row for each value
     QFile values(folder + QStringLiteral("/signals.csv"));
+    // Each line is read in bounded pieces, as the header's is, and the rest
+    // of a long one skipped: a file of one long line costs 64 KiB, not its
+    // size, and its second line is still the next one
+    const auto nextLine = [&values]() {
+        QByteArray line = values.readLine(64 * 1024);
+        for (QByteArray rest = line; !rest.endsWith('\n') && !values.atEnd();) {
+            rest = values.readLine(64 * 1024);
+        }
+        return line;
+    };
     const bool hasValues = values.open(QIODevice::ReadOnly) &&
-                           values.readLine().size() > 0 &&
-                           !values.readLine().trimmed().isEmpty();
+                           nextLine().size() > 0 &&
+                           !nextLine().trimmed().isEmpty();
     const QString profile = QString::fromStdString(recorded.profile);
     emit logMessage(
         (profile.isEmpty()

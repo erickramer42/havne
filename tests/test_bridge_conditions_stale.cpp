@@ -38,6 +38,47 @@ TEST(BridgeTest, TheHighestAlertOnASignalIsItsLevel)
     EXPECT_EQ(model.alertLevels(), levels);
 }
 
+// A handler that attaches another set while states are applied (a save on
+// dataChanged) ends the walk over the replaced rows: the new rows stay
+// unjudged, and nothing reads the buffer the attach replaced
+TEST(BridgeTest, ASetAttachedMidApplyEndsTheWalk)
+{
+    const QByteArray many =
+        R"({"havne_conditions":1,"conditions":[)"
+        R"({"key":"a","name":"A","when":{"signal":["id:1001"],"unit":"RPM","above":1},)"
+        R"("alert":{"level":"danger"}},)"
+        R"({"key":"b","name":"B","when":{"signal":["id:3001"],"unit":"km/h","above":1},)"
+        R"("alert":{"level":"warning"}},)"
+        R"({"key":"c","name":"C","when":{"signal":["id:4001"],"unit":"%","above":1},)"
+        R"("alert":{"level":"warning"}}]})";
+    QString words;
+    ConditionSetPtr first = loadConditionSet(many, &words);
+    ConditionSetPtr second = loadConditionSet(many, &words);
+    ASSERT_NE(first, nullptr) << words.toStdString();
+    ASSERT_NE(second, nullptr) << words.toStdString();
+    const ecuio_signal_set_t* mock = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("mock", &mock), ECUIO_OK);
+    ConditionModel model;
+    model.setConditions(first.get(), mock, nullptr);
+    int emits = 0;
+    QObject::connect(&model, &QAbstractItemModel::dataChanged, &model, [&] {
+        if (++emits == 1) {
+            model.setConditions(second.get(), mock, nullptr);
+        }
+    });
+    ecuio_condition_state_t states[3] = {};
+    for (ecuio_condition_state_t& s : states) {
+        s.state = ECUIO_CONDITION_ON;
+    }
+    model.applyStates(states, 3);
+    EXPECT_EQ(emits, 1);
+    ASSERT_EQ(model.count(), 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_FALSE(model.data(model.index(i), ConditionModel::LiveRole).toBool())
+            << "row " << i << " of the new set holds no old state";
+    }
+}
+
 // A row gone stale takes its time from the term it went stale on (the
 // event's, through applyTerm) plus the wall offset, judged once while that
 // term reads nothing new, and reads -1 again once fresh or unjudged

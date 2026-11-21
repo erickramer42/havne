@@ -122,9 +122,17 @@ QVariantMap ConditionStore::save(const QByteArray& bytes)
     m_unreadable = false;
     // A temporary beside it, renamed over the old file at commit
     QSaveFile file(where);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
-        !file.commit()) {
-        return refuse(QStringLiteral("the conditions can't be saved"));
+    if (m_failWrite || !file.open(QIODevice::WriteOnly) ||
+        file.write(bytes) != bytes.size() || !file.commit()) {
+        m_failWrite = false;
+        QString said = QStringLiteral("the conditions can't be saved");
+        if (!aside.isEmpty()) {
+            said += QStringLiteral(
+                         "; the file that didn't load is kept as %1, "
+                         "and is now the only copy")
+                         .arg(aside);
+        }
+        return refuse(said);
     }
     m_bytes = bytes;
     m_set = std::move(set);
