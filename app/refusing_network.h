@@ -1,14 +1,15 @@
 // File/layer: app/refusing_network.h | Qt6 Network + Qml, app layer, C++17
-// Testing: QML: QmlTest.dashedit_plugpages (a listener the case owns sees no
+// Testing: QML: QmlTest.plaintext (the rule and both gates),
+//          QmlTest.dashedit_plugpages (a listener the case owns sees no
 //          connection from an Image or an XMLHttpRequest on the engine)
 //
 // The QML engine's network manager. The app loads nothing remote, so
 // every request that could leave the machine (http, https, ftp) is
 // answered with a refusal; qrc:, data: and a file on this machine pass
-// through. A file: URL with a host never reaches the manager: the pixmap
-// loader opens it as a UNC path (on Windows over SMB, which can send the
-// user's credentials), so RefusingUrlInterceptor empties a string URL
-// that names one, and so does the manager. That covers an Image, a Loader
+// through. A file: URL with a host would be opened by the pixmap loader as
+// a UNC path (on Windows over SMB, which can send the user's credentials),
+// so RefusingUrlInterceptor empties a string URL that names one and the
+// manager refuses one too. That covers an Image, a Loader
 // and a component; a Text's <img> is read by another route that asks
 // neither, so the plain-text rule (every Text sets textFormat,
 // tests/plaintext_pin.py) keeps outside text from being markup. Both gate
