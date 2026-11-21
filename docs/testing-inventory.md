@@ -132,6 +132,8 @@ One row per pinned behavior, with the test that pins it and the evidence, groupe
 | `?baud=` and `?flags=` reach `PassThruConnect`; defaults kept; malformed URIs rejected before any DLL load | `J2534QueryParamTest` |
 | 29-bit channels connect with `CAN_29BIT_ID` (from `?filter=`/`?txid=` or a profile), on top of `?flags=`; a profile mixing 11- and 29-bit channels is rejected at create | `J2534QueryParamTest.Wide29BitChannelSetsConnectFlag`, `.ProfileChannelWidthDecidesConnectFlag` |
 | Surrogate: spawn under the job object, pipe handshake, batched `OP_READ` delivery, dead DLL fails fast, clean teardown | `J2534SurrogateTest` |
+| On arbitrary bytes as the surrogate child's replies to a script of requests (a READ, an IOCTL, a text reply or a plain one, any late or failing the pipe), read as the client reads them (`core/src/j2534_sur_reply.h`): frames only on a READ and at most the cap, each read whole and handed over as sent, marked after a loss; an empty READ's verdict the one its status maps to; a count past what a reply may carry stops the reading at its response; a cut, a wrong ID or frames past the cap end the handle; an IOCTL past its limit copies nothing; every text terminated; two runs agree; each check against a mutation of the header (2026-11-20) | `fuzz_sur_reply` (fuzz/README.md) |
+| The surrogate pipe's protections, on the pipe `ecuio_j2534_sur_create_pipe` makes for each session: its DACL holds one entry, full access for the session's user; one instance, for one client; a name another process made first refuses the create (`ERROR_ACCESS_DENIED`) rather than joining it; a client through the SMB loopback (`\\localhost\pipe\...`) is refused while a local one gets in, the case skipping with its reason where the loopback reaches no pipe; each checked against a mutation of it (2026-11-20) | `J2534PipeTest` (test_j2534_routing, `tests/test_j2534_pipe.cpp`) |
 | Write, ioctl and filter relay through the surrogate, including whitelist refusal and malformed filter shapes | `J2534SurrogateTest`, `J2534RoutingTest.X64WriteIoctlFilterRoundTrips` |
 | Routing by PE architecture ([ADR-0025](adr/0025-one-j2534-backend.md)): an x64 DLL loads in the x64 surrogate, never in the test's process; an x86 one in the x86 surrogate; a missing file or a file that isn't a PE is refused with no spawn; a PE for another machine (ARM64) goes to the x64 surrogate, whose load refuses it | `J2534RoutingTest.X64FakeSelectsTheX64SurrogateAndRoundTrips`, `.MissingDllIsRefusedBeforeAnySpawn`, `J2534ConnectTest.MissingDllFailsToLoad`; in the app (`run-havne`, 2026-10-26): the x64 fake's session log names `ecuio-j2534-surrogate-x64.exe`, the x86 fake's `ecuio-j2534-surrogate.exe`, and both sessions' lines read "through the surrogate" |
 | Paths are UTF-8 to UTF-16: a DLL in a directory named in Greek and CJK (outside every ANSI code page) is sniffed and loads in the surrogate child, same-arch and cross-arch. With `LoadLibraryExA` the load fails (checked by hand, 2026-10-21, on code page 1252) | `FakeFixture.NonAsciiDllPathLoads`, `J2534SurrogateTest.NonAsciiDllPathLoadsInTheChild` |
@@ -615,25 +617,11 @@ One row per pinned behavior, with the test that pins it and the evidence, groupe
   port (docs/bench-sessions/2026-10-27-elm327-vehicle.md). The POSIX half runs
   over a pseudo-terminal in CI ([ADR-0026](adr/0026-elm327-transport.md)
   section 8).
-- **The surrogate pipe's replies have no fuzz target.** What the
-  vendor DLL's process sends back (`core/src/j2534_surrogate_client.cpp`)
-  is read by a client that compiles only on Windows, against a live
-  pipe, and the CI `fuzz` job runs on Linux; a harness would need the
-  reply parsing split from the pipe's I/O first. The client checks the
-  counts and lengths it trusts (a read's frame count, an ioctl's output
-  length) against the wire's limits and fails the call past them, but
-  no test sends it a malformed reply and no fuzzer holds the checks
-  there. The ELM327
-  reply text, the replay reader and SocketCAN's filters, links and
-  frames, the other parsers fed from outside the process, have harnesses
-  (Fuzzing, above).
-- **The surrogate pipe's protections have no direct test.** Its
-  current-user DACL, `FILE_FLAG_FIRST_PIPE_INSTANCE`,
-  `PIPE_REJECT_REMOTE_CLIENTS` and the one-handle inheritance list are
-  exercised by every surrogate test (they'd fail to connect if the
-  child were shut out) and by the app's x86 path in a manual smoke
-  (2026-10-21), but nothing tries to connect as another user, squat
-  the name, or look for a leaked handle in the child.
+- **The surrogate pipe's protections are tested on the pipe, not
+  against another user.** `J2534PipeTest` checks the DACL, the one
+  instance, the first-instance flag and remote clients on the pipe each
+  session makes, but nothing connects as another user, and nothing looks
+  for a handle leaked to the child past the one-handle inheritance list.
 - **Discovery's UTF-16 registry read is untested.** The non-ASCII
   tests start from a path; reading one from `FUNCTIONLIBRARY` would
   need an HKLM entry, which needs elevation.

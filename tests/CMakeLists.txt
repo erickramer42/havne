@@ -143,7 +143,20 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
+add_executable(test_obd2 test_obd2.cpp
+    test_obd2_engine.cpp
+    test_obd2_walk.cpp
+    test_obd2_scan.cpp
+    test_obd2_identification.cpp
+    test_obd2_diagnostics.cpp
+    test_obd2_clear.cpp
+    test_obd2_packing.cpp
+    test_obd2_pid_support.cpp
+    test_obd2_sim_ecu.cpp
+    test_obd2_sim_dids.cpp
+    test_obd2_sim_ask.cpp
+    test_obd2_focus.cpp
+    test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
@@ -2457,6 +2470,9 @@ endif()
 if(WIN32)
     add_library(fake_j2534 SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534.def
     )
 
@@ -2486,6 +2502,9 @@ if(WIN32)
     # fallback resolver.
     add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534_legacy.def
     )
 
@@ -2550,6 +2569,14 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_stream_requests.cpp
+        ../tests/test_j2534_stream_rotation.cpp
+        ../tests/test_j2534_stream_probe.cpp
+        ../tests/test_j2534_stream_session.cpp
+        ../tests/test_j2534_stream_clear.cpp
+        ../tests/test_j2534_stream_stamps.cpp
+        ../tests/test_j2534_stream_focus.cpp
+        ../tests/test_j2534_stream_condition.cpp
         ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
@@ -2580,6 +2607,9 @@ endif()
 if(WIN32)
     add_executable(test_j2534_surrogate
         test_j2534_surrogate.cpp
+        test_j2534_surrogate_open.cpp
+        test_j2534_surrogate_wedged.cpp
+        test_j2534_surrogate_reads.cpp
     )
     target_link_libraries(test_j2534_surrogate PRIVATE
         ecuio-core
@@ -2613,6 +2643,9 @@ endif()
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_health_vx.cpp
+        test_j2534_health_replies.cpp
+        test_j2534_health_overflow.cpp
         test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
@@ -2671,6 +2704,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_routing
         test_j2534_routing.cpp
+        test_j2534_pipe.cpp
     )
     target_link_libraries(test_j2534_routing PRIVATE
         ecuio-core
