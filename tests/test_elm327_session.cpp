@@ -11,9 +11,11 @@ class LogRootEnvironment : public ::testing::Environment
 public:
     void SetUp() override
     {
+        /* The pid keeps two processes of one ctest run (a process each case)
+         * from sharing a root, which the first to finish removes */
         g_log_root =
             fs::temp_directory_path() /
-            ("havne-elm327-logs-" +
+            (temp_name("havne-elm327-logs") + "-" +
              std::to_string(
                  std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(g_log_root);
