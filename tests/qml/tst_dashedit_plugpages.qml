@@ -161,6 +161,23 @@ DashEditKit {
         compare(page.doc.pages.length, 1)
     }
 
+    // Core refuses a page file of two pages at the import, so the text is
+    // handed over directly: one page is added, two (or none) are not
+    function test_aTextOfTwoPagesAddsNothing() {
+        const page = pageWithPicks({}, [])
+        page.startEditing()
+        const one = pageJson("desktop", "Engine", ["key:oil"])
+        const two = pageJson("desktop", "Engine", ["key:oil"])
+        two.pages.push(pageJson("desktop", "Second", ["key:oil"]).pages[0])
+        verify(!page.editsPart.addPluginPageText("Two", JSON.stringify(two)))
+        compare(page.layoutFilePart.layoutNote, "The page couldn't be read")
+        verify(page.layoutFilePart.layoutNoteBad)
+        verify(!page.historyPart.canUndo)
+        compare(page.doc.pages.length, 1)
+        verify(page.editsPart.addPluginPageText("One", JSON.stringify(one)))
+        compare(page.doc.pages.length, 2)
+    }
+
     function test_aRemovedPluginLeavesTheCopyAsItWas() {
         const p = importPlugin("paged", "Paged")
         const page = pageWithPicks({}, [p.profiles[1]])
