@@ -2697,6 +2697,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_routing
         test_j2534_routing.cpp
+        test_j2534_pipe.cpp
     )
     target_link_libraries(test_j2534_routing PRIVATE
         ecuio-core
