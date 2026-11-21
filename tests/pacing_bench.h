@@ -599,7 +599,7 @@ inline void bench::on_deliver(const event& ev)
         (void)ecuio_engine_on_frame(m_engine.get(), c, f.data.data(),
                                     static_cast<uint16_t>(f.data.size()), ev.at,
                                     nullptr);
-        j2534_hold_answered(m_hold, c);
+        j2534_hold_answered(m_hold, m_engine.get(), c);
         ++m_result.answered[c];
     }
     ecuio_frame_t frame;

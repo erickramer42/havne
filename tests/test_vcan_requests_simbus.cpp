@@ -867,3 +867,42 @@ TEST_F(SimBusTest, ASimOnABusRefusesAnAsk)
               std::string::npos);
     EXPECT_EQ(sim.stats().requests, 0u);
 }
+
+/* A flood on the bus (another program on the interface) holds the sim's
+ * worker no longer than a pass: a destroy under it ends within a bound,
+ * not when the flood does */
+TEST_F(SimBusTest, ADestroyUnderAFloodEndsWithinABound)
+{
+    ecuio_sim_t* sim = nullptr;
+    ASSERT_EQ(ecuio_sim_create("mock://sim", vcan_bus::interface_name(), &sim),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    std::atomic<bool> flooding{true};
+    std::vector<std::thread> floods;
+    for (int k = 0; k < 4; ++k) {
+        floods.emplace_back([&flooding] {
+            vcan_bus::Fd bus = vcan_bus::open_raw();
+            struct can_frame f;
+            std::memset(&f, 0, sizeof f);
+            f.can_id = 0x7DF; /* every node feeds it */
+            f.can_dlc = 8;
+            f.data[0] = 0x30; /* a Flow Control nothing waits for */
+            const auto end = std::chrono::steady_clock::now() + 4s;
+            while (flooding.load() && std::chrono::steady_clock::now() < end) {
+                // a full queue drops the frame, which is the flood's point
+                if (::write(bus.get(), &f, sizeof f) < 0) {
+                    std::this_thread::yield();
+                }
+            }
+        });
+    }
+    std::this_thread::sleep_for(300ms);
+    const auto start = std::chrono::steady_clock::now();
+    ecuio_sim_destroy(sim);
+    const auto took = std::chrono::steady_clock::now() - start;
+    flooding = false;
+    for (std::thread& t : floods) {
+        t.join();
+    }
+    EXPECT_LT(took, 1s) << "the destroy waited for the flood";
+}

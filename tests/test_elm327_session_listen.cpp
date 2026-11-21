@@ -332,6 +332,42 @@ TEST_F(Elm327SessionTest, ClosingStopsTheMonitor)
         ' ');
 }
 
+/* A close inside the relisten wait, the backoff grown to 1.6 s: the
+ * worker reads the stop between the wait's pieces, so the close ends at
+ * once and no AT MA follows it */
+TEST_F(Elm327SessionTest, ClosingInTheRelistenWaitEndsAtOnce)
+{
+    uint32_t monitors = 0;
+    {
+        Session s;
+        listen_on(s);
+        for (uint32_t i = 2; i <= 5; ++i) { /* waits of 100 to 800 ms */
+            fake_elm327::with([](fake_elm327::adapter& a) {
+                a.end_monitor("CAN ERROR", fake_elm327::steady_us());
+            });
+            ASSERT_TRUE(
+                wait_for([&] { return fake_count("ATMA") >= i; }, 3000));
+            ASSERT_TRUE(wait_for(fake_monitoring, 2000));
+        }
+        fake_elm327::with([](fake_elm327::adapter& a) {
+            a.end_monitor("CAN ERROR", fake_elm327::steady_us());
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        monitors = fake_count("ATMA");
+        ASSERT_EQ(monitors, 5u) << "inside the 1.6 s wait";
+        // The close joins the worker and closes the port too, which an
+        // unoptimized CI runner stretches; a wait read whole takes 1.4 s
+        const auto from = std::chrono::steady_clock::now();
+        EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+        EXPECT_LT(std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - from)
+                      .count(),
+                  1000);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1700));
+    EXPECT_EQ(fake_count("ATMA"), monitors) << "nothing sent after the close";
+}
+
 /* A hung adapter doesn't hold the close past its 1 s */
 TEST_F(Elm327SessionTest, ClosingAHungMonitorTakesAtMostASecond)
 {

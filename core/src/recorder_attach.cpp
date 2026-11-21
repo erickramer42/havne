@@ -16,6 +16,7 @@
 
 #include "condition_eval.h"
 #include "error_detail.h"
+#include "folder_files.h"
 #include "recorder_impl.h"
 #include "recorder_text.h"
 #include "recording_lines.h" /* signal_line */
@@ -367,9 +368,10 @@ ecuio_status_t open_refusal(const ecuio_record_options_t* options)
 }
 
 /* The label, then an armed recorder's root and tail, or the recording's
- * folder and its three files */
+ * folder (made, once it is) and its three files */
 ecuio_status_t open_files(const ecuio_record_options_t* options,
-                          const std::string& root, ecuio_recorder& r)
+                          const std::string& root, ecuio_recorder& r,
+                          std::string& made)
 {
     const std::string label =
         options->label_utf8 != nullptr ? reduce_label(options->label_utf8) : "";
@@ -388,12 +390,13 @@ ecuio_status_t open_files(const ecuio_record_options_t* options,
                              why.c_str());
             return ECUIO_ERR_RECORDING_FAILED;
         }
-        r.folder = absolute(leaf);
+        made.swap(leaf); /* the search's name, never one it passed by */
+        r.folder = absolute(made);
         r.published = r.folder;
 
-        r.frames = open_file(leaf + "/frames.csv");
-        r.signals = open_file(leaf + "/signals.csv");
-        r.events = open_file(leaf + "/events.log");
+        r.frames = open_file(made + "/frames.csv");
+        r.signals = open_file(made + "/signals.csv");
+        r.events = open_file(made + "/events.log");
         if (r.frames == nullptr || r.signals == nullptr ||
             r.events == nullptr) {
             const int e = errno;
@@ -419,6 +422,64 @@ void queue_caller_lines(const ecuio_record_options_t* options,
     r.items.push_back(item{item_kind::begin, 0, caller, {}, {}});
     if (r.armed) {
         r.armed_caller = caller;
+    }
+}
+
+/* The root, the files and the writer, every step after the ring: a
+ * failed allocation is OUT_OF_MEMORY, a writer that can't start
+ * RECORDING_FAILED in words; made the recording's folder once it is */
+ecuio_status_t open_and_start(const ecuio_record_options_t* options,
+                              ecuio_recorder& r, std::string& made)
+{
+    try {
+        std::string root = options->root_utf8;
+        while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
+            root.pop_back();
+        }
+        std::string why;
+        if (!make_root(root, &why)) {
+            ecuio_detail_set("can't create the recordings' folder: %s",
+                             why.c_str());
+            return ECUIO_ERR_RECORDING_FAILED;
+        }
+        const ecuio_status_t st = open_files(options, root, r, made);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        queue_caller_lines(options, r);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    try {
+        r.writer = std::thread([rec = &r] { rec->run(); });
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    } catch (...) {
+        ecuio_detail_set("can't start the recording's writer");
+        return ECUIO_ERR_RECORDING_FAILED;
+    }
+    return ECUIO_OK;
+}
+
+/* What a refused open made in the recording's folder, once the recorder
+ * closed its files: those files, then the folder if that left it empty,
+ * so no list shows a recording that won't open */
+void remove_unfinished(const std::string& made, const bool opened[3]) noexcept
+{
+    if (made.empty()) {
+        return;
+    }
+    try {
+        const char* const kFiles[3] = {"/frames.csv", "/signals.csv",
+                                       "/events.log"};
+        for (int k = 0; k < 3; ++k) {
+            if (opened[k]) {
+                ecuio_files::remove_file(made + kFiles[k]);
+            }
+        }
+        ecuio_files::remove_folder(made);
+    } catch (...) { // NOLINT(bugprone-empty-catch): out of memory
+        /* naming them: the folder stays */
     }
 }
 
@@ -451,32 +512,16 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
-    /* Every step from here allocates: a failure frees the recorder, its
-     * files closed, and is answered */
-    try {
-        std::string root = options->root_utf8;
-        while (root.size() > 1 && (root.back() == '/' || root.back() == '\\')) {
-            root.pop_back();
-        }
-        std::string why;
-        if (!make_root(root, &why)) {
-            ecuio_detail_set("can't create the recordings' folder: %s",
-                             why.c_str());
-            return ECUIO_ERR_RECORDING_FAILED;
-        }
-        const ecuio_status_t st = open_files(options, root, *r);
-        if (st != ECUIO_OK) {
-            return st;
-        }
-        queue_caller_lines(options, *r);
-    } catch (...) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
-
-    try {
-        r->writer = std::thread([rec = r.get()] { rec->run(); });
-    } catch (...) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
+    /* A failure from here frees the recorder, its files closed, and takes
+     * back what the open made in the recording's folder */
+    std::string made;
+    const ecuio_status_t st = open_and_start(options, *r, made);
+    if (st != ECUIO_OK) {
+        const bool opened[3] = {r->frames != nullptr, r->signals != nullptr,
+                                r->events != nullptr};
+        r.reset();
+        remove_unfinished(made, opened);
+        return st;
     }
     *out = r.release();
     return ECUIO_OK;

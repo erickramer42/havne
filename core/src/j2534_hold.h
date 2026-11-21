@@ -32,7 +32,8 @@
 // A chosen request is due's own: the engine moved past it and left the
 // channel with nothing outstanding, so nothing changes in the engine
 // while it waits, and ecuio_engine_sent records it once it is written. A
-// row the focus parked while it waited is dropped, not written.
+// row the focus parked while it waited is dropped, not written, and so is
+// a pack holding one, so no value goes out for a signal the pick left.
 //
 // What holds no one: a silent channel, whose requests neither hold the
 // others nor keep their chosen requests waiting, or an absent module
@@ -42,7 +43,21 @@
 // that runs out (j2534_hold_answered and j2534_hold_recovered end the
 // run), so one lost reply leaves it protected; and the request after
 // every eighth is asked under the hold all the same, so a module that
-// answers late, inside another's segmented reply, is found again.
+// answers late, inside another's segmented reply, is found again. That
+// probe counts as one frame whatever its defs read, and so does every
+// request of a channel never heard once a wait of its own has run out
+// (j2534_hold_long): each module's first ask is judged by its defs, so a
+// present module costs no reply at connect, and an absent one holds the
+// bus only for that first ask's wait, 100 ms once if it reads long (four
+// present modules beside 14 absent ones of long rows answer 40% of their
+// own count in the first 3 s, 92% when those rows are short). The cost: a
+// module that wakes with a long reply can lose another module's Single
+// Frame once. A channel's first frame
+// after a run of J2534_HOLD_ASLEEP_MISSES waits, and at least its whole
+// rotation, takes back its rows' waits run out before any answer
+// (ecuio_engine_forget_ran_out), as a recovery's rescan does, so the defs
+// judge each row's first answer again; a shorter run is rows the module
+// never answers, which keep their one frame.
 //
 // A session request (10 03, 3E 00) waits for the hold like any request,
 // since its reply can be lost too, except in its session with S3 300 ms
@@ -86,6 +101,7 @@ struct j2534_hold {
     bool rotating[ECUIO_MAX_CHANNELS] = {}; /* a chosen row in the rotation
                                                when chosen */
     uint32_t misses[ECUIO_MAX_CHANNELS] = {}; /* waits run out in a row */
+    uint32_t heard = 0; /* a bit for each channel a frame has come from */
 
     j2534_hold()
     {
@@ -97,6 +113,10 @@ struct j2534_hold {
 
 constexpr uint32_t J2534_HOLD_SILENT_MISSES = 2; /* waits in a row */
 constexpr uint32_t J2534_HOLD_PROBE_EVERY = 8;   /* a silent channel's */
+/* A run this long is the module asleep, not rows it leaves unanswered */
+constexpr uint32_t J2534_HOLD_ASLEEP_MISSES = 8;
+static_assert(J2534_HOLD_ASLEEP_MISSES > J2534_HOLD_SILENT_MISSES,
+              "a module asleep is silent first");
 /* A hold lasts about a segmented wait; the window opens past the longest
  * keep-alive, so no keep-alive is let through at its own due time */
 constexpr int64_t J2534_HOLD_S3_MARGIN_US = 300000;
@@ -129,6 +149,17 @@ inline bool j2534_hold_silent(const j2534_hold& h, uint32_t k)
     return m >= J2534_HOLD_SILENT_MISSES && m % J2534_HOLD_PROBE_EVERY != 0;
 }
 
+/* Whether channel k's request r holds the others as segmented: the
+ * engine's judgment, but a channel never heard once a wait of its own has
+ * run out, or past its first waits run out (its probe), counts one frame */
+inline bool j2534_hold_long(const j2534_hold& h, const ecuio_request_engine* e,
+                            uint32_t k, int32_t r)
+{
+    return (((h.heard >> k) & 1u) != 0 || h.misses[k] == 0) &&
+           h.misses[k] < J2534_HOLD_SILENT_MISSES &&
+           ecuio_engine_reply_segmented(e, k, r);
+}
+
 /* Whether a channel but c, not silent, has a request on the bus, or
  * (segmented) one whose reply is expected segmented */
 inline bool j2534_hold_other_out(const j2534_hold& h,
@@ -137,8 +168,7 @@ inline bool j2534_hold_other_out(const j2534_hold& h,
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         if (k != c && !j2534_hold_silent(h, k) && j2534_hold_on_bus(e, k) &&
-            (!segmented ||
-             ecuio_engine_reply_segmented(e, k, e->chans[k].outstanding))) {
+            (!segmented || j2534_hold_long(h, e, k, e->chans[k].outstanding))) {
             return true;
         }
     }
@@ -315,13 +345,33 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
     return ecuio_engine_session_next_us(e, ch) <= now_us;
 }
 
+/* Whether chosen request r on channel c may still go: a row that was in
+ * the rotation when chosen while it still is, a pack while each of its
+ * rows is, anything else always */
+inline bool j2534_hold_still_asked(const j2534_hold& h,
+                                   const ecuio_request_engine* e, uint32_t c,
+                                   int32_t r)
+{
+    if (r == ECUIO_ENGINE_PACK) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        for (uint32_t k = 0; k < ch.pack_count; ++k) {
+            if (!ecuio_engine_in_rotation(e->requests[ch.pack_rows[k]])) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return r < 0 || !h.rotating[c] || ecuio_engine_in_rotation(e->requests[r]);
+}
+
 /* What channel c writes this pass at now: nothing while its own request
  * is out (and it isn't held); its chosen request once no other channel
  * has one on the bus or a key that can still go (a row the focus parked
- * meanwhile dropped); else its session request near S3; else, unless
- * another's segmented reply is due, another's chosen request waits (unless
- * c takes an extra turn ahead of it) or another has a key that can still
- * go (c is then held, a bit in *held_now), due's request, kept chosen
+ * meanwhile dropped, a pack holding one too); else its session request
+ * near S3; else, unless another's segmented reply is due, another's
+ * chosen request waits (unless c takes an extra turn ahead of it) or
+ * another has a key that can still go (c is then held, a bit in
+ * *held_now), due's request, kept chosen
  * instead when its reply is expected segmented while another channel has
  * one on the bus or a chosen row, and c isn't silent. c's own key waits
  * only for another's segmented reply, and one past its window is settled
@@ -343,8 +393,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         }
         const int32_t r = h.chosen[c];
         h.chosen[c] = ECUIO_ENGINE_NONE;
-        if (r < 0 || !h.rotating[c] ||
-            ecuio_engine_in_rotation(e->requests[r])) {
+        if (j2534_hold_still_asked(h, e, c, r)) {
             return r;
         }
     }
@@ -360,7 +409,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
     }
     const int32_t r = ecuio_engine_due(e, c, now_us);
     if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, c) ||
-        !ecuio_engine_reply_segmented(e, c, r) ||
+        !j2534_hold_long(h, e, c, r) ||
         !(j2534_hold_other_out(h, e, c, false) ||
           j2534_hold_other_row(h, e, c))) {
         return r;
@@ -376,10 +425,20 @@ inline void j2534_hold_pass_end(j2534_hold& h, uint32_t held_now)
     h.held = held_now;
 }
 
-/* A frame matched on channel c: its run of waits run out ends */
-inline void j2534_hold_answered(j2534_hold& h, uint32_t c)
+/* A frame matched on channel c: its run of waits run out ends, the
+ * channel is heard, and after a run that long its rows' waits run out
+ * are taken back. A run shorter than the channel's rotation is rows it
+ * never answers, not the module asleep: taken back, they would hold the
+ * bus again every lap */
+inline void j2534_hold_answered(j2534_hold& h, ecuio_request_engine* e,
+                                uint32_t c)
 {
+    if (h.misses[c] >= J2534_HOLD_ASLEEP_MISSES &&
+        h.misses[c] >= e->chans[c].requests) {
+        ecuio_engine_forget_ran_out(e, c);
+    }
     h.misses[c] = 0;
+    h.heard |= 1u << c;
 }
 
 /* The link recovered: every channel is asked again, none silent */
@@ -427,7 +486,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         if (r == ECUIO_ENGINE_NONE) {
             continue;
         }
-        const bool segmented = ecuio_engine_reply_segmented(e, c, r);
+        const bool segmented = j2534_hold_long(h, e, c, r);
         ahead = ahead || (!segmented && j2534_hold_other_row(h, e, c));
         write(c, r);
         h.segmented = segmented ? h.segmented | 1u << c

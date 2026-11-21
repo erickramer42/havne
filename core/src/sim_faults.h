@@ -203,13 +203,13 @@ inline bool parse_item(const char* s, size_t n, ecuio_sim_aim* out, bool* aimed)
 } // namespace ecuio_sim_fault_detail
 
 /* faults=<name>:<n>[@<reply ID>][,...]: every module's periods into
- * *out, the aimed ones into *aims; false with why (a line) */
+ * *out, the aimed ones joining *aims, so a second faults= key adds to the
+ * first as the timing keys do (a later item in place of an earlier);
+ * false with why (a line) */
 inline bool ecuio_sim_parse_faults(const char* text, size_t len,
                                    ecuio_sim_faults* out, ecuio_sim_aims* aims,
                                    char* why, size_t why_cap)
 {
-    *out = ecuio_sim_faults{};
-    *aims = ecuio_sim_aims{};
     size_t at = 0;
     while (at < len) {
         size_t end = at;

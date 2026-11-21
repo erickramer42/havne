@@ -136,7 +136,7 @@ struct ecuio_elm327_transport {
     };
     cut_hold cut[ECUIO_MAX_CHANNELS];
     /* Bytes read and not yet taken, the line under way, and the
-     * messages under way (32 KB, so here rather than on a stack). */
+     * messages under way (too big for a stack, isotp.h, so here). */
     uint8_t rx_buf[256] = {};
     uint32_t rx_len = 0;
     uint32_t rx_pos = 0;

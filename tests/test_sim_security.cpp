@@ -565,6 +565,23 @@ TEST(SimSecurityTest, AnUnboundSimsLockoutRunsOnTheCallersClock)
     EXPECT_EQ(u.ask(0x7E0, kD210), kD210Data);
 }
 
+// An unbound ask may come at any time up to INT64_MAX: a lockout that
+// starts near the end still runs, its end held at the clock's last
+TEST(SimSecurityTest, ALockoutNearTheClocksEndStillRuns)
+{
+    Unbound u("mock://ask?values=canned");
+    ASSERT_NE(u.sim, nullptr);
+    u.t = INT64_MAX - 1;
+    EXPECT_EQ(u.ask(0x7E0, {0x10, 0x03}), kEntered);
+    for (int i = 0; i < 2; ++i) {
+        u.ask(0x7E0, {0x27, 0x01});
+        EXPECT_EQ(u.ask(0x7E0, Ecu::wrong_key_for(0x01)), kNrc35);
+    }
+    u.ask(0x7E0, {0x27, 0x01});
+    EXPECT_EQ(u.ask(0x7E0, Ecu::wrong_key_for(0x01)), kNrc36);
+    EXPECT_EQ(u.ask(0x7E0, {0x27, 0x01}), kNrc37);
+}
+
 /* The test-only switch (internal.h) makes a simulated ECU strict, bound
  * or not. A functional request is heard by every module, so it comes
  * between a strict one's seed and its key as any other does, though it

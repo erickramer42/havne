@@ -406,3 +406,19 @@ TEST(RequestTurnsTest, APlainTalkInsideAWindowEndsNoTurn)
     EXPECT_EQ(a->sent[from].c, 0u);
     EXPECT_EQ(a->turns.since_us, since) << "channel 0's turn goes on";
 }
+
+/* A held channel past bit 15 is its own for a key too: channel 16's key
+ * offered, held, is not the next request */
+TEST(RequestTurnsTest, AHeldChannelsKeyPastBitFifteenIsNotNext)
+{
+    constexpr uint32_t n = 17;
+    auto a = adapter(n);
+    dids(&a->e, 0, 4);
+    dids(&a->e, 16, 1, 0x80);
+    a->ecus = key_ecu;
+    a->until(1000 * kMs);
+    ASSERT_NO_FATAL_FAILURE(seed_on(a.get(), 16));
+    ASSERT_EQ(offer_key(a.get(), 16), ecuio_talk_offer::taken);
+    EXPECT_EQ(ecuio_engine_turn_key(&a->e, 0), 16u);
+    EXPECT_EQ(ecuio_engine_turn_key(&a->e, 1u << 16), n) << "held";
+}

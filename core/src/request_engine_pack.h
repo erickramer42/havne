@@ -39,8 +39,9 @@ inline bool ecuio_engine_packable(const ecuio_request_engine* e, uint32_t c,
  * row with no answer and no wait run out is judged by its defs and, for
  * a Service 01 PID, J1979's length: segmented when either reaches past a
  * Single Frame, so its first ask shares the bus with no one while it is
- * out. A row whose wait ran out before any answer counts as one frame,
- * as does any other one-shot, and a talk is never judged. */
+ * out. A row whose wait ran out before any answer counts as one frame
+ * until a recovery or its module's waking (ran_out), as does any other
+ * one-shot, and a talk is never judged. */
 inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
                                          uint32_t c, int32_t r)
 {

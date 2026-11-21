@@ -3,6 +3,7 @@
 
 #include "wasm_sandbox.h"
 
+#include "ecuio/plugin.h"
 #include "wasm_export.h"
 
 #include <atomic>
@@ -10,10 +11,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <new>
 
 namespace ecuio_wasm {
+
+/* ADR-0066: a manifest's budget lowers the sandbox's, never raises it */
+static_assert(BUDGET_DEFAULT == ECUIO_PLUGIN_BUDGET_MAX,
+              "the sandbox's default budget is the most a manifest takes");
 
 namespace {
 
@@ -300,7 +306,20 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
     }
-    const check_result checked = check_module(bytes, n, wants, want_count);
+    /* The check judges a copy and the runtime loads that copy, so bytes
+     * the caller changes meanwhile never load unjudged; past the size
+     * bound the check refuses whatever they hold */
+    std::unique_ptr<uint8_t[]> copy;
+    const uint8_t* judged = bytes;
+    if (bytes != nullptr && n > 0 && n <= MODULE_MAX_BYTES) {
+        copy.reset(new (std::nothrow) uint8_t[n]);
+        if (!copy) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        std::memcpy(copy.get(), bytes, n);
+        judged = copy.get();
+    }
+    const check_result checked = check_module(judged, n, wants, want_count);
     if (!checked.ok) {
         std::snprintf(why, REFUSAL_MAX, "%s", checked.why);
         return ECUIO_ERR_LOAD_FAILED;
@@ -311,7 +330,7 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
     if (i == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    if (!build(i, bytes, n, wants, want_count, why)) {
+    if (!build(i, judged, n, wants, want_count, why)) {
         unmake(i);
         if (t_refused) {
             why[0] = '\0';

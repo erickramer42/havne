@@ -381,10 +381,7 @@ void loader::folder_code(const Value& file, const std::string& path,
     const std::string name = "file " + q(path);
     const char* bytes = nullptr;
     size_t length = 0;
-    if (read_(user_, path.c_str(), &bytes, &length) != 0 ||
-        (bytes == nullptr && length > 0)) {
-        refuse(file, name + " couldn't be read");
-    }
+    read_folder_file(file, name, path, &bytes, &length);
     if (length > ecuio_wasm::MODULE_MAX_BYTES) {
         refuse(file, name + " is over 1 MiB");
     }

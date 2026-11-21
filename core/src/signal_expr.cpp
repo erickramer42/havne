@@ -752,31 +752,41 @@ chain_reads(const std::vector<chain_node>& nodes)
     return reads;
 }
 
-/* Depths settled pass by pass: 1 for a node reading no computed node,
- * else one more than the deepest it reads. One left at 0 is on a circle
- * or reads one. */
+/* Each node's depth: 1 for a node reading no computed node, else one
+ * more than the deepest it reads; settled once all it reads are, so the
+ * work is the nodes and the reads, however long a chain. One left at 0
+ * is on a circle or reads one. */
 std::vector<uint32_t>
 settled_depths(const std::vector<chain_node>& nodes,
                const std::vector<std::vector<size_t>>& reads)
 {
     const size_t n = nodes.size();
     std::vector<uint32_t> depth(n, 0);
-    for (bool more = true; more;) {
-        more = false;
-        for (size_t i = 0; i < n; ++i) {
-            if (nodes[i].program == nullptr || depth[i] != 0) {
-                continue;
-            }
-            uint32_t d = 1;
-            for (const size_t j : reads[i]) {
-                d = depth[j] == 0 ? 0 : std::max(d, depth[j] + 1);
-                if (d == 0) {
-                    break;
-                }
-            }
-            if (d != 0) {
-                depth[i] = d;
-                more = true;
+    std::vector<size_t> waiting(n, 0); /* reads not yet settled */
+    std::vector<std::vector<size_t>> readers(n);
+    std::vector<size_t> ready;
+    for (size_t i = 0; i < n; ++i) {
+        if (nodes[i].program == nullptr) {
+            continue;
+        }
+        waiting[i] = reads[i].size();
+        for (const size_t j : reads[i]) {
+            readers[j].push_back(i);
+        }
+        if (waiting[i] == 0) {
+            ready.push_back(i);
+        }
+    }
+    for (size_t at = 0; at < ready.size(); ++at) {
+        const size_t i = ready[at];
+        uint32_t d = 1;
+        for (const size_t j : reads[i]) {
+            d = std::max(d, depth[j] + 1);
+        }
+        depth[i] = d;
+        for (const size_t r : readers[i]) {
+            if (--waiting[r] == 0) {
+                ready.push_back(r);
             }
         }
     }

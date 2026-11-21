@@ -12,6 +12,7 @@
 #include <ecuio/core.h>
 #include <ecuio/plugin.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <functional>
@@ -434,6 +435,22 @@ TEST(PluginConversationTest, AFoldersModuleIsReadCountedAndJudged)
             << ecuio_last_error_detail();
     }
     {
+        /* a module named like a Windows device is never asked for */
+        Made aux;
+        aux.group.code =
+            R"({"file": "aux.wasm", "sha256": ")" + sha_of(aux.module) + "\"}";
+        Folder f = folder_of(aux);
+        f.files["aux.wasm"] = f.files["guest.wasm"];
+        ecuio_status_t s = ECUIO_OK;
+        Plugin p = load_folder(f, &s);
+        EXPECT_EQ(s, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(std::string(ecuio_last_error_detail())
+                      .find("file 'aux.wasm' is a Windows device name"),
+                  std::string::npos)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(std::count(f.asked.begin(), f.asked.end(), "aux.wasm"), 0);
+    }
+    {
         /* a module with a NUL and bytes past 0x7F is read as bytes */
         Made binary;
         ASSERT_NE(
@@ -496,9 +513,12 @@ TEST(PluginConversationTest, APutAndADropRefuseAPluginWithTheTier)
         R"("ecus": [{"id": "pcm", "rx": "7E8"}], "signals": [{"key": "oil2", )"
         R"("name": "Oil 2", "ecu": "pcm", "read": {"service": "22", )"
         R"("number": "F40E"}, "field": {"byte": 0}}]})";
+    /* No Havne tool writes a packed plugin with the tier: the words name
+     * the folder, which loads as it stands */
     const char* const words =
         "the plugin has the conversation tier, which a put or a drop doesn't "
-        "carry over";
+        "carry over: change the variant in the plugin's folder, which Havne "
+        "loads as it stands";
     char* out = reinterpret_cast<char*>(1);
     size_t length = 7;
     EXPECT_EQ(ecuio_plugin_put_variant(packed.data(), packed.size(), "extra",

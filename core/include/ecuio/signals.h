@@ -1137,7 +1137,11 @@ ecuio_status_t ecuio_signal_address_key(const ecuio_signal_def_t* def,
  * a computed def, and a def at the address of one before it in the set,
  * take the author's key file gives them (ecuio_signal_file_key), and
  * "id:<n>", n the def's id in decimal, where it gives none. In a set
- * ecuio_validate_signal_set takes, no two defs share a key.
+ * ecuio_validate_signal_set takes, no two defs share a key. Of two defs
+ * at one address the earlier in the set's order keeps the address key
+ * whichever was written first, so a def placed ahead of another at its
+ * address takes the key from it, and what was kept under that key (a
+ * vehicle's ticks, a recording's column) follows the new def.
  *
  * file is the signal file whose set this is, or NULL for a set that has
  * none (a built-in set, one registered by hand): pass the file wherever

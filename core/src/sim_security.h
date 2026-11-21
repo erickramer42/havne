@@ -185,7 +185,9 @@ inline uint32_t ecuio_sim_security_answer(ecuio_sim_security& s, bool extended,
     }
     s.wrong = ECUIO_SIM_SECURITY_WRONG_MAX - 1;
     s.delayed = true;
-    s.delay_until_us = now_us + delay_us;
+    /* An unbound ask's time runs to INT64_MAX, so the end saturates */
+    s.delay_until_us =
+        now_us > INT64_MAX - delay_us ? INT64_MAX : now_us + delay_us;
     return refuse(ECUIO_SIM_NRC_ATTEMPTS);
 }
 

@@ -116,10 +116,7 @@ const Value& loader::page_root(const Value& at, const std::string& path)
     }
     const char* bytes = nullptr;
     size_t length = 0;
-    if (read_(user_, path.c_str(), &bytes, &length) != 0 ||
-        (bytes == nullptr && length > 0)) {
-        refuse(at, "page " + q(path) + " couldn't be read");
-    }
+    read_folder_file(at, "page " + q(path), path, &bytes, &length);
     if (length > ECUIO_PLUGIN_PAGE_MAX_BYTES) {
         refuse(at, "page " + q(path) + " is over 82,400 bytes");
     }

@@ -62,7 +62,8 @@ extern "C" {
  * (1-10000) of each module, on that module's own count, the bitmaps
  * never broken. @<reply ID> (11-bit hex) aims a fault at the module
  * answering on it alone (faults=late:3@7EA), in place of that fault
- * for every module; at most 32 aims.
+ * for every module; at most 32 aims. A faults key given twice adds to
+ * the first, a later item in place of an earlier, as the timing keys do.
  * The timing, both: delay is each reply's time from the request to its
  * first frame, a log-normal through its median p50 and its 99th
  * percentile p99 (1 <= p50 <= p99 <= 10000000), drawn on a generator of
