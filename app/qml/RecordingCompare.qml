@@ -114,14 +114,14 @@ Item {
         }
     }
     // Asks again with the panel's levels. A refusal leaves the earlier answer
-    // standing and its words under the fields
+    // standing and its words under the fields; false for a refusal
     function applyStretchRules(rules) {
         const request = part.host.recording.stretches(true, true, rules)
         if (request === 0) {
             part.host.rulesProblem = part.host.recording.stretchesProblem
             if (part.host.rulesProblem === "")
                 part.host.stretchFailed = true
-            return
+            return false
         }
         part.host.rulesProblem = ""
         part.host.askedRules = rules
@@ -140,6 +140,7 @@ Item {
         // On a phone the panel stood where the chart is: back to it
         if (Theme.compact)
             part.host.stretchesOpen = false
+        return true
     }
     function stretchesOf(kind) {
         return part.host.stretchList === null ? [] : part.host.stretchList.filter(s => s.kind === kind)

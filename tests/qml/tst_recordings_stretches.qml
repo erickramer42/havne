@@ -327,6 +327,24 @@ RecordingsKit {
         compare(page.stretchRules.pullEnd, undefined)
     }
 
+    // A pull's end chosen while a level core refuses is typed keeps the end
+    // in force, with the refusal's words showing
+    function test_aPullEndWithALevelCoreRefusesKeepsTheEndInForce() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const lift = find(page, "pullEnd_lift")
+        const top = find(page, "pullEnd_topSpeed")
+        find(page, "rule_pullLevel").text = "150"
+        top.clicked()
+        verify(lift.selected && !top.selected, "the end in force stays selected")
+        verify(page.rulesProblem !== "", "core's refusal is said")
+        compare(page.stretchRules.pullEnd, undefined)
+    }
+
     // The note says when panes are folded, and a value label is found by a point
     function test_foldedPanesAreSaidAndALabelIsFoundByItsPoint() {
         const page = openEarly()
