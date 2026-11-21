@@ -1082,6 +1082,16 @@ them.
 
 Amended 2026-11-20: the removal deletes a copy only when its bytes are somewhere else whatever the book says: a plugin was made from it (`wrappedFrom`) or `plugins/unmigrated/` holds them, and the copy still hashes to its name (one edited since stays, reported once as left). The book's records only add to what is spared, so no book state takes the only copy: a v0.8.0 move recorded no copy that no vehicle named, and a start after it would otherwise have deleted those. A copy in `signals/` that no vehicle of a readable book names gets a record under the book's own `unmigrated`, `"kept": false`, so Save and Remove reach it as they reach a file that didn't move. A copy whose `kept: false` record the user removes stays in `signals/` for good, and the folder with it: accepted, since its bytes are nowhere else. This amends "A record's Remove" above, whose copy no longer goes at the next start.
 
+**Note (2026-11-21):** the removal as it stands in v0.9.0 differs from the appendix above in these ways.
+
+- **Added files:** an older Havne run after the move adds its files to `signals/` and `vehicles/document`. The removal takes only what it can show is held elsewhere: a copy goes when a plugin was made from it or `plugins/unmigrated/` holds the very bytes it has (compared, not just the name), and it still hashes to its name. An older Havne's new copies are left in `signals/`, counted in the "left" line. The bullet "they go with the rest" is true of the `vehicles/document` key only, and only when the move read the book.
+- **A record's Remove:** it deletes the kept bytes and the record. The copy in `signals/` is then left for good: no record spares it and no plugin or kept file holds its bytes, so the removal never takes it. The bullet "its copy goes at the next start, spared by nothing" is wrong.
+- **What stays, judged by bytes:** a copy is no longer judged by its name alone. A kept file cut short or damaged, or a copy edited since the wrap or the keep, keeps the copy.
+- **A v0.8.0 move recorded no copy that no vehicle names.** At the first removal after the move, each such copy that is nowhere else gets a record under the book's own `unmigrated` (kept false, "No vehicle lists it"), once: the preference `vehicles/unnamedRecorded` says it is done (the move of this version sets it). A record the user removes afterwards is not made again.
+- **An old book the move couldn't read:** `vehicles/document` stays where it is, whole, at every start; it is removed only when the move could read and carry it. One line says so in the activity log.
+- **Device names:** a plugin folder's path part ending in a space (`nul `) is refused like one ending in a dot.
+- **Downgrade:** running v0.7.x after the move is unsupported. A vehicle list it writes under `vehicles/document` is not read again by a later version (the store is marked, so the move doesn't run), and the copies it leaves in `signals/` stay, unlisted. Use v0.8.0 to go back; it keeps its own book.
+
 ## Appendix: step 6 as built (2026-11-18)
 
 `SignalStore` and the bridge calls only it served are gone:

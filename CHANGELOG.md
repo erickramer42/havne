@@ -100,6 +100,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Through a J2534 adapter, a module that never answers a run of eight or more of its DIDs no longer holds the bus on every lap.
 - Through a J2534 adapter, modules that aren't in the car no longer slow the others' first seconds, and a module that wakes after the connect (the ignition turned on later) no longer loses other modules' replies while it catches up.
 - Through an ELM327 adapter with `?session=03` on several modules, a keep-alive that falls due goes out next instead of after one request on each module between, so the session no longer lapses past S3.
+- A connect error that quotes an adapter's reply is drawn as text, so a hostile adapter can no longer make Windows open a network share from it.
+- The ELM327 wire log says when the machine slept with a request out (`the machine slept 1139.2 s with 22<DID> out: its reply is lost`), where it read as an adapter gone quiet for 5 s.
 - The simulated ECU: a second `faults=` key adds to the first; a module whose request ID is another's reply ID is refused at create; a flood on the bus no longer holds its close.
 
 ## [0.8.0] - 2026-11-15
