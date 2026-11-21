@@ -46,17 +46,24 @@ Item {
         }
         return out
     }
-    // A signal's pane, "" for the one its unit makes; kept by its pane id,
-    // any entry by its name dropped
+    // A signal's pane, "" for the one its unit makes; kept by its pane id.
+    // An entry kept by name is dropped only when no other signal has the
+    // name, since each of them reads it. A move that would keep more
+    // signals than the store holds (ChartViews.viewsMaxSignals) is refused
+    // and returns false
     function setPaneOf(s, key) {
         const id = part.paneIdOf(s)
         const next = Object.assign({}, part.host.viewAssign)
-        delete next[s.name]
+        if (part.host.recording.signalList.filter(x => x.name === s.name).length <= 1)
+            delete next[s.name]
         if (key === "")
             delete next[id]
+        else if (!ChartViews.canKeep(next, id))
+            return false
         else
             next[id] = key
         part.writeView({ assign: next })
+        return true
     }
     // The panes a signal can join: each ordinary pane now drawn, named by the
     // signals plotted in it

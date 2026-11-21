@@ -20,6 +20,7 @@ ColumnLayout {
     property bool logExplains: false
 
     Label {
+        textFormat: Text.PlainText
         objectName: "sessionStatus"
         text: Bridge.connected
               ? qsTr("Connected: %1").arg(Bridge.currentUri)

@@ -399,6 +399,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertTermCheck"
                     visible: termCard.kind === "check"
                     text: qsTr("A recording's frames check (%1): kept as the file has it").arg(String(termCard.term.check))
@@ -467,6 +468,7 @@ ColumnLayout {
                         onTextEdited: root.texts[termCard.index].level = text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertLevelUnit"
                         visible: termCard.ordered
                         text: termCard.shownUnit
@@ -491,6 +493,7 @@ ColumnLayout {
                         onTextEdited: root.texts[termCard.index].clear = text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         text: termCard.shownUnit
                         color: Theme.textDim
                         height: clearField.height
@@ -657,6 +660,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertEditorProblem"
         visible: text !== ""
         text: root.problem
@@ -696,6 +700,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             objectName: "alertRemoveText"
             text: qsTr("Remove %1?").arg(nameInput.text.trim())
             color: Theme.text

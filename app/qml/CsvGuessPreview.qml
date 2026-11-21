@@ -116,6 +116,7 @@ ColumnLayout {
 
     // The time column and its unit
     Label {
+        textFormat: Text.PlainText
         objectName: "guessTime"
         Layout.fillWidth: true
         wrapMode: Text.WrapAnywhere
@@ -124,6 +125,7 @@ ColumnLayout {
               : qsTr("Time: %1").arg(preview.timeColumn.label)
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "guessTimeSamples"
         visible: preview.timeColumn !== null
         Layout.fillWidth: true
@@ -159,6 +161,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "guessTimeFixed"
         visible: preview.guess !== null && !preview.guess.timeNumbers
         Layout.fillWidth: true
@@ -171,6 +174,7 @@ ColumnLayout {
               : ""
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "guessWaiting"
         visible: preview.waiting !== ""
         Layout.fillWidth: true
@@ -222,6 +226,7 @@ ColumnLayout {
                         preview.recount()
                     }
                     contentItem: Label {
+                        textFormat: Text.PlainText
                         text: includeBox.text
                         color: Theme.text
                         wrapMode: Text.WrapAnywhere
@@ -231,6 +236,7 @@ ColumnLayout {
                 }
                 // Why a column was left out, and whether it can be put back
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "why"
                     visible: !row.col.used
                     Layout.fillWidth: true
@@ -279,6 +285,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "samples"
                     Layout.fillWidth: true
                     wrapMode: Text.WrapAnywhere
@@ -303,6 +310,7 @@ ColumnLayout {
         onClicked: preview.notesOpen = !preview.notesOpen
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "guessNotes"
         visible: preview.notesOpen && preview.guess !== null
         Layout.fillWidth: true
@@ -336,6 +344,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "saveMapNote"
         visible: preview.saveNote !== ""
         Layout.fillWidth: true

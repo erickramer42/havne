@@ -621,8 +621,11 @@ DashEditKit {
         while (d.pages.length < DashboardBook.maxPages)
             d = DashboardEdit.addPage(d, "P" + d.pages.length)
         const page = storedPageOf({}, d)
+        page.startEditing()
+        page.selected = 0
         verify(!page.layoutFilePart.loadLayoutFrom(url, true))
         verify(page.layoutFilePart.layoutNote.indexOf("Not added") === 0, page.layoutFilePart.layoutNote)
+        compare(page.selected, 0, "a refused add keeps the user's place")
         compare(page.doc.pages.length, DashboardBook.maxPages)
     }
 

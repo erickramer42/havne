@@ -108,24 +108,35 @@ ColumnLayout {
         root.recompute()
     }
 
+    // A number as typed, in the locale or plain, as every other typed number
+    // on these pages is read; NaN for one that isn't
+    function numberOf(t) {
+        try {
+            return Number.fromLocaleString(Qt.locale(), t)
+        } catch (e) {
+            return Number(t)
+        }
+    }
+
     // The test values typed so far, as the editor takes them: a number is
     // a value, anything else is none
     function valuesOf() {
         const out = []
         for (const l of root.checked.leaves) {
             const t = String(root.testTexts[l.ref] === undefined ? "" : root.testTexts[l.ref]).trim()
-            const n = Number(t)
+            const n = t === "" ? NaN : root.numberOf(t)
             if (t !== "" && isFinite(n))
                 out.push({ ref: l.ref, value: n, ageMs: 0 })
         }
         return out
     }
 
+    // The first typed text that isn't a number, "" with none
     function notNumber() {
         for (const l of root.checked.leaves) {
             const t = String(root.testTexts[l.ref] === undefined ? "" : root.testTexts[l.ref]).trim()
-            if (t !== "" && !isFinite(Number(t)))
-                return l.ref
+            if (t !== "" && !isFinite(root.numberOf(t)))
+                return t
         }
         return ""
     }
@@ -300,6 +311,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formExprProblem"
         visible: text !== ""
         text: root.problem === "" ? "" : root.problem.charAt(0).toUpperCase() + root.problem.slice(1)
@@ -310,6 +322,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formReplaces"
         visible: root.replaced !== ""
         text: qsTr("Replaces obd2's %1: a gauge or layout that shows it will show this one.").arg(root.replaced)
@@ -377,6 +390,7 @@ ColumnLayout {
                 Keys.onEscapePressed: root.closeInsert()
                 onClicked: root.insertText(pick.modelData.ref, true)
                 contentItem: Label {
+                    textFormat: Text.PlainText
                     id: rowText
                     text: pick.modelData.usable
                         ? qsTr("%1 (%2)%3").arg(pick.modelData.name, pick.modelData.ref,
@@ -403,6 +417,7 @@ ColumnLayout {
     Repeater {
         model: root.checked.ok ? root.checked.leaves : []
         Label {
+            textFormat: Text.PlainText
             required property var modelData
             required property int index
             objectName: "formInput_" + index
@@ -447,6 +462,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formUseLiveNote"
         visible: text !== "" && root.leafRefs.length > 0
         text: root.liveNote
@@ -466,6 +482,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing
             Label {
+                textFormat: Text.PlainText
                 text: testRow.modelData
                 color: Theme.text
                 elide: Text.ElideRight
@@ -491,6 +508,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formPreview"
         visible: text !== ""
         text: root.preview.text

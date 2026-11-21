@@ -79,6 +79,7 @@ Item {
                 leftPadding: 4
                 rightPadding: 4
                 contentItem: Label {
+                    textFormat: Text.PlainText
                     objectName: "tabLabel_" + btn.modelData.page
                     text: btn.text
                     font.pixelSize: btn.width < 64 ? Theme.fontCaption : Theme.fontBody

@@ -56,6 +56,7 @@ Flow {
             onClicked: row.jumpRequested(group.kind, -1)
         }
         Label {
+            textFormat: Text.PlainText
             text: group.word.charAt(0).toUpperCase() + group.word.slice(1)
             color: Theme.text
             font.pixelSize: Theme.fontBody
@@ -116,6 +117,7 @@ Flow {
         onClicked: row.conditionsToggled()
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "jumpStatus"
         // The status takes a line of its own when the groups fill the row
         width: Math.min(implicitWidth, row.width)

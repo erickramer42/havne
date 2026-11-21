@@ -23,6 +23,7 @@ ColumnLayout {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         objectName: "importFileName"
         Layout.fillWidth: true
         wrapMode: Text.WrapAnywhere
@@ -56,6 +57,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importBusy"
             visible: Bridge.recordingImport.busy
             Layout.fillWidth: true
@@ -130,6 +132,7 @@ ColumnLayout {
             onClicked: root.host.mapDialog.open()
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importMapName"
             Layout.fillWidth: true
             wrapMode: Text.WrapAnywhere

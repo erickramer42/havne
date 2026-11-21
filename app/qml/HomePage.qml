@@ -46,7 +46,7 @@ Rectangle {
     // The address's profile as written, "" with none
     function profileKey(uri) {
         const found = /[?&]profile=([^&]+)/.exec(uri)
-        return found ? decodeURIComponent(found[1]) : ""
+        return found ? SessionLabel.decoded(found[1]) : ""
     }
     // The address's profile in words: profile=, a plugin's by its name,
     // or the default
@@ -54,8 +54,9 @@ Rectangle {
         const found = /[?&]profile=([^&]+)/.exec(uri)
         if (!found)
             return qsTr("default")
-        const name = decodeURIComponent(found[1])
-        return profileNames[name] !== undefined ? profileNames[name] : name
+        const name = SessionLabel.decoded(found[1])
+        const plugin = SessionLabel.nameIn(profileNames, name)
+        return plugin !== undefined ? plugin : name
     }
 
     // Scrolls when the page is shorter than the column: a window on its
@@ -306,6 +307,7 @@ Rectangle {
                         color: Theme.text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeCoreVersion"
                         text: qsTr("core %1").arg(Bridge.coreVersion)
                         font.pixelSize: Theme.fontCaption
@@ -356,6 +358,7 @@ Rectangle {
                             color: Theme.linkColor(Bridge.linkState)
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "linkLabel"
                             text: Theme.linkLabel(Bridge.linkState)
                             font.pixelSize: Theme.fontEmphasis
@@ -364,6 +367,7 @@ Rectangle {
                         }
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeSessionAddress"
                         Layout.fillWidth: true
                         elide: Text.ElideMiddle
@@ -371,6 +375,7 @@ Rectangle {
                         text: SessionLabel.address(Bridge.uriLabel)
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeSessionDetail"
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
@@ -408,6 +413,7 @@ Rectangle {
             }
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "homeHint"
                 visible: !Bridge.connected
                 Layout.fillWidth: true

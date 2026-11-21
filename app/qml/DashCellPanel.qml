@@ -66,6 +66,7 @@ GaugeCard {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 font.pixelSize: Theme.fontBody
@@ -133,6 +134,7 @@ GaugeCard {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "dashAlertNote"
             visible: panelCard.host.alertNote !== ""
             text: panelCard.host.alertNote
@@ -744,6 +746,7 @@ GaugeCard {
     }
 
     component Caption: Label {
+        textFormat: Text.PlainText
         color: Theme.textDim
         font.pixelSize: Theme.fontCaption
     }

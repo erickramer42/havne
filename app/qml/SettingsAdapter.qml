@@ -27,6 +27,7 @@ ColumnLayout {
         spacing: Theme.spacing
 
         Label {
+            textFormat: Text.PlainText
             objectName: "deviceCount"
             text: root.host.devicesShown === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
@@ -64,6 +65,7 @@ ColumnLayout {
         visible: Bluetooth.available
 
         Label {
+            textFormat: Text.PlainText
             objectName: "bluetoothStatus"
             text: Bluetooth.status !== ""
                   ? Bluetooth.status
@@ -143,11 +145,13 @@ ColumnLayout {
                     spacing: Theme.spacing
 
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "deviceTitle"
                         text: row.modelData.title
                         color: root.host.ownPart.idle ? Theme.text : Theme.textDim
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "deviceVersions"
                         visible: text !== ""
                         text: row.modelData.versions === ""
@@ -161,6 +165,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "deviceDetail"
                     text: row.modelData.detail
                     color: Theme.textDim
@@ -182,6 +187,7 @@ ColumnLayout {
         spacing: Theme.spacing
 
         Label {
+            textFormat: Text.PlainText
             objectName: "relayStatus"
             text: Relay.running
                   ? Relay.status
@@ -286,6 +292,7 @@ ColumnLayout {
                     implicitWidth: Math.max(nameText.implicitWidth, hintText.implicitWidth)
                     implicitHeight: nameText.height + (hintText.visible ? hintText.height : 0)
                     Text {
+                        textFormat: Text.PlainText
                         id: nameText
                         width: parent.width
                         text: preset.text
@@ -295,6 +302,7 @@ ColumnLayout {
                         horizontalAlignment: Text.AlignHCenter
                     }
                     Text {
+                        textFormat: Text.PlainText
                         id: hintText
                         y: nameText.height
                         width: parent.width

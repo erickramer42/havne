@@ -28,6 +28,7 @@ ColumnLayout {
             checked = Qt.binding(() => Theme.developerMode)
         }
         contentItem: Label {
+            textFormat: Text.PlainText
             text: developerBox.text
             color: Theme.text
             leftPadding: developerBox.indicator.width + developerBox.spacing

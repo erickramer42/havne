@@ -306,6 +306,25 @@ RecordingsKit {
         compare(storedViews(), before, "no entry, no write")
     }
 
+    // A pull's end chosen with a bad number typed asks nothing and keeps the
+    // end in force
+    function test_aPullEndWithABadNumberKeepsTheEndInForce() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const lift = find(page, "pullEnd_lift")
+        const top = find(page, "pullEnd_topSpeed")
+        find(page, "rule_pullRise").text = "abc"
+        top.clicked()
+        verify(lift.selected && !top.selected, "the end in force stays selected")
+        verify(find(page, "stretchesPanel").typedProblem.indexOf("must be a number") >= 0)
+        verify(page.stretchList !== null, "nothing was asked")
+        compare(page.stretchRules.pullEnd, undefined)
+    }
+
     // The note says when panes are folded, and a value label is found by a point
     function test_foldedPanesAreSaidAndALabelIsFoundByItsPoint() {
         const page = openEarly()
@@ -315,6 +334,7 @@ RecordingsKit {
         if (chart.drawn.panes.length < 3) {
             verify(note.visible, "folded panes are said")
             verify(page.paneFoldNote.indexOf("folded") >= 0)
+            verify(/^(1 pane is|[2-9] panes are) folded/.test(page.paneFoldNote), "one or many: " + page.paneFoldNote)
         }
         const restore = growWindow(page)
         try {

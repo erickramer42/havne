@@ -40,6 +40,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             id: note
             objectName: "hiddenNote"
             Layout.fillWidth: true
@@ -83,6 +84,7 @@ ColumnLayout {
             Accessible.role: Accessible.ListItem
             Accessible.name: qsTr("%1: %2").arg(modelData.name).arg(part.reasonText(modelData.why))
             Label {
+                textFormat: Text.PlainText
                 objectName: "hiddenName"
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -91,6 +93,7 @@ ColumnLayout {
             }
             // The reason is the point of the list: it wraps, never elides
             Label {
+                textFormat: Text.PlainText
                 objectName: "hiddenWhy"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap

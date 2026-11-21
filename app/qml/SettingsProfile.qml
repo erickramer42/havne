@@ -72,6 +72,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "profileHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
@@ -122,6 +123,7 @@ ColumnLayout {
             root.host.uriPart.recompose()
         }
         contentItem: Label {
+            textFormat: Text.PlainText
             text: extBox.text
             color: extBox.enabled ? Theme.text : Theme.textDim
             leftPadding: extBox.indicator.width + extBox.spacing

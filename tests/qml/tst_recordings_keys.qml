@@ -146,6 +146,44 @@ TestCase {
         compare(page.viewAssign["Vehicle Speed"], undefined, "By unit drops both")
     }
 
+    // Two signals of one name share a view an earlier version kept by name:
+    // moving one leaves the other where it was
+    function test_movingOneOfTwoSignalsOfAName_keepsTheOthersPane() {
+        setStoredViews(JSON.stringify({ "twin-panes": { used: 1, assign: { "RPM": "own:1" } } }))
+        const page = createPage()
+        page.openPart.open(twoRpmRecording("twin-panes", 800, 900))
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const e8 = page.recording.signalList.find(s => s.key === "7E8:410C:2.0:16")
+        const e9 = page.recording.signalList.find(s => s.key === "7E9:410C:2.0:16")
+        compare(page.panesPart.paneOf(e8), "own:1")
+        compare(page.panesPart.paneOf(e9), "own:1")
+        verify(page.panesPart.setPaneOf(e8, "own:2"))
+        compare(page.panesPart.paneOf(e8), "own:2")
+        compare(page.panesPart.paneOf(e9), "own:1", "the other keeps its pane")
+    }
+
+    // The 65th kept signal is refused, so a view written is a view read back
+    function test_aMoveBeyondTheKeptBoundIsRefused() {
+        const page = createPage()
+        page.openPart.open(keyedRecording("bound-panes"))
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const rpm = page.recording.signalList.find(s => s.name === "RPM")
+        const assign = {}
+        for (let i = 0; i < ChartViews.viewsMaxSignals; ++i)
+            assign["other:" + i] = "own:1"
+        page.panesPart.writeView({ assign: assign })
+        compare(Object.keys(page.viewAssign).length, ChartViews.viewsMaxSignals)
+        verify(!page.panesPart.setPaneOf(rpm, "own:2"), "the 65th is refused")
+        compare(Object.keys(page.viewAssign).length, ChartViews.viewsMaxSignals)
+        // The kept ones survive a write and a read
+        tryVerify(() => {
+            const kept = ChartViews.viewsParse(storedViews())[page.viewName]
+            return kept !== undefined && Object.keys(kept.assign).length === ChartViews.viewsMaxSignals
+        }, 3000)
+        verify(page.panesPart.setPaneOf(page.recording.signalList.find(s => s.name === "Vehicle Speed"), ""),
+               "clearing a move needs no room")
+    }
+
     // An older recording keeps a pane by name in both decodes: one chosen
     // in its frames open, whose rows have keys, holds for its values too
     function test_anOlderRecordingsPaneIsKeptByNameInBothDecodes() {

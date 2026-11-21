@@ -459,6 +459,7 @@ Rectangle {
             border.width: 1
             border.color: Theme.text
             Label {
+                textFormat: Text.PlainText
                 id: handleText
                 objectName: "handleTime"
                 anchors.centerIn: parent
@@ -547,6 +548,7 @@ Rectangle {
                 color: Theme.seriesColor(root.host.panesPart.slotOf(stripRow.modelData.index))
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "stripName"
                 x: 12
                 width: parent.width - 12
@@ -556,6 +558,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "stripValue"
                 x: 12
                 y: 16
@@ -571,6 +574,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "stripSpan"
                 visible: root.host.hasSpan
                 x: 12

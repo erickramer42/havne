@@ -37,6 +37,7 @@ ColumnLayout {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "ownSignalText"
                 text: qsTr("%1: %2").arg(ownRow.modelData.name,
                                          SignalForm.describe(root.host.ownFile, ownRow.modelData))
@@ -73,6 +74,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsNote"
         visible: text !== ""
         text: root.host.ownPart.formNote

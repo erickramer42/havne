@@ -243,6 +243,7 @@ ColumnLayout {
         contentItem: RowLayout {
             spacing: Theme.spacing
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Theme.spacing
                 elide: Text.ElideRight
@@ -250,6 +251,7 @@ ColumnLayout {
                 text: intervalRow.text
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "intervalSize"
                 Layout.rightMargin: Theme.spacing
                 color: Theme.textDim
@@ -299,6 +301,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportNote"
         visible: panel.note !== ""
         Layout.fillWidth: true
@@ -361,6 +364,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
@@ -420,6 +424,7 @@ ColumnLayout {
                 onTextEdited: panel.customText = text
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "exportCustomProblem"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -429,6 +434,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "exportSizeProblem"
             visible: panel.sizeProblem !== ""
             Layout.fillWidth: true

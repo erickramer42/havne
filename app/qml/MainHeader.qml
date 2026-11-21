@@ -105,6 +105,7 @@ ToolBar {
                 // The address gives way first; the word only alone in a
                 // row under 240 units (a narrow phone at the top zoom)
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillText"
                     Layout.fillWidth: true
                     Layout.minimumWidth: pill.address !== "" || headerRow.width >= 240
@@ -116,6 +117,7 @@ ToolBar {
                     text: pill.stateWord
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillAddress"
                     visible: pill.address !== ""
                     Layout.fillWidth: true
@@ -139,6 +141,7 @@ ToolBar {
                 }
                 // Marks the status as a button where it opens the Log
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillChevron"
                     // Not where it would squeeze a connected phone's address
                     visible: pill.enabled && (pill.address === "" || headerRow.width >= 420)
@@ -154,6 +157,7 @@ ToolBar {
         // the bar so it covers no page (headerBar.host.framesPerSecond); not
         // in a row too narrow to hold it beside the pill's word
         Label {
+            textFormat: Text.PlainText
             id: frameRate
             objectName: "frameRate"
             visible: Theme.developerMode && headerRow.width >= 340
@@ -251,6 +255,7 @@ ToolBar {
         // else the size under the time, so a ten-hour log's
         // readout fits beside the name at 420 px
         Label {
+            textFormat: Text.PlainText
             objectName: "logReadout"
             visible: Bridge.logActive
             text: headerBar.host.headerHasRoom

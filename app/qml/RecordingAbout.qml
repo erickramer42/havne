@@ -25,6 +25,7 @@ ColumnLayout {
         text: qsTr("About this recording")
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "recordingInfo"
         visible: root.host.recording.state === RecordingView.Open && !root.host.chartMaximized
         Layout.fillWidth: true
@@ -43,6 +44,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "reportNote"
         // Under Save report...: the title row's on the desktop, About's on a phone
         parent: Theme.compact ? aboutNote : root.host.topNote
@@ -96,6 +98,7 @@ ColumnLayout {
             onClicked: root.host.openPart.useAsBaseline()
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "isBaseline"
             visible: root.host.isBaseline
             width: Math.min(implicitWidth, baselineFlow.width)
@@ -260,6 +263,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "compareStatus"
         parent: root.host.compareSlot
         visible: root.host.comparing && root.host.recording.state === RecordingView.Open
@@ -272,6 +276,7 @@ ColumnLayout {
     // The frames check: what it found, each row centering the view on
     // its finding
     Label {
+        textFormat: Text.PlainText
         objectName: "checkSummary"
         visible: root.host.recording.state === RecordingView.Open && !root.host.chartMaximized
         Layout.fillWidth: true

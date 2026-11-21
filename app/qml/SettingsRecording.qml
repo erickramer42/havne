@@ -42,6 +42,7 @@ ColumnLayout {
                 checked = Qt.binding(() => Bridge.recording)
             }
             contentItem: Label {
+                textFormat: Text.PlainText
                 text: recordBox.text
                 color: recordBox.enabled ? Theme.text : Theme.textDim
                 leftPadding: recordBox.indicator.width + recordBox.spacing
@@ -49,6 +50,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "recordStatus"
             Layout.fillWidth: true
             elide: Text.ElideMiddle
@@ -74,6 +76,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "recordNote"
         text: qsTr("Keeps every session whole (frames, values, events), from the next connect. "
                    + "Start log isn't offered while it is on: the recording already holds every "

@@ -345,6 +345,7 @@ GaugeCard {
                 }
             }
             contentItem: Text {
+                textFormat: Text.PlainText
                 text: removeBox.text
                 font.pixelSize: Theme.fontBody + 6
                 font.weight: Font.DemiBold

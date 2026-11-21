@@ -212,6 +212,7 @@ Rectangle {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "connectRowAddress"
                     Layout.fillWidth: true
                     // Whole up to half the row: a plugin's long name beside it is cut first
@@ -222,6 +223,7 @@ Rectangle {
                     text: row.modelData.title
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "connectRowDetail"
                     visible: text !== "" && !Theme.compact
                     Layout.maximumWidth: row.width * 0.4
@@ -231,6 +233,7 @@ Rectangle {
                     text: row.modelData.detail !== undefined ? row.modelData.detail : ""
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "connectRowKind"
                     visible: text !== ""
                     // A plugin's name can be long: it takes what the address
@@ -265,6 +268,7 @@ Rectangle {
                 color: Theme.text
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "connectHint"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -393,6 +397,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
             Label {
+                textFormat: Text.PlainText
                 objectName: "connectError"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap

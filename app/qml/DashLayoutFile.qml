@@ -119,8 +119,6 @@ Item {
         } else {
             part.host.commitTyping()
             part.host.cancelHold()
-            part.host.selected = -1
-            part.host.panel = ""
             const words = [adding === true ? qsTr("Added the file's pages") : qsTr("Loaded the layout")]
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(part.host.droppedText(read.dropped)))
@@ -148,13 +146,18 @@ Item {
                     noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
                     return false
                 }
+                part.host.selected = -1
+                part.host.panel = ""
                 part.host.goTo(after + 1)
             } else {
                 changed = part.host.edit(read.doc, part.host.historyPart.stepOf("", qsTr("load a layout"), -1, -1, 0))
                 if (!changed)
                     words[0] = qsTr("The file holds the layout already shown")
-                else
+                else {
+                    part.host.selected = -1
+                    part.host.panel = ""
                     part.host.goTo(0)
+                }
             }
             noteLayout(words.join(". "))
             return changed

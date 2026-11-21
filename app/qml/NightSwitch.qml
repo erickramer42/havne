@@ -46,6 +46,7 @@ ThemedButton {
             border.color: control.shown ? Theme.text : Theme.textDim
         }
         Text {
+            textFormat: Text.PlainText
             id: words
             anchors.verticalCenter: parent.verticalCenter
             text: control.text

@@ -187,6 +187,29 @@ DashEditKit {
         verify(find(page, "plugpage_name_0").width > 0)
     }
 
+    // A name from a file is text, never markup: an <img> in it would make
+    // the engine fetch the URL
+    function test_aPluginsNameIsDrawnAsTextAndFetchesNothing() {
+        const port = Harness.startListener()
+        verify(port > 0, "the listener is up")
+        const url = "http://127.0.0.1:" + port + "/x.png"
+        const name = "<img src=\"" + url + "\"><b>x</b>"
+        const p = importPlugin("markup", name)
+        const page = pageWithPicks({ form: "phone" }, [p.profiles[0]])
+        openList(page)
+        const label = find(page, "plugpage_name_0")
+        compare(label.text, name)
+        compare(label.textFormat, Text.PlainText)
+        // The button of a page shows the page's own name the same way
+        compare(find(page, "plugpage_0_0").contentItem.textFormat, Text.PlainText)
+        // And the engine itself refuses the network: an image asked of
+        // the listener fails without a connection
+        const probe = Qt.createQmlObject("import QtQuick; Image { asynchronous: true; source: \"" + url + "\" }", testCase)
+        tryVerify(() => probe.status === Image.Error, 5000)
+        compare(Harness.listenerConnections(), 0, "no connection reached the listener")
+        probe.destroy()
+    }
+
     function test_theDesktopsPhoneFrameOffersPhonePages() {
         const p = importPlugin("paged", "Paged")
         const page = pageWithPicks({}, [p.profiles[1]])

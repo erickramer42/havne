@@ -31,6 +31,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         readonly property string summary: Bridge.describeVin(vinLookupField.text)
         objectName: "vinLookupResult"
         visible: summary !== ""

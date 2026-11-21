@@ -142,6 +142,7 @@ GaugeBase {
 
     // Range ends under the arc tips
     Text {
+        textFormat: Text.PlainText
         Accessible.ignored: true
         text: gauge.formatScale(gauge.from)
         x: gauge.px(gauge.startAngle, gauge.rr) - width / 2
@@ -151,6 +152,7 @@ GaugeBase {
         color: Theme.textDim
     }
     Text {
+        textFormat: Text.PlainText
         Accessible.ignored: true
         text: gauge.formatScale(gauge.to)
         x: gauge.px(gauge.endAngle, gauge.rr) - width / 2
@@ -169,6 +171,7 @@ GaugeBase {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: gauge.rr * 0.03
             Text {
+                textFormat: Text.PlainText
                 id: readout
                 objectName: "readout"
                 Accessible.ignored: true
@@ -189,6 +192,7 @@ GaugeBase {
                 anchors.verticalCenter: readout.verticalCenter
             }
             Text {
+                textFormat: Text.PlainText
                 objectName: "unit"
                 Accessible.ignored: true
                 visible: gauge.hasValue
@@ -199,6 +203,7 @@ GaugeBase {
             }
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.label
@@ -206,6 +211,7 @@ GaugeBase {
             color: gauge.titleColor
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             objectName: "gaugeNote"

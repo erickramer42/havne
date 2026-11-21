@@ -45,6 +45,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: choice.caption
             color: Theme.textDim
             wrapMode: Text.WordWrap
@@ -91,6 +92,7 @@ ColumnLayout {
                 onClicked: Theme.stepZoom(-1)
             }
             Label {
+                textFormat: Text.PlainText
                 Layout.preferredWidth: Math.max(52, implicitWidth)
                 Layout.preferredHeight: smaller.height
                 horizontalAlignment: Text.AlignHCenter
@@ -220,6 +222,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "nightProblem"
             visible: schedule.problem !== ""
             text: schedule.problem
@@ -228,6 +231,7 @@ ColumnLayout {
             Layout.fillWidth: true
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "nightWords"
             text: Theme.scheduleWords()
             color: Theme.textDim

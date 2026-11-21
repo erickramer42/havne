@@ -81,6 +81,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleVinPickNote"
         visible: root.host.ownPart.vinPickNote !== ""
         text: root.host.ownPart.vinPickNote
@@ -206,6 +207,7 @@ ColumnLayout {
 
     // With the field empty, the defaults New and Duplicate take
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleLabelHint"
         visible: root.host.typedLabel === "" && root.host.confirming === ""
         text: root.host.pickedVehicle === null
@@ -220,6 +222,7 @@ ColumnLayout {
 
     // Why a typed label can't be used
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleLabelProblem"
         visible: text !== "" && root.host.confirming === ""
         text: root.host.typedLabel === "" ? ""
@@ -235,6 +238,7 @@ ColumnLayout {
         spacing: Theme.spacing
 
         Label {
+            textFormat: Text.PlainText
             objectName: "vehicleConfirmText"
             text: root.host.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
                 : root.host.pickedVehicle !== null ? qsTr("Forget %1?").arg(root.host.pickedVehicle.label)

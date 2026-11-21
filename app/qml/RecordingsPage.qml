@@ -237,7 +237,9 @@ Page {
                 folded[String(tr.paneKey)] = true
         }
         const n = Object.keys(folded).length
-        return n === 0 ? "" : qsTr("%n pane(s) are folded into the last one: maximize the chart or move a signal", "", n)
+        return n === 0 ? ""
+             : n === 1 ? qsTr("1 pane is folded into the last one: maximize the chart or move a signal")
+                       : qsTr("%1 panes are folded into the last one: maximize the chart or move a signal").arg(n)
     }
     // The drawn panes' places, assigned only when they change, so the
     // seams' and axes' handlers aren't made again at every paint
@@ -692,6 +694,7 @@ Page {
 
         // The last import's words: what it made, or why not
         Label {
+            textFormat: Text.PlainText
             objectName: "importNote"
             visible: root.importNote !== ""
             Layout.fillWidth: true
@@ -703,6 +706,7 @@ Page {
 
         // The list
         Label {
+            textFormat: Text.PlainText
             objectName: "recordingsHint"
             visible: !root.viewing
             Layout.fillWidth: true
@@ -748,6 +752,7 @@ Page {
         }
 
         Label {
+            textFormat: Text.PlainText
             objectName: "openError"
             visible: recording.state === RecordingView.Failed
             Layout.fillWidth: true
@@ -934,6 +939,7 @@ Page {
             Layout.fillWidth: true
             Layout.fillHeight: false
             Label {
+                textFormat: Text.PlainText
                 id: filterCount
                 objectName: "filterCount"
                 readonly property bool shown: recording.state === RecordingView.Open && signalFilter.active

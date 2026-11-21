@@ -142,6 +142,7 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 8
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: "0x" + idRow.model.arbId.toString(16).toUpperCase()
                           + (idRow.model.extended ? " E" : "")
@@ -151,6 +152,7 @@ Rectangle {
                     elide: Text.ElideRight
                 }
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: idRow.model.frames
                     color: Theme.textDim
@@ -158,6 +160,7 @@ Rectangle {
                     Layout.preferredWidth: 52
                 }
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: idTable.rateText(idRow.model.rate)
                     color: Theme.textDim
@@ -183,6 +186,7 @@ Rectangle {
         }
 
         Label {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             visible: idList.count === 0
             text: idTable.emptyText
