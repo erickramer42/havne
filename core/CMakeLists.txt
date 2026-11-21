@@ -83,6 +83,7 @@ add_library(ecuio-core STATIC
     src/vin.cpp
     src/wasm_sandbox.cpp
     src/j2534_surrogate_client.cpp
+    src/j2534_surrogate_pipe.cpp
 )
 
 # WAMR's objects join the archive (third_party/wamr.cmake), so core stays

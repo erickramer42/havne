@@ -47,7 +47,7 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 - ThreadSanitizer, the Python notebook example and Discovery's registry read (it needs elevation) run by hand or not at all: no CI job carries them.
 
 **Test seams and code**
-- The surrogate pipe's replies have no fuzz target, and its protections (DACL, first-instance flag, remote-client rejection) have no direct test.
+- The surrogate pipe's replies have no fuzz target, and its protections are tested on the pipe alone: nothing connects as another user or looks for a handle leaked to the child.
 - The fake is simpler than J2534: its default read model, no segmented replies, no filter gating.
 - The scrub can't see a VIN sent raw in frames that aren't ISO-TP, and can refuse a folder copy whose marker label looks like a VIN.
 - The Python declarations' signedness isn't checked: the generated types are held to the headers' sizes and offsets only.

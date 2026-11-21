@@ -211,45 +211,6 @@ bool make_pipe_name(LONG seq, char* out, size_t cap)
     return n > 0;
 }
 
-/* The pipe's security: full access for this process's user only (the
- * default DACL lets Everyone connect before the child and take the only
- * instance). The child runs
- * under the same token. Lives on the caller's stack until CreateNamedPipe
- * returns. */
-struct user_only_security {
-    SECURITY_ATTRIBUTES sa;
-    SECURITY_DESCRIPTOR sd;
-    alignas(DWORD) BYTE acl[sizeof(ACL) + sizeof(ACCESS_ALLOWED_ACE) + SECURITY_MAX_SID_SIZE];
-    alignas(void*) BYTE user[sizeof(TOKEN_USER) + SECURITY_MAX_SID_SIZE];
-};
-
-bool init_user_only(user_only_security* s)
-{
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-        return false;
-    }
-    DWORD len = 0;
-    const BOOL got = GetTokenInformation(token, TokenUser, s->user,
-                                         sizeof(s->user), &len);
-    CloseHandle(token);
-    if (!got) {
-        return false;
-    }
-    PSID sid = reinterpret_cast<TOKEN_USER*>(s->user)->User.Sid;
-    ACL* acl = reinterpret_cast<ACL*>(s->acl);
-    if (!InitializeAcl(acl, sizeof(s->acl), ACL_REVISION) ||
-        !AddAccessAllowedAce(acl, ACL_REVISION, GENERIC_ALL, sid) ||
-        !InitializeSecurityDescriptor(&s->sd, SECURITY_DESCRIPTOR_REVISION) ||
-        !SetSecurityDescriptorDacl(&s->sd, TRUE, acl, FALSE)) {
-        return false;
-    }
-    s->sa.nLength = sizeof(s->sa);
-    s->sa.lpSecurityDescriptor = &s->sd;
-    s->sa.bInheritHandle = FALSE;
-    return true;
-}
-
 bool ov_write(HANDLE pipe, HANDLE event, const void* buf, DWORD len,
               DWORD timeout_ms)
 {
@@ -625,35 +586,27 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
         return ECUIO_ERR_SURROGATE_FAILED;
     }
 
-    /* Local, user-only, unguessable, first instance only: no other process
-     * can sit on the child's end. */
+    /* Unguessable, then local, user-only and first instance only
+     * (ecuio_j2534_sur_create_pipe): no other process can sit on the
+     * child's end. */
     char pipe_name[128];
     wchar_t wpipe[128];
-    user_only_security sec = {};
     if (!make_pipe_name(seq, pipe_name, sizeof(pipe_name)) ||
-        !ecuio_utf8_to_wide(pipe_name, wpipe, _countof(wpipe)) ||
-        !init_user_only(&sec)) {
+        !ecuio_utf8_to_wide(pipe_name, wpipe, _countof(wpipe))) {
         const DWORD err = GetLastError();
         SUR_LOG(h, "open: pipe setup failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
         return spawn_failed("pipe setup", err);
     }
-    h->pipe = CreateNamedPipeW(wpipe,
-                               PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED |
-                                   FILE_FLAG_FIRST_PIPE_INSTANCE,
-                               PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT |
-                                   PIPE_REJECT_REMOTE_CLIENTS,
-                               1, sizeof(ecuio_sur_request_t),
-                               sizeof(ecuio_sur_response_t) +
-                                   ECUIO_SUR_MAX_FRAMES_PER_READ *
-                                       sizeof(ecuio_pt_rx_t),
-                               0, &sec.sa);
-    if (h->pipe == INVALID_HANDLE_VALUE) {
-        const DWORD err = GetLastError();
+    void* pipe = nullptr;
+    uint32_t pipe_err = 0;
+    if (ecuio_j2534_sur_create_pipe(pipe_name, &pipe, &pipe_err) != ECUIO_OK) {
+        const DWORD err = pipe_err;
         SUR_LOG(h, "open: CreateNamedPipe failed (err=%lu)\n", err);
         ecuio_j2534_sur_close(h);
         return spawn_failed("CreateNamedPipe", err);
     }
+    h->pipe = static_cast<HANDLE>(pipe);
     h->io_event = CreateEventA(nullptr, TRUE, FALSE, nullptr);
     if (h->io_event == nullptr) {
         const DWORD err = GetLastError();
