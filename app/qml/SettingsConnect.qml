@@ -95,6 +95,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             id: errorLabel
             objectName: "errorLabel"
             visible: false

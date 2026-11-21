@@ -141,6 +141,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: qsTr("Unit")
             color: Theme.textDim
             font.pixelSize: Theme.fontCaption

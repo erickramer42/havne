@@ -29,6 +29,7 @@ ColumnLayout {
         ? root.host.uriPart.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.uriPart.profiles
 
     Label {
+        textFormat: Text.PlainText
         visible: root.segmented.length > 0
         text: qsTr("Profile:")
         color: Theme.textDim
@@ -85,7 +86,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         visible: root.host.uriPart.profileChoice === "uds-generic"
-        Label { text: qsTr("DIDs:"); color: Theme.textDim }
+        Label { textFormat: Text.PlainText; text: qsTr("DIDs:"); color: Theme.textDim }
         ThemedTextField {
             id: didField
             objectName: "didField"
@@ -132,6 +133,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "optionsNote"
         Layout.fillWidth: true
         visible: root.host.uriPart.profileChoice === "uds-generic"

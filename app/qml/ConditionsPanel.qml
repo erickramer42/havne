@@ -76,6 +76,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Layout.fillWidth: true
         Label {
+            textFormat: Text.PlainText
             objectName: "conditionsTitle"
             Layout.fillWidth: true
             text: qsTr("Conditions")

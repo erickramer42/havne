@@ -419,6 +419,7 @@ Pane {
                 // Frames that came after the adapter lost some (its buffer
                 // overflowed), as against the ones dropped above
                 Label {
+                    textFormat: Text.PlainText
                     width: Math.min(implicitWidth, parent.width)
                     wrapMode: Text.Wrap
                     objectName: "overflowLabel"
@@ -433,6 +434,7 @@ Pane {
                 // queued call each, ADR-0005's per-frame baseline) and the
                 // coalesced signal batches. Left out at phone width.
                 Label {
+                    textFormat: Text.PlainText
                     text: qsTr("notify %1 · batch %2")
                         .arg(Bridge.guiNotifyCount)
                         .arg(Bridge.signalBatchCount)

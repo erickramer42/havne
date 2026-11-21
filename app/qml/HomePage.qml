@@ -256,6 +256,7 @@ Rectangle {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.horizontalCenter: parent.horizontalCenter
                         y: logo.cy + logo.r * 0.42
                         text: qsTr("RPM")
@@ -301,6 +302,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 2
                     Label {
+                        textFormat: Text.PlainText
                         text: qsTr("Havne")
                         font.pixelSize: Theme.fontHero
                         font.bold: true

@@ -223,6 +223,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: qsTr("A pull ends")
             color: Theme.textDim
@@ -287,6 +288,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "stretchesHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

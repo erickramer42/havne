@@ -358,6 +358,7 @@ GaugeCard {
 
     // A kind this version doesn't draw, kept so it can be removed
     Label {
+        textFormat: Text.PlainText
         objectName: "unknownKind"
         visible: !card.drawn
         anchors.centerIn: parent

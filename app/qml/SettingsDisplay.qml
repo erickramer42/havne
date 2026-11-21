@@ -77,6 +77,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: qsTr("Display size:")
             color: Theme.textDim
         }
@@ -117,6 +118,7 @@ ColumnLayout {
     }
     // A phone has no keyboard to zoom with
     Label {
+        textFormat: Text.PlainText
         visible: !Theme.mobile
         text: qsTr("or Ctrl + / Ctrl − / Ctrl 0")
         color: Theme.textDim
@@ -198,7 +200,7 @@ ColumnLayout {
         }
         RowLayout {
             spacing: Theme.spacing
-            Label { text: qsTr("From"); color: Theme.textDim }
+            Label { textFormat: Text.PlainText; text: qsTr("From"); color: Theme.textDim }
             ThemedTextField {
                 id: fromField
                 objectName: "nightFrom"
@@ -209,7 +211,7 @@ ColumnLayout {
                 text: Theme.nightFrom
                 onEditingFinished: schedule.commit(true, text)
             }
-            Label { text: qsTr("Until"); color: Theme.textDim }
+            Label { textFormat: Text.PlainText; text: qsTr("Until"); color: Theme.textDim }
             ThemedTextField {
                 id: untilField
                 objectName: "nightUntil"

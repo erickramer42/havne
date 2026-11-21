@@ -7,10 +7,14 @@
 // answered with a refusal; qrc:, data: and a file on this machine pass
 // through. A file: URL with a host never reaches the manager: the pixmap
 // loader opens it as a UNC path (on Windows over SMB, which can send the
-// user's credentials), so RefusingUrlInterceptor empties it, and any UNC or
-// extended-length path, first. Both gate the QML engine alone: core's sockets and the
-// adapter streams never go through them, and Qt.openUrlExternally opens the
-// system's browser by another route.
+// user's credentials), so RefusingUrlInterceptor empties a string URL
+// that names one, and so does the manager. That covers an Image, a Loader
+// and a component; a Text's <img> is read by another route that asks
+// neither, so the plain-text rule (every Text sets textFormat,
+// tests/plaintext_pin.py) keeps outside text from being markup. Both gate
+// the QML engine alone: core's sockets and the adapter streams never go
+// through them, and Qt.openUrlExternally opens the system's browser by
+// another route.
 
 #pragma once
 
@@ -27,7 +31,9 @@
 // is UNC (two leading separators) or a device or extended-length path
 // ("//?/", "//./"). Win32 reads a slash and a backslash alike, and
 // toLocalFile decodes a percent-encoded one, so every spelling is made a
-// slash before the check.
+// slash before the check. On Windows a path names this machine only with
+// a drive letter ("C:/"): the NT spelling (\??\UNC\host) and every other
+// form Qt never makes for a local file are refused.
 inline bool url_names_another_host(const QUrl& url)
 {
     if (url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0 &&
@@ -40,6 +46,12 @@ inline bool url_names_another_host(const QUrl& url)
     QString path = url.isLocalFile() ? url.toLocalFile()
                                      : url.toString(QUrl::PreferLocalFile);
     path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+#ifdef Q_OS_WIN
+    if (url.isLocalFile()) {
+        return !(path.size() >= 3 && path.at(0).unicode() < 128 && path.at(0).isLetter() &&
+                 path.at(1) == QLatin1Char(':') && path.at(2) == QLatin1Char('/'));
+    }
+#endif
     return path.startsWith(QLatin1String("//"));
 }
 

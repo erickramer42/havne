@@ -19,6 +19,7 @@ ColumnLayout {
 
     // The vehicle's own signals (ADR-0051's form)
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsTitle"
         visible: root.host.pickedVehicle !== null
         text: qsTr("Your own signals")

@@ -17,6 +17,7 @@ RowLayout {
     Layout.fillWidth: true
     spacing: Theme.spacing
     Label {
+        textFormat: Text.PlainText
         objectName: "baselineGone"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

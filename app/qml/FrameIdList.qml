@@ -75,13 +75,13 @@ Rectangle {
             anchors.rightMargin: 12
             spacing: 8
             // Widths MUST match the delegate's columns below
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 104 }   // a 29-bit ID and its E
-            Label { text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true; elide: Text.ElideRight }
         }
     }

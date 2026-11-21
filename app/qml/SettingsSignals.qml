@@ -46,6 +46,7 @@ ColumnLayout {
                                     unused: false })
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalLockedNote"
         visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to change what a vehicle reads.")
@@ -205,6 +206,7 @@ ColumnLayout {
                 Layout.fillWidth: true
             }
             Label {
+                textFormat: Text.PlainText
                 visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.changed.length > 0
                 text: qsTr("Differs from OBDb:")
                 color: Theme.text
@@ -215,6 +217,7 @@ ColumnLayout {
                 model: root.host.importPart.obdbReport !== null
                        ? root.host.importPart.obdbReport.changed.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
+                    textFormat: Text.PlainText
                     required property var modelData
                     text: qsTr("%1, %2: %3")
                               .arg(modelData.key !== "" ? modelData.key : modelData.signal)
@@ -234,6 +237,7 @@ ColumnLayout {
                 color: Theme.textDim
             }
             Label {
+                textFormat: Text.PlainText
                 visible: root.host.importPart.obdbReport !== null && root.host.importPart.obdbReport.skipped.length > 0
                 text: qsTr("Left out:")
                 color: Theme.text
@@ -244,6 +248,7 @@ ColumnLayout {
                 model: root.host.importPart.obdbReport !== null
                        ? root.host.importPart.obdbReport.skipped.slice(0, root.host.importPart.obdbRowsShown) : []
                 Label {
+                    textFormat: Text.PlainText
                     required property var modelData
                     text: qsTr("%1 (line %2): %3")
                               .arg(modelData.signal !== "" ? modelData.signal : qsTr("the set"))
@@ -642,6 +647,7 @@ ColumnLayout {
 
     // The signal files the move into the plugin store left behind
     Label {
+        textFormat: Text.PlainText
         objectName: "unmigratedTitle"
         visible: root.host.rowActionsPart.unmigratedRows.length > 0
         text: qsTr("Not moved from the earlier version:")

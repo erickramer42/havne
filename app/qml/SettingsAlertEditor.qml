@@ -549,6 +549,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s, off after:")
             color: Theme.textDim
             height: forInput.height
@@ -562,6 +563,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s")
             color: Theme.textDim
             height: clearForInput.height
@@ -609,6 +611,7 @@ ColumnLayout {
             text: qsTr("Sound")
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "alertSoundNote"
             text: qsTr("Sound plays on Android.")
             color: Theme.textDim
@@ -634,6 +637,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s, after:")
             color: Theme.textDim
             height: beforeInput.height
@@ -647,6 +651,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s")
             color: Theme.textDim
             height: afterInput.height

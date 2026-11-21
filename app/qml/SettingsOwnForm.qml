@@ -158,6 +158,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "formOrderLabel"
             visible: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum"
             text: qsTr("Byte order:")

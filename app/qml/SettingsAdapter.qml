@@ -204,6 +204,7 @@ ColumnLayout {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "relayTraffic"
                 visible: Relay.running
                 text: qsTr("%1 from the adapter, %2 to it")

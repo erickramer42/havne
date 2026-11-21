@@ -799,6 +799,7 @@ Page {
         radius: Theme.radius
         color: Theme.bg
         Label {
+            textFormat: Text.PlainText
             id: driveHintText
             anchors.centerIn: parent
             text: qsTr("Tap for the controls")

@@ -522,6 +522,7 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmReset
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             wrapMode: Text.WordWrap

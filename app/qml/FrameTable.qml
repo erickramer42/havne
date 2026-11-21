@@ -99,17 +99,17 @@ Rectangle {
                     Qt.callLater(table.live ? frameList.jumpToLatest : frameList.positionViewAtBeginning)
                 }
             }
-            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: 36 }
-            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 20 : 36 }
             // Fits a 29-bit ID ("0x18FF0C00") in the mono face
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 80 : 96 }
-            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true }
-            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: table.flagsWidth }
         }

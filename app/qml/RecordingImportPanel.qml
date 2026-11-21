@@ -71,7 +71,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importLabel
             objectName: "importLabel"
@@ -112,6 +112,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -177,6 +178,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "importGuessing"
         visible: root.host.importGuessing
         Layout.fillWidth: true
@@ -197,7 +199,7 @@ ColumnLayout {
         visible: root.host.importKind === RecordingImport.Candump && root.host.importAsksInterface
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importInterface
             objectName: "importInterface"

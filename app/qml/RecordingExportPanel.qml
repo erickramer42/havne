@@ -262,6 +262,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.text
@@ -337,6 +338,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportNoValues"
         visible: !panel.hasValues
         Layout.fillWidth: true
@@ -446,6 +448,7 @@ ColumnLayout {
 
     // The columns: the log's own, or the signals ticked in the viewer
     Label {
+        textFormat: Text.PlainText
         objectName: "exportColumnsLabel"
         visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
         text: qsTr("Signals:")
@@ -470,6 +473,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportDecodedNote"
         visible: panel.format === "csv" && panel.hasValues && panel.view.decodedWith !== ""
         Layout.fillWidth: true
@@ -487,6 +491,7 @@ ColumnLayout {
         onToggled: panel.raw = checked
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "exportRawHint"
         visible: Theme.developerMode
         Layout.fillWidth: true
@@ -496,6 +501,7 @@ ColumnLayout {
         text: qsTr("Scrubbed, the file leaves the vehicle's identification out; raw keeps it.")
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "exportRawWarning"
         visible: panel.rawOn
         Layout.fillWidth: true

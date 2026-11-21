@@ -42,6 +42,7 @@ ToolBar {
         // The name gives way to Mark or the log's controls on a
         // phone's width
         Label {
+            textFormat: Text.PlainText
             id: headerTitle
             objectName: "headerTitle"
             visible: !(markButton.visible || startLogButton.visible
@@ -131,6 +132,7 @@ ToolBar {
                 // already, which is why Mark stands where Start log
                 // would; the address gives way to the word
                 Label {
+                    textFormat: Text.PlainText
                     id: recordingNote
                     objectName: "linkPillRecording"
                     visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive

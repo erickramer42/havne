@@ -39,7 +39,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: 8
         Layout.rightMargin: 12
-        Label { text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
+        Label { textFormat: Text.PlainText; text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
         StatCell { text: qsTr("Change"); color: Theme.textDim }
         StatCell { text: qsTr("Low"); color: Theme.textDim }
         StatCell { text: qsTr("High"); color: Theme.textDim }

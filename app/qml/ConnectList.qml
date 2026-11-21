@@ -262,6 +262,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 2
             Label {
+                textFormat: Text.PlainText
                 text: qsTr("No session")
                 font.pixelSize: Theme.fontEmphasis
                 font.weight: Font.DemiBold
@@ -286,6 +287,7 @@ Rectangle {
             spacing: 4
             visible: list.recentRows.length > 0
             Label {
+                textFormat: Text.PlainText
                 text: qsTr("Recent")
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
@@ -302,6 +304,7 @@ Rectangle {
             spacing: 4
             visible: list.adapterRows.length > 0 || list.bluetoothAsk || list.bluetoothNone
             Label {
+                textFormat: Text.PlainText
                 text: qsTr("Adapters")
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
@@ -333,6 +336,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "connectBluetoothWhy"
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
@@ -352,6 +356,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "connectBluetoothNone"
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
@@ -370,6 +375,7 @@ Rectangle {
         }
 
         Label {
+            textFormat: Text.PlainText
             objectName: "connectPickHint"
             visible: list.chosen === ""
             Layout.fillWidth: true
@@ -381,6 +387,7 @@ Rectangle {
 
         // A relay holds the adapter, so Connect waits for it to stop
         Label {
+            textFormat: Text.PlainText
             objectName: "connectRelayNote"
             visible: list.chosen !== "" && Relay.running
             Layout.fillWidth: true

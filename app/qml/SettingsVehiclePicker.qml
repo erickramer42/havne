@@ -25,6 +25,7 @@ ColumnLayout {
     // changes it
     enabled: !root.host.bookLater
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleBookLater"
         visible: root.host.bookLater
         text: qsTr("This vehicle list was saved by a later Havne and is left as it is.")
@@ -33,6 +34,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleNote"
         text: qsTr("A vehicle keeps its picked plugins, its own signals, its last address and its plotted signals.")
         color: Theme.textDim
@@ -40,6 +42,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "vehicleLockedNote"
         visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to add or change vehicles.")

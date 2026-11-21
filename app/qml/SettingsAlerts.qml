@@ -428,6 +428,7 @@ ColumnLayout {
 
     // The list
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsNone"
         visible: root.conditions.length === 0 && !root.unreadable
         text: qsTr("No alerts yet.")

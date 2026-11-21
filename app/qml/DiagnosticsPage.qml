@@ -472,6 +472,7 @@ Page {
                             color: Theme.text
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "clearMovingText"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -709,6 +710,7 @@ Page {
                           : qsTr("Readiness monitors")
                 }
                 Label {
+                    textFormat: Text.PlainText
                     visible: card.ecu.readiness === "answered" && card.ecu.monitors.length === 0
                     text: qsTr("The ECU reports none")
                     color: Theme.textDim
@@ -733,12 +735,14 @@ Page {
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         visible: monitorGrid.cycleShown
                         text: qsTr("This drive")
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
                     }
                     Label {
+                        textFormat: Text.PlainText
                         visible: monitorGrid.cycleShown
                         text: qsTr("Since clear")
                         color: Theme.textDim

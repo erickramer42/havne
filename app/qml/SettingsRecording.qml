@@ -19,6 +19,7 @@ ColumnLayout {
     // at the next connect, so it's fixed while a session is up and
     // each recording covers a whole session.
     Label {
+        textFormat: Text.PlainText
         objectName: "recordLockedNote"
         visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to turn recording on or off.")

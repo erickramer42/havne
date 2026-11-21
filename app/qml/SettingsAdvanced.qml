@@ -43,6 +43,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: qsTr("Minimum time between sweeps")
             color: Theme.text
             wrapMode: Text.WordWrap
@@ -65,6 +66,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "minSweepNote"
         text: qsTr("For a slow adapter or a busy ECU: a session asks the signals it picks no more often than this, on Live, the Dashboard and in a log, so values update that slowly too. A session asking every signal (its profile ranks none) isn't held to it. It isn't for file size, which the export sets.")
         color: Theme.textDim

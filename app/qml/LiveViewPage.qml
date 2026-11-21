@@ -459,6 +459,7 @@ Page {
         }
         // The first pause's hint, once: a paused chart isn't a recording
         Label {
+            textFormat: Text.PlainText
             objectName: "pauseHint"
             visible: root.paused && root.hintShown
             Layout.fillWidth: true
@@ -739,6 +740,7 @@ Page {
             // The caption gives way under 360 px: with it the row's least
             // width is past the narrowest phone's
             Label {
+                textFormat: Text.PlainText
                 visible: !windowRow.tight && root.width >= 360
                 text: qsTr("Window")
                 color: Theme.textDim

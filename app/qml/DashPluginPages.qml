@@ -26,6 +26,7 @@ ColumnLayout {
     spacing: 4
 
     Label {
+        textFormat: Text.PlainText
         objectName: "plugpage_heading"
         Layout.fillWidth: true
         Layout.minimumWidth: 0

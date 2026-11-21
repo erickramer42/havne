@@ -83,6 +83,7 @@ ListView {
             }
             // The picked vehicle's baseline
             Label {
+                textFormat: Text.PlainText
                 objectName: "baselineBadge"
                 visible: root.host.baselineFolder !== ""
                          && recordingRow.modelData.folder === root.host.baselineFolder

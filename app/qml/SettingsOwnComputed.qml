@@ -407,6 +407,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "formInsertNone"
             visible: insertList.count === 0
             text: qsTr("No signal to read")
@@ -434,6 +435,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formUnitsNote"
         visible: root.leafRefs.length > 0
         text: qsTr("Values below are in the units signals are decoded in, as a gauge's levels are.")
@@ -519,6 +521,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formDemoHint"
         visible: root.demoHint
         text: qsTr("Or connect the demo: mock://demo with %1's signals, where these values move.")
