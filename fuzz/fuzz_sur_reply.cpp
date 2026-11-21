@@ -29,6 +29,10 @@ namespace {
 /* fuzz/seeds.py writes replies in this layout */
 static_assert(sizeof(ecuio_sur_response_t) == 328, "seeds.py's response");
 static_assert(sizeof(ecuio_pt_rx_t) == 4140, "seeds.py's frame");
+/* A batch holds one frame, so every READ reads the pipe: Reader::read's
+ * !called branch (a frame out of the batch) can't run, and a frame past
+ * the cap is judged by check_count alone. A larger cap needs both. */
+static_assert(ECUIO_SUR_MAX_FRAMES_PER_READ == 1, "Reader::read's cap of one");
 
 constexpr uint8_t kRead = 0;
 constexpr uint8_t kIoctl = 1;
@@ -219,10 +223,7 @@ struct Reader {
         bool got = false;
         const ecuio_status_t st = sur_read_msg(&batch, transact, &out, &got);
         if (!called) {
-            if (!got) {
-                abort();
-            }
-            return v;
+            abort(); /* at the cap of one a READ always reads the pipe */
         }
         if (v != sur_reply::whole) {
             if (st != ECUIO_ERR_TRANSPORT_HARD_FAILURE || got) {
