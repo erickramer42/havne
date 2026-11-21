@@ -173,26 +173,32 @@ TEST(J2534HoldTest, AModuleIsJudgedByItsDefsUntilItsSilenceSaysAbsent)
     }
 }
 
-/* A module that answers every row but one it never answers keeps that
- * row's wait run out: a short silence is the row's, not the module
- * asleep, so the row holds the bus once, not on every lap. The other
- * module answers about as often as with that row one frame long. */
+/* A module that answers every row but a run it never answers keeps those
+ * rows' waits run out: a silence shorter than its whole rotation is the
+ * rows', not the module asleep, so each holds the bus once, not on every
+ * lap, however long the run (a run of 8 or more passes
+ * J2534_HOLD_ASLEEP_MISSES). The other module answers about as often as
+ * with those rows one frame long. */
 TEST(J2534HoldTest, ARowAModuleNeverAnswersHoldsTheBusOnce)
 {
-    const auto answered = [](bool unanswered_long) {
+    const auto answered = [](unsigned run, bool unanswered_long) {
+        const auto silent = [run](uint32_t c, unsigned k) {
+            return c == 0 && k >= 5 && k < 5 + run;
+        };
         Bus b;
         EXPECT_TRUE(ecuio_engine_init(&b.e, 2));
         b.e.gap_us = 5 * kMs;
         for (uint32_t c = 0; c < 2; ++c) {
-            for (uint8_t k = 0; k < 10; ++k) {
+            for (uint8_t k = 0; k < 20; ++k) {
                 const uint8_t q[3] = {0x22, static_cast<uint8_t>(0x10 + c), k};
                 EXPECT_EQ(ecuio_engine_add(&b.e, c, q, 3),
                           ecuio_engine_add_result::added);
+                b.e.requests[b.e.count - 1].long_defs =
+                    silent(c, k) && unanswered_long ? 1 : 0;
             }
         }
-        b.e.requests[5].long_defs = unanswered_long ? 1 : 0;
-        b.reply_of = [](uint32_t c, const ecuio_request& q) {
-            return c == 0 && q.bytes[2] == 5 ? Bytes{} : did_reply(q, 2);
+        b.reply_of = [silent](uint32_t c, const ecuio_request& q) {
+            return silent(c, q.bytes[2]) ? Bytes{} : did_reply(q, 2);
         };
         b.until(10000 * kMs);
         size_t n = 0;
@@ -201,8 +207,11 @@ TEST(J2534HoldTest, ARowAModuleNeverAnswersHoldsTheBusOnce)
         }
         return n;
     };
-    const size_t plain = answered(false);
-    const size_t held = answered(true);
-    ASSERT_GT(plain, 100u);
-    EXPECT_GE(held, plain * 95 / 100) << held << " against " << plain;
+    for (const unsigned run : {1u, 8u, 12u}) {
+        SCOPED_TRACE(run);
+        const size_t plain = answered(run, false);
+        const size_t held = answered(run, true);
+        ASSERT_GT(plain, 100u);
+        EXPECT_GE(held, plain * 95 / 100) << held << " against " << plain;
+    }
 }

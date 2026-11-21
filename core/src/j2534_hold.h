@@ -53,9 +53,11 @@
 // own count in the first 3 s, 92% when those rows are short). The cost: a
 // module that wakes with a long reply can lose another module's Single
 // Frame once. A channel's first frame
-// after a run of J2534_HOLD_ASLEEP_MISSES waits takes back its rows'
-// waits run out before any answer (ecuio_engine_forget_ran_out), as a
-// recovery's rescan does, so the defs judge each row's first answer again.
+// after a run of J2534_HOLD_ASLEEP_MISSES waits, and at least its whole
+// rotation, takes back its rows' waits run out before any answer
+// (ecuio_engine_forget_ran_out), as a recovery's rescan does, so the defs
+// judge each row's first answer again; a shorter run is rows the module
+// never answers, which keep their one frame.
 //
 // A session request (10 03, 3E 00) waits for the hold like any request,
 // since its reply can be lost too, except in its session with S3 300 ms
@@ -425,11 +427,14 @@ inline void j2534_hold_pass_end(j2534_hold& h, uint32_t held_now)
 
 /* A frame matched on channel c: its run of waits run out ends, the
  * channel is heard, and after a run that long its rows' waits run out
- * are taken back */
+ * are taken back. A run shorter than the channel's rotation is rows it
+ * never answers, not the module asleep: taken back, they would hold the
+ * bus again every lap */
 inline void j2534_hold_answered(j2534_hold& h, ecuio_request_engine* e,
                                 uint32_t c)
 {
-    if (h.misses[c] >= J2534_HOLD_ASLEEP_MISSES) {
+    if (h.misses[c] >= J2534_HOLD_ASLEEP_MISSES &&
+        h.misses[c] >= e->chans[c].requests) {
         ecuio_engine_forget_ran_out(e, c);
     }
     h.misses[c] = 0;
