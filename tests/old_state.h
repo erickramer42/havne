@@ -267,7 +267,10 @@ public:
         QSettings prefs(prefsPath(), QSettings::IniFormat);
         QMap<QString, QVariant> out;
         for (const QString& key : prefs.allKeys()) {
-            if (key != kBook && key != kUri && key != kRecentUris) {
+            // The move's own keys: the book, and the mark that says every
+            // copy no vehicle names has its record
+            if (key != kBook && key != kUri && key != kRecentUris &&
+                key != QStringLiteral("vehicles/unnamedRecorded")) {
                 out.insert(key, prefs.value(key));
             }
         }
