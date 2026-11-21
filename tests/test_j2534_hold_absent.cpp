@@ -148,6 +148,37 @@ TEST(J2534HoldTest, AModuleAwakeAfterASilenceIsJudgedByItsDefsAgain)
     EXPECT_EQ(c.lost, c.lost_after_wake) << "nothing while it slept";
 }
 
+/* A channel whose rows all ran out wakes at its first frame after a run
+ * of J2534_HOLD_ASLEEP_MISSES waits that also covers its whole rotation:
+ * a rotation of 3 rows not at 3 or 7, at 8 (a small module losing a few
+ * replies in a row keeps its rows' one frame); one of 20 not at 19, at
+ * 20 */
+TEST(J2534HoldTest, ASmallRotationWakesNoSoonerThanEightMisses)
+{
+    const auto woken_after = [](uint8_t rows, uint32_t misses) {
+        ecuio_request_engine e;
+        EXPECT_TRUE(ecuio_engine_init(&e, 1));
+        for (uint8_t k = 0; k < rows; ++k) {
+            const uint8_t did[3] = {0x22, 0x1E, k};
+            EXPECT_EQ(ecuio_engine_add(&e, 0, did, 3),
+                      ecuio_engine_add_result::added);
+            e.requests[e.count - 1].reply_frames = 1;
+            e.requests[e.count - 1].ran_out = 1;
+        }
+        EXPECT_EQ(e.chans[0].requests, uint32_t{rows});
+        j2534_hold h;
+        h.misses[0] = misses;
+        j2534_hold_answered(h, &e, 0);
+        return e.requests[0].ran_out == 0 && e.requests[0].reply_frames == 0;
+    };
+    for (const uint32_t m : {3u, 7u}) {
+        EXPECT_FALSE(woken_after(3, m)) << m << " waits in a row";
+    }
+    EXPECT_TRUE(woken_after(3, J2534_HOLD_ASLEEP_MISSES));
+    EXPECT_FALSE(woken_after(20, 19));
+    EXPECT_TRUE(woken_after(20, 20));
+}
+
 /* The hold's judgment of a long row, by its module's state: a first ask
  * by its defs; unheard after a wait run out, one frame; heard, by its
  * defs through one lost reply; past its first waits (silent, or its
