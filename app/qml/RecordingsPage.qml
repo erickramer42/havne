@@ -794,7 +794,10 @@ Page {
             problem: root.rulesProblem
             bandsShown: root.bandsShown
             onBandsToggled: root.bandsShown = !root.bandsShown
-            onApplyRequested: rules => comparePart.applyStretchRules(rules)
+            onApplyRequested: rules => {
+                if (!comparePart.applyStretchRules(rules))
+                    stretchesPanel.keepEnd()
+            }
             onCloseRequested: root.stretchesOpen = false
         }
         // The recording's conditions, each row centering the view on its

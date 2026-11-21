@@ -109,6 +109,10 @@ ColumnLayout {
         else
             applyRequested(typed)
     }
+    // A refusal by core: the end shown goes back to the one in force
+    function keepEnd() {
+        pullEnd = rules.pullEnd === "top-speed" ? "top-speed" : "lift"
+    }
     function apply() {
         const typed = typedRules()
         if (typed !== null)
