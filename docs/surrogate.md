@@ -48,7 +48,9 @@ before the check is caught too. Either way the open fails with
   the open rather than being joined), `PIPE_REJECT_REMOTE_CLIENTS`, one
   instance, and a DACL granting the current user alone. The default
   DACL would let any local user open it for reading, enough to take
-  the only instance before the child.
+  the only instance before the child. `ecuio_j2534_sur_create_pipe`
+  (`core/src/j2534_surrogate_pipe.cpp`) makes it, and `J2534PipeTest`
+  checks each protection on the pipe it makes.
 - **Handles:** the child inherits the session log and nothing else.
   A `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` names that one handle; without
   it, inheritance would pass every inheritable handle in the app. The

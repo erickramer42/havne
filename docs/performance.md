@@ -511,6 +511,23 @@ Since the model loses more than the car, the prediction overstates what
 the hold wins for 0x7E9; its cost to 0x7E8 doesn't depend on the loss. A
 car run with the hold replaces both figures.
 
+**The hold's order, per signal (the model, 2026-11-20; no car run):** with
+the modules sharing the bus by signal (each row's age ranks its channel,
+Single Frames first), the pacing bench's model (the simulated car, `bench_pacing`) through the
+VX gives, over 70 s at seed 1 (seeds 1-3 agree within 1%); these figures
+are the model's, not a car's:
+
+| Shape | Values a second | Worst signal's P50 | P99 | Lost replies |
+|---|---|---|---|---|
+| Four modules, unequal | 137.4 | 721 ms | 753 ms | none |
+| Four modules, mixed | 153.5 | 655 ms | 684 ms | none |
+
+Against equal turns (a turn for each waiting channel in rotation): 102.8
+and 119.0 values a second, the worst signal's P50 at 1,573 and 1,425 ms,
+and 6 and 12 replies lost, all at the start. Each row's first answer
+comes by 0.9 s and 1.0 s. `bench_pacing`'s "unequal modules" rows are
+these figures.
+
 ### Connect cost: a surrogate per session
 
 Result: a create and close takes 18 to 28 ms against the x64 fake.

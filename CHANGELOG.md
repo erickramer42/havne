@@ -79,7 +79,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 ### Fixed
 
 - Through the OBDX Pro VX, which loses a second module's single-frame reply that arrives beside another module's long one, Havne now waits out a long reply before asking the other modules (not yet confirmed on a car). `j2534://...?hold=0` turns this off.
-- With three or more modules through J2534, two modules answering in long replies no longer leave a third one barely updating: the modules waiting for the bus take turns.
+- Through J2534 with several modules, each signal is now read about as often as every other: a module with more signals takes more turns, and modules answering in one frame go between the long replies. On a simulated four-module car the slowest signal updates every 0.72 s where it took 1.57 s with equal turns, and the car's values a second rise from 103 to 137. A module's first replies after connecting are no longer lost to another module's long reply.
 - A J2534 adapter whose frame timestamps stand still, or count frames and not microseconds, no longer stalls a session's frame times: once the adapter's clock lags the computer's by 10 s, Havne stamps frames with the computer's clock.
 - A paused Live chart drew almost none of its samples (one in eight on the mock); it now draws every column in view, and paints faster with a long history.
 - `ecuio_signal_file_expr_leaves` and `ecuio_signal_file_evaluate`, given a program whose depth comes through a base program (obd2's Boost over a replaced input), refuse it with words that name that base program, not the program's own depth. Which programs are refused is unchanged.
