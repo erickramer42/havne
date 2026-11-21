@@ -163,6 +163,56 @@ TEST(RequestEngineTest, AWaitRunOutOrAnAnswerOutweighsTheDefs)
     EXPECT_TRUE(segmented(e, 0)) << "answered in two";
 }
 
+/* A positive reply after its row's wait ran out teaches the row its
+ * frames, whether nothing is out or another row is: a DID's by its key, a
+ * PID's at J1979's length for it alone. A reply shaped as a pack, or
+ * naming no row, teaches nothing */
+TEST(RequestEngineTest, ALateReplyTeachesItsRowsFrames)
+{
+    const std::vector<ecuio_signal_def_t> defs = {
+        def(0x621E01, 3, 3, 0, 0, 10), /* row 0: 10 bytes of text */
+        def(0x621E02, 3, 3, 16),       /* row 1: a word */
+        def(0x4168, 2, 3, 8),          /* row 2: J1979's 7 bytes */
+        def(0x410C, 2, 2, 16),         /* row 3: rpm */
+    };
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    ASSERT_TRUE(ecuio_engine_derive(&e, &set, &rx, 1, nullptr));
+    const auto late = [&e](const Bytes& reply, int64_t at) {
+        return ecuio_engine_on_frame(&e, 0, reply.data(),
+                                     static_cast<uint16_t>(reply.size()), at,
+                                     nullptr);
+    };
+
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_FALSE(segmented(e, 0)) << "its wait ran out: one frame";
+    EXPECT_EQ(late(did_reply(0x1E01, 10), now + kMs), ecuio_reply::none);
+    EXPECT_EQ(e.requests[0].reply_frames, 2u) << "nothing out";
+    EXPECT_TRUE(segmented(e, 0));
+
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {}), 1);
+    EXPECT_EQ(late(did_reply(0x1E01, 4), now + kMs), ecuio_reply::none);
+    EXPECT_EQ(e.requests[0].reply_frames, 1u) << "another row out";
+    EXPECT_EQ(e.chans[0].outstanding, 1) << "the row out is still out";
+    EXPECT_EQ(late(did_reply(0x1E7F, 10), now + kMs), ecuio_reply::none);
+    EXPECT_EQ(e.requests[1].reply_frames, 0u) << "a DID of no row";
+
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
+    Bytes pid68 = {0x41, 0x68};
+    pid68.insert(pid68.end(), 7u, uint8_t{0x2A});
+    EXPECT_EQ(late(pid68, now + ECUIO_ENGINE_WAIT_US), ecuio_reply::none);
+    EXPECT_EQ(e.requests[2].reply_frames, 2u) << "a PID at J1979's length";
+    const Bytes pack = {0x41, 0x0C, 0x1A, 0xF8, 0x68, 0x2A};
+    EXPECT_EQ(late(pack, now + ECUIO_ENGINE_WAIT_US), ecuio_reply::none);
+    EXPECT_EQ(e.requests[3].reply_frames, 0u) << "a pack's reply";
+}
+
 /* A row's last answer sets it: 7 bytes are a Single Frame, 8 a First
  * Frame and a Consecutive Frame, a negative reply one frame, and a
  * shorter reply after a long one makes it one frame again */

@@ -296,8 +296,11 @@ void slow_pids(Bus& b,
  * (its length unknown, which takes no extra turn), goes ahead of an older
  * chosen row. Module 0 is six rows answering in turn one frame and three,
  * beside a segmented module of two rows and a Single Frame one, replies
- * at 6 ms; then slow_pids at 6 ms: an extra turn a fast row earns may meet
- * the slow row, which is then kept chosen, not written */
+ * at 6 ms; then two shapes of slow rows at 6 ms, where an extra turn a
+ * fast row earns may meet a slow row, which is then kept chosen, not
+ * written: six fast PIDs and three slow beside one segmented row, and
+ * slow_pids' own, whose rows reach that guard (the first shape's pass
+ * whether the guard is there or not) */
 TEST(J2534HoldTest, NoLongOrUnaskedRequestGoesAheadOfAChosenOne)
 {
     {
@@ -316,12 +319,17 @@ TEST(J2534HoldTest, NoLongOrUnaskedRequestGoesAheadOfAChosenOne)
         EXPECT_GT(expect_none_ahead(b, "mixed rows").known_segmented, 30u)
             << "the mixed module's long rows were asked";
     }
-    {
+    for (const bool three_slow : {true, false}) {
         Bus b;
-        ASSERT_NO_FATAL_FAILURE(slow_pids(b));
+        if (three_slow) {
+            ASSERT_NO_FATAL_FAILURE(slow_pids(
+                b, {0x04, 0x05, 0x0C, 0x0D, 0x0F, 0x10, 0x68, 0x69, 0x6E}, 1));
+        } else {
+            ASSERT_NO_FATAL_FAILURE(slow_pids(b));
+        }
         b.first_us = 6 * kMs;
         EXPECT_GT(expect_none_ahead(b, "slow rows", false).known_segmented, 50u)
-            << "the slow rows were asked";
+            << "the slow rows were asked, three " << three_slow;
     }
 }
 
@@ -330,7 +338,13 @@ TEST(J2534HoldTest, NoLongOrUnaskedRequestGoesAheadOfAChosenOne)
  * turn. That turn meets the slow row (asked at every slow turn, so
  * younger than the segmented module's rows), kept chosen beside the
  * segmented module's chosen row: j2534_hold_order ranks both by age when
- * the bus clears, so the older goes first and the younger waits */
+ * the bus clears, so the older goes first and the younger waits. The pin
+ * holds only at some phases of the rate classes: module 0 asks
+ * ECUIO_ENGINE_FAST_PER_SLOW fast rows to each slow one, and its count of
+ * fast rows sets when the slow row comes due against the segmented
+ * module's turns. With 3 s here, five fast PIDs meet the path 21 times;
+ * three or eight once; four, six and seven never, nor six fast with
+ * three slow beside one segmented row. So the case takes five */
 TEST(J2534HoldTest, AChosenRowFromAnExtraTurnGoesOnlyAsTheOlder)
 {
     Bus b;
