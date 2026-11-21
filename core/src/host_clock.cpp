@@ -42,6 +42,27 @@ namespace {
     return slept > seen ? slept : seen;
 }
 
+/* The counting clock minus the stopped one, the stopped one read before and
+ * after (microseconds each): a thread held between the reads would raise
+ * the difference for good, so a bracket over 1 ms is read again, and the
+ * later stopped read keeps a hold from ever overstating it */
+template <typename Awake, typename All>
+uint64_t slept_between(Awake awake, All all)
+{
+    uint64_t before = 0;
+    uint64_t counting = 0;
+    uint64_t after = 0;
+    for (int tries = 0; tries < 4; ++tries) {
+        before = awake();
+        counting = all();
+        after = awake();
+        if (after - before < 1000) {
+            break;
+        }
+    }
+    return counting > after ? counting - after : 0;
+}
+
 #if defined(_WIN32)
 
 uint64_t qpc_us()
@@ -121,19 +142,24 @@ extern "C" uint64_t ecuio_clock_slept_us(void)
     if (c.biased == nullptr || c.unbiased == nullptr) {
         return 0;
     }
-    ULONGLONG awake = 0;
-    ULONGLONG all = 0;
-    c.unbiased(&awake);
-    c.biased(&all);
-    return never_back(all > awake ? (all - awake) / 10u : 0);
+    return never_back(slept_between(
+        [&] {
+            ULONGLONG t = 0;
+            c.unbiased(&t);
+            return static_cast<uint64_t>(t / 10u);
+        },
+        [&] {
+            ULONGLONG t = 0;
+            c.biased(&t);
+            return static_cast<uint64_t>(t / 10u);
+        }));
 #elif defined(__APPLE__)
-    const uint64_t awake = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
-    const uint64_t all = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW);
-    return never_back(all > awake ? (all - awake) / 1000u : 0);
+    return never_back(slept_between(
+        [] { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1000u; },
+        [] { return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) / 1000u; }));
 #elif defined(__linux__)
-    const uint64_t awake = read_us(CLOCK_MONOTONIC);
-    const uint64_t all = read_us(CLOCK_BOOTTIME);
-    return never_back(all > awake ? all - awake : 0);
+    return never_back(slept_between([] { return read_us(CLOCK_MONOTONIC); },
+                                    [] { return read_us(CLOCK_BOOTTIME); }));
 #else
     return 0;
 #endif
