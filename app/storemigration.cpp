@@ -625,10 +625,10 @@ QStringList removalLines(const StoreMigration::Removal& r)
                                 "the earlier version's folder for Save: %1")
                      .arg(r.spared);
     }
-    if (r.unnamed > 0 && (r.oldBook || r.removed > 0)) {
-        lines << QStringLiteral("Signal files no plugin was made from, left "
-                                "in the earlier version's folder: %1")
-                     .arg(r.unnamed);
+    if (r.left > 0 && (r.oldBook || r.removed > 0)) {
+        lines << QStringLiteral("Other signal files left in the earlier "
+                                "version's folder: %1")
+                     .arg(r.left);
     }
     if (r.stuck > 0) {
         lines << QStringLiteral("The earlier version's signal files that "
@@ -737,10 +737,13 @@ StoreMigration::Removal StoreMigration::removeOld(QSettings& prefs,
             ++r.spared;
             continue;
         }
-        // The book alone never takes a copy: its bytes must be elsewhere
-        if (store.wrappedFrom(sha).isEmpty() &&
-            !QFileInfo::exists(unmigratedPath(sha))) {
-            ++r.unnamed;
+        // The book alone never takes a copy: its bytes must be elsewhere,
+        // and an edit since the wrap or the keep is the user's own
+        QByteArray bytes;
+        if ((store.wrappedFrom(sha).isEmpty() &&
+             !QFileInfo::exists(unmigratedPath(sha))) ||
+            readCopy(sha, &bytes) != Copy::Whole) {
+            ++r.left;
             continue;
         }
         if (!QFile::remove(oldPath(sha)) && QFile::exists(oldPath(sha))) {

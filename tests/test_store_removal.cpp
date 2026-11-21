@@ -130,9 +130,9 @@ Five stageFive(const OldState& old)
     return f;
 }
 
-const QString kLeftUnnamed1 =
-    QStringLiteral("Signal files no plugin was made from, left in the "
-                   "earlier version's folder: 1");
+const QString kLeftOther1 =
+    QStringLiteral("Other signal files left in the earlier version's "
+                   "folder: 1");
 
 // Every bridge call that imports, keeps, saves or removes in the stores,
 // each once and each answered ok; what it saves goes to out
@@ -285,7 +285,7 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
     EXPECT_TRUE(r.oldBook);
     EXPECT_EQ(r.removed, 2);
     EXPECT_EQ(r.spared, 2);
-    EXPECT_EQ(r.unnamed, 1);
+    EXPECT_EQ(r.left, 1);
     EXPECT_EQ(r.stuck, 0);
     EXPECT_FALSE(old.has(kOldBook));
     QStringList left{f.a + QStringLiteral(".json"),
@@ -304,7 +304,7 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
                            QStringLiteral("Signal files that weren't moved, "
                                           "kept in the earlier version's "
                                           "folder for Save: 2"),
-                           kLeftUnnamed1}));
+                           kLeftOther1}));
 }
 
 /* A book that records no file that didn't move, with the mark set (an
@@ -323,20 +323,44 @@ TEST(BridgeTest, OneStoreRemovalNeverTakesACopyOnTheBooksWordAlone)
 
     const Removal first = removal(old);
     EXPECT_EQ(first.removed, 1);
-    EXPECT_EQ(first.unnamed, 1);
+    EXPECT_EQ(first.left, 1);
     EXPECT_EQ(first.lines,
               (QStringList{kListRemoved,
                            QStringLiteral("The earlier version's signal files "
                                           "removed: 1"),
-                           kLeftUnnamed1}));
+                           kLeftOther1}));
     EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
     const Removal second = removal(old);
     EXPECT_EQ(second.removed, 0);
-    EXPECT_EQ(second.unnamed, 1);
+    EXPECT_EQ(second.left, 1);
     EXPECT_TRUE(second.lines.isEmpty());
     EXPECT_EQ(namesIn(old.signalsRoot()),
               QStringList{stray + QStringLiteral(".json")});
     EXPECT_EQ(readBytes(old.copyOf(stray)), "stray's bytes");
+}
+
+/* A copy edited since its wrap or its keep holds bytes neither the
+ * plugin nor plugins/unmigrated has: it stays, counted with the copies
+ * left, and the unedited ones go */
+TEST(BridgeTest, OneStoreRemovalKeepsACopyEditedSinceItWasMoved)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    const QString edited = keepMoved(old, QStringLiteral("Edited"));
+    const QString kept = old.keep("kept's bytes");
+    writeBytes(keptPath(kept), "kept's bytes");
+    writeBytes(old.copyOf(edited), "edited by hand since the wrap");
+    old.set(kBook, book2({record(kept, true)}, {}));
+    markDone();
+
+    const Removal r = removal(old);
+    EXPECT_EQ(r.removed, 2);
+    EXPECT_EQ(r.left, 1);
+    EXPECT_EQ(namesIn(old.signalsRoot()),
+              QStringList{edited + QStringLiteral(".json")});
+    EXPECT_EQ(readBytes(old.copyOf(edited)), "edited by hand since the wrap");
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
 }
 
 /* With every copy's bytes elsewhere and nothing else there, the folder
@@ -383,7 +407,7 @@ TEST(BridgeTest, OneStoreRemovalKeepsACopyOnceItsRecordIsRemoved)
     old.set(kBook, book2({}, {}));
     const Removal after = removal(old);
     EXPECT_EQ(after.removed, 0);
-    EXPECT_EQ(after.unnamed, 1);
+    EXPECT_EQ(after.left, 1);
     EXPECT_TRUE(after.lines.isEmpty());
     EXPECT_EQ(filesUnder(old.signalsRoot()), kept);
 }

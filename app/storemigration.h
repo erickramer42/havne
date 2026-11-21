@@ -79,20 +79,23 @@ public:
     // signals/ stays while a record (an entry's unmigrated or the book's
     // own) names it with kept false or with no bytes in plugins/unmigrated,
     // judged by name alone (a copy changed since is still its record's).
-    // Whatever the book says, a copy goes only when a plugin was made from
-    // it (wrappedFrom) or plugins/unmigrated holds its bytes: a copy no
-    // record names (an earlier version's move that recorded none, a record
-    // the user removed) stays, counted apart. In order, each step safe to stop after: vehicles/document (a failed
-    // sync stops it, nothing deleted, as does the key still read after it:
-    // the registry's failed delete, a fallback file's key), then every
-    // other <sha256>.json in signals/, then the folder if it ends empty. A
-    // file of another name is left. The lines for the activity log, none
-    // when there was nothing to remove
+    // Whatever the book says, a copy goes only when its bytes are
+    // elsewhere: a plugin was made from it (wrappedFrom) or
+    // plugins/unmigrated holds its bytes, and its bytes are still the ones
+    // its name hashes. Any other copy (an earlier version's move that
+    // recorded none, a record the user removed, a copy edited since) stays,
+    // counted apart. In order, each step safe to stop after:
+    // vehicles/document (a failed sync stops it, nothing deleted, as does
+    // the key still read after it: the registry's failed delete, a
+    // fallback file's key), then each <sha256>.json in signals/ whose bytes
+    // are elsewhere, then the folder if it ends empty. A file of another
+    // name is left. The lines for the activity log, none when there was
+    // nothing to remove
     struct Removal {
         bool oldBook = false; // vehicles/document removed
         int removed = 0;      // copies deleted
         int spared = 0;       // copies a record keeps for Save
-        int unnamed = 0;      // copies no record keeps, their bytes only there
+        int left = 0;         // other copies whose bytes may be only there
         int stuck = 0;        // copies that couldn't be deleted
         bool stopped = false; // the test seam ended it
         QStringList lines;
