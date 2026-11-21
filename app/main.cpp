@@ -173,8 +173,10 @@ int main(int argc, char *argv[])
     // Nothing the QML loads is remote: a name from a file drawn as markup
     // could otherwise fetch a URL
     RefusingNetworkFactory networkFactory;
+    RefusingUrlInterceptor urlInterceptor;
     QQmlApplicationEngine engine;
     engine.setNetworkAccessManagerFactory(&networkFactory);
+    engine.addUrlInterceptor(&urlInterceptor);
     engine.loadFromModule("App", "Main");
 
     if (engine.rootObjects().isEmpty()) {

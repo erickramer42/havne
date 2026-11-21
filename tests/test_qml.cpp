@@ -328,6 +328,17 @@ public:
         model->applyUnasked(ids);
     }
 
+    // What the engines' URL interceptor has emptied so far
+    Q_INVOKABLE int urlsRefused() const
+    {
+        return RefusingUrlInterceptor::refused();
+    }
+
+    Q_INVOKABLE bool namesAnotherHost(const QUrl& url) const
+    {
+        return RefusingUrlInterceptor::names_another_host(url);
+    }
+
     // A file of text in a scratch folder of the harness's own, as a URL a
     // file dialog would give; an empty URL when it can't be written
     Q_INVOKABLE QUrl writeScratchFile(const QString& name, const QString& text)
@@ -762,6 +773,7 @@ public slots:
     void qmlEngineAvailable(QQmlEngine* engine)
     {
         engine->setNetworkAccessManagerFactory(&m_networkFactory);
+        engine->addUrlInterceptor(&m_urlInterceptor);
     }
 
     void applicationAvailable()
@@ -842,6 +854,7 @@ private:
     QTemporaryDir m_settingsDir;
     QTemporaryDir m_recordingsDir;
     RefusingNetworkFactory m_networkFactory;
+    RefusingUrlInterceptor m_urlInterceptor;
     Harness m_harness;
     std::unique_ptr<BluetoothDevices> m_bluetooth;
     std::unique_ptr<SessionBridge> m_bridge;
