@@ -299,6 +299,11 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # (growth into a struct's reserved room passes, a break fails): its
 # self-test runs over reports of real mutants, on every platform.
 if(Python3_Interpreter_FOUND)
+    # The names a CTest include sets properties on still exist (the include
+    # ignores a missing one)
+    add_test(NAME CtestIncludeNamesTest.TheJ2534TimeoutNamesExist
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ctest_include_names.py)
+    set_tests_properties(CtestIncludeNamesTest.TheJ2534TimeoutNamesExist PROPERTIES TIMEOUT 60)
     add_test(NAME GoldenTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     # recording_compare.py, golden.py's like for recording folders
@@ -2713,6 +2718,10 @@ if(WIN32)
     gtest_discover_tests(test_j2534_connect DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
+    # The out-of-memory loop outlasts the ceiling's margin under load; the
+    # include runs after the discovery's, which defines the test
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_SOURCE_DIR}/j2534_timeouts.cmake)
 endif()
 
 # J2534 routing tests (Win32-only, HARNESS tier: the surrogate chosen by
