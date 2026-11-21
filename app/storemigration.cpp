@@ -50,8 +50,9 @@ const QString kUriKey = QStringLiteral("uri");
 const QString kUnmigrated = QStringLiteral("unmigrated");
 const QString kJson = QStringLiteral(".json");
 // A preference: every copy no vehicle names has its record (the move that
-// wrote the book, or recordUnnamed). Outside the book, which the page
-// rewrites with the keys it knows
+// wrote the book, or recordUnnamed). Outside the book: it is the move's
+// fact, not the user's document, and a book edited by hand or written by an
+// older Havne carries no such key
 const QString kRecorded = QStringLiteral("vehicles/unnamedRecorded");
 constexpr int kBookFormat = 2;
 // The most of one unmigrated copy kept: core reads nothing larger
@@ -75,6 +76,20 @@ QString shaOf(const QByteArray& bytes)
 {
     return QString::fromLatin1(
         QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+// The preferences written out without an error
+bool syncedOk(QSettings& prefs)
+{
+    prefs.sync();
+    return prefs.status() == QSettings::NoError;
+}
+
+// The mark that every copy no vehicle names has its record, written out
+bool markRecorded(QSettings& prefs)
+{
+    prefs.setValue(kRecorded, true);
+    return syncedOk(prefs);
 }
 
 // A SHA-256 as both stores name a file: 64 lower-case hex digits
@@ -530,9 +545,9 @@ bool moveFiles(QSettings& prefs, PluginStore& store, const OldBook& old,
     const QJsonObject book = newBook(old, store, left, renamesOf(files, store));
     prefs.setValue(kBook, QString::fromUtf8(QJsonDocument(book).toJson(
                               QJsonDocument::Compact)));
-    prefs.setValue(kRecorded, true);
-    prefs.sync();
-    if (prefs.status() != QSettings::NoError) {
+    // The book on disk before the mark: the registry writes each value at
+    // once, and a mark without its book would end the move's retries
+    if (!syncedOk(prefs) || !markRecorded(prefs)) {
         report->lines << QStringLiteral("The vehicle list couldn't be saved: "
                                         "the move runs again at the next "
                                         "start");
@@ -665,10 +680,11 @@ bool recordUnnamed(QSettings& prefs, PluginStore& store, QSet<QString>* spared)
         book.insert(kUnmigrated, loose);
         prefs.setValue(kBook, QString::fromUtf8(QJsonDocument(book).toJson(
                                   QJsonDocument::Compact)));
+        if (!syncedOk(prefs)) {
+            return false;
+        }
     }
-    prefs.setValue(kRecorded, true);
-    prefs.sync();
-    if (prefs.status() != QSettings::NoError) {
+    if (!markRecorded(prefs)) {
         return false;
     }
     for (const QString& sha : added) {
@@ -699,7 +715,7 @@ QStringList removalLines(const StoreMigration::Removal& r)
                                 "version's folder: %1")
                      .arg(r.left);
     }
-    if (r.oldBookLeft) {
+    if (r.oldBookLeft && (r.removed > 0 || r.stuck > 0)) {
         lines << QStringLiteral("The earlier version's vehicle list couldn't "
                                 "be read and stays where it is");
     }
@@ -741,7 +757,15 @@ QByteArray StoreMigration::unmigratedBytes(const QString& sha, QString* words)
         *words = QStringLiteral("Its bytes weren't kept");
         return {};
     }
-    return f.read(kKeptMaxBytes);
+    QByteArray bytes = f.read(kKeptMaxBytes);
+    // Kept bytes that aren't the name's hash are a copy changed before the
+    // move (served), unless the old folder still holds the whole file
+    QByteArray whole;
+    if (shaOf(bytes) != sha && readCopy(sha, &whole) == Copy::Whole) {
+        *words = QStringLiteral("Its kept bytes are cut short");
+        return {};
+    }
+    return bytes;
 }
 
 bool StoreMigration::removeUnmigrated(const QString& sha)

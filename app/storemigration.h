@@ -82,17 +82,18 @@ public:
     // Whatever the book says, a copy goes only when its bytes are
     // elsewhere: a plugin was made from it (wrappedFrom) or
     // plugins/unmigrated holds the very bytes the copy has, and they are
-    // still the ones its name hashes. Any other copy (an earlier version's move that
-    // recorded none, a record the user removed, a copy edited since) stays,
+    // still the ones its name hashes. Any other copy (an earlier version's
+    // move that recorded none, a record the user removed, a copy edited
+    // since) stays,
     // counted apart. In order, each step safe to stop after:
     // first, once, a record for each copy no record names that a move of
     // v0.8.0 left (recordUnnamed); vehicles/document (a failed sync stops
     // it, nothing deleted, as does the key still read after it: the
     // registry's failed delete, a fallback file's key; a key that isn't a
-    // book stays, as the move carried nothing from it), then each <sha256>.json in signals/ whose bytes
-    // are elsewhere, then the folder if it ends empty. A file of another
-    // name is left. The lines for the activity log, none when there was
-    // nothing to remove
+    // book stays, as the move carried nothing from it), then each
+    // <sha256>.json in signals/ whose bytes are elsewhere, then the folder
+    // if it ends empty. A file of another name is left. The lines for the
+    // activity log, none when there was nothing to remove
     struct Removal {
         bool oldBook = false; // vehicles/document removed
         bool oldBookLeft = false; // vehicles/document unreadable: it stays
@@ -112,7 +113,8 @@ public:
     // The bytes of the files that didn't move, <sha256>.json under
     // <the plugin store's folder>/unmigrated, named by the hash the book
     // has (a copy changed since it was kept no longer hashes to it): the
-    // hashes there; one's bytes for a Save, empty with words why not;
+    // hashes there; one's bytes for a Save, empty with words why not (kept
+    // bytes that don't hash to the name while the old copy does are cut)
     // and one removed, true when it is gone
     static QString unmigratedRoot();
     static QStringList unmigrated();

@@ -477,8 +477,8 @@ TEST(PluginPagesTest, APageIsAPathListedOnceAndFound)
 /* A Windows device name (any case, any extension, in any part) or a part
  * ending in a dot or a space, which Windows drops, opens the device or
  * another file from disk: a folder's read refuses it before the host
- * reads, a page or a data file alike. A packed file's paths are keys in its text, so a
- * plugin installed with one still loads */
+ * reads, a page or a data file alike. A packed file's paths are keys in its
+ * text, so a plugin installed with one still loads */
 TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
 {
     const char* const names[] = {"con.json", "p/nul", "Com1.tar.json",
