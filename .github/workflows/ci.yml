@@ -65,9 +65,13 @@ concurrency:
 # many jobs at once: without it Make builds one file at a time, MSBuild one
 # project at a time and ctest one case at a time. The hosted Linux and
 # Windows runners have four cores, the macOS ones three. The suite's cases
-# wait more than they compute, and the ones that share a fixed resource
-# (the vcan bus, the surrogate's log) are RUN_SERIAL, so verify.sh runs it
-# 8 at a time.
+# wait more than they compute, so win-build and linux-build set a higher
+# CTEST_PARALLEL_LEVEL of their own (verify.sh runs it that way too); the
+# CPU-bound entries carry PROCESSORS 2 (tests/CMakeLists.txt), so they
+# still share the cores. The workflow's value is the one for the jobs
+# that don't (macOS's late timers, the core jobs, coverage). The cases
+# that share a fixed resource (the vcan bus, the surrogate's log) are
+# RESOURCE_LOCK or RUN_SERIAL.
 #
 # HAVNE_WARNINGS_AS_ERRORS is the CMake option's default (CMakeLists.txt):
 # a GCC or Clang warning in first-party code fails the job. MSVC isn't
@@ -411,6 +415,8 @@ jobs:
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      CTEST_PARALLEL_LEVEL: '8'
     # Two runners, each with its own build, run alternate halves of ctest
     # (-I k,,2: every case once across the two); the first alone saves the
     # caches and runs the load test
@@ -915,6 +921,8 @@ jobs:
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      CTEST_PARALLEL_LEVEL: '8'
     # The app and its Qt tests (the "qt" label: the bridge's and QML's)
     # under GCC, the Python package against SocketCAN, the USDT probes and
     # the load test. The Qt-free suites run in core-and-tests (optimized,
