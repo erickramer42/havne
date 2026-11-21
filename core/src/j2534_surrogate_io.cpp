@@ -28,8 +28,6 @@
 #include "j2534_surrogate_client.h"
 #include "j2534_surrogate_log.h"
 
-using ecuio_sur_client::sur_log;
-
 namespace {
 
 bool ov_write(HANDLE pipe, HANDLE event, const void* buf, DWORD len,

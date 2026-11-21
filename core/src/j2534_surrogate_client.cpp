@@ -29,7 +29,6 @@
 #include "j2534_surrogate_log.h"
 
 using ecuio_sur_client::fetch_vendor_text;
-using ecuio_sur_client::sur_log;
 using ecuio_sur_client::transact;
 
 namespace {

@@ -66,7 +66,7 @@ void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out);
 
 } // namespace ecuio_sur_client
 
-#define SUR_LOG(h, ...) sur_log((h), __VA_ARGS__)
+#define SUR_LOG(h, ...) ecuio_sur_client::sur_log((h), __VA_ARGS__)
 
 #endif /* _WIN32 */
 
