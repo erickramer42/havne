@@ -761,6 +761,8 @@ inline void ecuio_seed_reports(ecuio_session_t* session,
  * request to see whether an ECU answers: the failure backoff's cap */
 constexpr int64_t ECUIO_UNPICKED_CHECK_US =
     static_cast<int64_t>(LINK_BACKOFF_CAP_MS) * 1000;
+static_assert(ECUIO_ENGINE_QUIET_CAP_US == ECUIO_UNPICKED_CHECK_US,
+              "a held quiet module is asked as often as an unpicked check");
 
 /* That interval as the workers read it: a test's own while one is set
  * (ecuio_set_unpicked_check_ms, internal.h) */

@@ -4,12 +4,10 @@
 // Modules that answer nothing (off, asleep, not fitted) beside modules
 // that answer, on the pacing bench (tests/pacing_bench.h), judged by the
 // answering signals' update intervals (cli/summary_lines.h's tally, its
-// P50 read at an eighth octave's top). Through the MX+ model each silent
-// row costs every lap its NO DATA; under the J2534 hold an absent
-// module's probes hold the segmented rows. Each pin is a bound a quiet
-// module's rule in the engine must meet, and today's engine fails every
-// one, so they stand DISABLED_ until that rule lands
-// (--gtest_also_run_disabled_tests runs them).
+// P50 read at an eighth octave's top). Each pin is a bound the engine's
+// quiet module rule (core/src/request_engine_quiet.h) meets: without it,
+// through the MX+ model each silent row costs every lap its NO DATA, and
+// under the J2534 hold an absent module's probes hold the segmented rows.
 
 #include "pacing_bench.h"
 
@@ -264,9 +262,10 @@ constexpr double kConnectLaterS = 5.0;
 } // namespace
 
 /* A silent module of 1, 4 or 8 rows beside the engine ECU's 8 through the
- * MX+ model: the engine's values keep their pace alone (164 ms). Today
- * each silent row's NO DATA goes in every lap: 279, 602 and 1,033 ms. */
-TEST(PacingTest, DISABLED_AnElm327sSilentRowsCostTheOthersNothing)
+ * MX+ model: the engine's values keep their pace alone (164 ms; 180 here,
+ * the tally's step). Without the quiet rule each silent row's NO DATA
+ * goes in every lap: 279, 602 and 1,033 ms. */
+TEST(PacingTest, AnElm327sSilentRowsCostTheOthersNothing)
 {
     const pace alone = engine_beside({});
     ASSERT_EQ(alone.answered, 8u) << text_of(alone);
@@ -280,9 +279,9 @@ TEST(PacingTest, DISABLED_AnElm327sSilentRowsCostTheOthersNothing)
 }
 
 /* Six silent modules of 4 rows beside the engine ECU's 8 through the MX+
- * model: the engine's values within twice their pace alone. Today they
- * come every 2.8 s, 24 NO DATA a lap. */
-TEST(PacingTest, DISABLED_AnElm327sSilentModulesCostTheOthersNothing)
+ * model: the engine's values within twice their pace alone (180 ms, as
+ * alone). Without the rule they come every 2.8 s, 24 NO DATA a lap. */
+TEST(PacingTest, AnElm327sSilentModulesCostTheOthersNothing)
 {
     const pace alone = engine_beside({});
     const pace beside = engine_beside(absent(0x608, 6));
@@ -293,9 +292,9 @@ TEST(PacingTest, DISABLED_AnElm327sSilentModulesCostTheOthersNothing)
 
 /* Four modules that answer (8, 4, 4 and 4 rows) beside 14 absent ones of
  * 4 rows, the whole-car shape, through the MX+ model: every answering
- * signal within twice its pace alone, none stale. Today every one comes
- * every 6.5 s, dimmed as stale. */
-TEST(PacingTest, DISABLED_FourModulesBesideFourteenAbsentKeepTheirLap)
+ * signal within twice its pace alone, none stale (524 ms against 426).
+ * Without the rule every one comes every 6.5 s, dimmed as stale. */
+TEST(PacingTest, FourModulesBesideFourteenAbsentKeepTheirLap)
 {
     const std::vector<module> present = {words(0x7E8, 8), words(0x7E9, 4),
                                          words(0x7EA, 4), words(0x7EB, 4)};
@@ -318,10 +317,11 @@ TEST(PacingTest, DISABLED_FourModulesBesideFourteenAbsentKeepTheirLap)
 /* The connect as shipped (identification and diagnostics on, the engine
  * ECU's PIDs walked and packed) of the same four modules beside 14
  * absent: every answering signal has its first value within 5 s of the
- * same connect with none absent (2.0 s), each absent module costing a
- * couple of waits. Today the last first value comes at 12.7 s, every
- * absent module's lists waited out item by item. */
-TEST(PacingTest, DISABLED_AConnectBesideFourteenAbsentReadsThePresentSoon)
+ * same connect with none absent (2.0 s; 5.2 s beside them), each absent
+ * module costing a couple of waits. Without the rule the last first
+ * value comes at 12.7 s, every absent module's lists waited out item by
+ * item. */
+TEST(PacingTest, AConnectBesideFourteenAbsentReadsThePresentSoon)
 {
     module engine;
     engine.rx = 0x7E8;
@@ -347,13 +347,43 @@ TEST(PacingTest, DISABLED_AConnectBesideFourteenAbsentReadsThePresentSoon)
         << " s with none absent";
 }
 
+/* The same connect, read from 5 s on: beside the 14 absent the answering
+ * signals keep twice their pace with none absent, since an absent
+ * module's lists settle unasked once it is quiet. Asked one item a lap
+ * each, their waits would hold every lap for about half a minute. */
+TEST(PacingTest, TheLapsAfterAConnectBesideFourteenAbsentKeepTheirPace)
+{
+    module engine;
+    engine.rx = 0x7E8;
+    engine.pids = true;
+    const std::vector<module> present = {engine, words(0x7E9, 4),
+                                         words(0x7EA, 4), words(0x7EB, 4)};
+    const std::vector<uint32_t> rx = {0x7E9, 0x7EA, 0x7EB};
+    const auto laps = [&](const std::vector<module>& gone) {
+        const Car car(present, gone);
+        pacing::bench_config cfg = car.config(pacing::elm327_bluetooth());
+        cfg.params.identify = true;
+        cfg.params.diagnose = true;
+        cfg.supported = pacing::test_car_pids();
+        cfg.seconds = 30;
+        cfg.settle_s = 5;
+        return pace_of(run(cfg), car.session, rx);
+    };
+    const pace none = laps({});
+    const pace beside = laps(absent(0x608, 14));
+    ASSERT_EQ(none.answered, 12u) << text_of(none);
+    EXPECT_EQ(beside.answered, 12u) << text_of(beside);
+    EXPECT_LE(beside.p50, kBesideMany * none.p50)
+        << text_of(beside) << " against " << text_of(none) << " with none";
+}
+
 /* The J2534 hold, the VX model: the engine ECU's 20 text rows (three
  * frames each) beside a module of 4 words, and 1, 4 or 14 absent modules
  * of 4 rows. The text rows keep their pace with none absent (490 ms)
- * within an eighth octave's step. Today an absent module's probe (one
- * ask in 8 under the hold) holds a chosen segmented row for its wait:
- * 572, 793 and 2,663 ms. */
-TEST(PacingTest, DISABLED_TheHoldsSegmentedRowsKeepTheirPaceBesideAbsentOnes)
+ * within an eighth octave's step (491, 491 and 524 ms). Without the rule
+ * an absent module's probe (one ask in 8 under the hold) holds a chosen
+ * segmented row for its wait: 572, 793 and 2,663 ms. */
+TEST(PacingTest, TheHoldsSegmentedRowsKeepTheirPaceBesideAbsentOnes)
 {
     module engine;
     engine.rx = 0x7E8;

@@ -38,7 +38,7 @@ struct Count {
     size_t first_3s = 0; /* the present modules' rows answered */
     size_t lost = 0;
     size_t lost_after_wake = 0;
-    size_t lost_settled = 0; /* from a second after the wake */
+    size_t lost_settled = 0; /* from a second after its first frame */
 };
 
 void add_rows(Bus& b, const Shape& s)
@@ -81,11 +81,16 @@ Count run(const Shape& s, int64_t until_us = 3000 * kMs)
     };
     size_t at_wake = 0;
     size_t at_settled = 0;
+    int64_t heard_us = INT64_MAX; /* a module that slept, at its first frame */
     while (b.now < until_us) {
+        for (uint32_t c = s.present; c < s.present + s.absent; ++c) {
+            heard_us =
+                b.e.chans[c].heard && heard_us == INT64_MAX ? b.now : heard_us;
+        }
         if (s.wake_us != 0 && b.now < s.wake_us) {
             at_wake = b.lost;
         }
-        if (s.wake_us != 0 && b.now < s.wake_us + 1000 * kMs) {
+        if (s.wake_us != 0 && b.now < heard_us + 1000 * kMs) {
             at_settled = b.lost;
         }
         b.pass();
@@ -132,12 +137,12 @@ TEST(J2534HoldTest, AFirstAskThatReadsLongCostsNoReplyAtConnect)
     EXPECT_EQ(c.lost, 0u);
 }
 
-/* A module of long rows asleep at connect, every row's wait run out, then
- * awake at 5 s: its first frame after so long a silence takes back its
- * rows' waits run out, so each row's first answer is judged by its defs
- * again and goes alone. The waking reply itself, judged one frame, can
- * cost each other module one Single Frame, once (3 here; 24 with the
- * waits run out kept), and nothing after */
+/* A module of long rows asleep at connect, quiet after its first waits,
+ * then awake at 5 s and read at its next step: its first frame after so
+ * long a silence takes back its rows' waits run out, so each row's first
+ * answer is judged by its defs again and goes alone. The waking reply
+ * itself, judged one frame, can cost each other module one Single Frame,
+ * once (3 here), and nothing from a second after it */
 TEST(J2534HoldTest, AModuleAwakeAfterASilenceIsJudgedByItsDefsAgain)
 {
     Shape s{3, 1, 20, true};

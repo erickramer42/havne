@@ -184,6 +184,8 @@ struct ecuio_engine_channel {
     int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
     int64_t walk_until_us = 0;  /* the walk's budget ends (walk_timed) */
+    int64_t heard_us = 0;       /* the last frame from it (heard) */
+    int64_t quiet_next_us = 0;  /* a held quiet channel's next row */
     int32_t outstanding = ECUIO_ENGINE_NONE; /* a table index, the one-shot,
                                               * or none (after the int64s:
                                               * the padding check) */
@@ -192,8 +194,15 @@ struct ecuio_engine_channel {
     uint32_t fast_run = 0;      /* fast requests since the last slow one,
                                  * at most ECUIO_ENGINE_FAST_PER_SLOW */
     uint32_t requests = 0;      /* this channel's requests in the rotation */
+    /* A quiet module (request_engine_quiet.h): its waits run out in a row,
+     * a pack's rows each; its rows asked while held */
+    uint32_t quiet_run = 0;
+    uint32_t quiet_asks = 0;
     bool in_step = true;        /* no request has timed out since the last
                                  * positive reply: see ecuio_engine_on_frame */
+    bool heard = false; /* a frame came from it since the start or a rescan */
+    bool quiet = false; /* judged quiet (ecuio_engine_quiet_expired) */
+    bool quiet_settled = false; /* items settled unasked while held */
     /* The one-shot: what goes out outside the rotation, one at a time,
      * whoever it's for (the walk's next bitmap, an identification item,
      * a scanned DID). identifying and scanning say it's taken; the walk
@@ -352,6 +361,9 @@ struct ecuio_request_engine {
     bool pick_only = false;
     /* The floor between the starts of two writes on a channel */
     int64_t gap_us = ECUIO_ENGINE_GAP_US;
+    /* The last row a held quiet channel asked, any channel's: the next
+     * waits the spacing (request_engine_quiet.h) */
+    int64_t quiet_ask_us = INT64_MIN / 4;
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
     uint32_t scan_count = 0;
     bool scan_first = false;    /* the scan doesn't take turns with the rotation */

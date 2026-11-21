@@ -80,9 +80,9 @@ inline bool ecuio_engine_turn_walking(const ecuio_engine_channel& ch)
 }
 
 /* When channel ch next has something to ask, by its floor, a focus's gap
- * between sweeps, its session and a key's window that holds it (none
- * holds a key offered); INT64_MAX while a request is out or with nothing
- * to ask */
+ * between sweeps, a held quiet channel's step, its session and a key's
+ * window that holds it (none holds a key offered); INT64_MAX while a
+ * request is out or with nothing to ask */
 inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
                                          const ecuio_engine_channel& ch)
 {
@@ -96,6 +96,10 @@ inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
         at = (e->min_sweep_us > 0 && ch.next_sweep_us > ch.next_send_us)
                  ? ch.next_sweep_us
                  : ch.next_send_us;
+        if (ecuio_engine_quiet_held(e, ch)) {
+            const int64_t q = ecuio_engine_quiet_due_us(e, ch);
+            at = q > ch.next_send_us ? q : ch.next_send_us;
+        }
     }
     const int64_t s = ecuio_engine_session_next_us(e, ch);
     at = s < at ? s : at;

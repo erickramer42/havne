@@ -194,11 +194,45 @@ inline bool ecuio_engine_scan_late(ecuio_request_engine* e, uint32_t c,
     return false;
 }
 
+/* Channel c's unanswered scan entries, identification items and
+ * diagnostics items are asked again, its scan in a round of its own; a
+ * channel mid-clear keeps its report as the caller saved it until the
+ * clear ends */
+inline void ecuio_engine_ask_again(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        ecuio_scan_entry& s = e->scan[i];
+        if (s.channel != c) {
+            continue;
+        }
+        s.retried = 0;
+        if (s.outcome == ECUIO_SCAN_UNANSWERED) {
+            s.outcome = ECUIO_SCAN_UNASKED;
+            ++ch.scan_pending;
+        }
+    }
+    for (uint32_t i = 0; i < ch.ident_count; ++i) {
+        if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
+            ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
+            ++ch.ident_pending;
+        }
+    }
+    for (uint32_t i = 0;
+         i < ch.diag_count && ch.clear_step == ECUIO_CLEAR_STEP_NONE; ++i) {
+        if (ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED) {
+            ch.diag_items[i].outcome = ECUIO_DIAG_UNASKED;
+            ++ch.diag_pending;
+            ch.diag.flags &= ~ECUIO_DIAG_COMPLETE;
+        }
+    }
+}
+
 /* Asks every unanswered scan entry, identification item and diagnostics
  * item again: the driver's call when the link returns to ok, as the walk
  * resumes. Silence wasn't an answer: a row whose wait ran out before any
- * answer is judged by its defs again. A channel mid-clear keeps its
- * report as the caller saved it until the clear ends. */
+ * answer is judged by its defs again, and no channel is quiet or heard
+ * (request_engine_quiet.h). */
 inline void ecuio_engine_rescan(ecuio_request_engine* e)
 {
     for (uint32_t i = 0; i < e->count; ++i) {
@@ -208,16 +242,13 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             q.ran_out = 0;
         }
     }
-    for (uint32_t i = 0; i < e->scan_count; ++i) {
-        ecuio_scan_entry& s = e->scan[i];
-        s.retried = 0; /* the link's return starts a round of its own */
-        if (s.outcome == ECUIO_SCAN_UNANSWERED) {
-            s.outcome = ECUIO_SCAN_UNASKED;
-            ++e->chans[s.channel].scan_pending;
-        }
-    }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
+        ecuio_engine_ask_again(e, c);
+        ch.quiet_run = 0;
+        ch.heard = false;
+        ch.quiet = false;
+        ch.quiet_settled = false;
         ch.check_due = false; /* the link is back: no check is owed */
         if (ch.unpacked) {
             ch.unpacked = false;
@@ -234,20 +265,6 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
             }
             ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
             ++ch.generation;
-        }
-        for (uint32_t i = 0; i < ch.ident_count; ++i) {
-            if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
-                ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
-                ++ch.ident_pending;
-            }
-        }
-        for (uint32_t i = 0;
-             i < ch.diag_count && ch.clear_step == ECUIO_CLEAR_STEP_NONE; ++i) {
-            if (ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED) {
-                ch.diag_items[i].outcome = ECUIO_DIAG_UNASKED;
-                ++ch.diag_pending;
-                ch.diag.flags &= ~ECUIO_DIAG_COMPLETE;
-            }
         }
     }
 }
