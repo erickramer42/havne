@@ -31,8 +31,9 @@ TEST(BridgeTest, OneStoreMigrationWritesEachCorpusBookAsItsFormat2)
     for (const QString& name : cases) {
         OldState old;
         ASSERT_TRUE(old.valid());
-        keepCorpusSignals(old);
-        old.set(kOldBook, corpusText(name + QStringLiteral(".json")));
+        const QString text = corpusText(name + QStringLiteral(".json"));
+        keepCorpusSignals(old, text);
+        old.set(kOldBook, text);
         const Report r = old.start();
         EXPECT_TRUE(r.marked) << name.toStdString();
         const QString expect =

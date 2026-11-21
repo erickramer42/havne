@@ -170,7 +170,8 @@ void runEveryStoreCall(SessionBridge& bridge, const QString& out,
 
 /* Two starts after an update from before v0.8.0: the first moves the
  * files and leaves the earlier version's data; the second removes it,
- * keeping the copy that couldn't be moved, and its Save still writes it */
+ * keeping the copy that couldn't be moved and the copy no vehicle names,
+ * whose bytes are nowhere else, and Save still writes each */
 TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
 {
     OldState old;
@@ -219,11 +220,11 @@ TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
         EXPECT_EQ(bridge.migrateStores(prefs),
                   (QStringList{kListRemoved,
                                QStringLiteral("The earlier version's signal "
-                                              "files removed: 2"),
+                                              "files removed: 1"),
                                QStringLiteral("Signal files that weren't "
                                               "moved, kept in the earlier "
                                               "version's folder for Save: "
-                                              "1")}));
+                                              "2")}));
         QTemporaryDir out;
         ASSERT_TRUE(out.isValid());
         const QString to = out.path() + QStringLiteral("/big.json");
@@ -232,13 +233,21 @@ TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
         EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
             << saved.value(QStringLiteral("words")).toString().toStdString();
         EXPECT_EQ(QFileInfo(to).size(), ECUIO_PLUGIN_PACKAGE_MAX + 1);
+        const QString looseTo = out.path() + QStringLiteral("/loose.json");
+        const QVariantMap looseSaved =
+            bridge.saveUnmigratedFile(loose, QUrl::fromLocalFile(looseTo));
+        EXPECT_TRUE(looseSaved.value(QStringLiteral("ok")).toBool())
+            << looseSaved.value(QStringLiteral("words"))
+                   .toString()
+                   .toStdString();
+        EXPECT_EQ(readBytes(looseTo), signalFile(QStringLiteral("Loose")));
     }
     EXPECT_FALSE(old.has(kOldBook));
-    EXPECT_EQ(namesIn(old.signalsRoot()),
-              (QStringList{big + QStringLiteral(".json"),
-                           QStringLiteral("not-a-hash.json"),
-                           QStringLiteral("notes.txt")}))
-        << "the moved copy and " << loose.left(12).toStdString() << " go";
+    QStringList left{
+        big + QStringLiteral(".json"), loose + QStringLiteral(".json"),
+        QStringLiteral("not-a-hash.json"), QStringLiteral("notes.txt")};
+    left.sort();
+    EXPECT_EQ(namesIn(old.signalsRoot()), left) << "the moved copy goes";
     EXPECT_FALSE(old.book().isEmpty()) << "the new book stays";
 }
 

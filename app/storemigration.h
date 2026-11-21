@@ -33,10 +33,11 @@
 // left out. A file that didn't move is listed under the entry's
 // unmigrated as { sha256, name, words }, with kept false when its copy
 // is there but its bytes couldn't be copied, and so are only in the old
-// folder. With an old book
-// that can't be read no entry exists, and the files that didn't move
-// are listed the same way under the book's own unmigrated, kept false
-// each, since their bytes stay where they are. VehicleBook.qml judges
+// folder. With an old book that can't be read no entry exists, and the
+// files that didn't move are listed the same way under the book's own
+// unmigrated, kept false each, since their bytes stay where they are; so
+// is each copy in signals/ that no vehicle of a readable book names, which
+// Save and Remove reach there and the removal spares. VehicleBook.qml judges
 // the result, and tests/data/vehiclebook holds both formats for the two
 // readers.
 
@@ -59,7 +60,8 @@ public:
         int made = 0;         // files that became a new plugin
         int kept = 0;         // files whose plugin was here already
         int unmigrated = 0;   // files the book names that didn't move
-        int unnamed = 0;      // copies no vehicle lists, left where they are
+        int unnamed = 0;      // copies no vehicle lists: recorded, left where
+                              // they are
         int addresses = 0;    // saved addresses given their new profile
         qint64 elapsedMs = 0;
         QStringList lines; // for the activity log: no path, no VIN

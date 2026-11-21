@@ -428,6 +428,26 @@ QJsonObject newBook(const OldBook& old, PluginStore& store,
     return book;
 }
 
+// The old folder's copies no vehicle of a readable book names: each gets
+// a record under the book's own unmigrated, kept false, so Save and Remove
+// reach it and the removal spares bytes that are nowhere else
+void keepUnnamed(const QList<OldFile>& files, NotMoved* left, Report* report)
+{
+    QStringList named;
+    for (const OldFile& f : files) {
+        named << f.sha;
+    }
+    for (const QString& sha : shasIn(StoreMigration::oldSignalsRoot())) {
+        if (named.contains(sha)) {
+            continue;
+        }
+        ++report->unnamed;
+        left->why.insert(sha, QStringLiteral("No vehicle lists it"));
+        left->loose << sha;
+        left->unkept << sha;
+    }
+}
+
 // The files into the store, the bytes of those that didn't move kept, and
 // the new book written: false when the run ends here (the seam, or a
 // book that can't be saved)
@@ -435,16 +455,6 @@ bool moveFiles(QSettings& prefs, PluginStore& store, const OldBook& old,
                Report* report)
 {
     const QList<OldFile> files = oldFiles(old);
-    if (old.readable) {
-        QStringList named;
-        for (const OldFile& f : files) {
-            named << f.sha;
-        }
-        const QStringList copies = shasIn(StoreMigration::oldSignalsRoot());
-        for (const QString& sha : copies) {
-            report->unnamed += named.contains(sha) ? 0 : 1;
-        }
-    }
 
     QHash<QString, QString> refused;
     QStringList fresh;
@@ -469,6 +479,9 @@ bool moveFiles(QSettings& prefs, PluginStore& store, const OldBook& old,
     // Judged once every file is in: a later file can take an earlier
     // one's place in a plugin, and that one then has none
     NotMoved left;
+    if (old.readable) {
+        keepUnnamed(files, &left, report);
+    }
     for (const OldFile& f : files) {
         if (!profileOf(store, f.sha).isEmpty()) {
             // A copy an earlier run kept, while its wrap failed, is no one's now
