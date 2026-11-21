@@ -40,8 +40,7 @@ int run_sim_elm327(const SimArgs& args)
     const ecuio_status_t st = ecuio_sim_create_unbound(args.uri, 0, &sim);
     if (st != ECUIO_OK) {
         write_error(out, st);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const auto created = std::chrono::steady_clock::now();
     cli::Elm327Server server;
@@ -49,8 +48,7 @@ int run_sim_elm327(const SimArgs& args)
     if (!server.open(args.elm327_at, &why)) {
         ecuio_sim_destroy(sim);
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     {
         char buf[1024];
@@ -139,8 +137,7 @@ int run_sim(const SimArgs& args)
         args.uri, args.on, args.desk_bus ? ECUIO_SIM_ALLOW_DESK_BUS : 0u, &sim);
     if (st != ECUIO_OK) {
         write_error(out, st);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     {
         char buf[1024];

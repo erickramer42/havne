@@ -15,6 +15,7 @@
 #define HAVNE_CLI_PLUGIN_LINES_H
 
 #include "jsonl.h"
+#include "key_field.h"
 #include "signal_file_lines.h"
 
 #include "ecuio/plugin.h"
@@ -356,14 +357,15 @@ inline bool lacks_gauge(const ecuio_signal_file_t* file,
 
 inline size_t no_gauge_line_bytes()
 {
-    return 1024 + 2 * sizeof(ecuio_signal_def_t{}.name);
+    return 1024 + 2 * sizeof(ecuio_signal_def_t{}.name) + kKeyFieldBytes;
 }
 
-// {"type":"no_gauge", variant, id, name, kind, words}, after a variant's
+// {"type":"no_gauge", variant, id, name, key, kind, words}, after a variant's
 // lines for each number or computed signal of its own with no gauge: a
 // note, never a failure
 inline void no_gauge_line(Line& l, const char* variant,
-                          const ecuio_signal_def_t& d)
+                          const ecuio_signal_def_t& d,
+                          const char* key = nullptr)
 {
     const char* kind = kind_word(d);
     l.raw("{\"type\":\"no_gauge\"");
@@ -373,6 +375,7 @@ inline void no_gauge_line(Line& l, const char* variant,
     l.u64(d.id);
     l.key("name");
     l.string(d.name, sizeof d.name);
+    key_field(l, key, ECUIO_SIGNAL_KEY_LEN);
     l.key("kind");
     l.string(kind, std::strlen(kind));
     l.key("words");
