@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "tidy-size-ratchet.sh")
@@ -45,7 +46,7 @@ def note(path, line, n):
             % (path, line, n))
 
 
-def run(bash, size_lines, base_lines, files, update=0, notes=None):
+def run_one(bash, size_lines, base_lines, files, update=0, notes=None):
     if notes is None:
         # Each size warning's note, 90 lines, as clang-tidy prints it
         notes = [note(m.group(1), int(m.group(2)), 90)
@@ -66,11 +67,39 @@ def run(bash, size_lines, base_lines, files, update=0, notes=None):
         return p.returncode, p.stdout + p.stderr, base_after
 
 
+# Each bash spawn costs seconds on Windows, so the cases run twice: a first
+# pass records every distinct call, the calls run on a pool, and the second
+# pass reads their results.
+_calls = {}
+_recording = True
+
+
+def run(bash, size_lines, base_lines, files, update=0, notes=None):
+    key = repr((size_lines, base_lines, files, update, notes))
+    if _recording:
+        _calls.setdefault(key, (bash, size_lines, base_lines, files, update, notes))
+        return 0, "", []
+    return _calls[key]
+
+
 def main():
+    global _recording
     bash = find_bash()
     if not bash:
         print("no bash found")
         return 77
+    _recording = True
+    cases(bash)
+    todo = dict(_calls)
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 2)) as pool:
+        results = list(pool.map(lambda a: run_one(*a), todo.values()))
+    _calls.clear()
+    _calls.update(zip(todo.keys(), results))
+    _recording = False
+    return cases(bash)
+
+
+def cases(bash):
     f = "core/src/a.cpp"
     fails = []
 
@@ -170,6 +199,8 @@ def main():
     expect("update keeps the grown number and lowers the shrunk",
            base, ["%s	go	85	-" % f, "%s	run	90	-" % f], str(base))
 
+    if _recording:
+        return 0
     for m in fails:
         print("FAIL " + m)
     print("%d failure(s)" % len(fails) if fails else "ok")
