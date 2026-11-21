@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "plugin_rules.h" /* core/src: names_a_device */
 #include "plugin_wrap_support.h"
 
 using namespace plugin_wrap_test;
@@ -474,9 +475,9 @@ TEST(PluginPagesTest, APageIsAPathListedOnceAndFound)
 }
 
 /* A Windows device name (any case, any extension, in any part) or a part
- * ending in a dot, which Windows drops, opens the device or another file
- * from disk: a folder's read refuses it before the host reads, a page or
- * a data file alike. A packed file's paths are keys in its text, so a
+ * ending in a dot or a space, which Windows drops, opens the device or
+ * another file from disk: a folder's read refuses it before the host
+ * reads, a page or a data file alike. A packed file's paths are keys in its text, so a
  * plugin installed with one still loads */
 TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
 {
@@ -491,9 +492,9 @@ TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
         EXPECT_EQ(folder.status, ECUIO_ERR_INVALID_ARGUMENT);
         EXPECT_NE(folder.detail.find("page '" + std::string(name) +
                                      "' is a Windows device name (con, nul, "
-                                     "com1, ...) or ends in a dot: a "
-                                     "folder's file isn't read by such a "
-                                     "name"),
+                                     "com1, ...) or ends in a dot or a "
+                                     "space: a folder's file isn't read by "
+                                     "such a name"),
                   std::string::npos)
             << folder.detail;
     }
@@ -519,9 +520,25 @@ TEST(PluginPagesTest, ADeviceNameLoadsPackedAndIsRefusedInAFolder)
     EXPECT_EQ(fixture.status, ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_NE(fixture.detail.find("fixture 't/Aux.json' is a Windows device "
                                   "name (con, nul, com1, ...) or ends in a "
-                                  "dot"),
+                                  "dot or a space"),
               std::string::npos)
         << fixture.detail;
+}
+
+/* Windows drops a trailing space as it does a dot, so "nul " opens the
+ * device. The loader's path rule refuses a space already; the rule that
+ * names devices doesn't lean on it */
+TEST(PluginPagesTest, ADeviceNameWithATrailingSpaceIsADevice)
+{
+    for (const char* name : {"nul ", "t/con /v.json", "v.json ", "Com1 ",
+                             "a/b./c", "x. "}) {
+        SCOPED_TRACE(name);
+        EXPECT_TRUE(ecuio_plugin_rules::names_a_device(name));
+    }
+    for (const char* name : {"nul-x.json", "a b", "t/v.json", "n ul"}) {
+        SCOPED_TRACE(name);
+        EXPECT_FALSE(ecuio_plugin_rules::names_a_device(name));
+    }
 }
 
 // A name that only starts like a Windows device is a path like any other
