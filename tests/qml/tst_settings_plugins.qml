@@ -415,10 +415,13 @@ SettingsKit {
         compare(find(page, "profileHint").text,
                 "obd2's signals and those of Plus 1.0.0, picked for this vehicle")
 
-        // Typed back to Default, both show, so the row is the URI's
+        // Typed back to Default, both show, so the row is the URI's; the
+        // pick stands in for Default, so Default's words stay the ordinary ones
         field.text = "elm327://COM9"
         verify(find(page, "profile_default").checked)
         verify(!find(page, "profile_plugin.plus.base").checked)
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"))
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
 
         // A second such pick is read too, but the first still stands in
         verify(importFile(page, "more.json", "More", "D101", true))
@@ -468,8 +471,21 @@ SettingsKit {
         verify(find(page, "profile_default").checked)
         compare(find(page, "profileHint").text,
                 "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
-        verify(page.picksPart.signalsSummary().endsWith("(Default reads plain obd2)"),
+        verify(page.picksPart.signalsSummary().endsWith("(Default reads plain OBD-II)"),
                page.picksPart.signalsSummary())
+
+        // An adapter's address of either kind says it; a pick the store
+        // lacks is nothing for Default to leave out
+        field.text = "j2534://C:/fake.dll"
+        verify(find(page, "profile_default").checked)
+        compare(find(page, "profileHint").text,
+                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"),
+               find(page, "profileHint").text)
+        verify(!page.picksPart.signalsSummary().includes("Default reads"))
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.extras.base"]))
+        field.text = "elm327://COM9"
 
         // Another profile chosen, or an address that isn't an adapter's: the
         // ordinary words

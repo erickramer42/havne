@@ -490,8 +490,9 @@ QtObject {
         if (r.outcome !== "switched")
             return ""
         return r.previous === ""
-                ? qsTr("The connected car's VIN is %1's: pick it to read its signals at the next connect").arg(r.label)
-                : qsTr("The connected car's VIN is %1's, but this session reads %2: pick %1 for the next connect")
+                ? qsTr("This car's VIN is %1's and no vehicle is picked. Pick %1 to read its signals at the next connect")
+                      .arg(r.label)
+                : qsTr("This car's VIN is %1's and %2 is picked. Pick %1 to read its signals at the next connect")
                       .arg(r.label, r.previous)
     }
 
@@ -504,13 +505,13 @@ QtObject {
             return qsTr("Vehicle: %1 (recognized from now on)").arg(r.label)
         case "switched":
             return r.previous === ""
-                    ? qsTr("Vehicle: %1 (recognized, not picked; pick it for the next connect)").arg(r.label)
-                    : qsTr("Vehicle: %1 (recognized; this session reads %2, pick %1 for the next connect)")
+                    ? qsTr("Vehicle: none picked (the car's VIN is %1's; pick it for the next connect)").arg(r.label)
+                    : qsTr("Vehicle: %2 (the car's VIN is %1's; pick %1 for the next connect)")
                           .arg(r.label, r.previous)
         default:
             return r.previous === ""
-                    ? qsTr("Vehicle: saved as %1 (not picked)").arg(r.label)
-                    : qsTr("Vehicle: not %1 (its VIN differs); saved as %2, not picked for this session")
+                    ? qsTr("Vehicle: none picked (the car's VIN is new; saved as %1)").arg(r.label)
+                    : qsTr("Vehicle: %1 (the car's VIN differs; saved as %2, not picked)")
                           .arg(r.previous, r.label)
         }
     }

@@ -517,15 +517,15 @@ TestCase {
         compare(r.doc, unlearned, "the session's pick stays, the book is as it was")
         compare(r.doc.picked, "v2")
         compare(VehicleBook.logLine(r),
-                "Vehicle: Daily driver (recognized; this session reads Weekend car, pick Daily driver for the next connect)")
+                "Vehicle: Weekend car (the car's VIN is Daily driver's; pick Daily driver for the next connect)")
         compare(VehicleBook.pickNote(r),
-                "The connected car's VIN is Daily driver's, but this session reads Weekend car: pick Daily driver for the next connect")
+                "This car's VIN is Daily driver's and Weekend car is picked. Pick Daily driver to read its signals at the next connect")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-a", "elm327://COM6")
         compare(r.doc.picked, "", "no pick is no pick")
-        compare(VehicleBook.logLine(r), "Vehicle: Daily driver (recognized, not picked; pick it for the next connect)")
+        compare(VehicleBook.logLine(r), "Vehicle: none picked (the car's VIN is Daily driver's; pick it for the next connect)")
         compare(VehicleBook.pickNote(r),
-                "The connected car's VIN is Daily driver's: pick it to read its signals at the next connect")
+                "This car's VIN is Daily driver's and no vehicle is picked. Pick Daily driver to read its signals at the next connect")
         // Only a switch is offered
         compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-a", "elm327://COM6")), "")
         compare(VehicleBook.pickNote(VehicleBook.recognize(book(), "key-c", "elm327://COM6")), "")
@@ -538,11 +538,11 @@ TestCase {
                   uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
                   picks: [], own: "", vinMatches: [], baseline: "" })
         compare(VehicleBook.logLine(r),
-                "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1, not picked for this session")
+                "Vehicle: Daily driver (the car's VIN differs; saved as Vehicle 1, not picked)")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")
         compare(r.doc.picked, "")
-        compare(VehicleBook.logLine(r), "Vehicle: saved as Vehicle 1 (not picked)")
+        compare(VehicleBook.logLine(r), "Vehicle: none picked (the car's VIN is new; saved as Vehicle 1)")
     }
 
     // A vehicle a VIN adds picks no plugin, so the URI it keeps reads

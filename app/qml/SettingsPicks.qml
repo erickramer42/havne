@@ -164,7 +164,7 @@ Item {
                    : named.length === 1 ? qsTr("%1: %2").arg(plugins, first)
                    : qsTr("%1: %2 and %3 more").arg(plugins, first).arg(named.length - 1)
         const unread = named.length > 0 && host.uriPart.unreadPick !== null
-                       && host.uriPart.profileChoice === "default" ? qsTr(" (Default reads plain obd2)") : ""
+                       && host.uriPart.profileChoice === "default" ? qsTr(" (Default reads plain OBD-II)") : ""
         return said + unread + (missing === 0 ? "" : missing === 1 ? qsTr(", 1 pick missing")
                                                            : qsTr(", %1 picks missing").arg(missing))
     }

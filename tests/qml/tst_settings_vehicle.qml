@@ -426,20 +426,39 @@ SettingsKit {
         find(page, "uriField").text = uri
         log = []
         press(page, "connectButton")
-        tryVerify(() => log.some(l => l.startsWith("Vehicle: Daily driver")), 10000)
+        const offer = "Vehicle: Weekend car (the car's VIN is Daily driver's; pick Daily driver for the next connect)"
+        tryVerify(() => log.includes(offer), 10000, "the offer is logged")
+        verify(!log.some(l => l.startsWith("Vehicle: Daily driver")), "no line names it as the one read")
         compare(page.pickedVehicle.id, weekend, "the session's pick stays")
-        verify(log.includes("Vehicle: Daily driver (recognized; this session reads Weekend car, "
-                            + "pick Daily driver for the next connect)"), log.join("\n"))
         page.open("vehicle")
         verify(note.visible)
-        compare(note.text, "The connected car's VIN is Daily driver's, but this session reads Weekend car: "
-                           + "pick Daily driver for the next connect")
+        const said = "This car's VIN is Daily driver's and Weekend car is picked. "
+                     + "Pick Daily driver to read its signals at the next connect"
+        compare(note.text, said)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
-        verify(note.visible, "it stays after the session")
+        verify(note.visible, "it stays true after the session")
+        compare(note.text, said)
         compare(page.pickedVehicle.id, weekend)
+
+        // A change of the pick ends it, New included, and a session's start;
+        // the part's text is read, since the note shows on the Vehicle page only
+        const own = page.ownPart
+        find(page, "vehicleLabelField").text = "Third car"
+        press(page, "vehicleNew")
+        compare(own.vinPickNote, "", "New ends the offer")
+        press(page, "vehicle_" + weekend)
+        press(page, "connectButton")
+        tryVerify(() => own.vinPickNote !== "", 10000, "offered again by the next session")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        press(page, "connectButton")
+        compare(own.vinPickNote, "", "a session's start ends it")
+        tryVerify(() => own.vinPickNote !== "", 10000, "and the VIN offers it again")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         press(page, "vehicle_" + daily)
-        verify(!note.visible, "the user's pick ends it")
+        compare(own.vinPickNote, "", "the user's pick ends it")
         Bridge.logMessage.disconnect(collect)
     }
 
@@ -449,6 +468,9 @@ SettingsKit {
     function test_theVinsNamingAnotherVehicleLeavesTheFieldAndTheConnection() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")
+        const log = []
+        const collect = line => log.push(line)
+        Bridge.logMessage.connect(collect)
         const page = createPage()
         const uri = "j2534://" + Harness.fakeDllPath
         find(page, "vehicleLabelField").text = "Daily driver"
@@ -470,18 +492,21 @@ SettingsKit {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected && page.pickedVehicle.uri === named, 30000,
                   "the connect keeps the URI")
-        wait(200)   // the VIN's recognition has run by the connect's end
+        tryVerify(() => log.some(l => l.includes("the car's VIN is Daily driver's")), 10000,
+                  "the VIN has been read")
         compare(page.pickedVehicle.id, weekend, "the pick stays")
         compare(find(page, "uriField").text, named, "the field stays")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         compare(page.pickedVehicle.id, weekend)
+        compare(find(page, "uriField").text, named, "the field keeps the plugin after the session")
         compare(page.pickedVehicle.uri, named, "the vehicle keeps its own plugin's connection")
+        Bridge.logMessage.disconnect(collect)
     }
 
     // A vehicle the VIN adds during a session holds no signal file, so its
-    // connection doesn't name the last vehicle's, and neither does the
-    // field once the session ends
+    // connection doesn't name the last vehicle's; the picked vehicle and
+    // the field keep the plugin the session read
     function test_aVehicleTheVinAddsKeepsNoOtherVehiclesFile() {
         if (Harness.fakeDllPath === "")
             skip("needs the fake J2534 DLL (Windows)")
@@ -503,6 +528,9 @@ SettingsKit {
         compare(page.pickedVehicle.id, weekend, "the session's pick stays")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 30000)
+        const named = uri + "?profile=plugin.extras.base"
+        compare(find(page, "uriField").text, named, "the field keeps the plugin")
+        compare(page.pickedVehicle.uri, named, "and so does the picked vehicle's address")
     }
 
     // ADR-0056 section 4: the row lists Off and the bridge's choices,
