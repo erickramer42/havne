@@ -8,7 +8,9 @@
 # scripts/tidy-size-baseline.txt (scripts/tidy-size-ratchet.sh): a function
 # past a threshold that the baseline doesn't list fails, and so does a
 # baseline line that no longer applies or a listed function that grew, so
-# the list and its numbers only shrink.
+# the list and its numbers only shrink. It also runs the file-length ratchet
+# (scripts/filelength_check.py, scripts/filelength-baseline.txt): a source file
+# past 1,000 lines that isn't listed, or a listed one that grew, fails.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
@@ -57,6 +59,20 @@ else
     TREE=${1:-build-tidy}
 fi
 DB=$TREE/compile_commands.json
+
+# The file-length ratchet (scripts/filelength_check.py): cheap, needs no
+# compiler, and runs before the long part. CI's shards share the tree, so
+# shard 1 alone judges it.
+case "${HAVNE_TIDY_SHARD:-1/1}" in
+    1/*)
+        PY=python
+        command -v python > /dev/null 2>&1 || PY=python3
+        fl=
+        [ "$UPDATE" = 1 ] && fl=--update
+        if ! "$PY" -I scripts/filelength_check.py $fl; then
+            exit 1
+        fi ;;
+esac
 
 # A Developer environment on Windows: vcvars64's variables, read through
 # a cmd of its own and taken into this shell (PATH converted)
