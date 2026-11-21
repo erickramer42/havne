@@ -246,7 +246,8 @@ void recording_export::mark_sparse()
 
 std::string recording_export::wide_head() const
 {
-    std::string h = "Time (ms)";
+    std::string h = kUtf8Bom; /* Excel reads a CSV without one as ANSI */
+    h += "Time (ms)";
     for (const wide_column& c : columns_) {
         h += ',';
         h += c.head;

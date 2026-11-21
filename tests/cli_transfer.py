@@ -283,7 +283,7 @@ def candump(cli):
 
 def csv_rows(path):
     """The comment line, then the rows under the header"""
-    with open(path, encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         comment = f.readline()
         rows = list(csv.reader(f))
     if rows[0] != ["time_s", "signal", "unit", "value", "key"]:
@@ -409,7 +409,7 @@ def csv_export(cli, recording):
 def wide_rows(path):
     """The wide CSV: its header cells and its rows, each cell a number or
     empty and the times whole ms ascending"""
-    with open(path, encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         raw = f.read()
     if "\r\n" not in raw or "\n" in raw.replace("\r\n", ""):
         raise SystemExit("FAIL  the wide CSV isn't CRLF throughout")

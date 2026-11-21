@@ -673,7 +673,7 @@ TEST(CsvExportTest, EachValueIsARowAsRecorded)
     fs::remove(f.path / "rec" / "frames.csv");
     CsvExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
-    EXPECT_EQ(e.bytes,
+    EXPECT_EQ(unbommed(e.bytes),
               csv_head("a scrubbed export",
                        "4 values of 3 signals, 0.001000 s to 0.003000 s", 0,
                        0) +
@@ -689,7 +689,7 @@ TEST(CsvExportTest, EachValueIsARowAsRecorded)
     /* A range takes its values alone, and says where they run */
     CsvExported mid(f, 0, 1500, 2600, "mid.csv");
     ASSERT_EQ(mid.rc, ECUIO_OK) << mid.detail;
-    EXPECT_EQ(mid.bytes,
+    EXPECT_EQ(unbommed(mid.bytes),
               csv_head("a scrubbed export",
                        "2 values of 2 signals, 0.002000 s to 0.002500 s", 0,
                        0) +
@@ -697,7 +697,7 @@ TEST(CsvExportTest, EachValueIsARowAsRecorded)
                   "0.002500,\"Trim, bank 1\",%,3.1\n");
     CsvExported none(f, 0, 9000, 0, "none.csv");
     ASSERT_EQ(none.rc, ECUIO_OK) << none.detail;
-    EXPECT_EQ(none.bytes,
+    EXPECT_EQ(unbommed(none.bytes),
               csv_head("a scrubbed export", "0 values of 0 signals", 0, 0));
 }
 
