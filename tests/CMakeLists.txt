@@ -2603,6 +2603,9 @@ endif()
 if(WIN32)
     add_executable(test_j2534_surrogate
         test_j2534_surrogate.cpp
+        test_j2534_surrogate_open.cpp
+        test_j2534_surrogate_wedged.cpp
+        test_j2534_surrogate_reads.cpp
     )
     target_link_libraries(test_j2534_surrogate PRIVATE
         ecuio-core
