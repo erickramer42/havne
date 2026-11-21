@@ -69,6 +69,7 @@ qt_add_library(app_ui STATIC
     recordingexport.h
     recording_frameset.cpp
     recording_frameset.h
+    refusing_network.h
     recording_pairs.cpp
     recordingframes.cpp
     recordingframes.h

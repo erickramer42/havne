@@ -30,6 +30,7 @@
 #include "carryover.h"
 #include "recording_frameset.h"
 #include "recordingexport.h"
+#include "refusing_network.h"
 #include "sessionbridge.h"
 #if defined(Q_OS_ANDROID) || defined(Q_OS_WIN) || defined(Q_OS_LINUX)
 #include "windowtheme.h"
@@ -169,7 +170,11 @@ int main(int argc, char *argv[])
         storesMoved = bridge.migrateStores(preferences);
     }
 
+    // Nothing the QML loads is remote: a name from a file drawn as markup
+    // could otherwise fetch a URL
+    RefusingNetworkFactory networkFactory;
     QQmlApplicationEngine engine;
+    engine.setNetworkAccessManagerFactory(&networkFactory);
     engine.loadFromModule("App", "Main");
 
     if (engine.rootObjects().isEmpty()) {
