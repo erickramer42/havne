@@ -32,10 +32,10 @@ pat="^([^:]+):([0-9]+):[0-9]+: warning: function '(.*)' (exceeds|has cognitive).
 # measure the function is within is "-"), longest first within a name.
 measured=$(awk '
     FILENAME == ARGV[1] {
-        if ($0 ~ /^[^:]+:[0-9]+:[0-9]+: note: [0-9]+ lines including/) {
-            k = $0; sub(/: note: .*/, "", k)
-            n = $0; sub(/^[^:]+:[0-9]+:[0-9]+: note: /, "", n); sub(/ lines.*/, "", n)
-            lines[k] = n
+        if ($0 ~ /^([A-Za-z]:)?[^:]+:[0-9]+:[0-9]+: note: [0-9]+ lines including/) {
+            k = $0; sub(/: note: .*/, "", k); sub(/^[A-Za-z]:/, "", k)
+            n = $0; sub(/^([A-Za-z]:)?[^:]+:[0-9]+:[0-9]+: note: /, "", n); sub(/ lines.*/, "", n)
+            nn++; nkey[nn] = tolower(k); nval[nn] = n
         }
         next
     }
@@ -45,13 +45,28 @@ measured=$(awk '
         name = $0; sub(/^[^:]+:[0-9]+:[0-9]+: warning: function \047/, "", name)
         sub(/\047 (exceeds|has cognitive).*/, "", name)
         file[k] = f; fn[k] = name
+        if ($0 ~ /exceeds recommended size/) sizew[k] = 1
         if ($0 ~ /has cognitive complexity of /) {
             c = $0; sub(/.*complexity of /, "", c); sub(/ .*/, "", c); cx[k] = c
         }
     }
+    # A note joins its warning by file:line:col, case-insensitively and by
+    # the tail of its path, so a root or a drive letter left on one side still
+    # joins; a size warning no note joins reads "?", never a number
+    function lines_of(k,   kk, i) {
+        kk = tolower(k); sub(/^[a-z]:/, "", kk)
+        for (i = 1; i <= nn; i++)
+            if (nkey[i] == kk || (length(nkey[i]) > length(kk) &&
+                    substr(nkey[i], length(nkey[i]) - length(kk)) == "/" kk))
+                return nval[i]
+        return ""
+    }
     END {
-        for (k in fn)
-            printf "%s\t%s\t%s\t%s\n", file[k], fn[k], (k in lines ? lines[k] : "-"), (k in cx ? cx[k] : "-")
+        for (k in fn) {
+            l = lines_of(k)
+            if (l == "") l = (k in sizew ? "?" : "-")
+            printf "%s\t%s\t%s\t%s\n", file[k], fn[k], l, (k in cx ? cx[k] : "-")
+        }
     }
 ' "$notes" "$size" | sort -t "$tab" -k1,1 -k2,2 -k3,3nr -k4,4nr)
 seen=$(printf '%s\n' "$measured" | cut -f1,2 | sort)
@@ -109,12 +124,15 @@ paired=$(awk -F'\t' '
         if (!(key SUBSEP i in sl)) next
         bl = ($3 == "" ? "-" : $3); bc = ($4 == "" ? "-" : $4)
         l = sl[key, i]; c = sc[key, i]
-        grown = (num(l) > num(bl) || num(c) > num(bc))
-        nl = (num(l) < num(bl) ? l : bl); nc = (num(c) < num(bc) ? c : bc)
+        # "?": a size warning with no note, so no lines to judge or to write
+        grown = ((l != "?" && num(l) > num(bl)) || num(c) > num(bc))
+        nl = (l == "?" || num(l) >= num(bl) ? bl : l); nc = (num(c) >= num(bc) ? bc : c)
         printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", (grown ? "grown" : "ok"), $1, $2, bl, bc, l, c, nl, nc
     }
 ' <(printf '%s\n' "$measured") <(printf '%s\n' "$baselines"))
 grown=$(printf '%s\n' "$paired" | awk -F'\t' '$1 == "grown"' | grep .)
+# A size warning whose note line is missing can't be judged: fail, never read it as 0
+nonote=$(printf '%s\n' "$measured" | awk -F'\t' '$3 == "?" { print $1 "\t" $2 }' | grep .)
 
 if [ "$update" = 1 ]; then
     # Lowered numbers are written back; a line the run didn't see (a shard,
@@ -139,6 +157,12 @@ if [ -n "$unreadable" ]; then
     n=$(printf '%s\n' "$unreadable" | wc -l | tr -d ' ')
     printf 'tidy        FAIL  %s size line(s) in %s this script cannot read (a drive letter in the path, a changed message):\n' "$n" "$size"
     printf '%s\n' "$unreadable" | sed 's/^/  /'
+    rc=1
+fi
+if [ -n "$nonote" ]; then
+    n=$(printf '%s\n' "$nonote" | wc -l | tr -d ' ')
+    printf 'tidy        FAIL  %s function(s) with a size warning and no line count in %s (a path that does not join, or a changed message):\n' "$n" "$notes"
+    printf '%s\n' "$nonote" | awk -F'\t' '{ printf "  %s  %s\n", $1, $2 }'
     rc=1
 fi
 if [ -n "$new" ]; then

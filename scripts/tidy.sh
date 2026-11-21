@@ -188,13 +188,13 @@ dur=$((SECONDS - start))
 # A header's warning repeats in every file that includes it: print once.
 # The size checks are judged apart (the baseline), listed in size.txt.
 all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
-    sed "s#^$root/##" | sort -u)
+    sed "s#^$root/##I" | sort -u)
 sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
 found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
 printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
 # The size check's line count is in a note that follows its warning
 cat "$LOGDIR"/*.log | grep -E 'note: [0-9]+ lines including whitespace' | tr '\\' '/' |
-    sed "s#^$root/##" | sort -u > "$LOGDIR/size-notes.txt"
+    sed "s#^$root/##I" | sort -u > "$LOGDIR/size-notes.txt"
 nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
@@ -211,7 +211,7 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##" > "$LOGDIR/checked.txt"
+printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##I" > "$LOGDIR/checked.txt"
 sharded=0
 [ -z "${HAVNE_TIDY_SHARD:-}" ] || sharded=1
 if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-baseline.txt \

@@ -9,6 +9,7 @@
 # one past a threshold its line lists it within. Skips (77) where no bash
 # is found.
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,7 +45,12 @@ def note(path, line, n):
             % (path, line, n))
 
 
-def run(bash, size_lines, base_lines, files, update=0, notes=()):
+def run(bash, size_lines, base_lines, files, update=0, notes=None):
+    if notes is None:
+        # Each size warning's note, 90 lines, as clang-tidy prints it
+        notes = [note(m.group(1), int(m.group(2)), 90)
+                 for m in (re.match(r"([^:]+):(\d+):\d+: warning: function .* exceeds", x)
+                           for x in size_lines) if m]
     with tempfile.TemporaryDirectory() as d:
         for f in files:
             os.makedirs(os.path.dirname(os.path.join(d, f)) or d, exist_ok=True)
@@ -72,30 +78,30 @@ def main():
         if got != want:
             fails.append("%s: exit %s, wanted %s\n%s" % (label, got, want, out))
 
-    rc, out, _ = run(bash, [warn(f, 10, "run")], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [warn(f, 10, "run")], ["%s\trun\t90\t-" % f], [f])
     expect("a listed function passes", rc, 0, out)
     rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 10, "run", "cx")],
-                     ["%s\trun\t-\t50" % f], [f])
+                     ["%s\trun\t90\t50" % f], [f])
     expect("size and complexity on one function pass with one line", rc, 0, out)
-    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "go")], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "go")], ["%s\trun\t90\t-" % f], [f])
     expect("an unlisted function fails", rc, 1, out)
-    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "run")], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "run")], ["%s\trun\t90\t-" % f], [f])
     expect("a second function of a listed name fails", rc, 1, out)
     rc, out, _ = run(bash, [warn(f, 10, "run"), warn(f, 90, "run")],
-                     ["%s\trun" % f, "%s\trun" % f], [f])
+                     ["%s\trun\t90\t-" % f, "%s\trun\t90\t-" % f], [f])
     expect("a repeated name with a line for each passes", rc, 0, out)
     rc, out, _ = run(bash, [warn("E:/src/" + f, 10, "go")], [], [f])
     expect("a line it cannot read fails", rc, 1, out)
     lam = ("%s:10:5: warning: lambda has cognitive complexity of 50 (threshold 40) "
            "[readability-function-cognitive-complexity]" % f)
-    rc, out, _ = run(bash, [warn(f, 10, "run"), lam], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [warn(f, 10, "run"), lam], ["%s\trun\t90\t-" % f], [f])
     expect("a lambda's line fails as unreadable", rc, 1, out)
-    rc, out, _ = run(bash, [], ["%s\trun" % f], [f])
+    rc, out, _ = run(bash, [], ["%s\trun\t90\t-" % f], [f])
     expect("a stale baseline line fails", rc, 1, out)
     rc, out, base = run(bash, [warn(f, 10, "run")],
-                        ["%s\trun" % f, "%s\trun" % f], [f], update=1)
+                        ["%s\trun\t90\t-" % f, "%s\trun\t90\t-" % f], [f], update=1)
     expect("update drops one of two lines", rc, 0, out)
-    expect("update leaves the other line", base, ["%s\trun" % f], str(base))
+    expect("update leaves the other line", base, ["%s\trun\t90\t-" % f], str(base))
 
     # Measured numbers: a listed function may stay or shrink, never grow
     def sized(lines, cx=None):
@@ -126,7 +132,24 @@ def main():
     expect("one measure over with the other at its number fails", rc, 1, out)
     rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=n)
     expect("a function past a threshold its line lists it within fails", rc, 1, out)
+    # A size warning with no note can't be judged: it fails, never reads as 0 lines
+    w, n = sized(96)
     rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=[])
+    expect("a size warning with no note fails", rc, 1, out)
+    rc, out, base = run(bash, w, [line(96, "-")], [f], update=1, notes=[])
+    expect("update with a missing note fails", rc, 1, out)
+    expect("update with a missing note keeps the recorded number", base, [line(96, "-")], str(base))
+    rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=[note(f, 11, 96)])
+    expect("a note of another line does not join", rc, 1, out)
+    # A root or a drive letter left on the note's path still joins it, in
+    # either case of the letter; another file's note doesn't
+    for root in ("E:/work/tree/", "e:/work/tree/"):
+        rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=[note(root + f, 10, 96)])
+        expect("a note under %s joins" % root, rc, 0, out)
+        rc, out, _ = run(bash, w, [line(95, "-")], [f], notes=[note(root + f, 10, 96)])
+        expect("a joined note under %s still judges growth" % root, rc, 1, out)
+    rc, out, _ = run(bash, w, [line(96, "-")], [f], notes=[note("E:/work/tree/core/src/b.cpp", 10, 96)])
+    expect("a note of another file does not join", rc, 1, out)
     w, n = sized(90)
     rc, out, base = run(bash, w, [line(96, 52)], [f], update=1, notes=n)
     expect("a shrunk function that is still listed passes", rc, 0, out)

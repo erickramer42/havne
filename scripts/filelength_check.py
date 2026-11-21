@@ -28,7 +28,9 @@ import tempfile
 sys.dont_write_bytecode = True
 
 LIMIT = 1000
-SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".qml", ".py", ".sh")
+# Source kinds the tree has (CMake files are not judged), matched in lower case
+SUFFIXES = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".m", ".mm",
+            ".java", ".kt", ".js", ".qml", ".py", ".sh", ".ps1")
 EXEMPT_PREFIXES = ("third_party/", "core/include/ecuio/")
 EXEMPT_FILES = (
     "core/src/dtc_titles_table.h",
@@ -50,10 +52,17 @@ def count_lines(full):
 
 
 def tracked(root):
-    out = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True)
+    """The tracked source files and the new ones not yet added (a local run
+    sees what CI will), less any tracked file deleted in the working tree
+    (a split under way)."""
+    out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--cached", "--others",
+                          "--exclude-standard"], capture_output=True)
     if out.returncode != 0:
-        raise SystemExit("filelength: git ls-files failed: " + out.stderr.strip())
-    return [p for p in out.stdout.splitlines() if p.endswith(SUFFIXES)]
+        raise SystemExit("filelength: git ls-files failed: "
+                         + out.stderr.decode("utf-8", "replace").strip())
+    paths = sorted(set(out.stdout.decode("utf-8", "surrogateescape").split(chr(0))))
+    return [p for p in paths if p and p.lower().endswith(SUFFIXES)
+            and os.path.isfile(os.path.join(root, p))]
 
 
 def read_baseline(path):
@@ -156,6 +165,14 @@ def selftest():
             fh.write("# header\n" + "".join("%s\t%d\n" % kv for kv in base_lines.items()))
         return d
 
+    def judge_run(d):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = run(d, False)
+        return rc, buf.getvalue()
+
     def verdict(files, base_lines, update=False):
         d = tree(files, base_lines)
         import io
@@ -191,12 +208,38 @@ def selftest():
     expect("a data table and a generated file are exempt", rc, 0)
     rc, _, out = verdict({"third_party/w/x.c": 3000}, {})
     expect("third_party is exempt", rc, 0)
+    rc, _, out = verdict({"a/x.mm": 1001, "a/y.JAVA": 1001, "a/z.kt": 1001, "a/w.js": 1001,
+                          "a/v.inl": 1001, "a/u.m": 1001}, {})
+    expect("the other source kinds are judged, in either case", out.count("FAIL"), 6)
+    rc, _, out = verdict({"CMakeLists.txt": 3000, "a/b.cmake": 3000}, {})
+    expect("CMake files are not judged", rc, 0)
     rc, _, out = verdict({"a/x.txt": 3000, "a/y.md": 3000}, {})
     expect("a non-source file is not judged", rc, 0)
     rc, _, out = verdict({"a/x.qml": 1001, "a/y.py": 1001, "a/z.sh": 1001, "a/w.h": 1001}, {})
     expect("QML, Python, shell and headers are judged", out.count("FAIL"), 4)
     rc, _, out = verdict({"core/include/ecuio/api.h": 3000}, {"core/include/ecuio/api.h": 3000})
     expect("a listed exempt file is stale", rc, 1)
+
+    # A tracked file deleted in the working tree (a split under way) is skipped,
+    # and a new file not yet added is judged
+    d = tree({"a/x.cpp": 1500, "a/y.cpp": 10}, {"a/x.cpp": 1500})
+    os.remove(os.path.join(d, "a/x.cpp"))
+    rc = judge_run(d)
+    expect("a deleted tracked file is stale, not a crash", rc[0], 1)
+    expect("its line is named", "a/x.cpp" in rc[1], True)
+    d = tree({"a/y.cpp": 10}, {})
+    with open(os.path.join(d, "a/new.cpp"), "w", newline="\n") as fh:
+        fh.write("x\n" * 1200)
+    rc = judge_run(d)
+    expect("a new file not yet added is judged", rc[0], 1)
+    expect("and named", "a/new.cpp" in rc[1], True)
+    d = tree({"a/y.cpp": 10}, {})
+    with open(os.path.join(d, ".gitignore"), "w") as fh:
+        fh.write("out/\n")
+    os.makedirs(os.path.join(d, "out"))
+    with open(os.path.join(d, "out/gen.cpp"), "w", newline="\n") as fh:
+        fh.write("x\n" * 1200)
+    expect("an ignored file is not judged", judge_run(d)[0], 0)
 
     for m in fails:
         print("FAIL " + m)
