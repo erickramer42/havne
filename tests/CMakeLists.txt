@@ -302,6 +302,11 @@ if(Python3_Interpreter_FOUND)
     # scripts/docs_only.py, which diffs CI runs and the release gate takes as docs alone
     add_test(NAME DocsOnlyTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/docs_only.py selftest)
+    # scripts/tidy-size-ratchet.sh over made-up size lines and baselines
+    # (skip 77 where no bash is found)
+    add_test(NAME TidyRatchetTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tidy_ratchet_selftest.py)
+    set_tests_properties(TidyRatchetTest.SelfTest PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)

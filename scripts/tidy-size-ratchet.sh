@@ -8,17 +8,24 @@
 #   checked   the sources this run checked, one per line, relative to the root
 #
 # Fails (exit 1) on a function past a threshold that the baseline doesn't list,
+# on a size line this script can't read (a dropped line would pass unseen),
 # and on a baseline line that no longer applies: its function is within the
 # thresholds or gone, or its file is gone. A shard judges only the lines of
 # its own sources: a header's function can be seen by any shard, so a header's
 # line is judged by an unsharded run alone. update=1 (unsharded only) removes
 # the lines that no longer apply; a line is never added by the script.
+# A name that repeats in a file (an overload, another class's method) has a
+# baseline line for each function: lines are counted, not just compared.
 set -u
 size=$1 base=$2 checked=$3 sharded=$4 update=$5
 export LC_ALL=C
 
-seen=$(sed -nE "s/^([^:]+):[0-9]+:[0-9]+: warning: function '(.*)' (exceeds|has cognitive).*/\1\t\2/p" "$size" | sort -u)
-listed=$(tr -d '\r' < "$base" | grep -vE '^[[:space:]]*(#|$)' | sort -u)
+pat="^([^:]+):([0-9]+):[0-9]+: warning: function '(.*)' (exceeds|has cognitive).*"
+# One function is one file:line:name, whether it trips the size check, the
+# complexity check or both; the line number is dropped after that
+seen=$(sed -nE "s/$pat/\1\t\2\t\3/p" "$size" | sort -u | cut -f1,3 | sort)
+unreadable=$(grep -E ': (warning|error): function ' "$size" | grep -vE "$pat")
+listed=$(tr -d '\r' < "$base" | grep -vE '^[[:space:]]*(#|$)' | sort)
 
 new=$(comm -23 <(printf '%s\n' "$seen") <(printf '%s\n' "$listed") | grep .)
 unseen=$(comm -13 <(printf '%s\n' "$seen") <(printf '%s\n' "$listed") | grep .)
@@ -46,13 +53,21 @@ if [ "$update" = 1 ] && [ -n "$stale" ]; then
     drop=$(mktemp)
     printf '%s\n' "$stale" | cut -f1,2 > "$drop"
     n=$(grep -c . "$drop")
-    grep -vxFf "$drop" "$base" > "$base.new" && mv "$base.new" "$base"
+    # One baseline line per stale line: a repeated name keeps its other lines
+    awk -F'\t' 'NR == FNR { gone[$1 FS $2]++; next }
+        { k = $1 FS $2; if (gone[k] > 0) { gone[k]--; next } print }' "$drop" "$base" > "$base.new" && mv "$base.new" "$base"
     rm -f "$drop"
     echo "tidy        removed $n baseline line(s) that no longer apply from $base"
     stale=
 fi
 
 rc=0
+if [ -n "$unreadable" ]; then
+    n=$(printf '%s\n' "$unreadable" | wc -l | tr -d ' ')
+    printf 'tidy        FAIL  %s size line(s) in %s this script cannot read (a drive letter in the path, a changed message):\n' "$n" "$size"
+    printf '%s\n' "$unreadable" | sed 's/^/  /'
+    rc=1
+fi
 if [ -n "$new" ]; then
     n=$(printf '%s\n' "$new" | wc -l | tr -d ' ')
     printf 'tidy        FAIL  %s function(s) past a size threshold (80 lines, cognitive complexity 40) and not in %s:\n' "$n" "$base"
