@@ -106,7 +106,9 @@ void SessionBridge::logReplayMadeUnder(const QString& uri)
     // size, and its second line is still the next one
     const auto nextLine = [&values]() {
         QByteArray line = values.readLine(64 * 1024);
-        for (QByteArray rest = line; !rest.endsWith('\n') && !values.atEnd();) {
+        // An empty read is a read error, and atEnd() stays false after one
+        for (QByteArray rest = line;
+             !rest.isEmpty() && !rest.endsWith('\n') && !values.atEnd();) {
             rest = values.readLine(64 * 1024);
         }
         return line;
