@@ -2,7 +2,13 @@
 
 - **Status:** Accepted. Built: the default pick (section 2), in v0.8.0
   (ADR-0056's appendix "a front end's default pick", ADR-0051's appendix
-  "1024 requests"). Not built: everything else (v0.9.0).
+  "1024 requests"). As of 2026-11-20, v0.9.0 also builds steps 1 to 3
+  (the layout and constants, tables from the set, keys and recording
+  format 4), the simulated car of step 6 and the hold of the appendix
+  below. Not built, v0.9.1's: step 4 (the merged set, `needs` and
+  signal-file format 3), step 5 (the pick opens modules), step 7 (a
+  vehicle's plugins read together) and step 8 (faster), and the
+  simulated car's `vcan` cases.
 - **Date:** 2026-11-15.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI); [ADR-0015](0015-request-engine.md) (requests derived
@@ -923,7 +929,8 @@ Each choice of sections 2, 6 and 9, 2026-11-15:
   profile names. Not an address that lists the parts.
 - **The profile row** has one button for the vehicle's set beside
   Default. Not a button for each pick.
-- **`needs` and signal-file format 3** are v0.9.0's, with the merge.
+- **`needs` and signal-file format 3** go with the merge, in v0.9.1
+  (the cut of 2026-11-19).
 - **An unranked set past the pool** is asked for nothing until a signal
   is picked. Not its first 1024 requests.
 

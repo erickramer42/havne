@@ -100,6 +100,7 @@ it inside that table.
 | `test_j2534_connect` | `J2534ConnectTest`, `J2534SurrogateConnectTest` | Windows, the fake DLL and the x64 surrogate beside it |
 | `test_j2534_surrogate` | `J2534SurrogateTest` | Windows, the fake DLL and the surrogate exe |
 | `test_j2534_routing` | `J2534RoutingTest` | Windows; the cross-arch case skips unless `ECUIO_FAKE_DLL` is set |
+| `test_sandbox` | `WamrBuildTest`, `WasmCheckTest`, `SandboxTest` | Nothing (Qt-free, internal headers); the cross-arch step runs it against the x86 core |
 | `test_obd2` | `Obd2SetTest`, `Obd2DecodeTest`, `Obd2MuxTest`, `Obd2ReplyTest`, `RequestEngineTest`, `UdsGenericTest`, `Obd2TableTest`, `FakeEcuTest`, `DiagnosticsTest`, `ClearTest`, `DtcTitleTest`, `InspectionTest`, `SimEcuTest`, `SimDidsTest`, `SimAskTest`, `SimRecordingTest`, `PidSupportTest`, `RequestTimingTest`, `SessionControlTest` | Nothing (Qt-free) |
 | `test_elm327` | `Elm327ProtocolTest`, `Elm327SessionTest`, `Elm327LogTest`, `SerialPortsTest`, `Elm327TcpTest`, `Elm327StreamTest`, and on Linux and macOS `Elm327PortTest` | Nothing (Qt-free) |
 | `test_vcan` | `VcanTest`, `SocketCanBusTest`, `SocketCanRequestTest`, `SocketCanFaultTest`, `IsoTpConformanceTest`, `SimBusTest` | Linux, `vcan0` up and `can-isotp` loaded; each case skips without them, and fails under `ECUIO_VCAN_REQUIRED=1` (CI's `linux-build`) |

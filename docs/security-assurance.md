@@ -19,7 +19,8 @@ named, and the phone's adapter relay on its own localhost, which only
 [ADR-0047](adr/0047-adapter-relay.md)).
 
 - **Assets:** the integrity of the host and the user's account; the
-  vehicle, which must never be sent anything but a read request; and
+  vehicle, which is sent reads, the clear behind its gate and, in
+  v0.9.0, nothing a plugin's code causes; and
   the user's vehicle data (VIN, calibration IDs) and local paths.
 - **Adversaries:**
   - a faulty or malicious vendor DLL;
@@ -32,7 +33,10 @@ named, and the phone's adapter relay on its own localhost, which only
   - another local process or user trying to reach the surrogate's
     pipe, or another app on the phone trying to reach the session;
   - a compromised build dependency or CI action.
-- **Out of scope:** writing to an ECU (there is no write path),
+- **Out of scope:** writing to an ECU beyond the clear (the engine's
+  talk door can carry security access and a few more services under
+  tier 2's ceiling, but in v0.9.0 nothing outside the tests offers a
+  talk and no plugin's module runs),
   attackers beyond the adapter's own link (Havne serves nothing and
   reaches nothing but the adapter), and an attacker who already runs
   code as the user or as an administrator (they can replace the driver
@@ -61,7 +65,10 @@ named, and the phone's adapter relay on its own localhost, which only
 | Earlier version's stored data to the app | The vehicle book, the signal copies and the saved addresses, as an older Havne wrote them | Each entry judged by itself, a malformed one left out and a later format left as it is; the old files are never written. No fuzz target (QtCore, outside the Qt-free tier); the hand-built corpus in `tests/data/vehiclebook` and `BridgeTest.OneStoreMigration*` pin the shapes ([fuzz/README.md](../fuzz/README.md)) |
 | Recording to someone else | An export or a health report: frames, values, the session's log | Scrubbed by class (identification replies on any CAN ID, text signals, the session's address), then checked whole for the car's identity values and anything shaped like a VIN; a match writes nothing ([ADR-0054](adr/0054-exports-and-imports.md); fuzzed by `fuzz_export`) |
 | ECU to request engine | Replies to the requests, through any adapter | Matched to the one outstanding request by service and key, or a code list's by its service alone; identification's text cut to its field; the diagnostics' code lists, monitors and freeze-frame values copied within their caps, a count past a cap shown as reported against held ([ADR-0037](adr/0037-reading-trouble-codes.md)). Fuzzed (`fuzz_diagnostics`) |
-| App to vehicle | Requests | The request engine sends reads, services 0x01, 0x02, 0x03, 0x07, 0x09, 0x0A and 0x22, and refuses any other even if one reaches it ([ADR-0015](adr/0015-request-engine.md) section 3, [ADR-0037](adr/0037-reading-trouble-codes.md) section 1). The one request that changes the car, 0x04 (clear trouble codes), is built only by a channel's clear, after core sees the report the caller saved (its generation) and the ECU answer 0 rpm to `01 0C`, or, with the caller's word on a running engine, 0 km/h to `01 0D` (any speed with the word on a moving vehicle too); the app sends it only after a confirmation and a saved copy of the report, each ECU by its own ID, and asks once more before clearing a moving vehicle ([ADR-0038](adr/0038-clearing-trouble-codes.md)). `static_assert`s keep 0x04 out of every list, and the fuzz harness fails on a 0x04 that wasn't preceded by a 0 rpm answer (`fuzz_diagnostics`) |
+| App to vehicle | Requests | The request engine's rotation sends reads, services 0x01, 0x02, 0x03, 0x07, 0x09, 0x0A and 0x22, and refuses any other even if one reaches it ([ADR-0015](adr/0015-request-engine.md) section 3, [ADR-0037](adr/0037-reading-trouble-codes.md) section 1). The one request that changes the car, 0x04 (clear trouble codes), is built only by a channel's clear, after core sees the report the caller saved (its generation) and the ECU answer 0 rpm to `01 0C`, or, with the caller's word on a running engine, 0 km/h to `01 0D` (any speed with the word on a moving vehicle too); the app sends it only after a confirmation and a saved copy of the report, each ECU by its own ID, and asks once more before clearing a moving vehicle ([ADR-0038](adr/0038-clearing-trouble-codes.md)). `static_assert`s keep 0x04 out of every list, and the fuzz harness fails on a 0x04 that wasn't preceded by a 0 rpm answer (`fuzz_diagnostics`) |
+| Request engine's talk door | One request of up to 60 bytes offered to a channel | The door admits only what tier 2's ceiling lists: `10 03`, `3E 00`, `27` (sub-functions 01 to 7E but 5F and 60, never with bit 7), `2C 01` and `2C 03`, and the reads `19`, `22` and `2A`; anything else is refused whatever the caller checked, and a request past the transport's bound is too long. The bytes sent are the bytes the door judged, and a talk is never sent twice. Built and tested, and inert in v0.9.0: nothing outside the tests offers a talk and no plugin's module is bound ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md) sections 1 and 2.4; `Tier2CeilingTest`, `EngineTalkTest`) |
+| Plugin to sandbox | A conversation plugin's WebAssembly module, the binary file of a packed package with a format 2 manifest | Judged before any runtime sees it (`core/src/wasm_check.h`): at most 1 MiB, no start section, no import, none of the exports the runtime would run with no limit, exactly one memory of a fixed size (1 to 16 pages), each export a function of its wanted type, every count read within its section. The runtime runs it with an instruction budget set before each call, no allocation on the worker, a memory zeroed and counted by core's allocator under a bound for each instance and one for all, and an instance that fails a call is never called again. Fuzzed (`fuzz_wasm_module`; `WasmCheckTest`, `SandboxTest`, `WamrBuildTest`). Core reads and checks such a module in v0.9.0 and binds none, so a conversation plugin is data only |
+| Disk to security store | The file that keeps each vehicle's, address's and level's failed security-access attempts and delays across a restart | One strict reader (`core/src/security_store.h`): at most 64 KiB and 256 entries, a malformed file refused with one line and no entry, a time past the year 9999 refused. A store is written whole to a file of its own and put over the old one, so a crash leaves the old file or the new. Fuzzed (`fuzz_security_store`; `SecurityStoreTest`). Inert until a module binds |
 | Source to release | The downloads: the Windows zip and its symbols, the Android APK, the Linux AppImage and the core packages | Actions pinned to commit SHAs, a hash-pinned clang-tidy wheel, a release workflow that requires the commit's CI to have passed, checks the zip's imports and version resources and the APK's package, version and debuggability, and starts the AppImage offscreen, a signed SLSA build provenance on every download, and an SPDX SBOM of what each download contains, attested over them ([packaging.md](packaging.md#releases)). The core packages build to the same bytes in CI under varied folders, clocks and locales ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)). The APK is signed with the release key, which only the Android job reads, from a `release` environment that only `v*` tags and `main` deploy to; the signing step fails unless the certificate is the one pinned in the repository ([ADR-0030](adr/0030-signed-android-releases.md)) |
 
 ## Design principles applied
@@ -84,8 +91,8 @@ named, and the phone's adapter relay on its own localhost, which only
   and an app stream ([testing.md](testing.md)).
 - **Dynamic analysis:** ASan, UBSan and LeakSanitizer over the core
   and its tests; libFuzzer over the decoder, the validators, the
-  `?did=` parser, the ELM327 reply parsers and the replay reader, 60 s
-  each, on every push.
+  `?did=` parser, the ELM327 reply parsers, the replay reader, a plugin's WebAssembly
+  module and the security store's reader, 60 s each, on every push.
 - **Static analysis:** clang-tidy's analyzer and bug-finding checks
   over the core, the surrogate, `havne-cli` and the desktop app,
   failing CI on any warning; CodeQL
