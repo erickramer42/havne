@@ -889,7 +889,10 @@ TEST_F(SimBusTest, ADestroyUnderAFloodEndsWithinABound)
             f.data[0] = 0x30; /* a Flow Control nothing waits for */
             const auto end = std::chrono::steady_clock::now() + 4s;
             while (flooding.load() && std::chrono::steady_clock::now() < end) {
-                (void)::write(bus.get(), &f, sizeof f);
+                // a full queue drops the frame, which is the flood's point
+                if (::write(bus.get(), &f, sizeof f) < 0) {
+                    std::this_thread::yield();
+                }
             }
         });
     }
