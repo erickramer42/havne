@@ -34,7 +34,8 @@ import sys
 PATH_LINE = re.compile(r"^.*:$")
 STRUCT_LINE = re.compile(r"^(?:underlying )?type 'struct (\w+)' changed:$")
 EARLIER = re.compile(r"^type 'struct (\w+)' changed, as reported earlier$")
-RESERVED = r"\w*reserved\w*"
+# reserved, reserved0, display_reserved: not unreserved_count
+RESERVED = r"(?:\w+_)?reserved\d*"
 MEMBER_TYPE_CHANGE = re.compile(rf"^type of '[^']*\b{RESERVED}(\[\d+\])?' changed:$")
 ANY_MEMBER_TYPE_CHANGE = re.compile(r"^type of '[^']*' changed:$")
 MEMBER_GONE = re.compile(rf"^'[^']*\b{RESERVED}(\[\d+\])?', at offset \d+ \(in bits\)$")
@@ -328,6 +329,50 @@ SCALAR ="""          type size hasn't changed
 """
 
 
+# abidiff's own reports (2.9.0, --no-show-locs) of a struct whose reserved[8]
+# a smaller scalar took part of (an insertion beside it; no whole taking),
+# and of a field named unreserved_count shrunk like a reserved array
+PARTIAL_SCALAR = """Functions changes summary: 0 Removed, 1 Changed, 0 Added function
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 function with some indirect sub-type change:
+
+  [C] 'function int f(s_t*)' has some indirect sub-type changes:
+    parameter 1 of type 's_t*' has sub-type changes:
+      in pointed to type 'typedef s_t':
+        underlying type 'struct s' changed:
+          type size hasn't changed
+          1 data member insertion:
+            'uint8_t more[7]', at offset 40 (in bits)
+          1 data member change:
+            type of 'uint8_t reserved[8]' changed:
+              entity changed from 'uint8_t[8]' to 'typedef uint8_t'
+              type size changed from 64 to 8 (in bits)
+            and name of 's::reserved' changed to 's::foo'
+"""
+UNRESERVED = """Functions changes summary: 0 Removed, 1 Changed, 0 Added function
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 function with some indirect sub-type change:
+
+  [C] 'function int f(s_t*)' has some indirect sub-type changes:
+    parameter 1 of type 's_t*' has sub-type changes:
+      in pointed to type 'typedef s_t':
+        underlying type 'struct s' changed:
+          type size hasn't changed
+          1 data member insertion:
+            'uint8_t foo', at offset 32 (in bits)
+          1 data member change:
+            type of 'uint8_t unreserved_count[8]' changed:
+              type name changed from 'uint8_t[8]' to 'uint8_t[7]'
+              array type size changed from 64 to 56
+              array type subrange 1 changed length from 8 to 7
+              array subrange changed: 
+                upper bound of '<anonymous range>[8]' change from '7' to '6'
+            and offset changed from 32 to 40 (in bits) (by +8 bits)
+"""
+
+
 def field(to, size=""):
     """TAKEN, its one-element array a longer one taken by a field of type
     to that isn't an array; size the line abidiff adds under it when the
@@ -374,6 +419,8 @@ def selftest():
             "                in pointed to type 'const ecuio_signal_def_t':\n"
             "                  typedef name changed from ecuio_signal_def_t to ecuio_other_t\n"
             "                  in unqualified underlying type 'typedef ecuio_signal_def_t':\n"), False),
+        ("a smaller scalar taking part of a reserved array fails", PARTIAL_SCALAR, False),
+        ("a member only named like reserved fails", UNRESERVED, False),
         ("fields swapped beside the growth fail", HEAD + SWAP, False),
         ("a field split before the room fails", HEAD + SPLIT, False),
         ("a struct that grew fails", HEAD + GROWN, False),

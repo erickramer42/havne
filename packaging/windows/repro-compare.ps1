@@ -50,6 +50,19 @@ foreach ($n in ($namesA + $namesB | Sort-Object -Unique)) {
 }
 Write-Host "binaries compared: $($namesA.Count); different: $($bad.Count)"
 
+# A tree with no havne.exe, ecuio.dll or surrogate compared nothing that
+# matters: an empty pair of folders would read as reproducible
+$missing = @()
+foreach ($want in 'havne.exe', 'ecuio.dll', 'ecuio-j2534-surrogate.exe') {
+    foreach ($tree in @(@('first', $namesA), @('second', $namesB))) {
+        if (-not ($tree[1] | Where-Object { (Split-Path -Leaf $_) -eq $want })) { $missing += "$want ($($tree[0]) tree)" }
+    }
+}
+if ($missing.Count) {
+    Write-Host "::error::nothing to compare for: $($missing -join ', ')"
+    exit 1
+}
+
 # Reported, not gated
 foreach ($z in Get-ChildItem -LiteralPath (Join-Path $RootA 'dist') -Filter *.zip -ErrorAction SilentlyContinue) {
     $other = Join-Path (Join-Path $RootB 'dist') $z.Name

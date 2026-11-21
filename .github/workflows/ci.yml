@@ -578,14 +578,14 @@ jobs:
       # The Visual Studio generator is what release.yml builds with, but this
       # job and win-coverage use Ninja (a compiler cache needs it). One shard
       # keeps the generator, the multi-config layout and /Zi in CI: core, the
-      # shared library and the surrogate, no Qt, after the tests whatever
+      # shared library, the surrogate and the app, after the tests whatever
       # they did, so one red doesn't hide the other.
       - name: Configure and build with the Visual Studio generator
         if: ${{ (success() || failure()) && matrix.shard == 2 }}
         run: |
-          cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          cmake -B build-vs -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DBUILD_TESTING=OFF
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate
+          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate havne
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   # Line coverage for the README badge: the whole suite under
@@ -1079,7 +1079,7 @@ jobs:
           ECUIO_PYTEST_REQUIRED: '1'
         run: >-
           ctest --test-dir build --output-on-failure --no-tests=error
-          -R '^PythonTest\.test_(vcan|did_scan|isotp_fuzz)$'
+          -L vcan
       - name: Save the tests' cost data
         if: success() || failure()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

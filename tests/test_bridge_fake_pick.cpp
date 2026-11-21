@@ -174,6 +174,24 @@ TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
         EXPECT_TRUE(log.contains(kNoneToPick)) << log.join('\n').toStdString();
         EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
         const auto writes = [] { return fake_control::writes(fakePage()); };
+        // A request chosen just before a step's change may still go out: the
+        // baseline is taken once the writes have been still for 300 ms
+        const auto stillWrites = [&]() -> uint32_t {
+            uint32_t last = writes();
+            QElapsedTimer still;
+            still.start();
+            const bool quiet = spinUntil(
+                [&]() {
+                    if (writes() != last) {
+                        last = writes();
+                        still.restart();
+                    }
+                    return still.elapsed() >= 300;
+                },
+                5000, 10);
+            EXPECT_TRUE(quiet) << "the asking never stopped";
+            return last;
+        };
         QElapsedTimer quiet;
         quiet.start();
         ASSERT_TRUE(spinUntil([&]() { return quiet.elapsed() >= 400; }, 5000));
@@ -201,11 +219,9 @@ TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
         ASSERT_TRUE(
             spinUntil([&]() { return log.count(kNoneToPick) == 2; }, 5000))
             << log.join('\n').toStdString();
+        const auto after = stillWrites();
         QElapsedTimer settle;
         settle.start();
-        ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 300; }, 5000));
-        const auto after = writes();
-        settle.restart();
         ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 400; }, 5000));
         EXPECT_EQ(writes(), after) << "unticked: the asking stops";
 
@@ -221,22 +237,7 @@ TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
         bridge.stopLog();
         EXPECT_TRUE(log.contains(kNoneToPick)) << log.join('\n').toStdString();
         EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
-        // A request chosen before the log's focus cleared may still go out:
-        // the baseline is taken once the writes have been still for 300 ms
-        uint32_t last = writes();
-        QElapsedTimer still;
-        still.start();
-        ASSERT_TRUE(spinUntil(
-            [&]() {
-                if (writes() != last) {
-                    last = writes();
-                    still.restart();
-                }
-                return still.elapsed() >= 300;
-            },
-            5000, 10))
-            << "the asking never stopped after Stop log";
-        const auto afterLog = last;
+        const auto afterLog = stillWrites();
         settle.restart();
         ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 400; }, 5000));
         EXPECT_EQ(writes(), afterLog);
