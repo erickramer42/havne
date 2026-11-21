@@ -1080,6 +1080,8 @@ them.
   remove. Seam: `stopAfterForTesting(Step::OldBook)` and
   `(Step::OldCopy, n)`.
 
+Amended 2026-11-20: the removal deletes a copy only when its bytes are somewhere else whatever the book says: a plugin was made from it (`wrappedFrom`) or `plugins/unmigrated/` holds them, and the copy still hashes to its name (one edited since stays, reported once as left). The book's records only add to what is spared, so no book state takes the only copy: a v0.8.0 move recorded no copy that no vehicle named, and a start after it would otherwise have deleted those. A copy in `signals/` that no vehicle of a readable book names gets a record under the book's own `unmigrated`, `"kept": false`, so Save and Remove reach it as they reach a file that didn't move. A copy whose `kept: false` record the user removes stays in `signals/` for good, and the folder with it: accepted, since its bytes are nowhere else. This amends "A record's Remove" above, whose copy no longer goes at the next start.
+
 ## Appendix: step 6 as built (2026-11-18)
 
 `SignalStore` and the bridge calls only it served are gone:

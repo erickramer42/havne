@@ -302,3 +302,12 @@ different VIN; the bridge then takes the new one, once.
 
 - `plotted` and `unplotted` hold signal keys ([ADR-0065](0065-car-sized-profile.md) section 9). `SignalListModel::setPlotChoices` takes each stored text as a key, else as a name one row has, so an entry kept by name applies as before; `plottedKeys()` and `unplottedKeys()` give keys, so the next `rememberPlotting` writes keys. No format change: both are lists of strings.
 - A stored text no row of the session's set answers is carried through that session's saves, after the rows' keys, at most 1024 in each list (the newest). A vehicle a VIN adds takes the session's own ticks and none carried for the vehicle picked before.
+
+## Appendix: a session changes no pick (2026-11-21)
+
+Section 1's "section 4's switch is the one change made during a session" and section 4's table no longer hold; the text above stays as written. A VIN never changes the pick, because the session's URI and profile are fixed at connect and a pick that moved under them named one vehicle in the log while the session read another's channels.
+
+- **A VIN naming another saved vehicle** is offered, not applied: the log line reads `Vehicle: <picked> (the car's VIN is <other>'s; pick <other> for the next connect)` and the Vehicle section shows the same note until the pick changes or the next session starts.
+- **An unknown VIN** adds a vehicle, "Vehicle N", unpicked, with the connection's URI: `Vehicle: <picked> (the car's VIN differs; saved as Vehicle N, not picked)`, and with none picked `Vehicle: none picked (...)`.
+- **A VIN that matches the picked vehicle, or a first VIN learned by it,** act as before.
+- "A switch applies the new vehicle's plotted signals at once" is void: nothing is applied, so the plotted choices are neither re-applied nor dropped on a recognition. Tested by `QmlTest.vehiclebook` and `QmlTest.settings_vehicle`.

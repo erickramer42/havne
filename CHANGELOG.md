@@ -75,6 +75,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **Python:** `Session.set_focus`, `Session.ranked_signals` and `Session.health_report(values=...)` take a signal's key as well as its id or name, and a name two signals of the session's set have is a `KeyError` whose words list their keys.
 - **A vehicle's ticks on Live are kept by each signal's key** (ADR-0065 section 9), not its name. Ticks saved by an earlier version are read as they are and saved by key at the next tick. A tick on a signal the connected profile lacks is no longer dropped at the next tick: it stays with the vehicle and comes back under a profile that has the signal. A version before this one reads such a vehicle's ticks as none.
 - After an update from a version before v0.8.0, the vehicle list and signal files that version kept are removed at the second start, once the first has moved them into the plugin store. Files added by an earlier version after the move are removed with the rest. A signal file that couldn't be moved stays until it is saved or removed. A downgrade past v0.8.0 then shows no vehicles or signal files. (ADR-0064)
+- The CSV exports (a column for each signal, and a row for each value) start with a UTF-8 byte order mark, so Excel shows units such as the degree sign correctly instead of garbled. Read an export with encoding `utf-8-sig` (Python) or `fileEncoding = "UTF-8-BOM"` (R's `read.csv`); the folder export's files are unchanged.
 
 ### Fixed
 
@@ -88,6 +89,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
 - A plugin made from a signal file names the oldest Havne that reads it, not the version that made it, so the same file makes the same plugin on every version and the store keeps one copy of it. (ADR-0064)
 - **A pick spread over several ECUs no longer stalls through an ELM327 adapter.** The adapter asks one ECU at a time, and it gave each ECU the same share of its exchanges, so one signal on a second module was asked as often as all of the engine's together, and the engine's values went stale (dimmed) every few seconds. Now each ECU is asked each of its requests once in turn, under one header switch. Each ECU's supported-PID check (the walk) now has its own second, so with several ECUs the engine's no longer stops at the first range and leaves the PIDs above 0x20 asked one per request.
+- A connected car's VIN no longer switches the picked vehicle during a session: the vehicle it names is offered for the next connect, and a new one is added unpicked. Default's hint, on an adapter's address, says it reads plain OBD-II when the picked vehicle's plugin isn't one that extends obd2.
+- A connect no longer logs "no answer to the supported-PID query" while the first supported-PID query is still being asked again; the line appears only when the ECU never answers.
+- Fixed a rare crash in the Dashboard's edit mode after adding and removing a page.
+- A SocketCAN session reading nine or more modules whose replies are longer than a frame no longer loses replies to one another.
+- A recording that fails to open no longer leaves an empty folder on the Recordings page, in the app or from `havne-cli`.
+- The J2534 adapter's own timestamps come back after one late reply (a reply read after the computer slept), so reply intervals are measured on the adapter's clock again.
+- A plugin folder whose file names use a Windows device name (`con.json`, `nul`) is refused before any of its files is read, on every platform; a packed plugin with such a name still loads, and a signal file named Aux or Con imports with its data file numbered (`data/aux-2.json`).
+- Earlier-version signal files that no vehicle used are kept after the update, with Save and Remove, instead of being deleted at the next start; after an update from v0.8.0, whose move recorded none of them, they stay in the earlier version's folder, since a copy is deleted only once a plugin was made from it or its bytes are kept.
+- Through a J2534 adapter, a module that never answers a run of eight or more of its DIDs no longer holds the bus on every lap.
+- Through a J2534 adapter, modules that aren't in the car no longer slow the others' first seconds, and a module that wakes after the connect (the ignition turned on later) no longer loses other modules' replies while it catches up.
+- Through an ELM327 adapter with `?session=03` on several modules, a keep-alive that falls due goes out next instead of after one request on each module between, so the session no longer lapses past S3.
+- The simulated ECU: a second `faults=` key adds to the first; a module whose request ID is another's reply ID is refused at create; a flood on the bus no longer holds its close.
 
 ## [0.8.0] - 2026-11-15
 
