@@ -65,11 +65,13 @@ ListView {
                 color: root.host.formatPart.findingColor(findingRow.modelData.kind)
             }
             Label {
+                textFormat: Text.PlainText
                 text: root.host.formatPart.timeText(findingRow.modelData.atMs, true)
                 color: Theme.textDim
                 font.family: Theme.monoFamily
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "findingText"
                 text: root.host.formatPart.findingText(findingRow.modelData)
                 color: Theme.text

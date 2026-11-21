@@ -150,5 +150,6 @@ private:
 
     std::vector<Row> m_rows;
     std::vector<Row> m_rowsBefore; // keepRowsBefore's copy
+    uint64_t m_setGeneration = 0;  // one more at each setConditions
     uint32_t m_units = ECUIO_UNITS_METRIC;
 };

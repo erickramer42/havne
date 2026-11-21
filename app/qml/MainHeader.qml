@@ -42,6 +42,7 @@ ToolBar {
         // The name gives way to Mark or the log's controls on a
         // phone's width
         Label {
+            textFormat: Text.PlainText
             id: headerTitle
             objectName: "headerTitle"
             visible: !(markButton.visible || startLogButton.visible
@@ -105,6 +106,7 @@ ToolBar {
                 // The address gives way first; the word only alone in a
                 // row under 240 units (a narrow phone at the top zoom)
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillText"
                     Layout.fillWidth: true
                     Layout.minimumWidth: pill.address !== "" || headerRow.width >= 240
@@ -116,6 +118,7 @@ ToolBar {
                     text: pill.stateWord
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillAddress"
                     visible: pill.address !== ""
                     Layout.fillWidth: true
@@ -129,6 +132,7 @@ ToolBar {
                 // already, which is why Mark stands where Start log
                 // would; the address gives way to the word
                 Label {
+                    textFormat: Text.PlainText
                     id: recordingNote
                     objectName: "linkPillRecording"
                     visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
@@ -139,6 +143,7 @@ ToolBar {
                 }
                 // Marks the status as a button where it opens the Log
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "linkPillChevron"
                     // Not where it would squeeze a connected phone's address
                     visible: pill.enabled && (pill.address === "" || headerRow.width >= 420)
@@ -154,6 +159,7 @@ ToolBar {
         // the bar so it covers no page (headerBar.host.framesPerSecond); not
         // in a row too narrow to hold it beside the pill's word
         Label {
+            textFormat: Text.PlainText
             id: frameRate
             objectName: "frameRate"
             visible: Theme.developerMode && headerRow.width >= 340
@@ -213,8 +219,19 @@ ToolBar {
             implicitHeight: armedButton.implicitHeight
             Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
             readonly property bool explaining: !armedButton.enabled && Bridge.armedWhy !== ""
-            ToolTip.visible: armedHover.hovered && explaining
-            ToolTip.text: Bridge.armedWhy
+            ToolTip {
+                id: armedTip
+                visible: armedHover.hovered && armedHost.explaining
+                text: Bridge.armedWhy
+                // Basic's own content, drawn as plain text
+                contentItem: Text {
+                    text: armedTip.text
+                    textFormat: Text.PlainText
+                    font: armedTip.font
+                    color: armedTip.palette.toolTipText
+                    wrapMode: Text.Wrap
+                }
+            }
             HoverHandler { id: armedHover }
             TapHandler {
                 objectName: "armedExplain"
@@ -251,6 +268,7 @@ ToolBar {
         // else the size under the time, so a ten-hour log's
         // readout fits beside the name at 420 px
         Label {
+            textFormat: Text.PlainText
             objectName: "logReadout"
             visible: Bridge.logActive
             text: headerBar.host.headerHasRoom

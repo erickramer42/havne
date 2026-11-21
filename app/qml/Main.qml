@@ -635,6 +635,7 @@ ApplicationWindow {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
         Label {
+            textFormat: Text.PlainText
             id: zoomBadgeLabel
             anchors.centerIn: parent
             text: qsTr("Zoom %1 %").arg(Math.round(Theme.zoom * 100))

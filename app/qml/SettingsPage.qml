@@ -555,6 +555,7 @@ Pane {
 
                 // The phone has no Home page to show it, and a bug report needs it
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "settingsCoreVersion"
                     Layout.fillWidth: true
                     Layout.topMargin: Theme.spacing

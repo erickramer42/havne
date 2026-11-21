@@ -13,6 +13,9 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QStyleHints>
+#include <QHostAddress>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QKeyEvent>
 #include <QLocale>
 #include <QObject>
@@ -36,6 +39,7 @@
 #include "recordingexport.h"
 #include "recording_frameset.h"
 #include "recordingimport.h"
+#include "refusing_network.h"
 #include "recordingview.h"
 #include "storemigration.h"
 #include "windowtheme.h"
@@ -324,6 +328,38 @@ public:
         model->applyUnasked(ids);
     }
 
+    // What the engines' URL interceptor has emptied so far
+    Q_INVOKABLE int urlsRefused() const
+    {
+        return RefusingUrlInterceptor::refused();
+    }
+
+    // Whether the engines' network manager lets a request for the URL go on
+    Q_INVOKABLE bool networkStays(const QUrl& url) const
+    {
+        return RefusingNetworkManager::stays(url);
+    }
+
+    // The interceptor's answer for a URL of the named kind: "string" (an
+    // Image's source), "qml", "js" or "qmldir"
+    Q_INVOKABLE QUrl intercepted(const QUrl& url, const QString& kind) const
+    {
+        RefusingUrlInterceptor interceptor;
+        const auto type = kind == QLatin1String("qml")
+                              ? QQmlAbstractUrlInterceptor::QmlFile
+                          : kind == QLatin1String("js")
+                              ? QQmlAbstractUrlInterceptor::JavaScriptFile
+                          : kind == QLatin1String("qmldir")
+                              ? QQmlAbstractUrlInterceptor::QmldirFile
+                              : QQmlAbstractUrlInterceptor::UrlString;
+        return interceptor.intercept(url, type);
+    }
+
+    Q_INVOKABLE bool namesAnotherHost(const QUrl& url) const
+    {
+        return RefusingUrlInterceptor::names_another_host(url);
+    }
+
     // A file of text in a scratch folder of the harness's own, as a URL a
     // file dialog would give; an empty URL when it can't be written
     Q_INVOKABLE QUrl writeScratchFile(const QString& name, const QString& text)
@@ -556,6 +592,30 @@ public:
     }
     Q_INVOKABLE QString emulatorWhy() const { return m_emulatorWhy; }
 
+    // A listener on the loopback that counts what connects: a case proves
+    // the engine opened no connection by this count, not by a timeout
+    Q_INVOKABLE int startListener()
+    {
+        if (m_listener == nullptr) {
+            m_listener = new QTcpServer(this);
+            connect(m_listener, &QTcpServer::newConnection, this, [this] {
+                ++m_listenerConnections;
+                while (QTcpSocket* s = m_listener->nextPendingConnection()) {
+                    s->deleteLater();
+                }
+            });
+        }
+        m_listenerConnections = 0;
+        return m_listener->isListening() ||
+                       m_listener->listen(QHostAddress::LocalHost)
+                   ? m_listener->serverPort()
+                   : 0;
+    }
+    Q_INVOKABLE int listenerConnections() const
+    {
+        return m_listenerConnections;
+    }
+
     // How many of the emulator's client lines carried this event
     // (connected, closed, refused): it serves one host at a time, so a
     // case waits for a closed before the next connect
@@ -633,6 +693,8 @@ private:
     QStringList m_storesMoved;
     std::unique_ptr<QProcess> m_emulator;
     QString m_emulatorWhy;
+    QTcpServer* m_listener = nullptr;
+    int m_listenerConnections = 0;
     QHash<QString, int> m_clientEvents;
 };
 
@@ -728,6 +790,13 @@ public:
     }
 
 public slots:
+    // Every engine the tests make has main()'s network manager
+    void qmlEngineAvailable(QQmlEngine* engine)
+    {
+        engine->setNetworkAccessManagerFactory(&m_networkFactory);
+        engine->addUrlInterceptor(&m_urlInterceptor);
+    }
+
     void applicationAvailable()
     {
         // HAVNE_TEST_LOCALE (for example "C") runs a file under that locale, as CI
@@ -805,6 +874,8 @@ public slots:
 private:
     QTemporaryDir m_settingsDir;
     QTemporaryDir m_recordingsDir;
+    RefusingNetworkFactory m_networkFactory;
+    RefusingUrlInterceptor m_urlInterceptor;
     Harness m_harness;
     std::unique_ptr<BluetoothDevices> m_bluetooth;
     std::unique_ptr<SessionBridge> m_bridge;

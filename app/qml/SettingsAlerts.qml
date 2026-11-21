@@ -152,12 +152,17 @@ ColumnLayout {
     }
 
     // Words
-    // A number as shown: up to three decimals (or decimals), the locale's
-    // point. The editor's fields keep three, so a saved level reads back as
-    // it was; the list says a level in its signal's own decimals
+    // A number as shown: up to three decimals, the locale's point. The
+    // editor's fields keep three, so a saved level reads back as it was; the
+    // list says a level in its signal's own decimals or as many as the level
+    // needs (up to three), whichever is more
     function shownNumber(v, decimals) {
-        return typeof v === "number" && isFinite(v)
-               ? String(Number(v.toFixed(decimals ?? 3))).replace(".", Qt.locale().decimalPoint) : ""
+        if (typeof v !== "number" || !isFinite(v))
+            return ""
+        let d = decimals ?? 3
+        while (d < 3 && Math.abs(v - Number(v.toFixed(d))) > 1e-9)
+            ++d
+        return String(Number(v.toFixed(d))).replace(".", Qt.locale().decimalPoint)
     }
     function rowOfRefs(refs) {
         const all = DashboardEdit.lookupRefs(refs ?? [], gaugeSets)
@@ -252,6 +257,7 @@ ColumnLayout {
 
     // The page
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsNote"
         text: qsTr("An alert watches the session's signals and says when one passes its level. "
                    + "Havne ships none: a level that suits one engine is a false alarm on another.")
@@ -261,6 +267,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsSavedProblem"
         visible: Bridge.conditionsProblem !== ""
         text: Bridge.conditionsProblem
@@ -269,6 +276,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsPending"
         visible: Bridge.conditionsPending !== ""
         text: qsTr("Your last change %1.").arg(Bridge.conditionsPending)
@@ -337,6 +345,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             objectName: "alertConfirmText"
             text: root.confirming !== "import"
                   ? qsTr("Start again with no alerts? The saved file is replaced; one that couldn't be read is kept beside it.")
@@ -374,6 +383,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertProblem"
         visible: text !== ""
         text: root.problem
@@ -382,6 +392,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "alertSaveNote"
         visible: text !== ""
         text: root.note
@@ -397,6 +408,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: qsTr("A signal with a gauge's levels: the alert starts at its danger level, "
                        + "else its warning, and clears a little inside it.")
             color: Theme.textDim
@@ -416,6 +428,7 @@ ColumnLayout {
 
     // The list
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsNone"
         visible: root.conditions.length === 0 && !root.unreadable
         text: qsTr("No alerts yet.")
@@ -456,6 +469,7 @@ ColumnLayout {
                     spacing: 2
                     Layout.fillWidth: true
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertName"
                         text: alertRow.condition.name ?? ""
                         color: Theme.text
@@ -465,6 +479,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertSummary"
                         text: root.summaryOf(alertRow.condition)
                         color: Theme.textDim
@@ -476,6 +491,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertLevel"
                     readonly property string level: alertRow.condition.alert?.level ?? ""
                     visible: level !== ""
@@ -484,6 +500,7 @@ ColumnLayout {
                     font.pixelSize: Theme.fontCaption
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertState"
                     visible: text !== ""
                     text: alertRow.stateText

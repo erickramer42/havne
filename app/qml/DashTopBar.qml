@@ -205,6 +205,7 @@ ColumnLayout {
             onClicked: topBar.host.setPhoneEdit(!topBar.host.phoneEdit)
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "dashPhoneNote"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
@@ -221,6 +222,7 @@ ColumnLayout {
 
     // How a gauge is reached, while no panel is open
     Label {
+        textFormat: Text.PlainText
         objectName: "dashEditHint"
         visible: topBar.host.editing && topBar.host.panel === ""
         Layout.fillWidth: true
@@ -351,6 +353,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "dashLayoutNote"
         visible: topBar.host.editing && topBar.host.layoutFilePart.layoutNote !== ""
                  && (topBar.host.moreShown || topBar.host.layoutFilePart.layoutNoteBad)
@@ -397,6 +400,7 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmRemovePage
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             objectName: "removePageQuestion"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
@@ -487,6 +491,7 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmReplaceKey !== ""
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             objectName: "replaceQuestion"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
@@ -517,6 +522,7 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmReset
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             wrapMode: Text.WordWrap
@@ -544,6 +550,7 @@ ColumnLayout {
         visible: (topBar.host.problem === "damaged" || topBar.host.problem === "newer"
                   || topBar.host.problem === "dropped") && !topBar.host.problemDismissed
         Label {
+            textFormat: Text.PlainText
             objectName: "dashProblemText"
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -610,6 +617,7 @@ ColumnLayout {
                 opacity: linkLabel.opacity
             }
             Label {
+                textFormat: Text.PlainText
                 id: linkLabel
                 objectName: "linkLabel"
                 Layout.fillWidth: true

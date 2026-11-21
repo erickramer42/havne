@@ -351,6 +351,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
                 ${CMAKE_SOURCE_DIR})
+    # Every Text and Label in app/qml sets textFormat: a text's <img> loads
+    # a file: URL's host with no interceptor asked, so outside text is plain
+    add_test(NAME PlainTextPinTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py --selftest)
+    add_test(NAME PlainTextPinTest.EveryTextSetsItsFormat
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py
+                ${CMAKE_SOURCE_DIR})
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---

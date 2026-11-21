@@ -156,9 +156,9 @@ TestCase {
         compare(find(alerts, "alertSaveNote").text, "Imported 2 alerts.")
     }
 
-    // In imperial the list says a level in its signal's own decimals, and
-    // the editor keeps three, so a metric level left as it showed is saved
-    // back as it was
+    // In imperial the list says a level in its signal's own decimals or as
+    // many as the level needs, and the editor keeps three, so a metric level
+    // left as it showed is saved back as it was
     function test_anImperialLevelReadsInItsSignalsDecimals() {
         save([rpm("fast", "Fast", { signal: ["id:3001"], unit: "km/h", above: 20 })])
         Bridge.unitSystem = 1
@@ -170,7 +170,7 @@ TestCase {
         verify(speed !== undefined, "the mock lists its speed")
         compare(speed.decimals, 0, "the speed's own decimals")
         const summary = wordsOf(rowOf(page, 0), "alertSummary")
-        verify(summary.endsWith(" above 12 mph"), summary)
+        verify(summary.endsWith(" above 12" + Qt.locale().decimalPoint + "427 mph"), summary)
         rowOf(page, 0).clicked()
         const term = termOf(editorOf(page), 0)
         compare(term.levelField.text, "12" + Qt.locale().decimalPoint + "427", "the field keeps three")
@@ -180,6 +180,20 @@ TestCase {
         const c = stored().conditions[0]
         verify(c.when.above === 20, String(c.when.above))
         compare(c.when.unit, "km/h")
+    }
+
+    // The list says a level in its signal's decimals or as many as the level
+    // needs: a stored 0.4 on a signal with none is not "above 0"
+    function test_aLevelNeedingMoreDecimalsThanTheSignalKeepsThem() {
+        save([rpm("slow", "Slow", { signal: ["id:3001"], unit: "km/h", above: 0.4 })])
+        Bridge.unitSystem = 0
+        const page = settingsOf()
+        page.connectPart.uriField.text = "mock://demo"
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.refreshRows()
+        compare(alerts.rows.find(r => r.ref === "id:3001").decimals, 0, "the speed keeps none")
+        const summary = wordsOf(rowOf(page, 0), "alertSummary")
+        verify(summary.endsWith(" above 0" + Qt.locale().decimalPoint + "4 km/h"), summary)
     }
 
     // ---- The editor

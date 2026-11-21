@@ -24,6 +24,7 @@ TestCase {
     Component { id: readoutC;  SegmentReadout { width: 260; height: 90; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: sparkC;    SparkGauge { width: 300; height: 110; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: digitalC;  DigitalGauge { width: 180; height: 122; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: metricsC;  FontMetrics { font.pixelSize: 10; font.features: Theme.valueFeatures } }
     Component { id: barC;      BarGauge { width: 300; height: 72; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;     RingGauge { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: analogC;   AnalogGauge { width: 260; height: 260; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
@@ -790,6 +791,21 @@ TestCase {
         const m = marks(narrow)
         for (let i = 1; i < m.length; ++i)
             verify(m[i].x >= m[i - 1].x + m[i - 1].width, "no overlap: " + texts)
+    }
+
+    // The stride follows the widest label drawn, not the one with the most
+    // characters: "0.5" is as long as "100" and narrower, whatever the order
+    function test_theMarkStrideMeasuresEveryLabel() {
+        const a = make(barC, { width: 100, to: 700, scaleMarks: [0.5, 100, 300, 500, 700] })
+        const b = make(barC, { width: 100, to: 700, scaleMarks: [100, 300, 500, 700, 0.5] })
+        const metrics = createTemporaryObject(metricsC, testCase)
+        const narrow = metrics.advanceWidth(a.formatScale(0.5))
+        const wide = metrics.advanceWidth(a.formatScale(100))
+        verify(wide > narrow, "the longer-looking label is the wider: " + wide + " vs " + narrow)
+        // The gauge's own metrics may differ from this one's by a pixel
+        verify(a.widestMarkWidth >= wide - 1, "the widest label sets it, not the first longest: "
+               + a.widestMarkWidth + " vs " + wide)
+        compare(a.widestMarkWidth, b.widestMarkWidth, "the order of the marks changes nothing")
     }
 
     function test_thePeakShowsOnTheBarAndTheRing_data() {

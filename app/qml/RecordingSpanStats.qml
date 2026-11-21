@@ -23,6 +23,7 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: 0
     component StatCell: Label {
+        textFormat: Text.PlainText
         // Shares, not widths: a width read from the page would
         // make the column lay itself out again as it sizes
         Layout.fillWidth: true
@@ -38,7 +39,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: 8
         Layout.rightMargin: 12
-        Label { text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
+        Label { textFormat: Text.PlainText; text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
         StatCell { text: qsTr("Change"); color: Theme.textDim }
         StatCell { text: qsTr("Low"); color: Theme.textDim }
         StatCell { text: qsTr("High"); color: Theme.textDim }
@@ -56,6 +57,7 @@ ColumnLayout {
             Layout.leftMargin: 8
             Layout.rightMargin: 12
             Label {
+                textFormat: Text.PlainText
                 text: statRow.modelData.name
                 color: Theme.text
                 elide: Text.ElideRight
@@ -110,6 +112,7 @@ ColumnLayout {
                     RowLayout {
                         Layout.fillWidth: true
                         Label {
+                            textFormat: Text.PlainText
                             text: statCard.modelData.name
                             color: Theme.textDim
                             elide: Text.ElideRight
@@ -117,6 +120,7 @@ ColumnLayout {
                             Layout.fillWidth: true
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "statChange"
                             text: root.host.textsPart.statChange(statCard.stat)
                             color: Theme.text
@@ -126,6 +130,7 @@ ColumnLayout {
                         }
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "statLine"
                         Layout.fillWidth: true
                         // At most a value to a line: a narrow card cuts none

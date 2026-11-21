@@ -202,6 +202,7 @@ GaugeBase {
     Repeater {
         model: gauge.majorCount
         delegate: Text {
+            textFormat: Text.PlainText
             required property int index
             Accessible.ignored: true
             readonly property real v: gauge.from + index * gauge.majorStep
@@ -242,6 +243,7 @@ GaugeBase {
 
     // Readout: caption above the hub, value below it
     Text {
+        textFormat: Text.PlainText
         Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
         // Below the upper numerals' ring (they sit at 45 degrees off the
@@ -268,6 +270,7 @@ GaugeBase {
             width: valueLabel.width
             height: valueLabel.height
             Text {
+                textFormat: Text.PlainText
                 id: valueLabel
                 objectName: "readout"
                 Accessible.ignored: true
@@ -290,6 +293,7 @@ GaugeBase {
             }
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.unit
@@ -297,6 +301,7 @@ GaugeBase {
             color: Theme.textDim
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: gauge.size * 0.012

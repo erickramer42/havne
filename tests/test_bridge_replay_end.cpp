@@ -24,7 +24,7 @@ struct Played {
 };
 
 bool playUnder(SessionBridge& bridge, Played& played, const QString& profile,
-               bool dropValues = false)
+               bool dropValues = false, bool oneLongLine = false)
 {
     if (!played.recorded.isValid()) {
         return false;
@@ -45,6 +45,14 @@ bool playUnder(SessionBridge& bridge, Played& played, const QString& profile,
         !QFile::remove(played.recorded.path() + QStringLiteral("/") +
                        folders.first() + QStringLiteral("/signals.csv"))) {
         return false;
+    }
+    if (oneLongLine) {
+        QFile csv(played.recorded.path() + QStringLiteral("/") +
+                  folders.first() + QStringLiteral("/signals.csv"));
+        if (!csv.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            return false;
+        }
+        csv.write(QByteArray(8 * 1024 * 1024, 'x'));
     }
     QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&played](const QString& line) { played.log << line; });
@@ -122,6 +130,22 @@ TEST(BridgeTest, AReplaysFirstLineSaysWhenTheRecordingHoldsNoValues)
     EXPECT_TRUE(made.first().contains(QStringLiteral("holds no signal values")))
         << made.first().toStdString();
     EXPECT_FALSE(made.first().contains(played.recorded.path()));
+}
+
+/* A signals.csv that is one long line holds no values: the connect reads
+ * it in bounded pieces and says so, never taking the file's size. */
+TEST(BridgeTest, AReplayOfAOneLineSignalsCsvSaysItHoldsNoValues)
+{
+    SessionBridge bridge;
+    Played played;
+    ASSERT_TRUE(playUnder(bridge, played, QStringLiteral("obd2"), false, true))
+        << played.log.join(QLatin1Char('\n')).toStdString();
+    const QStringList made =
+        played.log.filter(QStringLiteral("recorded under"));
+    ASSERT_EQ(made.size(), 1)
+        << played.log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_TRUE(made.first().contains(QStringLiteral("holds no signal values")))
+        << made.first().toStdString();
 }
 
 /* A looping replay never finishes: its rows keep waiting for data. */

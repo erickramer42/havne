@@ -352,6 +352,7 @@ GaugeCard {
                 }
             }
             contentItem: Text {
+                textFormat: Text.PlainText
                 text: removeBox.text
                 font.pixelSize: Theme.fontBody + 6
                 font.weight: Font.DemiBold
@@ -364,6 +365,7 @@ GaugeCard {
 
     // A kind this version doesn't draw, kept so it can be removed
     Label {
+        textFormat: Text.PlainText
         objectName: "unknownKind"
         visible: !card.drawn
         anchors.centerIn: parent

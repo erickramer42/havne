@@ -12,12 +12,13 @@
 
 import collections
 import os
+import subprocess
 
 import pytest
 
 import havne
 
-from conftest import PLUGINS, SIGNALS, cli, line_of
+from conftest import PLUGINS, SIGNALS, cli, havne_cli, line_of
 
 # obd2's own IDs (signal_sets.h, which the package doesn't carry): its
 # first ten signals, two of them by name, and its computed Boost
@@ -136,6 +137,12 @@ def test_a_value_goes_to_a_number_by_a_name_an_expression_reads():
             f.evaluate("obd2.rpm", {"obd2.rpm": (1, age)})
     with pytest.raises(havne.ExprRefused):
         f.evaluate("obd2.rpm +", {"obd2.rpm": 1})
+    # A bad value is worded before a refused expression, a value that isn't finite is refused
+    with pytest.raises(ValueError, match="'bost', which no signal is"):
+        f.evaluate("obd2.rpm +", {"bost": 1})
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="must be finite"):
+            f.evaluate("obd2.rpm", {"obd2.rpm": bad})
 
 
 def test_a_plugins_variant_is_judged_in_its_own_file():
@@ -146,12 +153,16 @@ def test_a_plugins_variant_is_judged_in_its_own_file():
     with pytest.raises(havne.ExprRefused) as r:
         p.check_expr("clutch_slip / 2", variant="base")
     assert r.value.at == 1
-    with pytest.raises(havne.ExprRefused):
-        p.check_expr("clutch_slip / 2")  # the first variant when none is named
+    # A plugin of several variants needs one named, as havne-cli does
+    for call in (lambda: p.check_expr("clutch_slip / 2"),
+                 lambda: p.expr_ref("Clutch Slip"),
+                 lambda: p.evaluate("clutch_slip", {})):
+        with pytest.raises(ValueError, match="variants: base, my2019"):
+            call()
     assert p.expr_ref("Clutch Slip", variant="my2019") == "clutch_slip"
     with pytest.raises(LookupError):
         p.expr_ref("Clutch Slip", variant="base")
-    assert p.expr_ref("Trans Fluid Temp") == "trans_temp"
+    assert p.expr_ref("Trans Fluid Temp", variant="my2019") == "trans_temp"
     assert p.expr_ref(RPM, variant="base") == "obd2.rpm"
     assert p.evaluate("trans_temp - obd2.coolant", {"trans_temp": 90, "obd2.coolant": 85},
                       variant="my2019") == havne.Evaluation(5.0, None, None, None)
@@ -190,3 +201,31 @@ def test_havne_cli_says_the_same_of_an_expression():
     assert [x["ref"] for x in listed if x["type"] == "input"] == \
         [f.expr_ref(x["id"]) for x in listed if x["type"] == "input"]
     assert len(listed) == 6, "start and the file's five signals"
+
+
+def test_havne_cli_and_the_package_refuse_the_same_three_inputs():
+    path = os.path.join(SIGNALS, "chain.json")
+    plugin = os.path.join(PLUGINS, "example-sim")
+    p = havne.Plugin(plugin)
+    f = chain()
+
+    def refused(*args):
+        done = subprocess.run([havne_cli(), "signals", "expr", *args], capture_output=True,
+                              text=True, encoding="utf-8", timeout=120)
+        assert (done.returncode, done.stdout) == (2, ""), (args, done.returncode, done.stdout)
+        return done.stderr
+
+    # A plugin of several variants with none named: both list them
+    listed = ", ".join(p.variants)
+    assert listed in refused("--plugin", plugin, "clutch_slip / 2")
+    with pytest.raises(ValueError, match=listed):
+        p.check_expr("clutch_slip / 2")
+    # A bad value name beside a refused expression: both word the value
+    assert "--value bost" in refused("--signals", path, "max(coolant, oli", "--value", "bost=1")
+    with pytest.raises(ValueError, match="a value for 'bost'"):
+        f.evaluate("max(coolant, oli", {"bost": 1})
+    # A value that isn't finite: both refuse it
+    for word in ("nan", "inf"):
+        refused("--signals", path, "coolant", "--value", "coolant=" + word)
+        with pytest.raises(ValueError, match="must be finite"):
+            f.evaluate("coolant", {"coolant": float(word)})

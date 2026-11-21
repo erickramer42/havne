@@ -70,8 +70,7 @@ int run_signals_check(const char* path)
     const ecuio_status_t st = load_signal_file(path, &file, &why);
     if (st != ECUIO_OK) {
         write_error(out, st, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     write_check_lines(out, file);
     ecuio_signal_file_free(file);
@@ -122,8 +121,7 @@ int import_as_plugin(Output& out, const ImportArgs& args,
     const MadeText m = made_text(st, text, length);
     if (m.status != ECUIO_OK) {
         write_error(out, m.status, m.words.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     if (!write_made_file(out, args.out, m)) {
         out.flush();
@@ -166,8 +164,7 @@ int run_signals_import(const ImportArgs& args)
     if (!read_whole(args.file, ECUIO_OBDB_MAX_BYTES, "OBDb file", &bytes,
                     &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ImportNotes notes;
     notes.out = &out;
@@ -178,8 +175,7 @@ int run_signals_import(const ImportArgs& args)
                           write_import_note, &notes, &json, &length);
     if (st != ECUIO_OK) {
         write_error(out, st);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const std::string text(json, length);
     ecuio_obdb_free(json);
@@ -188,8 +184,7 @@ int run_signals_import(const ImportArgs& args)
     }
     if (!write_whole(args.out, text, &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-        out.flush();
-        return kExitFailed;
+        return ended(out, kExitFailed);
     }
     {
         char buf[256];

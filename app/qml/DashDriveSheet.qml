@@ -67,6 +67,7 @@ Rectangle {
                 onClicked: Bridge.startLog()
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "driveLogReadout"
                 visible: Bridge.logActive
                 // Gives way first, so Stop log and Mark keep their size

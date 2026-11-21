@@ -201,6 +201,7 @@ void ConditionModel::setConditions(const ecuio_condition_set_t* set,
                                    const ecuio_signal_file_t* file)
 {
     const int before = count();
+    ++m_setGeneration;
     beginResetModel();
     m_rows.clear();
     const uint32_t n = ecuio_condition_set_count(set);
@@ -251,9 +252,14 @@ void ConditionModel::setConditions(const ecuio_condition_set_t* set,
 void ConditionModel::applyStates(const ecuio_condition_state_t* states,
                                  uint32_t n)
 {
-    for (size_t i = 0; i < m_rows.size() && i < n; ++i) {
+    // A handler of dataChanged may attach another set (a save), which
+    // replaces the rows and the caller's buffer: walk a copy and stop once
+    // the set has changed
+    const std::vector<ecuio_condition_state_t> own(states, states + n);
+    const uint64_t generation = m_setGeneration;
+    for (size_t i = 0; i < m_rows.size() && i < own.size(); ++i) {
         Row& r = m_rows[i];
-        const ecuio_condition_state_t& s = states[i];
+        const ecuio_condition_state_t& s = own[i];
         if (r.live && sameState(r.state, s)) {
             continue;
         }
@@ -264,6 +270,9 @@ void ConditionModel::applyStates(const ecuio_condition_state_t* states,
         emit dataChanged(at, at,
                          {LiveRole, StateRole, StaleRole, UnavailableRole,
                           WhyRole, FiredRole, ValueRole, SinceMsRole});
+        if (m_setGeneration != generation) {
+            return;
+        }
     }
 }
 

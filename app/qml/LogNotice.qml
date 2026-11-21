@@ -27,6 +27,7 @@ RowLayout {
         color: Theme.warning
     }
     Label {
+        textFormat: Text.PlainText
         objectName: notice.name + "Text"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

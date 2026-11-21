@@ -283,6 +283,7 @@ SwipeView {
             }
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "dashEmptyPage"
                 visible: pageView.cells.length === 0 && !swipe.host.editing && !swipe.host.connectShown
                 x: swipe.host.margin
