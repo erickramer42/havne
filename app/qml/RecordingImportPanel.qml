@@ -147,7 +147,7 @@ ColumnLayout {
                  && (root.host.savedMaps.length > 0 || root.host.importMap.toString() !== "")
         Layout.fillWidth: true
         spacing: Theme.spacing
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)

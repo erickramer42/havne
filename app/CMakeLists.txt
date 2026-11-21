@@ -112,6 +112,8 @@ qt_add_qml_module(app_ui
         qml/ThemedButton.qml
         qml/ThemedCheckBox.qml
         qml/ThemedTextField.qml
+        qml/PlainComboBox.qml
+        qml/PlainMenuItem.qml
         qml/SegmentButton.qml
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml

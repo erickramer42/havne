@@ -57,7 +57,7 @@ ColumnLayout {
 
     // Where the values come from: offered once it opened, or failed
     // (a profile that can't decode it, a folder with frames alone)
-    ComboBox {
+    PlainComboBox {
         implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                  implicitContentHeight + topPadding + bottomPadding,
                                  implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -126,7 +126,7 @@ ColumnLayout {
         visible: root.host.recording.state === RecordingView.Open
         Layout.fillWidth: true
         spacing: Theme.spacing
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -175,7 +175,7 @@ ColumnLayout {
                     { text: qsTr("Align a pull"), value: "pull" }]
             onActivated: root.host.comparePart.setAlignOn(currentValue)
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -193,7 +193,7 @@ ColumnLayout {
                 currentIndex = Qt.binding(() => root.host.alignPullHere)
             }
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -209,7 +209,7 @@ ColumnLayout {
                 currentIndex = Qt.binding(() => root.host.alignPullThere)
             }
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -219,7 +219,7 @@ ColumnLayout {
             model: root.host.recording.state === RecordingView.Open ? root.host.comparePart.markerLabels() : []
             onActivated: root.host.alignLabel = currentText
         }
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)

@@ -864,7 +864,7 @@ Page {
             objectName: "paneMenu"
             Instantiator {
                 model: root.paneMenuItems
-                delegate: MenuItem {
+                delegate: PlainMenuItem {
                     required property var modelData
                     objectName: "paneChoice_" + (modelData.key === "" ? "unit" : modelData.key === "new" ? "new" : modelData.key)
                     text: modelData.text
