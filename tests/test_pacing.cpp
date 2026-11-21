@@ -535,15 +535,18 @@ struct TwoDids {
     static constexpr const char* kName = "pacing-two-dids";
 };
 
-// A car run's model, checked to be the same run with ?hold=0: one
-// module's channel, which the hold leaves alone
+// A car run's model; a J2534 one checked to be the same run with
+// ?hold=0, one module's channel, which the hold leaves alone. The
+// ELM327 model never reads the hold, so its rerun would prove nothing.
 pacing::bench_result car_run(pacing::bench_config cfg)
 {
     cfg.seconds = 60;
     const pacing::bench_result r = run(cfg);
-    cfg.model.hold = false;
-    const pacing::bench_result plain = run(cfg);
-    EXPECT_EQ(r.sent_us, plain.sent_us) << "the hold acted on one module";
+    if (cfg.model.kind == pacing::adapter::j2534) {
+        cfg.model.hold = false;
+        const pacing::bench_result plain = run(cfg);
+        EXPECT_EQ(r.sent_us, plain.sent_us) << "the hold acted on one module";
+    }
     EXPECT_EQ(r.timeouts, 0u);
     return r;
 }
@@ -570,8 +573,8 @@ pacing::bench_config the_car(pacing::adapter_model model)
 
 /* The car pins: each model against its run in
  * docs/bench-sessions/2026-11-18-pacing-car.md, replies a second from
- * the engine ECU. Every run there asked one module, so each holds with
- * ?hold= on or off. D1, obd2 whole through the VX, packed: 58.7. D4, the
+ * the engine ECU. Every run there asked one module, so each VX run holds
+ * with ?hold= on or off. D1, obd2 whole through the VX, packed: 58.7. D4, the
  * same at ?gap=0, ran 52.7 on the car, its ECU's first frame later (P50
  * 5.05 against 3.80 ms); the model's reply timing doesn't follow the
  * pace, so it runs D4 as D1, a gap it doesn't cover and no pin */
