@@ -223,6 +223,20 @@ bool take_bytes(transport* t, const char* sent, OnLine& on_line, bool* line)
     return false;
 }
 
+/* Logs the machine's sleep since sent was typed, when there was one, with
+ * what became of the reply; false when there was none. */
+inline bool say_sleep(transport* t, const char* sent, const char* then)
+{
+    const uint64_t slept = slept_us() - t->slept_at;
+    if (slept < ELM327_SLEEP_SAID_US) {
+        return false;
+    }
+    const unsigned long long tenths = slept / 100000;
+    elm327_log_write(t->log, "the machine slept %llu.%llu s with %s out: %s",
+                     tenths / 10, tenths % 10, sent, then);
+    return true;
+}
+
 /* Reads the reply to sent (sent without its CR) to the prompt, calling
  * on_line for each line but its echo; a stop first leaves it owed. */
 template <typename OnLine>
@@ -267,15 +281,7 @@ elm327_io reply_to(transport* t, const char* sent, OnLine& on_line)
                     .count();
             const uint32_t timeout = prompt_timeout_ms();
             if (quiet >= timeout) {
-                const uint64_t slept = slept_us() - t->slept_at;
-                if (slept >= ELM327_SLEEP_SAID_US) {
-                    const unsigned long long tenths = slept / 100000;
-                    elm327_log_write(
-                        t->log,
-                        "the machine slept %llu.%llu s with %s out: its reply "
-                        "is lost",
-                        tenths / 10, tenths % 10, sent);
-                } else {
+                if (!say_sleep(t, sent, "its reply is lost")) {
                     elm327_log_write(t->log,
                                      "no line and no prompt for %s (%s)",
                                      words_of(timeout).text, sent);
@@ -288,8 +294,10 @@ elm327_io reply_to(transport* t, const char* sent, OnLine& on_line)
             t->port.impl, t->rx_buf, sizeof(t->rx_buf),
             (left < ELM327_READ_SLICE_MS) ? left : ELM327_READ_SLICE_MS);
         if (n < 0) {
-            elm327_log_write(t->log,
-                             "the port failed (reading the reply to %s)", sent);
+            if (!say_sleep(t, sent, "the port failed on the wake")) {
+                elm327_log_write(
+                    t->log, "the port failed (reading the reply to %s)", sent);
+            }
             return elm327_io::failed;
         }
         t->rx_len = static_cast<uint32_t>(n);

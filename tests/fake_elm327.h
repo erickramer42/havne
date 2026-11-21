@@ -803,7 +803,9 @@ private:
             text_line(k.version, end);
         }
         end_line(end);
-        prompt(end);
+        if (!k.no_prompt) {
+            prompt(end);
+        }
     }
 };
 
