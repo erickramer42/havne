@@ -208,7 +208,7 @@ protected:
     }
 };
 
-/* 32 KB: kept off the stack */
+/* Too big for a stack (isotp.h): kept off it */
 isotp_rx& fresh_rx()
 {
     static isotp_rx r;

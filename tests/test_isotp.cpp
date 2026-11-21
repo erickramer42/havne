@@ -30,7 +30,7 @@ std::vector<uint8_t> counting(uint16_t n)
     return v;
 }
 
-/* 32 KB each: kept off the stack, fresh per test */
+/* Too big for a stack (isotp.h): kept off it, fresh per test */
 isotp_rx& fresh_rx(bool timed)
 {
     static isotp_rx r;

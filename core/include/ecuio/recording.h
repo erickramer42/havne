@@ -337,11 +337,9 @@ _Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
 
 /* ecuio_recording_signal_t.flags */
 #define ECUIO_RECORDING_SIGNAL_TEXT 0x1u /* a text kind: counts, no range */
-#define ECUIO_RECORDING_SIGNAL_ENUM                                            \
-    0x2u /* a number shown as a word
-                                            (format 3 or later): read as a
-                                            number, its labels from
-                                            ecuio_recording_get_labels */
+/* A number shown as a word (format 3 or later): read as a number, its
+ * labels from ecuio_recording_get_labels */
+#define ECUIO_RECORDING_SIGNAL_ENUM 0x2u
 
 typedef struct ecuio_recording_signal {
     char name[32];          /* as ecuio_signal_def_t holds them; in a
@@ -712,10 +710,10 @@ ecuio_recording_get_conditions(const ecuio_recording_t* r,
  * in time order. A cond line is an activity line of format 3 or later
  * whose kind is cond; one that doesn't parse (a torn last line or one
  * past the longest row among them), or names a key past the
- * ECUIO_CONDITION_MAX_CONDITIONS a set holds, is left out and counted in lines_skipped; an eighth field
- * and after are passed by, and a flag word the reader doesn't know is
- * left out of flags. A line whose time doesn't read is no activity line,
- * of any kind. index runs below
+ * ECUIO_CONDITION_MAX_CONDITIONS a set holds, is left out and counted in
+ * lines_skipped; an eighth field and after are passed by, and a flag
+ * word the reader doesn't know is left out of flags. A line whose time
+ * doesn't read is no activity line, of any kind. index runs below
  * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
  * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */
 ecuio_status_t
