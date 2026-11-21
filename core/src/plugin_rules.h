@@ -123,7 +123,7 @@ inline bool wmi_ok(const std::string& s)
 /* names_a_device's judgment of one part */
 inline bool device_part(const std::string& part)
 {
-    if (part.back() == '.') {
+    if (part.back() == '.' || part.back() == ' ') {
         return true;
     }
     std::string stem = part.substr(0, part.find('.'));
@@ -143,8 +143,8 @@ inline bool device_part(const std::string& part)
 }
 
 /* Whether a part of path p is a Windows device name in any case with any
- * extension (con.json, NUL, com1.txt) or ends in a dot, which Windows
- * drops: read from disk it opens the device or another file. A folder's
+ * extension (con.json, NUL, com1.txt) or ends in a dot or a space, which
+ * Windows drops: read from disk it opens the device or another file. A folder's
  * reads refuse one and a wrap or put never writes one; a packed file's
  * paths are keys in its text, which nothing opens, so its load takes them */
 inline bool names_a_device(const std::string& p)

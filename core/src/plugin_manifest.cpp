@@ -64,8 +64,8 @@ void refuse_a_device(const Value& at, const std::string& name,
 {
     if (names_a_device(path)) {
         refuse(at, name + " is a Windows device name (con, nul, com1, ...) "
-                          "or ends in a dot: a folder's file isn't read by "
-                          "such a name");
+                          "or ends in a dot or a space: a folder's file isn't "
+                          "read by such a name");
     }
 }
 
