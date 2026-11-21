@@ -636,3 +636,32 @@ TEST(RequestTurnsTest, TheLastModulesBitsAreItsOwn)
               ECUIO_ENGINE_ONCE);
     EXPECT_EQ(t.walk_away, 0u) << "it asks: away no more";
 }
+
+/* A held channel past bit 15 is its own: channel 16 held neither cuts
+ * channel 0's floor short nor has its session request end a turn, where
+ * channel 0's bit would say it isn't held */
+TEST(RequestTurnsTest, AHeldChannelPastBitFifteenIsItsOwn)
+{
+    constexpr uint32_t n = 17;
+    auto a = adapter(n);
+    dids(&a->e, 0, 4);
+    dids(&a->e, 16, 4, 0x80);
+    const int64_t now = 100 * kMs;
+    a->e.chans[0].next_send_us = now + 3 * ECUIO_ENGINE_GAP_US;
+    a->e.chans[16].next_send_us = now + ECUIO_ENGINE_GAP_US;
+    EXPECT_EQ(ecuio_engine_turn_floor_us(&a->e, 0, 0, now), 0)
+        << "channel 16 asks first";
+    EXPECT_EQ(ecuio_engine_turn_floor_us(&a->e, 0, 1u << 16, now),
+              3 * ECUIO_ENGINE_GAP_US)
+        << "held, channel 16 asks nothing";
+
+    ASSERT_TRUE(
+        ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MIN_US));
+    for (uint32_t c = 0; c < 16; ++c) {
+        a->e.chans[c].session_step = ECUIO_SESSION_STATE_REFUSED;
+    }
+    const int64_t later = now + ECUIO_ENGINE_GAP_US;
+    ASSERT_EQ(ecuio_engine_turn_session(&a->e, 0, n, later), 16u);
+    EXPECT_EQ(ecuio_engine_turn_session(&a->e, 1u << 16, n, later), n)
+        << "held, its session request is no one's turn";
+}
