@@ -2211,6 +2211,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     # took past the default 5 s and failed the build. The "qt" label marks
     # this block's tests, which linux-build runs
     gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "qt")
+    # The dense-recording cases generate and read a million-row file, so
+    # each counts as two jobs against ctest's -j; the include runs after
+    # the discovery's, which defines the tests
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_SOURCE_DIR}/bridge_processors.cmake)
 
     # The GUI thread's cost per frame by profile size, a measurement for
     # docs/performance.md; built with the tests, never run by ctest
@@ -2375,6 +2380,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
             set_tests_properties(QmlTest.${_qml_name} PROPERTIES
                 ENVIRONMENT "${_qml_test_env}"
                 TIMEOUT 180
+                PROCESSORS 2
                 LABELS "qt"
             )
             if(DEFINED _qml_cost_${_qml_name})
@@ -2426,6 +2432,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                     ENVIRONMENT "${_qml_test_env}"
                     TIMEOUT 180
                     COST ${_qml_cost_${_qml_name}}
+                    PROCESSORS 2
                     LABELS "qt"
                 )
                 unset(_qml_share_${_qml_share})
