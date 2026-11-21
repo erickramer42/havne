@@ -157,9 +157,11 @@ _Static_assert(offsetof(ecuio_recorder_state_t, frames_passed) == 184,
  * NULL on every failure. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
  * options, root or out; ECUIO_ERR_INVALID_ARGUMENT for a flag other than
  * ECUIO_RECORD_ARMED or nonzero reserved; ECUIO_ERR_RECORDING_FAILED
- * when the folder can't be created, with ecuio_last_error_detail naming
- * the cause, never the path; ECUIO_ERR_OUT_OF_MEMORY when an allocation
- * fails, the files it made closed.
+ * when the folder or its files can't be created or the writer thread
+ * can't start, with ecuio_last_error_detail naming the cause, never the
+ * path; ECUIO_ERR_OUT_OF_MEMORY when an allocation fails. A failure
+ * after the folder was made removes the files the open made and then
+ * the folder, when that leaves it empty.
  */
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
                                    ecuio_recorder_t** out);
@@ -168,8 +170,8 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
  * The signal file that will decode the session (ADR-0051 section 4),
  * given before ecuio_session_record: attach checks that its set is the
  * session's, and the recording holds a copy of the file's bytes as
- * signals.json, its SHA-256 on events.log's header (format 3's
- * "signal file" line), so a replay loading that copy decodes the same
+ * signals.json, its SHA-256 on events.log's header (the "signal file"
+ * line of format 3 or later), so a replay loading that copy decodes the same
  * values. file must outlive the call only. ECUIO_ERR_NULL_ARGUMENT for a
  * NULL recorder or file; ECUIO_ERR_INVALID_ARGUMENT once a session has
  * attached or on a second call; ECUIO_ERR_OUT_OF_MEMORY.
@@ -315,8 +317,8 @@ typedef struct ecuio_recording_info {
     uint64_t records_dropped; /* the writer's, from the summary */
     uint64_t notes_dropped;
     uint64_t condition_events; /* events.log's cond lines that parse
-                                  (ADR-0063 section 8; format 3), every
-                                  one counted;
+                                  (ADR-0063 section 8; format 3 or
+                                  later), every one counted;
                                   ecuio_recording_get_condition_event */
     uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_recording_info_t;
@@ -335,9 +337,10 @@ _Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
 
 /* ecuio_recording_signal_t.flags */
 #define ECUIO_RECORDING_SIGNAL_TEXT 0x1u /* a text kind: counts, no range */
-#define ECUIO_RECORDING_SIGNAL_ENUM 0x2u /* a number shown as a word
-                                            (format 3): read as a number,
-                                            its labels from
+#define ECUIO_RECORDING_SIGNAL_ENUM                                            \
+    0x2u /* a number shown as a word
+                                            (format 3 or later): read as a
+                                            number, its labels from
                                             ecuio_recording_get_labels */
 
 typedef struct ecuio_recording_signal {
@@ -504,7 +507,7 @@ typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
 typedef int (*ecuio_cancel_t)(void* user_data);
 
 /* ecuio_recording_signals_t.flags: NAMED, events.log's header names
- * signals.json and its SHA-256 (format 3); PRESENT, signals.json is in
+ * signals.json and its SHA-256 (format 3 or later); PRESENT, signals.json is in
  * the folder; MATCH, named and present, and its SHA-256 the header's */
 #define ECUIO_RECORDING_SIGNALS_NAMED   0x1u
 #define ECUIO_RECORDING_SIGNALS_PRESENT 0x2u
@@ -535,7 +538,8 @@ _Static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
 #endif
 
 /* ecuio_recording_conditions_t.flags, as the signal file's: NAMED,
- * events.log's header names conditions.json and its SHA-256 (format 3);
+ * events.log's header names conditions.json and its SHA-256 (format 3
+ * or later);
  * PRESENT, conditions.json is in the folder; MATCH, named and present,
  * and its SHA-256 the header's */
 #define ECUIO_RECORDING_CONDITIONS_NAMED   0x1u
@@ -553,7 +557,7 @@ typedef struct ecuio_recording_conditions {
                                when it names none */
     uint64_t events_lost;   /* condition events the recorder lost: the sum
                                of its drop lines that count them (format
-                               3), which stops at UINT64_MAX */
+                               3 or later), which stops at UINT64_MAX */
     uint64_t reserved[4];   /* zero; ABI growth space */
 } ecuio_recording_conditions_t;
 
@@ -705,10 +709,10 @@ ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);
 /* The index-th cond line in events.log's order, which the recorder writes
- * in time order. A cond line is a format 3 activity line whose kind is
- * cond; one that doesn't parse (a torn last line or one past the longest
- * row among them), or names a key past the ECUIO_CONDITION_MAX_CONDITIONS
- * a set holds, is left out and counted in lines_skipped; an eighth field
+ * in time order. A cond line is an activity line of format 3 or later
+ * whose kind is cond; one that doesn't parse (a torn last line or one
+ * past the longest row among them), or names a key past the
+ * ECUIO_CONDITION_MAX_CONDITIONS a set holds, is left out and counted in lines_skipped; an eighth field
  * and after are passed by, and a flag word the reader doesn't know is
  * left out of flags. A line whose time doesn't read is no activity line,
  * of any kind. index runs below

@@ -138,6 +138,12 @@ TEST(RecorderTest, OutOfMemoryAnywhereInAnOpenIsAnsweredNotThrown)
                 ++refused;
                 EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
                 EXPECT_EQ(rec, nullptr) << "at " << n;
+                /* The root is the caller's; nothing the open made in it
+                 * stays, so no list shows a recording that won't open */
+                std::error_code ec;
+                const fs::path made = fs::u8path(dir);
+                EXPECT_TRUE(!fs::exists(made, ec) || fs::is_empty(made, ec))
+                    << "a refused open left its folder at " << n;
                 continue;
             }
             ASSERT_NE(rec, nullptr);

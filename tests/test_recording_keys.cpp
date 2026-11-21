@@ -551,6 +551,48 @@ TEST(RecordingKeysTest, TheLongCsvGivesEachRowsKey)
     EXPECT_EQ(o.lines[2], "1.000000,RPM,rpm,800");
 }
 
+// A hand-made header the export reads as the reader does: a signal line
+// repeated keeps the first, so a column named by it is that signal's
+TEST(RecordingKeysTest, ASignalLineRepeatedIsTheFirstToTheExportToo)
+{
+    Folder f;
+    f.write("events.log",
+            events_of(rows::kFormat3, {"signal  RPM,number,rpm,0,2,1",
+                                       "signal  RPM,number,r/min,0,0,1"}));
+    f.write("signals.csv",
+            signals_csv("1000000,RPM,800,rpm\n2000000,RPM,810,rpm\n"));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(r.info().signal_count, 1u);
+    EXPECT_STREQ(r.signal(0).unit, "rpm");
+    const Exported e(f, ECUIO_CSV_WIDE, {"RPM"});
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    ASSERT_GE(e.lines.size(), 3u);
+    EXPECT_EQ(e.lines[0], "Time (ms),RPM (rpm)");
+    EXPECT_EQ(e.lines[1], "1000,800");
+}
+
+// A first line past a row's length is no format to the reader, and none
+// to the export either: the format line under it keys neither
+TEST(RecordingKeysTest, AFirstLineTooLongIsNoFormatToEither)
+{
+    Folder f;
+    const std::string first(rows::kRowMax + 10, 'x');
+    f.write("events.log",
+            first + "\n" +
+                events_of(rows::kFormat4, {std::string("signal  ") + kRpm1 +
+                                           ",RPM,number,rpm,0,2,1"}));
+    f.write("signals.csv",
+            signals_csv(std::string("1000000,") + kRpm1 + ",800,rpm\n"));
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.info().format, ECUIO_RECORDING_FORMAT_UNKNOWN);
+    const Exported e(f, ECUIO_CSV_LONG);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    ASSERT_GE(e.lines.size(), 3u);
+    EXPECT_EQ(e.lines[1], "time_s,signal,unit,value") << "no key column";
+}
+
 // The wide CSV heads a column "Name (unit)", with its key after only
 // where two columns share that head; a column is named by its key or by
 // a name one signal has
