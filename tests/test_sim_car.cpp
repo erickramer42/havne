@@ -209,6 +209,31 @@ TEST(SimEcuTest, EachModulesFaultsAreTheAllAndItsOwnAims)
     EXPECT_EQ(other.pending, 7u);
 }
 
+// A second faults= key adds to the first, as the timing keys do: its
+// faults for every module beside the first's, its aims after them, and
+// the aims' bound counted across both
+TEST(SimEcuTest, ASecondFaultsKeyAddsToTheFirst)
+{
+    const ecuio_sim_config c =
+        parsed("mock://sim?faults=silent:3@7E9,late:4&faults=late:5,pending:2");
+    EXPECT_EQ(c.faults.late, 5u) << "the later of two for every module";
+    EXPECT_EQ(c.faults.pending, 2u);
+    ASSERT_EQ(c.aimed.count, 1u);
+    EXPECT_EQ(c.aimed.items[0].reply_id, 0x7E9u);
+    EXPECT_EQ(c.aimed.items[0].kind, ecuio_sim_fault_kind::silent);
+    EXPECT_EQ(ecuio_sim_faults_for(c.faults, c.aimed, 0x7E9).silent, 3u);
+
+    std::string many = "mock://sim?faults=late:1@700";
+    for (uint32_t i = 1; i < ECUIO_SIM_AIMED_MAX; ++i) {
+        char item[16];
+        std::snprintf(item, sizeof item, ",late:1@%X", 0x700u + i);
+        many += item;
+    }
+    EXPECT_EQ(parsed(many.c_str()).aimed.count, ECUIO_SIM_AIMED_MAX);
+    EXPECT_EQ(refusal((many + "&faults=late:1@7FF").c_str()),
+              "faults: more than 32 faults aimed at a module");
+}
+
 // The fate of one module's replies, from its own periods and counts
 TEST(SimEcuTest, EachCountIsItsOwn)
 {
@@ -273,6 +298,52 @@ TEST(SimAskTest, AnAimReplacesItsFaultForThatModule)
     for (int k = 0; k < 4; ++k) {
         EXPECT_TRUE(u.late(0)) << k;
         EXPECT_EQ(u.late(1), k % 2 == 1) << k;
+    }
+}
+
+// A module asked on a reply ID, another module's or its own, is refused
+// at create: the sim would hear its own replies as another node's and
+// yield at the first request
+TEST(SimAskTest, ARequestIdThatIsAReplyIdIsRefused)
+{
+    struct Shape {
+        std::vector<ecuio_channel_decl_t> channels;
+        const char* why;
+    };
+    const Shape shapes[] = {
+        {{{0x740, 0x700, 0, 0}, {0x741, 0x740, 0, 0}},
+         "profile 'sim-car-crossed': channel 1's request ID 0x740 is "
+         "channel 0's reply ID: the simulated ECU would take its requests "
+         "for another node's replies"},
+        {{{0x740, 0x700, 0, 0}, {0x741, 0x741, 0, 0}},
+         "profile 'sim-car-crossed': channel 1's request ID 0x741 is "
+         "channel 1's reply ID: the simulated ECU would take its requests "
+         "for another node's replies"},
+    };
+    for (const Shape& shape : shapes) {
+        std::vector<ecuio_channel_decl_t> channels = shape.channels;
+        std::vector<ecuio_signal_def_t> defs;
+        for (const ecuio_channel_decl_t& c : channels) {
+            defs.push_back(did_def(static_cast<uint16_t>(100 + defs.size()),
+                                   c.rx_id, 0x1000));
+        }
+        ecuio_signal_set_t set{};
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = static_cast<uint32_t>(defs.size());
+        set.defs = defs.data();
+        set.channel_count = static_cast<uint32_t>(channels.size());
+        set.channels = channels.data();
+        ecuio_validation_t v{};
+        ASSERT_EQ(ecuio_profile_register("sim-car-crossed", &set, &v), ECUIO_OK)
+            << v.code << " at " << v.index;
+        ecuio_sim_t* sim = nullptr;
+        EXPECT_EQ(ecuio_sim_create_unbound("mock://ask?profile=sim-car-crossed",
+                                           0, &sim),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_EQ(sim, nullptr);
+        EXPECT_STREQ(ecuio_last_error_detail(), shape.why);
+        ecuio_sim_destroy(sim);
+        EXPECT_EQ(ecuio_profile_unregister("sim-car-crossed"), ECUIO_OK);
     }
 }
 
