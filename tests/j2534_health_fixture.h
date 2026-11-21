@@ -114,6 +114,21 @@ protected:
         return frames.load() >= n;
     }
 
+    /* Waits up to budget_ms for the worker to make n more reads of the
+     * fake than it has made now: the first of them may have begun before
+     * what the caller just changed, so n = 2 is one that began after. */
+    bool after_reads(uint32_t n, int budget_ms)
+    {
+        const uint32_t base = fake_control::reads(page);
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(budget_ms);
+        while (fake_control::reads(page) - base < n &&
+               std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        return fake_control::reads(page) - base >= n;
+    }
+
     /* Closes the session, so what it delivered can be read. */
     void close_session()
     {
