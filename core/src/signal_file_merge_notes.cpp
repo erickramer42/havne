@@ -172,8 +172,12 @@ std::string merger::replaced_words(const note& n,
 std::string merger::beside_words(const note& n, const note_counts& counts) const
 {
     const item& it = items_[n.item];
-    std::string out = named(n.item) + " is read beside obd2's " + q(it.name) +
-                      ": a merged set replaces no obd2 signal";
+    const size_t stands = standing(n.item);
+    std::string out = named(stands) + " is read beside obd2's " + q(it.name);
+    if (stands != n.item) {
+        out += " in the place of " + named(n.item);
+    }
+    out += ": a merged set replaces no obd2 signal";
     const auto read = counts.of_base.find(base_code(it.part, it.base_id));
     if (read != counts.of_base.end()) {
         out += "; " + q(items_[read->second.first].name);
@@ -238,8 +242,8 @@ void merger::give_notes(ecuio_signal_file& f) const
     f.notes.clear();
     for (const note& n : notes_) {
         const size_t stands = n.item != kNone ? standing(n.item) : kNone;
-        if (n.kind == ECUIO_NOTE_BESIDE_BASE && stands != n.item) {
-            continue; /* the signal is no longer beside it */
+        if (n.kind == ECUIO_NOTE_BESIDE_BASE && stands == kNone) {
+            continue; /* nothing stands beside it */
         }
         ecuio_signal_file::note out;
         out.kind = n.kind;

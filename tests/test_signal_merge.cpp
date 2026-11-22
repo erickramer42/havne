@@ -216,6 +216,27 @@ TEST(MergeTest, AnOwnKeyTakesAKeyKeptForAReplacedSignal)
     EXPECT_EQ(both[0].part, 1u) << "the note is still Beta's over Alpha's";
 }
 
+// A signal at the address of the one that kept its key replaces it and
+// takes the key with it: one replacement, no key taken from a signal gone
+TEST(MergeTest, AKeyKeptByTheSignalItReplacesIsNotTakenFromIt)
+{
+    File a = load(doc("Alpha", num("a", "D100")));
+    File b = load(doc("Beta", num("x", "D100")));
+    File c = load(doc("Gamma", num("a", "D100")));
+    const Merged m = merge({a.get(), b.get(), c.get()});
+    ASSERT_EQ(m.status, ECUIO_OK) << m.words;
+    const ecuio_signal_file_t* f = m.file.get();
+    EXPECT_EQ(keys_of(f), (Words{"a"}));
+    EXPECT_EQ(replaced_keys(f, "a"), (Words{"x"}));
+    EXPECT_EQ(ecuio_signal_file_def_part(f, ecuio_signal_file_find(f, "a")),
+              2u);
+    EXPECT_EQ(sentences(f),
+              (Words{"1: 'N x' (Beta) replaces 'N a' (Alpha): both read PCM "
+                     "22 D100, byte 0",
+                     "1: 'N a' (Gamma) replaces 'N x' (Beta): both read PCM "
+                     "22 D100, byte 0"}));
+}
+
 TEST(MergeTest, ANameReplacesNothingAndMayRepeat)
 {
     File a = load(doc("Alpha", num("a", "D100", "", "Oil temperature")));
@@ -287,6 +308,47 @@ TEST(MergeTest, NoObd2SignalIsReplaced)
               (Words{"4: 'RPM' (Old) is read beside obd2's 'RPM': a merged "
                      "set replaces no obd2 signal; 'C half' and 1 more read "
                      "obd2's"}));
+}
+
+// The note of a signal that stood in an obd2 signal's place follows it to
+// the signal a later part put there, so what showed the one can show the
+// other; with nothing standing there it isn't given
+TEST(MergeTest, TheNoteBesideObd2FollowsTheSignalThatStands)
+{
+    File old =
+        load(doc("Old",
+                 num("my_rpm", "D100", "", "RPM") + "," + num("keep", "D300") +
+                     "," + calc("half", "obd2.rpm / 2"),
+                 R"("extends":"obd2",)", 2));
+    ASSERT_NE(old, nullptr) << ecuio_last_error_detail();
+    File later = load(doc("Later", num("y", "D100")));
+    const Merged m = merge({old.get(), later.get()});
+    ASSERT_EQ(m.status, ECUIO_OK) << m.words;
+    const ecuio_signal_file_t* f = m.file.get();
+    EXPECT_EQ(keys_of(f), (Words{"y", "keep", "half"}));
+    EXPECT_EQ(sentences(f),
+              (Words{"4: 'N y' (Later) is read beside obd2's 'RPM' in the "
+                     "place of 'RPM' (Old): a merged set replaces no obd2 "
+                     "signal; 'C half' reads obd2's",
+                     "1: 'N y' (Later) replaces 'RPM' (Old): both read PCM 22 "
+                     "D100, byte 0"}));
+    const ecuio_signal_note_t beside = notes_of(f)[0];
+    EXPECT_EQ(beside.def, place_of(f, "y"));
+    EXPECT_EQ(beside.part, 0u) << "the note is still Old's";
+    EXPECT_EQ(beside.other_part, ECUIO_SIGNAL_PART_NONE);
+
+    /* What took its place is left out: nothing is beside obd2's */
+    File unmet = load(doc("Unmet", calc("my_rpm", "130 - oil"),
+                          R"("needs":["oil"],)", 3, ""));
+    ASSERT_NE(unmet, nullptr) << ecuio_last_error_detail();
+    const Merged gone = merge({old.get(), unmet.get()});
+    ASSERT_EQ(gone.status, ECUIO_OK) << gone.words;
+    EXPECT_EQ(keys_of(gone.file.get()), (Words{"keep", "half"}));
+    EXPECT_EQ(sentences(gone.file.get()),
+              (Words{"2: 'C my_rpm' (Unmet) replaces 'RPM' (Old) by its key "
+                     "'my_rpm'",
+                     "8: 'C my_rpm' (Unmet) is left out: it reads 'oil', "
+                     "which its part needs and no part gives"}));
 }
 
 TEST(MergeTest, AFormat3PartMergedAloneIsItsOwnSet)
