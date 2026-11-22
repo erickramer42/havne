@@ -45,11 +45,12 @@
 #include "ecuio/conditions.h"
 #include "latencystats.h"
 #include "bridgeformats.h"
+#include "bridgeseams.h"
 #include "bridgestate.h"
 
 class QSettings;
 
-class SessionBridge : public QObject, public BridgeFormats, protected BridgeState
+class SessionBridge : public QObject, public BridgeFormats, public BridgeSeams
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
@@ -488,22 +489,6 @@ public:
     // onConditions on the calling thread, as core's worker calls it
     void dispatchConditionsForTesting(const ecuio_condition_event_t* events,
                                       uint32_t count);
-    // The generation of the session's last attach, as core counts them
-    uint32_t conditionsGenerationForTesting() const
-    {
-        return m_conditionsGeneration;
-    }
-    // The next n attaches refused where core's call is made; during, when
-    // given, runs there first, as the worker's callback can meanwhile
-    void failConditionsAttachesForTesting(int n,
-                                          std::function<void()> during = {})
-    {
-        m_failAttaches = n;
-        m_duringFailedAttach = std::move(during);
-    }
-    // The alert tones asked, and a later time for the tone's 5 s
-    const AlertTone& alertToneForTesting() const { return m_tone; }
-    void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
 
     ConditionModel* conditionModel() const { return m_conditionModel; }
     QString conditionsPending() const { return m_conditionsPending; }
@@ -533,11 +518,7 @@ public:
     void reloadSavedConditionsForTesting();
     // alertLevels' level for one def, 0 for none
     Q_INVOKABLE int alertLevelOf(int defId) const;
-    // The samples one window can hold, from the next connect
-    void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
-    static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
-    ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
     /* A direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
     Q_INVOKABLE static QString uriLabelFor(const QString& uri);
@@ -723,14 +704,6 @@ public:
     QStringList clearMoving() const;
     QString clearMovingSpeed() const;
     QString refusedUnnamed() const { return m_refusedUnnamed; }
-    // Test seam: where recordings go instead of Documents/Havne/recordings
-    void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
-    // Test seam: the earlier name's recordings, instead of
-    // Documents/<earlierProductName()>/recordings
-    void setEarlierRecordingsRootForTesting(const QString& root)
-    {
-        m_earlierRecordingsRoot = root;
-    }
     // Before every connect, on the GUI thread: readies the link an app-fed
     // stream stands behind (ADR-0028; main() hands it the Bluetooth
     // singleton's prepare) and returns why it can't, "" when it can or
@@ -739,38 +712,6 @@ public:
     void setStreamPreparer(std::function<QString(const QString& uri)> preparer)
     {
         m_streamPreparer = std::move(preparer);
-    }
-    // Test seam: record a replay too, to compare it with its source. The
-    // app never records one: it would copy the recording it plays
-    void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
-    // Armed no longer judges "no condition records" itself, so core's own
-    // refusal at the attach reaches the user
-    void skipArmedJudgmentForTesting(bool on)
-    {
-        m_skipArmedJudgmentForTesting = on;
-    }
-    // Test seam: the next load of the plugin copy with this hash fails
-    void failPluginLoadForTesting(const QString& sha)
-    {
-        m_pluginStore.failLoadForTesting(sha);
-    }
-    // Test seam: the session's recorder, for core's internal.h seams
-    // (a failed write); nullptr with none
-    ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
-    // Test seam: the running session, for a recorder of the test's own
-    // (an attach the session refuses); nullptr with none
-    ecuio_session_t* sessionForTesting() const { return m_session; }
-    // Test seam: how long Read once waits for its reply once the
-    // session starts (3 s)
-    void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
-    // Test seam: a sleep of this long, added to what core's count says,
-    // for the tick to find (no runner can sleep)
-    void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
-    // Test seam: core can't give a recorder's folder whole, so the bridge
-    // reads it as empty
-    void failRecorderFolderForTesting(bool on)
-    {
-        m_failRecorderFolderForTesting = on;
     }
 
 public slots:
