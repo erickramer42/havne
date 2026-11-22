@@ -5,5 +5,5 @@
 # or removes its line (scripts/tidy.sh --update-size-baseline), and a line is
 # added by hand only. Exempt: data tables, generated files, core/include/ecuio/
 # (the public headers) and third_party/.
-app/sessionbridge.h	1090
+app/sessionbridge.h	1005
 tests/test_c_abi.c	1389

@@ -697,7 +697,7 @@ void SessionBridge::pollSleep()
  * Theme.linkLabel key on them. Static and session-free so test_bridge
  * can pin every mapping without a transport: linkState() itself stays
  * a connected-check + delegation. */
-QString SessionBridge::linkStateForError(int32_t errorCode)
+QString BridgeFormats::linkStateForError(int32_t errorCode)
 {
     switch (errorCode) {
         case ECUIO_OK:                         return QStringLiteral("ok");

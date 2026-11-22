@@ -14,7 +14,7 @@ using namespace bridgetext;
  * name and text, then the refused requests with their codes, then how
  * many went unanswered. Static, like channelSupportText, so test_bridge
  * pins the wording without an adapter. */
-QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
+QString BridgeFormats::channelIdentityText(const ecuio_channel_identity_t& s)
 {
 
     QStringList parts;
@@ -67,7 +67,7 @@ QString SessionBridge::channelIdentityText(const ecuio_channel_identity_t& s)
 
 /* One channel's "ECU 0x… clear:" line (ADR-0038): what became of the
  * clear its report names, a speed in the unit system the page shows */
-QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s,
+QString BridgeFormats::channelClearText(const ecuio_channel_diagnostics_t& s,
                                         uint32_t units)
 {
     QString what;
@@ -135,7 +135,7 @@ QString SessionBridge::channelClearText(const ecuio_channel_diagnostics_t& s,
  * channelIdentityText, so test_bridge pins the wording without an
  * adapter. */
 QString
-SessionBridge::channelDiagnosticsText(const ecuio_channel_diagnostics_t& s)
+BridgeFormats::channelDiagnosticsText(const ecuio_channel_diagnostics_t& s)
 {
     const auto dtc = [](uint16_t code) {
         char text[8] = {};
