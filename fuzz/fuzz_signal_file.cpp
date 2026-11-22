@@ -9,6 +9,8 @@
 #include "frame_decoder.h" /* core/src: the set's decode, chains and all */
 #include "json.h"          /* core/src: the file with an expression put in */
 
+#include "fuzz_same_tables.h"
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -495,10 +497,38 @@ void check_registers(const ecuio_signal_file_t* a,
                      const ecuio_signal_set_t* set)
 {
     const char* profile = ecuio_signal_file_profile(a);
-    check(strncmp(profile, "user.", 5) == 0);
+    const char* kind =
+        ecuio_signal_file_part_count(a) > 0 ? "merged." : "user.";
+    check(strncmp(profile, kind, strlen(kind)) == 0);
     check(strlen(profile) <= ECUIO_PROFILE_NAME_MAX);
     check(ecuio_profile_register(profile, set, nullptr) == ECUIO_OK);
     check(ecuio_profile_unregister(profile) == ECUIO_OK);
+}
+
+/* The file merged alone (ADR-0065 section 9): refused in the merge's own
+ * words, a merged set always, or one part's set, a format 3 file's its
+ * own tables */
+void check_merged_alone(const ecuio_signal_file_t* a,
+                        const ecuio_signal_set_t* set)
+{
+    static const std::string own_fault = "the merged set doesn't read back";
+    const ecuio_signal_file_t* parts[] = {a};
+    ecuio_signal_file_t* m = reinterpret_cast<ecuio_signal_file_t*>(1);
+    const ecuio_status_t s = ecuio_signal_file_merge(parts, 1, nullptr, &m);
+    const std::string words = ecuio_last_error_detail();
+    if (s != ECUIO_OK) {
+        check(m == nullptr);
+        check(s == ECUIO_ERR_OUT_OF_MEMORY ||
+              (s == ECUIO_ERR_INVALID_ARGUMENT && !words.empty()));
+        check(words.compare(0, own_fault.size(), own_fault) != 0);
+        return;
+    }
+    check(m != nullptr && ecuio_signal_file_part_count(a) == 0);
+    check(ecuio_signal_file_part_count(m) == 1);
+    if (ecuio_signal_file_format(a) == 3) {
+        check(same_tables(ecuio_signal_file_set(m), set));
+    }
+    ecuio_signal_file_free(m);
 }
 
 /* Each def reads a payload as long as its field needs, through the
@@ -676,6 +706,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     check_expr_against_load(a, bytes, size);
     check_expr_refs(a, set);
     check_registers(a, set);
+    check_merged_alone(a, set);
     uint8_t payload[ECUIO_FRAME_DATA_MAX] = {};
     check_each_def_decodes(a, set, payload);
     check_frames(a, set, payload);

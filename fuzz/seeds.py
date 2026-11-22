@@ -29,6 +29,8 @@
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
+# fuzz_signal_merge's are signal files in the order to merge them, the
+# example plugins' variants written as one file each (variant_file()).
 # fuzz_sur_reply's are scripts of requests and the replies the surrogate
 # child would send (sur_seeds()), in the wire's layout: a whole READ
 # reply, empty READs with each kind of status, a bare one, a cut one, a
@@ -62,6 +64,32 @@ def write(out, harness, name, data):
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, name), "wb") as f:
         f.write(data)
+
+
+def wrap_named(paths):
+    """Each signal file's seed name (its folder and file) and bytes"""
+    return [(os.path.basename(os.path.dirname(p)) + "_" + os.path.basename(p),
+             read(os.path.relpath(p, ROOT))) for p in paths]
+
+
+def variant_file(plugin, variant_id):
+    """A plugin's variant as one signal file, for the merge: the plugin's
+    name, source and ECUs, and its data files' signals, a later file's in
+    the place of an earlier one of its key"""
+    manifest = json.loads(read(plugin + "/manifest.json"))
+    variant = next(v for v in manifest["variants"] if v["id"] == variant_id)
+    files = [json.loads(read(plugin + "/" + p)) for p in variant["files"]]
+    signals = {}
+    for f in files:
+        for s in f["signals"]:
+            signals[s["key"]] = s
+    whole = {"havne_signals": max(f["havne_signals"] for f in files),
+             "name": manifest["name"] + ", " + variant_id, "source": manifest["source"]}
+    if any(f.get("extends") for f in files):
+        whole["extends"] = "obd2"
+    whole["ecus"] = manifest["ecus"]
+    whole["signals"] = list(signals.values())
+    return json.dumps(whole, ensure_ascii=False).encode("utf-8")
 
 
 def signal_rows(path):
@@ -174,6 +202,41 @@ def main(argv):
                   "x-expr": "obd2.map + x9"}
     write(out, "fuzz_signal_file", "digit_keys.json", json.dumps(digit_keys).encode())
 
+    # The merge (ADR-0065 section 9): a base byte (1 asks for obd2), then
+    # up to four signal files cut at 0x1E. Each file alone with obd2 under
+    # it, each ordered pair, the example plugins' variants as files of
+    # their own in both orders, and after them a format 3 file of the
+    # user's own: a signal at the address of one of the plugin's, under
+    # another key, and a computed signal that needs the plugin's key
+    merge_files = wrap_named(signal_files) + [("grammar_format2.json", json.dumps(grammar).encode()),
+                                              ("chain_format2.json", json.dumps(chain).encode())]
+    for name, data in merge_files:
+        write(out, "fuzz_signal_merge", "alone_" + name, b"\x01" + data)
+        for other, second in merge_files:
+            if other != name:
+                write(out, "fuzz_signal_merge", "pair_" + name + "_" + other,
+                      b"\x00" + data + SEP + second)
+    sim_base = variant_file(plugin, "base")
+    sim_2019 = variant_file(plugin, "my2019")
+    car = variant_file("plugins/example-car", "whole")
+    own = {"havne_signals": 3, "name": "Own", "source": {"name": "Havne's seeds"},
+           "needs": ["oil_temp"], "ecus": [{"id": "trans", "name": "Transaxle", "rx": "7E9"}],
+           "signals": [{"key": "fluid", "name": "Fluid", "ecu": "trans",
+                        "read": {"service": "22", "number": "F410"},
+                        "field": {"byte": 0, "bits": 16}},
+                       {"key": "oil_margin", "name": "Oil margin", "kind": "computed",
+                        "expr": "130 - oil_temp"}]}
+    own = json.dumps(own).encode()
+    for name, data in [("sim_variants", sim_base + SEP + sim_2019),
+                       ("sim_variants_back", sim_2019 + SEP + sim_base),
+                       ("sim_variants_own", sim_base + SEP + sim_2019 + SEP + own),
+                       ("own_alone", own), ("own_sim", own + SEP + sim_base),
+                       ("car", car), ("car_own", car + SEP + own),
+                       ("car_sim_own_chain", car + SEP + sim_2019 + SEP + own + SEP +
+                        json.dumps(chain).encode())]:
+        write(out, "fuzz_signal_merge", name, b"\x00" + data)
+        write(out, "fuzz_signal_merge", name + "_obd2", b"\x01" + data)
+
     # The condition-file loader (ADR-0063): each fixture alone, and again
     # before a signal file to resolve it against (cut at 0x1E). One of
     # them, every-key.json, holds every key the loader takes, each term
@@ -272,8 +335,7 @@ def main(argv):
     # switches, each ordered pair (the put's variant "other", then
     # "base", which replaces the wrap's), and the example plugin with
     # each file put as "other" and under the file's own name
-    wrap_files = [(os.path.basename(os.path.dirname(p)) + "_" + os.path.basename(p),
-                   read(os.path.relpath(p, ROOT))) for p in signal_files]
+    wrap_files = wrap_named(signal_files)
     wrap_files += [("grammar_format2.json", json.dumps(grammar).encode()),
                    ("chain_format2.json", json.dumps(chain).encode())]
     for name, data in wrap_files:
