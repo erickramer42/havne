@@ -1,0 +1,9 @@
+# Source files past 1,000 lines (the source-size rule), "<path><TAB><lines>" each.
+# scripts/filelength_check.py, run by scripts/tidy.sh, fails on a file past 1,000
+# lines that isn't listed, on a listed file longer than its number and on a line
+# that no longer applies, so the list and its numbers only shrink: a split lowers
+# or removes its line (scripts/tidy.sh --update-size-baseline), and a line is
+# added by hand only. Exempt: data tables, generated files, core/include/ecuio/
+# (the public headers) and third_party/.
+app/sessionbridge.h	1352
+tests/test_c_abi.c	1389

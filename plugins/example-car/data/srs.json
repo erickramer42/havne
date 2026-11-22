@@ -1,0 +1,26 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its srs",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up srs at 526",
+  "signals": [
+    {
+      "key": "srs_name",
+      "name": "Restraints Module Name",
+      "kind": "text",
+      "ecu": "srs",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "srs_driver_belt",
+      "name": "Driver Belt",
+      "kind": "enum",
+      "ecu": "srs",
+      "read": {"service": "22", "number": "4A20"},
+      "field": {"byte": 0, "bits": 8},
+      "values": {"0": "Unbuckled", "1": "Buckled", "2": "Fault"},
+      "group": "vehicle"
+    }
+  ]
+}

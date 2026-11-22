@@ -1,10 +1,12 @@
 // File/layer: cli/cmd_plugins.cpp | havne-cli, plugins list, match, check, wrap, put
 //             and drop (ADR-0052, ADR-0064)
 // Testing: UNIT: CliGoldenTest, CliPluginMakeTest, CliPluginRunTest,
-//          CliUsageTest (ctest); CliPluginTest (test_cli)
+//          CliPluginConversationTest, CliUsageTest (ctest); CliPluginTest
+//          (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
+#include "page_lines.h"
 #include "plugin_lines.h"
 #include "signal_file_lines.h"
 
@@ -22,9 +24,27 @@
 
 namespace cmd {
 
+namespace {
+
+// The conversation line of a plugin with the tier, after its plugin line
+void write_conversation(Output& out, uint32_t package, const ecuio_plugin_t* p)
+{
+    ecuio_plugin_conversation_t c{};
+    c.struct_size = sizeof c;
+    if (ecuio_plugin_conversation(p, &c) != ECUIO_OK) {
+        return; // a plugin without the tier
+    }
+    BigLine b(cli::kConversationLineBytes);
+    cli::conversation_line(b.line, package, p, c);
+    write_line(out, b.line);
+}
+
+} // namespace
+
 // plugins list <pkg>... (ADR-0052): start, then a plugin line for each
-// package, or a refused line saying why and going on; exit 3 when any was
-// refused. No end line (a list)
+// package (and a conversation line for one with the tier), or a refused
+// line saying why and going on; exit 3 when any was refused. No end line
+// (a list)
 int run_plugins_list(const std::vector<const char*>& paths)
 {
     Output out;
@@ -42,9 +62,12 @@ int run_plugins_list(const std::vector<const char*>& paths)
                               why.c_str());
         } else {
             cli::plugin_line(b.line, index, p, plugin_info(p));
-            ecuio_plugin_free(p);
         }
         write_line(out, b.line);
+        if (p != nullptr) {
+            write_conversation(out, index, p);
+            ecuio_plugin_free(p);
+        }
     }
     out.flush();
     if (!out.ok()) {
@@ -276,43 +299,24 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
     return ECUIO_OK;
 }
 
-} // namespace
+// What a plugin's variants use that an older core reads otherwise
+struct VariantUses {
+    bool gauge = false;
+    bool format2 = false;
+};
 
-// plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
-// package as a session would, then reads its value fixtures. start,
-// plugin, for each variant a variant line (its source's license), a
-// share_alike line when that license is share-alike, and its own signals'
-// signal_def lines, a fixture_refused line for each fixture file that
-// can't be read or that core refused, a fixture line for each entry (with
-// --on, run through the simulated ECU on that interface, Linux's vcan;
-// else not run), then checked. A package refused is start and an error
-// line, exit 3, as is a sim or session that won't start; a fixture failed
-// or a file refused, exit 1. No end line
-int run_plugins_check(const char* path, const char* on)
+// For each variant a variant line, a share_alike line when its license is
+// share-alike, and its own signals' signal_def lines
+VariantUses write_variant_lines(Output& out, const ecuio_plugin_t* p,
+                                const ecuio_plugin_info_t& info)
 {
-    Output out;
-    write_start(out);
-    std::string why;
-    ecuio_plugin_t* p = nullptr;
-    ecuio_status_t st = load_package(path, &p, &why);
-    if (st != ECUIO_OK) {
-        write_error(out, st, why.c_str());
-        return ended(out, kExitConnect);
-    }
-    const ecuio_plugin_info_t info = plugin_info(p);
-    {
-        BigLine b(4096);
-        cli::plugin_line(b.line, 0, p, info);
-        write_line(out, b.line);
-    }
-    bool uses_gauge = false;
-    bool uses_format2 = false;
+    VariantUses uses;
     for (uint32_t v = 0; v < info.variant_count; ++v) {
         const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
         const std::string id = variant_of(p, v);
-        uses_format2 = uses_format2 ||
-                       ecuio_signal_file_format(
-                           ecuio_plugin_variant_file(p, v)) >= 2;
+        uses.format2 =
+            uses.format2 ||
+            ecuio_signal_file_format(ecuio_plugin_variant_file(p, v)) >= 2;
         {
             BigLine b(
                 cli::variant_line_bytes(set, ecuio_plugin_variant_file(p, v)));
@@ -332,7 +336,7 @@ int run_plugins_check(const char* path, const char* on)
             if (cli::own_signal(ecuio_plugin_variant_file(p, v), set.defs[i])) {
                 const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
                     ecuio_plugin_variant_file(p, v), &set.defs[i]);
-                uses_gauge = uses_gauge || gauge != nullptr;
+                uses.gauge = uses.gauge || gauge != nullptr;
                 BigLine b(cli::def_line_bytes(set, set.defs[i]));
                 cli::def_line(b.line, set, set.defs[i], gauge,
                               ecuio_signal_file_expr(
@@ -341,18 +345,50 @@ int run_plugins_check(const char* path, const char* on)
             }
         }
     }
+    return uses;
+}
 
-    cli::FixtureCounts counts;
+// A no_gauge note for each number or computed signal of a variant's own
+// that has none, so a plugin's author sets the range the Dashboard would
+// guess
+void write_no_gauge_notes(Output& out, const ecuio_plugin_t* p,
+                          const ecuio_plugin_info_t& info)
+{
+    for (uint32_t v = 0; v < info.variant_count; ++v) {
+        const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p, v);
+        const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
+        const std::string id = variant_of(p, v);
+        const std::vector<ecuio_signal_key_t> keys = cli::set_keys(&set, file);
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::lacks_gauge(file, set.defs[i],
+                                 ecuio_signal_file_gauge(file, &set.defs[i]))) {
+                BigLine b(cli::no_gauge_line_bytes());
+                cli::no_gauge_line(b.line, id.c_str(), set.defs[i],
+                                   i < keys.size() ? keys[i].text : nullptr);
+                write_line(out, b.line);
+            }
+        }
+    }
+}
+
+// Each fixture file's entries as runs not yet run, or a fixture_refused
+// line for a file that can't be read or that core refused
+std::vector<FixtureRun> read_fixture_runs(Output& out, const char* path,
+                                          const ecuio_plugin_t* p,
+                                          const ecuio_plugin_info_t& info,
+                                          cli::FixtureCounts& counts)
+{
     std::vector<FixtureRun> runs;
+    std::string why;
     for (uint32_t f = 0; f < info.fixture_count; ++f) {
         char name[ECUIO_PLUGIN_PATH_MAX + 1] = {};
         ecuio_plugin_fixture(p, f, name, sizeof name);
         std::string bytes;
-        st = read_whole((std::string(path) + "/" + name).c_str(),
-                        ECUIO_SIGNAL_FILE_MAX_BYTES, "fixture file", &bytes,
-                        &why)
-                 ? ECUIO_OK
-                 : ECUIO_ERR_LOAD_FAILED;
+        ecuio_status_t st = read_whole((std::string(path) + "/" + name).c_str(),
+                                       ECUIO_SIGNAL_FILE_MAX_BYTES,
+                                       "fixture file", &bytes, &why)
+                                ? ECUIO_OK
+                                : ECUIO_ERR_LOAD_FAILED;
         uint32_t count = 0;
         if (st == ECUIO_OK) {
             st = ecuio_plugin_values(p, bytes.data(), bytes.size(), nullptr, 0,
@@ -381,20 +417,28 @@ int run_plugins_check(const char* path, const char* on)
             runs.push_back(r);
         }
     }
+    return runs;
+}
 
-    if (on != nullptr && !runs.empty()) {
-        st = register_variants(p, &why);
-        for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
-            const std::string profile =
-                cli::plugin_profile(info.id, variant_of(p, v).c_str());
-            st = run_variant_fixtures(profile, v, on, runs, &why);
-        }
-        if (st != ECUIO_OK) {
-            write_error(out, st, why.c_str());
-            ecuio_plugin_free(p);
-            return ended(out, kExitConnect);
-        }
+// Every variant's runs, through the simulated ECU on interface on
+ecuio_status_t run_fixtures(ecuio_plugin_t* p, const ecuio_plugin_info_t& info,
+                            const char* on, std::vector<FixtureRun>& runs,
+                            std::string* why)
+{
+    ecuio_status_t st = register_variants(p, why);
+    for (uint32_t v = 0; st == ECUIO_OK && v < info.variant_count; ++v) {
+        const std::string profile =
+            cli::plugin_profile(info.id, variant_of(p, v).c_str());
+        st = run_variant_fixtures(profile, v, on, runs, why);
     }
+    return st;
+}
+
+// A fixture line for each run, counted
+void write_fixture_lines(Output& out, const ecuio_plugin_t* p,
+                         const std::vector<FixtureRun>& runs,
+                         cli::FixtureCounts& counts)
+{
     for (const FixtureRun& r : runs) {
         switch (r.result) {
         case cli::FixtureResult::passed:
@@ -414,21 +458,102 @@ int run_plugins_check(const char* path, const char* on)
             r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
         write_line(out, b.line);
     }
+}
+
+// A page line for each of the plugin's pages; false when one fails
+bool write_page_lines(Output& out, const ecuio_plugin_t* p,
+                      const ecuio_plugin_info_t& info)
+{
+    bool all = true;
+    std::vector<std::pair<std::string, std::string>> seen;
+    for (uint32_t i = 0; i < info.page_count; ++i) {
+        const cli::PageCheck c =
+            cli::check_page(p, info.variant_count, i, &seen);
+        all = all && c.words.empty();
+        BigLine b(cli::page_line_bytes(c));
+        cli::page_line(b.line, c);
+        write_line(out, b.line);
+    }
+    return all;
+}
+
+// A requires_core line for each thing the plugin uses (its variants' and
+// its pages) that the manifest's requires.core is too old to read
+void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
+                               const VariantUses& uses, uint32_t page_count)
+{
     uint16_t declared[3] = {};
     if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
                                    &declared[2]) == ECUIO_OK) {
-        if (cli::gauge_needs_newer_core(declared, uses_gauge)) {
+        if (cli::gauge_needs_newer_core(declared, uses.gauge)) {
             BigLine b(512);
             cli::requires_core_line(b.line, declared);
             write_line(out, b.line);
         }
-        if (cli::format2_needs_newer_core(declared, uses_format2)) {
+        if (cli::format2_needs_newer_core(declared, uses.format2)) {
             BigLine b(512);
             cli::requires_core_line(b.line, declared, cli::kFormat2Core,
                                     "\"havne_signals\": 2");
             write_line(out, b.line);
         }
+        if (cli::pages_need_newer_core(declared, page_count)) {
+            BigLine b(1024);
+            cli::pages_core_line(b.line, declared);
+            write_line(out, b.line);
+        }
     }
+}
+
+} // namespace
+
+// plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
+// package as a session would, then reads its value fixtures. start,
+// plugin, a conversation line for a plugin with the tier, for each
+// variant a variant line (its source's license), a
+// share_alike line when that license is share-alike, and its own signals'
+// signal_def lines, then a no_gauge note for each of its own number or
+// computed signals with no gauge (exit stays 0), a page line for each
+// Dashboard page, a fixture_refused line for each fixture file that can't
+// be read or that core refused, a fixture line for each entry (with --on,
+// run through the simulated ECU on that interface, Linux's vcan; else not
+// run), then checked. A package refused is start and an error line, exit
+// 3, as is a sim or session that won't start; a fixture failed, a file
+// refused or a page failed, exit 1. No end line
+int run_plugins_check(const char* path, const char* on)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    ecuio_plugin_t* p = nullptr;
+    ecuio_status_t st = load_package(path, &p, &why);
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        return ended(out, kExitConnect);
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    write_conversation(out, 0, p);
+    const VariantUses uses = write_variant_lines(out, p, info);
+    write_no_gauge_notes(out, p, info);
+    const bool pages_ok = write_page_lines(out, p, info);
+
+    cli::FixtureCounts counts;
+    std::vector<FixtureRun> runs =
+        read_fixture_runs(out, path, p, info, counts);
+    if (on != nullptr && !runs.empty()) {
+        st = run_fixtures(p, info, on, runs, &why);
+        if (st != ECUIO_OK) {
+            write_error(out, st, why.c_str());
+            ecuio_plugin_free(p);
+            return ended(out, kExitConnect);
+        }
+    }
+    write_fixture_lines(out, p, runs, counts);
+    write_requires_core_lines(out, p, uses, info.page_count);
     {
         BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
         cli::checked_line(b.line, counts, on, info.fixture_count);
@@ -439,8 +564,9 @@ int run_plugins_check(const char* path, const char* on)
     if (!out.ok()) {
         return kExitFailed;
     }
-    return counts.failed > 0 || counts.files_refused > 0 ? kExitFailed
-                                                         : kExitOk;
+    return counts.failed > 0 || counts.files_refused > 0 || !pages_ok
+               ? kExitFailed
+               : kExitOk;
 }
 
 MadeText made_text(ecuio_status_t status, char* text, size_t length)
@@ -662,6 +788,93 @@ bool parse_plugin_make(const std::string& word, int first, int argc,
         return false;
     }
     return true;
+}
+
+namespace {
+
+// plugins list's packages, an option refused
+int plugins_list(int argc, char** argv)
+{
+    std::vector<const char*> paths;
+    for (int i = 3; i < argc; ++i) {
+        if (argv[i][0] == '-' && argv[i][1] == '-') {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        }
+        paths.push_back(argv[i]);
+    }
+    return run_plugins_list(paths);
+}
+
+// plugins check's package, and --on <vcan> read and checked
+int plugins_check(int argc, char** argv)
+{
+    const char* on = nullptr;
+    if (argc == 6) {
+        if (std::string(argv[4]) != "--on" || *argv[5] == '\0') {
+            std::fprintf(stderr, "havne-cli: plugins check takes "
+                                 "<pkg> [--on <vcan>]\n");
+            usage(stderr);
+            return kExitUsage;
+        }
+        on = argv[5];
+    }
+    return run_plugins_check(argv[3], on);
+}
+
+// wrap, put and drop: their words through parse_plugin_make, then the run
+int plugins_make(const std::string& word, int argc, char** argv)
+{
+    PluginMakeArgs make;
+    if (word == "wrap") {
+        make.file = argv[3];
+    } else {
+        make.package = argv[3];
+        make.file = word == "put" ? argv[4] : nullptr;
+    }
+    std::string why;
+    if (!parse_plugin_make(word, word == "put" ? 5 : 4, argc, argv, &make,
+                           &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    return word == "wrap"  ? run_plugins_wrap(make)
+           : word == "put" ? run_plugins_put(make)
+                           : run_plugins_drop(make);
+}
+
+} // namespace
+
+// plugins' words, then each one's run
+int cmd_plugins(int argc, char** argv)
+{
+    const std::string word = argc > 2 ? argv[2] : "";
+    if (word == "list" && argc > 3) {
+        return plugins_list(argc, argv);
+    }
+    const bool package = argc > 3 && std::string(argv[3]).rfind("--", 0) != 0;
+    if (word == "check" && package && (argc == 4 || argc == 6)) {
+        return plugins_check(argc, argv);
+    }
+    if (word == "match" && package && argc == 6 &&
+        std::string(argv[4]) == "--vin") {
+        return run_plugins_match(argv[3], argv[5]);
+    }
+    const bool two =
+        package && argc > 4 && std::string(argv[4]).rfind("--", 0) != 0;
+    if ((word == "wrap" && package) || (word == "put" && two) ||
+        (word == "drop" && package)) {
+        return plugins_make(word, argc, argv);
+    }
+    std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check <pkg> "
+                         "[--on <vcan>], match <pkg> --vin <VIN>, wrap "
+                         "<signal-file> --out <pkg>, put <pkg> <signal-file> "
+                         "--out <pkg>, or drop <pkg> --variant <id> --out "
+                         "<pkg>\n");
+    usage(stderr);
+    return kExitUsage;
 }
 
 } // namespace cmd

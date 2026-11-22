@@ -1,5 +1,5 @@
 // File/layer: app/qml/StretchesPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -9,10 +9,11 @@ import App
 pragma ComponentBehavior: Bound
 
 // The viewer's Stretches panel (ADR-0056 section 6): the levels that make a
-// stretch a pull or a cruise, with core's defaults shown in each field.
-// Apply asks again with the typed levels; a field left empty, or typed as 0,
-// takes the default. The page owns the ask, the stored levels and the words
-// of a refusal; this panel reads them and says what was typed.
+// stretch a pull or a cruise, with core's defaults shown in each field, and
+// where a pull ends. Apply asks again with the typed levels; a field left
+// empty, or typed as 0, takes the default; a pull's end asks again at its
+// tap. The page owns the ask, the stored levels and the words of a refusal;
+// this panel reads them and says what was typed.
 ColumnLayout {
     id: panel
     spacing: Theme.spacing
@@ -33,17 +34,22 @@ ColumnLayout {
     // system's speed unit, which a cell reads itself so a change of units
     // never remakes the cells and empties their fields)
     readonly property string speedUnit: Bridge.unitSystem === 1 ? "mph" : "km/h"
+    // The names come from the view's table, the words a refusal uses
     readonly property var fields: [
-        { key: "pullLevel", name: qsTr("Pull throttle"), unit: "%" },
-        { key: "pullLoadLevel", name: qsTr("Pull load, with no throttle"), unit: "%" },
-        { key: "pullHoldS", name: qsTr("Pull at least"), unit: "s" },
-        { key: "pullGapS", name: qsTr("A dip shorter than"), unit: "s" },
-        { key: "pullRise", name: qsTr("Engine speed rises"), unit: "rpm" },
-        { key: "pullGain", name: qsTr("Speed gains, no rpm"), unit: "speed" },
-        { key: "cruiseHoldS", name: qsTr("Cruise at least"), unit: "s" },
-        { key: "cruiseSpeedBand", name: qsTr("Speed within"), unit: "speed" },
-        { key: "cruiseThrottleBand", name: qsTr("Throttle within"), unit: "%" },
-        { key: "cruiseFloor", name: qsTr("Cruise above"), unit: "speed" }]
+        { key: "pullLevel", unit: "%" },
+        { key: "pullLoadLevel", unit: "%" },
+        { key: "pullHoldS", unit: "s" },
+        { key: "pullGapS", unit: "s" },
+        { key: "pullRise", unit: "rpm" },
+        { key: "pullGain", unit: "speed" },
+        { key: "cruiseHoldS", unit: "s" },
+        { key: "cruiseSpeedBand", unit: "speed" },
+        { key: "cruiseThrottleBand", unit: "%" },
+        { key: "cruiseFloor", unit: "speed" }].map(f => ({ key: f.key, unit: f.unit,
+                                                          name: view.stretchRuleNames[f.key] }))
+
+    // Where a pull ends: "lift" (the default) or "top-speed"
+    property string pullEnd: "lift"
 
     // What was typed that isn't a number, in words; "" for none
     property string typedProblem: ""
@@ -87,7 +93,25 @@ ColumnLayout {
             }
             out[item.key] = n
         }
+        if (pullEnd === "top-speed")
+            out.pullEnd = pullEnd
         return out
+    }
+    // A pull's end chosen: asked for at once, with the levels typed. It
+    // takes hold only once the fields are judged, so a bad number leaves the
+    // end that is in force selected
+    function choosePullEnd(word) {
+        const before = pullEnd
+        pullEnd = word
+        const typed = typedRules()
+        if (typed === null)
+            pullEnd = before
+        else
+            applyRequested(typed)
+    }
+    // A refusal by core: the end shown goes back to the one in force
+    function keepEnd() {
+        pullEnd = rules.pullEnd === "top-speed" ? "top-speed" : "lift"
     }
     function apply() {
         const typed = typedRules()
@@ -98,6 +122,7 @@ ColumnLayout {
     function reset() {
         for (let i = 0; i < fieldRepeater.count; ++i)
             cellAt(i).field.text = ""
+        pullEnd = "lift"
         typedProblem = ""
         applyRequested({})
     }
@@ -108,6 +133,7 @@ ColumnLayout {
             const v = rules[item.key]
             item.field.text = shown(v)
         }
+        pullEnd = rules.pullEnd === "top-speed" ? "top-speed" : "lift"
         typedProblem = ""
     }
     onRulesChanged: fill()
@@ -123,6 +149,7 @@ ColumnLayout {
                                      : Math.min(grid.width, 200)
         spacing: 2
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: cell.modelData.name + " (" + (cell.modelData.unit === "speed" ? panel.speedUnit : cell.modelData.unit) + ")"
             color: Theme.textDim
@@ -185,12 +212,56 @@ ColumnLayout {
     signal bandsToggled()
 
     Label {
+        textFormat: Text.PlainText
         objectName: "stretchesProblem"
         visible: text !== ""
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.danger
         text: panel.typedProblem !== "" ? panel.typedProblem : panel.problem
+    }
+
+    // Where a pull ends: at the throttle's lift, the limiter's fuel cut
+    // included, or at top speed, which leaves it out
+    ColumnLayout {
+        Layout.fillWidth: true
+        spacing: 2
+        Label {
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            text: qsTr("A pull ends")
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            elide: Text.ElideRight
+        }
+        SegmentRow {
+            objectName: "pullEnd"
+            Layout.fillWidth: Theme.compact
+            SegmentButton {
+                objectName: "pullEnd_lift"
+                tapHeight: Theme.touchTarget
+                share: Theme.compact
+                wrapMode: Theme.compact ? Text.Wrap : Text.NoWrap
+                Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                labelSize: Theme.fontBody
+                text: qsTr("At the throttle's lift")
+                selected: panel.pullEnd === "lift"
+                checked: selected
+                onClicked: panel.choosePullEnd("lift")
+            }
+            SegmentButton {
+                objectName: "pullEnd_topSpeed"
+                tapHeight: Theme.touchTarget
+                share: Theme.compact
+                wrapMode: Theme.compact ? Text.Wrap : Text.NoWrap
+                Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                labelSize: Theme.fontBody
+                text: qsTr("At top speed")
+                selected: panel.pullEnd === "top-speed"
+                checked: selected
+                onClicked: panel.choosePullEnd("top-speed")
+            }
+        }
     }
 
     Flickable {
@@ -221,6 +292,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "stretchesHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

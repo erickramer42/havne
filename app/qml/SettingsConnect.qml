@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsConnect.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The connect bar (the status line, the URI field and Connect): one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -20,6 +20,7 @@ ColumnLayout {
     property bool logExplains: false
 
     Label {
+        textFormat: Text.PlainText
         objectName: "sessionStatus"
         text: Bridge.connected
               ? qsTr("Connected: %1").arg(Bridge.currentUri)
@@ -49,17 +50,17 @@ ColumnLayout {
             placeholderText: qsTr("Address, e.g. mock://demo, elm327://COM5, "
                                   + "elm327://192.168.0.10:35000 or "
                                   + "j2534://Vendor?profile=raw&poll=0x0C")
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             color: Theme.text
             // A URI, not prose: a phone's keyboard capitalized
             // "Replay://" into a scheme core doesn't know
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             // Any text the page didn't compose is read back
             onTextChanged: {
-                if (!root.host.composing)
-                    root.host.readChoices()
+                if (!root.host.uriPart.composing)
+                    root.host.uriPart.readChoices()
             }
-            onAccepted: root.host.requestConnect(text)
+            onAccepted: root.host.connectFromPart.requestConnect(text)
         }
 
         ThemedButton {
@@ -73,7 +74,7 @@ ColumnLayout {
             // with a URI to connect
             // and no relay holds the adapter (ADR-0047)
             enabled: Bridge.connected
-                     || (root.host.idle && uriField.text !== "" && !Relay.running)
+                     || (root.host.ownPart.idle && uriField.text !== "" && !Relay.running)
             onClicked: {
                 if (Bridge.connected) {
                     Bridge.disconnectSession()
@@ -81,7 +82,7 @@ ColumnLayout {
                     root.logExplains = false
                     errorLabel.text = ""
                 } else {
-                    root.host.requestConnect(uriField.text)
+                    root.host.connectFromPart.requestConnect(uriField.text)
                 }
             }
         }
@@ -94,6 +95,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             id: errorLabel
             objectName: "errorLabel"
             visible: false

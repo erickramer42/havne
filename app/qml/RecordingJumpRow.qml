@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingJumpRow.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -20,13 +20,16 @@ Flow {
 
     // "Pull 2 of 5 · 12.9 s", "No cruise found", "Looking for stretches..."
     property string status: ""
+    // What a screen reader says in its place, when it holds more
+    property string statusSpoken: ""
     property bool canPreviousPull: false
     property bool canNextPull: false
     property bool canPreviousCruise: false
     property bool canNextCruise: false
     property bool bandsShown: true
     property bool stretchesOpen: false
-    // The Conditions panel's switch, shown for a recording with entries
+    // The Conditions panel's switch, shown for a recording with entries or
+    // with condition events lost (the panel says the loss)
     property bool conditionsShown: false
     property bool conditionsOpen: false
     signal jumpRequested(string kind, int direction)
@@ -53,6 +56,7 @@ Flow {
             onClicked: row.jumpRequested(group.kind, -1)
         }
         Label {
+            textFormat: Text.PlainText
             text: group.word.charAt(0).toUpperCase() + group.word.slice(1)
             color: Theme.text
             font.pixelSize: Theme.fontBody
@@ -113,12 +117,14 @@ Flow {
         onClicked: row.conditionsToggled()
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "jumpStatus"
         // The status takes a line of its own when the groups fill the row
         width: Math.min(implicitWidth, row.width)
         height: Theme.touchTarget
         verticalAlignment: Text.AlignVCenter
         text: row.status
+        Accessible.name: row.statusSpoken !== "" ? row.statusSpoken : row.status
         color: Theme.textDim
         font.pixelSize: Theme.fontCaption
         elide: Text.ElideRight

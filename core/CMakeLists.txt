@@ -1,10 +1,21 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/core_detail.cpp
+    src/core_getters.cpp
+    src/core_dispatch.cpp
+    src/core_pick.cpp
     src/frame_decoder.cpp
     src/dtc_titles.cpp
     src/export.cpp
+    src/export_csv.cpp
+    src/export_events.cpp
+    src/export_folder.cpp
+    src/export_pcapng.cpp
+    src/export_wide.cpp
     src/health.cpp
+    src/health_build.cpp
+    src/health_write.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp
@@ -14,37 +25,80 @@ add_library(ecuio-core STATIC
     src/queue.cpp
     src/recorder.cpp
     src/recorder_armed.cpp
+    src/recorder_attach.cpp
+    src/recorder_control.cpp
     src/recorder_text.cpp
     src/recorder_writer.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
+    src/recording_reader_events.cpp
+    src/recording_reader_source.cpp
+    src/recording_reader_rows.cpp
+    src/recording_reader_stats.cpp
+    src/recording_reader_search.cpp
     src/scrub.cpp
     src/scrub_frames.cpp
     src/mock_transport.cpp
     src/replay_transport.cpp
     src/j2534_loader.cpp
     src/j2534_transport.cpp
+    src/j2534_worker.cpp
     src/elm327_transport.cpp
+    src/elm327_worker.cpp
+    src/elm327_setup.cpp
+    src/elm327_listen.cpp
+    src/elm327_close.cpp
     src/elm327_port.cpp
     src/elm327_tcp.cpp
     src/elm327_stream.cpp
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/sim.cpp
+    src/sim_bus.cpp
     src/socketcan_interfaces.cpp
+    src/socketcan_request.cpp
     src/socketcan_transport.cpp
+    src/talk_seam.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/signal_file_parts.cpp
+    src/signal_file_rules.cpp
+    src/signal_file_source.cpp
+    src/signal_expr.cpp
+    src/signal_file_expr.cpp
+    src/signal_keys.cpp
+    src/recording_keys.cpp
     src/condition_file.cpp
     src/condition_eval.cpp
     src/plugin.cpp
+    src/plugin_manifest.cpp
+    src/plugin_conversation.cpp
+    src/plugin_merge.cpp
+    src/plugin_pages.cpp
     src/plugin_wrap.cpp
+    src/security_store.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
     src/vin.cpp
+    src/wasm_sandbox.cpp
     src/j2534_surrogate_client.cpp
+    src/j2534_surrogate_io.cpp
+    src/j2534_surrogate_ops.cpp
+    src/j2534_surrogate_pipe.cpp
 )
+
+# WAMR's objects join the archive (third_party/wamr.cmake), so core stays
+# one library to link and install. Only a source that embeds it includes
+# its header.
+app_wamr_objects(ecuio-wamr)
+target_sources(ecuio-core PRIVATE $<TARGET_OBJECTS:ecuio-wamr>)
+target_include_directories(ecuio-core PRIVATE ${WAMR_INCLUDE_DIR})
+target_compile_definitions(ecuio-core PRIVATE ${WAMR_EMBED_DEFINITIONS})
+# WAMR's Android port writes through the system log
+if(ANDROID)
+    target_link_libraries(ecuio-core PRIVATE log)
+endif()
 
 # The public headers: the C API an outside program compiles against.
 # One list for what's installed, what scripts/api_check.py compares
@@ -88,6 +142,9 @@ target_link_libraries(ecuio-core PRIVATE Threads::Threads)
 # still reaches whatever links core.
 if(WIN32)
     target_link_libraries(ecuio-core PRIVATE bcrypt ws2_32)
+    # Windows only: elsewhere it compiles to nothing, which Apple's ranlib
+    # reports. Added before ecuio-core-mt reads the sources (below).
+    target_sources(ecuio-core PRIVATE src/j2534_surrogate_log.cpp)
 endif()
 
 # USDT probes (ADR-0034 section 4, core/src/probes.h): systemtap's header-only
@@ -173,6 +230,9 @@ if(HAVNE_SHARED_CORE)
         # heap is safe, since every allocation has its release in core
         # (ExportsTest.EachAllocationHasItsRelease).
         get_target_property(_ecuio_core_sources ecuio-core SOURCES)
+        # WAMR's objects are /MD there; this library takes /MT ones
+        list(FILTER _ecuio_core_sources EXCLUDE REGEX "TARGET_OBJECTS")
+        app_wamr_objects(ecuio-wamr-mt STATIC_RUNTIME)
         add_library(ecuio-core-mt OBJECT ${_ecuio_core_sources})
         target_include_directories(ecuio-core-mt PRIVATE
             $<TARGET_PROPERTY:ecuio-core,INCLUDE_DIRECTORIES>)
@@ -181,7 +241,8 @@ if(HAVNE_SHARED_CORE)
         app_enable_warnings(ecuio-core-mt)
         set_target_properties(ecuio-core-mt ecuio PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>)
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>
+            $<TARGET_OBJECTS:ecuio-wamr-mt>)
         target_link_libraries(ecuio PRIVATE bcrypt ws2_32)
     elseif(APPLE)
         set_source_files_properties(${_ecuio_gen}/ecuio.exp PROPERTIES HEADER_FILE_ONLY ON)

@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingFindings.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The frames check's findings, a row each, a tap centering the view on one:
 // one part of RecordingsPage, which holds the state
 
@@ -48,12 +48,12 @@ ListView {
             objectName: "findingRowArea"
             anchors.fill: parent
             hoverEnabled: true
-            Accessible.name: qsTr("Show %1").arg(root.host.findingText(findingRow.modelData))
+            Accessible.name: qsTr("Show %1").arg(root.host.formatPart.findingText(findingRow.modelData))
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             onClicked: {
                 const f = findingRow.modelData
-                root.host.centerOn(f.atMs + f.lengthMs / 2)
-                root.host.setCursor(f.atMs)
+                root.host.cursorsPart.centerOn(f.atMs + f.lengthMs / 2)
+                root.host.cursorsPart.setCursor(f.atMs)
             }
         }
         RowLayout {
@@ -62,16 +62,18 @@ ListView {
             anchors.rightMargin: 8
             Rectangle {
                 implicitWidth: 10; implicitHeight: 4
-                color: root.host.findingColor(findingRow.modelData.kind)
+                color: root.host.formatPart.findingColor(findingRow.modelData.kind)
             }
             Label {
-                text: root.host.timeText(findingRow.modelData.atMs, true)
+                textFormat: Text.PlainText
+                text: root.host.formatPart.timeText(findingRow.modelData.atMs, true)
                 color: Theme.textDim
                 font.family: Theme.monoFamily
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "findingText"
-                text: root.host.findingText(findingRow.modelData)
+                text: root.host.formatPart.findingText(findingRow.modelData)
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true

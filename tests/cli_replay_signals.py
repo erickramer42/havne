@@ -11,8 +11,11 @@
 # own name (rec.<16 hex>) the same again; with profile=obd2 the copy is
 # unused; another .csv in the folder is a frames file of its own, which
 # doesn't take the copy (raw); a malformed query is refused as core
-# refuses it, the copy there or not; and once signals.json no longer
-# matches its hash the replay decodes nothing (raw) and stderr says why.
+# refuses it, the copy there or not; a copy past a written file's
+# megabyte (a session's whole set, ADR-0065 section 3) still decodes its
+# recording, in a replay and in view --frames, while the same bytes given
+# as --signals are refused; and once signals.json no longer matches its
+# hash the replay decodes nothing (raw) and stderr says why.
 
 import hashlib
 import json
@@ -109,6 +112,66 @@ def main():
                 print(f"FAIL  {query!r}: exit {r.returncode}, profile {profile(lines)}")
                 ok = False
 
+        # A copy past a written file's megabyte: read as the recording's,
+        # refused as a file a user gives
+        big = folder + "-big"
+        shutil.copytree(folder, big)
+        with open(os.path.join(big, "signals.json"), "rb") as f:
+            body = f.read().rstrip()
+        padded = body[:-1] + b" " * (1024 * 1024 + 64 - len(body)) + b"}"
+        with open(os.path.join(big, "signals.json"), "wb") as f:
+            f.write(padded)
+        with open(os.path.join(big, "events.log"), "rb") as f:
+            events = f.read()
+        was = hashlib.sha256(open(os.path.join(folder, "signals.json"),
+                                  "rb").read()).hexdigest().encode()
+        if not body.endswith(b"}") or was not in events:
+            print("FAIL  the recording's copy or its hash line isn't as expected")
+            ok = False
+        with open(os.path.join(big, "events.log"), "wb") as f:
+            f.write(events.replace(was, hashlib.sha256(padded).hexdigest().encode()))
+        r, lines = run([cli, "stream", f"replay://{big}?speed=max", "--values"])
+        if r.returncode != 0 or profile(lines) != recorded or values(lines) != want:
+            print(f"FAIL  a copy of {len(padded)} bytes: exit {r.returncode}, "
+                  f"profile {profile(lines)}, {len(values(lines))} values lines: "
+                  f"{r.stderr.decode(errors='replace')}")
+            ok = False
+        r, lines = run([cli, "view", big, "--frames"])
+        viewed = of_type(lines, "opened")
+        if (r.returncode != 0 or not viewed
+                or viewed[0].get("frames") != "signals.json"):
+            print(f"FAIL  view --frames over the large copy: exit {r.returncode}, "
+                  f"{viewed[:1]}: {r.stderr.decode(errors='replace')}")
+            ok = False
+        r, lines = run([cli, "stream", fixture + "?speed=max&from=100&to=102",
+                        "--signals", os.path.join(big, "signals.json"),
+                        "--values"])
+        if r.returncode != 3 or values(lines):
+            print(f"FAIL  the large copy as --signals: exit {r.returncode}, "
+                  f"{len(values(lines))} values lines; a written file is "
+                  "held to its megabyte")
+            ok = False
+
+        # A file a user gives is held to a written file's signals too,
+        # however few its bytes
+        many = os.path.join(root, "many.json")
+        with open(many, "w", encoding="utf-8") as f:
+            json.dump({
+                "havne_signals": 1, "name": "Many", "source": {"name": "t"},
+                "ecus": [{"id": "a", "rx": "7E8"}, {"id": "b", "rx": "7E9"}],
+                "signals": [{"key": f"s{i}", "name": f"S{i}",
+                             "ecu": "ab"[i // 1024],
+                             "read": {"service": "22",
+                                      "number": f"{0x1000 + i % 1024:04X}"},
+                             "field": {"byte": 0}} for i in range(1025)]}, f)
+        r, lines = run([cli, "stream", fixture + "?speed=max&from=100&to=102",
+                        "--signals", many, "--values"])
+        said = r.stdout.decode(errors="replace") + r.stderr.decode(errors="replace")
+        if r.returncode != 3 or "lists 1025, more than 1024" not in said:
+            print(f"FAIL  1025 signals as --signals: exit {r.returncode}, "
+                  f"{said[:300]!r}")
+            ok = False
+
         # A copy changed since: raw, and stderr says why
         with open(os.path.join(folder, "signals.json"), "ab") as f:
             f.write(b" ")
@@ -126,7 +189,8 @@ def main():
     if ok:
         print(f"ok    {len(want)} values lines replayed through the copy "
               f"({recorded}), its own name, unused under obd2 and for another "
-              ".csv, a bad query refused, refused once changed")
+              ".csv, a bad query refused, a copy past a megabyte read, "
+              "refused once changed")
     return 0 if ok else 1
 
 

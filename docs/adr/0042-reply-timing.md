@@ -132,7 +132,7 @@ list): the recorder's header is that list, and each of the CLI's
 
 ### 4. The benchmark
 
-What v0.3.5 publishes in [docs/testing.md](../testing.md#performance),
+What v0.3.5 publishes in [docs/testing.md](../performance.md),
 all with no hardware:
 
 - The delivery figures as today (`bench_bridge --load`: frames a
@@ -307,3 +307,53 @@ section 3): the session's time would put a mid-session log's reply
 timing ahead of its frames. The snapshot's cadence and the columns are
 unchanged; [ADR-0017](0017-session-recording.md)'s appendix of
 2026-11-07 has what an older recording holds.
+
+## Note: the timing rows are a pool (2026-11-16)
+
+The rows are a pool of `ECUIO_PROFILE_MAX_REQUESTS`: one is taken when a
+request first enters the rotation and kept, and the public rows are in the
+order taken. A request first kept once the pool is spent is asked with no
+row and counted in `untimed` (ADR-0065).
+
+## Appendix: the pacing model and its gate (2026-11-18)
+
+Section 4's benchmark measures what the stack adds to a reply. Beside
+it sits a model of the request engine that gates a change to its pacing
+before a car sees it.
+
+- **The aim:** each pick's physical ceiling (the ECU's reply payload
+  or its reply time, then the bus), with nothing lost.
+- **What a log reaches:** `havne-cli log`'s `summary` line
+  ([ADR-0056](0056-analysis-log.md)'s appendix of 2026-11-18): values,
+  sweeps and frames a second, and each signal's interval at the same
+  12.5% bound as this ADR's histograms.
+- **The model** (`tests/pacing_bench.h`, run by `bench_pacing`): the
+  request engine driven on a simulated clock, with no change to core
+  (the engine reads no clock; the loop hands it the time). Each
+  transport's worker is modeled by the calls it makes:
+  - **J2534:** each pass's expiries, then each idle channel's due
+    request, the write's time, and the 5 ms floor from the write's
+    start.
+  - **SocketCAN:** one request at a time for the socket, its echo's
+    time and the engine's own gap.
+  - **ELM327:** the turn (`request_turns.h`), one command to its
+    prompt, `AT SH` when the channel changes, the response-count digit
+    and the take-back of a DID it cut; a link one way and a time per
+    character carrying the commands, lines and prompt; and a
+    late-prompt knob for an adapter that gives a multi-frame reply's
+    prompt one `AT ST` after it.
+- **The simulated car's timing:** each module's time to its first
+  frame is the simulated ECU's own draw (`core/src/sim_timing.h`,
+  [ADR-0046](0046-simulated-ecu.md)'s appendix of 2026-11-18), its
+  Flow Control and Consecutive Frame pace fixed, its replies on one
+  500 kbit/s bus, first come first served.
+- **The gate:** `PacingTest` (`test_pacing`) pins the model's figures
+  for the engine's constants (the floor, the pack's size, the turn)
+  inside bounds set from the model's arithmetic. A pacing lever ships
+  when the model shows its gain toward the pick's ceiling, a bench
+  shows it loses nothing, and a car run confirms it within 10% of the
+  model's figure; a car run outside 10% calibrates the model first.
+
+The model is not a transport bench: `bench_timing` measures the real
+stacks against the fakes, and a gap between the two names something
+the model leaves out.

@@ -79,26 +79,32 @@ bool is_valid_name(const char* name)
     return n > 0;
 }
 
-/* Whether a validated set's requests fit the engine's table; out, when
- * not NULL, gets ECUIO_VALIDATE_ERR_REQUEST_COUNT and the first def
- * that didn't. */
-bool fits_request_table(const ecuio_signal_set_t* set, ecuio_validation_t* out)
+/* Whether each module of a validated set derives no more requests than
+ * ECUIO_MODULE_MAX_REQUESTS: OK, INVALID_ARGUMENT (out, when not NULL,
+ * gets ECUIO_VALIDATE_ERR_REQUEST_COUNT and the first def past its
+ * module's), or OUT_OF_MEMORY when the count doesn't allocate. */
+ecuio_status_t fits_request_table(const ecuio_signal_set_t* set,
+                                  ecuio_validation_t* out)
 {
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     for (uint32_t i = 0; i < set->channel_count; ++i) {
         rx_ids[i] = set->channels[i].rx_id;
     }
-    ecuio_request_engine e;
-    ecuio_engine_init(&e, set->channel_count);
-    uint32_t overflow = UINT32_MAX;
-    if (ecuio_engine_derive(&e, set, rx_ids, set->channel_count, &overflow)) {
-        return true;
+    ecuio_derived derived;
+    switch (
+        ecuio_engine_plan(set, rx_ids, set->channel_count, nullptr, &derived)) {
+    case ecuio_plan_result::ok:
+        return ECUIO_OK;
+    case ecuio_plan_result::out_of_memory:
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    case ecuio_plan_result::module_full:
+        break;
     }
     if (out != nullptr) {
         out->code = ECUIO_VALIDATE_ERR_REQUEST_COUNT;
-        out->index = overflow;
+        out->index = derived.overflow_def;
     }
-    return false;
+    return ECUIO_ERR_INVALID_ARGUMENT;
 }
 
 } // namespace
@@ -135,9 +141,12 @@ ecuio_status_t ecuio_profile_register(const char* name,
     }
     /* Every derived request must fit the engine's table, or the rest would
      * silently never be asked. Counted on the set's own channels: a
-     * ?filter= override merges them, which can only dedupe more. */
-    if (signal_set != nullptr && !fits_request_table(signal_set, out)) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
+     * ?filter= override puts them all on one, which attach judges. */
+    if (signal_set != nullptr) {
+        const ecuio_status_t fits = fits_request_table(signal_set, out);
+        if (fits != ECUIO_OK) {
+            return fits;
+        }
     }
     try {
         std::lock_guard<std::mutex> lock(registry_mutex());

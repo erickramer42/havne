@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashDriveStatus.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
 import QtQuick.Controls
@@ -14,7 +14,7 @@ Item {
     id: driveStatus
     required property DashboardPage host
     objectName: "driveStatusLine"
-    visible: driveStatus.host.driving
+    visible: driveStatus.host.drivePart.driving
     x: 0
     y: driveStatus.host.driveInsetTop
     width: driveStatus.host.width
@@ -31,31 +31,35 @@ Item {
             color: Theme.linkColor(Bridge.linkState)
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusWord"
             font.pixelSize: Theme.fontCaption
             color: Theme.text
             text: Theme.linkShortLabel(Bridge.linkState)
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusAddress"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             elide: Text.ElideRight
             font.pixelSize: Theme.fontCaption
             color: Theme.textDim
-            text: qsTr("· %1").arg(Bridge.uriLabel)
+            text: qsTr("· %1").arg(SessionLabel.address(Bridge.uriLabel))
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusRun"
-            visible: Bridge.logActive || Bridge.recordingActive || driveStatus.host.driveLogEnded
+            visible: Bridge.logActive || Bridge.recordingActive || driveStatus.host.drivePart.driveLogEnded
             font.pixelSize: Theme.fontCaption
             color: Theme.text
             text: Bridge.logActive ? qsTr("Log")
                 : Bridge.armedRecording ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
                 : Bridge.armedActive ? qsTr("Armed")
-                : driveStatus.host.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
+                : driveStatus.host.drivePart.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusTime"
             visible: Bridge.logActive
             font.family: Theme.valueFamily
@@ -65,6 +69,7 @@ Item {
             text: driveStatus.host.driveLogTime
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusDetail"
             readonly property string detail:
                 Bridge.logActive ? driveStatus.host.driveLogSize

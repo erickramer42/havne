@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # scripts/tidy.sh: clang-tidy over core/, surrogate/ and cli/, and app/ in a
 # tree with Qt, with .clang-tidy's checks, one summary line; each file's
-# output goes to Testing/tidy/<file>.log, and on a warning the warnings
+# output goes to Testing/tidy/<path, / as _>.log, and on a warning the warnings
 # are printed and the script exits 1. CI's clang-tidy job runs it.
+# The size checks' lines (a function past 80 lines or complexity 40) are
+# written to Testing/tidy/size.txt and judged against the committed baseline
+# scripts/tidy-size-baseline.txt (scripts/tidy-size-ratchet.sh): a function
+# past a threshold that the baseline doesn't list fails, and so does a
+# baseline line that no longer applies or a listed function that grew, so
+# the list and its numbers only shrink. It also runs the file-length ratchet
+# (scripts/filelength_check.py, scripts/filelength-baseline.txt): a source file
+# past 1,000 lines that isn't listed, or a listed one that grew, fails.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
 #        HAVNE_TIDY_SHARD=<k>/<n> scripts/tidy.sh ...   (every n-th file from the k-th, k from 1 to n)
+#        scripts/tidy.sh --update-size-baseline ...     (also drops the baseline's lines that no
+#            longer apply; never adds one, and not in a shard: a header's function is seen by any shard)
 #
 # The tree is a Ninja (or Makefile) build with a compile database, which
 # the Visual Studio generator doesn't write, configured where cl.exe is
@@ -36,6 +46,11 @@ set -u
 cd "$(dirname "$0")/.." || exit 2
 LOGDIR=Testing/tidy
 QT_KIT=
+UPDATE=0
+if [ "${1:-}" = --update-size-baseline ]; then
+    UPDATE=1
+    shift
+fi
 if [ "${1:-}" = --qt ]; then
     QT_KIT=${2:?"--qt takes the Qt kit's folder"}
     shift 2
@@ -44,6 +59,20 @@ else
     TREE=${1:-build-tidy}
 fi
 DB=$TREE/compile_commands.json
+
+# The file-length ratchet (scripts/filelength_check.py): cheap, needs no
+# compiler, and runs before the long part. CI's shards share the tree, so
+# shard 1 alone judges it.
+case "${HAVNE_TIDY_SHARD:-1/1}" in
+    1/*)
+        PY=python
+        command -v python > /dev/null 2>&1 || PY=python3
+        fl=
+        [ "$UPDATE" = 1 ] && fl=--update
+        if ! "$PY" -I scripts/filelength_check.py $fl; then
+            exit 1
+        fi ;;
+esac
 
 # A Developer environment on Windows: vcvars64's variables, read through
 # a cmd of its own and taken into this shell (PATH converted)
@@ -121,10 +150,12 @@ rm -f "$LOGDIR"/*.log
 root=$(pwd -W 2>/dev/null || pwd)
 # C and C++ sources in the source tree only (app/ in a tree with Qt): the database also lists
 # generated files, such as the version resource in the tree's own
-# surrogate/ folder, which clang-tidy can't read
+# surrogate/ folder, which clang-tidy can't read. third_party/ is another
+# project's code (WAMR's own tree has a core/ folder): never checked, but for
+# wamr_port.c, which is Havne's own.
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
-    tr '\\' '/' | grep -E "/(core|surrogate|cli|app)/" | grep -E '\.(c|cc|cpp|cxx)$' |
-    grep -vF "/$TREE/" | sort -u)
+    tr '\\' '/' | grep -E '/(core|surrogate|cli|app)/|/third_party/wamr_port\.c$' | grep -E '\.(c|cc|cpp|cxx)$' |
+    grep -vF "/$TREE/" | grep -vE '/third_party/(wamr/|[^w])' | sort -u)
 if [ -z "$files" ]; then
     echo "no core/, surrogate/, cli/ or app/ sources in $DB" >&2
     exit 2
@@ -142,19 +173,29 @@ if [ -n "${HAVNE_TIDY_SHARD:-}" ]; then
     files=$(printf '%s
 ' "$files" | awk -v k="$shard_k" -v n="$shard_n" '(NR - 1) % n == k - 1')
 fi
+[ -z "${HAVNE_TIDY_SHARD:-}" ] || [ "$UPDATE" = 0 ] || {
+    echo "--update-size-baseline judges the whole tree: not with HAVNE_TIDY_SHARD" >&2; exit 2; }
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 
 start=$SECONDS
 jobs=$(nproc 2>/dev/null || echo 4)
 printf '%s\n' "$files" | xargs -P "$jobs" -I{} sh -c \
-    '"$1" -p "$2" --quiet "$3" > "$4/$(basename "$3").log" 2>&1' \
-    sh "$TIDY" "$TREE" {} "$LOGDIR"
+    'rel=${3#"$5"/}; "$1" -p "$2" --quiet "$3" > "$4/$(printf %s "$rel" | tr / _).log" 2>&1' \
+    sh "$TIDY" "$TREE" {} "$LOGDIR" "$root"
 rc=$?
 dur=$((SECONDS - start))
 
 # A header's warning repeats in every file that includes it: print once.
-found=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
-    sed "s#^$root/##" | sort -u)
+# The size checks are judged apart (the baseline), listed in size.txt.
+all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
+    sed "s#^$root/##I" | sort -u)
+sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
+found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
+printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
+# The size check's line count is in a note that follows its warning
+cat "$LOGDIR"/*.log | grep -E 'note: [0-9]+ lines including whitespace' | tr '\\' '/' |
+    sed "s#^$root/##I" | sort -u > "$LOGDIR/size-notes.txt"
+nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
     what=warnings
@@ -170,5 +211,12 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf 'tidy        ok    %4s s  %s files, no warnings (%s)\n' \
-    "$dur" "$count" "$version"
+printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##I" > "$LOGDIR/checked.txt"
+sharded=0
+[ -z "${HAVNE_TIDY_SHARD:-}" ] || sharded=1
+if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-baseline.txt \
+        "$LOGDIR/checked.txt" "$sharded" "$UPDATE" "$LOGDIR/size-notes.txt"; then
+    exit 1
+fi
+printf 'tidy        ok    %4s s  %s files, no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \
+    "$dur" "$count" "$nsized" "$LOGDIR" "$version"

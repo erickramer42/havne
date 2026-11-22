@@ -4,6 +4,7 @@
 //
 // Public headers only: what any program linking core can do.
 
+#include "signal_pairs.h"
 #include "view_frames.h"
 #include "view_lines.h"
 #include "jsonl.h"
@@ -76,19 +77,47 @@ struct Viewed {
     std::string decoded; // --frames: the profile, or "signals.json"
     ecuio_stretch_rules_t rules{}; // --stretches: --role's indexes in
 
-    // The index of a signal by name, or UINT32_MAX
-    uint32_t find(const std::string& name) const
+    // The index of the signal a text names, its key or a name one signal
+    // has (ecuio_recording_find_signal), or UINT32_MAX; *several says a
+    // name more than one signal has, core's detail saying their keys
+    uint32_t find(const std::string& text, bool* several = nullptr) const
     {
-        for (uint32_t k = 0; k < signals.size(); ++k) {
-            if (name ==
-                std::string(signals[k].name,
-                            strnlen(signals[k].name, sizeof signals[k].name))) {
-                return k;
+        uint32_t k = UINT32_MAX;
+        const bool found =
+            ecuio_recording_find_signal(r.get(), text.c_str(), &k) == ECUIO_OK;
+        if (several != nullptr) {
+            size_t named = 0;
+            for (const ecuio_recording_signal_t& s : signals) {
+                named +=
+                    text == std::string(s.name, strnlen(s.name, sizeof s.name))
+                        ? 1u
+                        : 0u;
             }
+            *several = !found && named > 1;
         }
-        return UINT32_MAX;
+        return found ? k : UINT32_MAX;
     }
 };
+
+// The signal file a registered profile is the set of, when view was given
+// it (--signals' file, a --plugin's variant); NULL for any other profile
+const ecuio_signal_file_t* given_file(const std::string& profile)
+{
+    if (g_signal_file != nullptr &&
+        profile == ecuio_signal_file_profile(g_signal_file)) {
+        return g_signal_file;
+    }
+    for (uint32_t v = 0; g_plugin != nullptr; ++v) {
+        const ecuio_signal_file_t* f = ecuio_plugin_variant_file(g_plugin, v);
+        if (f == nullptr) {
+            break;
+        }
+        if (profile == ecuio_signal_file_profile(f)) {
+            return f;
+        }
+    }
+    return nullptr;
+}
 
 // view's open of one recording: its signals.csv, or with --frames its
 // frames.csv through the set cli/view_frames.h's rules pick, *decoded
@@ -126,13 +155,17 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
         cli::frames_source(args.profile, recorded, own);
     ecuio_signal_file_t* file = nullptr;
     const ecuio_signal_set_t* set = nullptr;
+    // The file the set is of, where there is one: through it a computed
+    // signal goes by its author's key, as a recording of the file keeps it
+    const ecuio_signal_file_t* keyed = nullptr;
     if (source.own_file) {
         const ecuio_status_t st = load_signal_file(
-            (std::string(folder) + "/signals.json").c_str(), &file, why);
+            (std::string(folder) + "/signals.json").c_str(), &file, why, true);
         if (st != ECUIO_OK) {
             return st;
         }
         set = ecuio_signal_file_set(file);
+        keyed = file;
         *decoded = "signals.json";
     } else if (source.profile.empty()) {
         *why = source.why;
@@ -146,9 +179,13 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
             return ECUIO_ERR_UNKNOWN_PROFILE;
         }
         *decoded = source.profile;
+        keyed = given_file(source.profile);
+        if (keyed != nullptr) {
+            set = ecuio_signal_file_set(keyed);
+        }
     }
-    const ecuio_status_t st = ecuio_recording_open_frames(
-        folder, set, view_open_interrupted, nullptr, r);
+    const ecuio_status_t st = ecuio_recording_open_frames_with(
+        folder, set, keyed, view_open_interrupted, nullptr, r);
     *why = ecuio_last_error_detail();
     ecuio_signal_file_free(file); /* the reader keeps its own copy */
     return st;
@@ -223,8 +260,7 @@ int use_view_signals(Output& out, ViewArgs& args)
     }
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // The start of a recording's nth pull (1 the first) under its rules, over
@@ -381,6 +417,41 @@ ecuio_status_t column_means(const Viewed& v, const cli::Window& w,
     return ECUIO_OK;
 }
 
+// kept's means views[i]'s signal k takes its delta from (*from, its place):
+// the first before i showing k's pair as a number in k's unit; else NULL
+const double* delta_source(const std::vector<Viewed>& views, uint32_t i,
+                           uint32_t k, uint32_t columns,
+                           const std::vector<std::vector<double>>& kept,
+                           std::vector<std::vector<uint32_t>>& pairs,
+                           uint32_t* from)
+{
+    const Viewed& v = views[i];
+    for (uint32_t j = 0; j < i; ++j) {
+        const Viewed& u = views[j];
+        if (kept[j].empty()) {
+            continue;
+        }
+        if (pairs[j].empty()) {
+            pairs[j] = cli::pair_signals(
+                static_cast<uint32_t>(v.signals.size()),
+                [&](uint32_t n) -> const auto& { return v.signals[n]; },
+                static_cast<uint32_t>(u.signals.size()),
+                [&](uint32_t n) -> const auto& { return u.signals[n]; });
+        }
+        const uint32_t t = pairs[j][k];
+        const auto at = std::find(u.shown.begin(), u.shown.end(), t);
+        if (at == u.shown.end() ||
+            (u.signals[t].flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0 ||
+            !cli::same_unit(v.signals[k], u.signals[t])) {
+            continue;
+        }
+        *from = j;
+        return kept[j].data() +
+               static_cast<size_t>(at - u.shown.begin()) * columns;
+    }
+    return nullptr;
+}
+
 } // namespace
 
 // A recording read offline (ADR-0049 section 5): every recording opens,
@@ -429,7 +500,25 @@ int run_view(ViewArgs& args)
             return v.find(name) != UINT32_MAX;
         });
     };
+    // A name two signals of one recording have names neither: usage, in
+    // core's words, which list their keys
+    const auto several = [&](const std::string& name) {
+        for (const Viewed& v : views) {
+            bool many = false;
+            (void)v.find(name, &many);
+            if (many) {
+                std::fprintf(stderr, "havne-cli: recording %u: %s\n",
+                             static_cast<unsigned>(&v - views.data()),
+                             ecuio_last_error_detail());
+                return true;
+            }
+        }
+        return false;
+    };
     for (const std::string& name : args.signals) {
+        if (several(name)) {
+            return kExitUsage;
+        }
         if (!in_any(name)) {
             std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
                          name.c_str());
@@ -439,6 +528,9 @@ int run_view(ViewArgs& args)
     const bool threshold = args.align.kind == cli::AlignOn::rise ||
                            args.align.kind == cli::AlignOn::fall;
     if (threshold) {
+        if (several(args.align.signal)) {
+            return kExitUsage;
+        }
         if (!in_any(args.align.signal)) {
             std::fprintf(stderr, "havne-cli: no recording has a signal '%s'\n",
                          args.align.signal.c_str());
@@ -457,6 +549,11 @@ int run_view(ViewArgs& args)
     }
 
     // --role's names, each a number signal of every recording
+    for (const auto& role : args.roles) {
+        if (several(role.second)) {
+            return kExitUsage;
+        }
+    }
     for (Viewed& v : views) {
         v.rules = args.rules;
         for (const auto& role : args.roles) {
@@ -691,9 +788,8 @@ int run_view(ViewArgs& args)
         write_line(out, l);
     }
     std::vector<ecuio_recording_column_t> cols;
-    // Each number signal's means in the first aligned recording to show
-    // it, by name and unit, which a later recording's delta is taken from
-    std::map<std::string, std::pair<uint32_t, std::vector<double>>> firsts;
+    // Each aligned recording's means, which a later one's delta is taken from
+    std::vector<std::vector<double>> kept(views.size());
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         if (g_interrupted.load()) {
@@ -763,33 +859,32 @@ int run_view(ViewArgs& args)
             return ended(out, kExitConnect);
         }
         std::vector<double> delta(axis.columns);
+        std::vector<std::vector<uint32_t>> pairs(i);
         for (size_t n = 0; n < v.shown.size(); ++n) {
             const ecuio_recording_signal_t& s = v.signals[v.shown[n]];
             const double* mean = means.data() + n * axis.columns;
             const double* less = nullptr;
             uint32_t delta_from = 0;
-            if ((s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0) {
-                const std::string key = cli::delta_key(s);
-                const auto first = firsts.find(key);
-                if (first == firsts.end()) {
-                    firsts[key] = {
-                        i, std::vector<double>(mean, mean + axis.columns)};
-                } else if (first->second.first != i) {
-                    /* Another recording's: a signal named twice has no
-                     * delta from itself */
-                    /* NaN where either column is empty */
-                    for (uint32_t c = 0; c < axis.columns; ++c) {
-                        delta[c] = mean[c] - first->second.second[c];
-                    }
-                    less = delta.data();
-                    delta_from = first->second.first;
+            const double* first =
+                (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0
+                    ? nullptr
+                    : delta_source(views, i, v.shown[n], axis.columns, kept,
+                                   pairs, &delta_from);
+            if (first != nullptr) {
+                /* NaN where either column is empty */
+                for (uint32_t c = 0; c < axis.columns; ++c) {
+                    delta[c] = mean[c] - first[c];
                 }
+                less = delta.data();
             }
             BigLine b(cli::columns_line_bytes(axis.columns));
             cli::columns_line(b.line, i, s, w, axis.columns,
                               any ? cols.data() + n * w.count : nullptr, mean,
                               less, delta_from);
             write_line(out, b.line);
+        }
+        if (i + 1 < views.size()) {
+            kept[i] = std::move(means); // the last one's are never a delta's
         }
     }
     if (args.has_at) {
@@ -800,7 +895,8 @@ int run_view(ViewArgs& args)
                 continue;
             }
             const int64_t t = args.at_us - v.offset_us;
-            BigLine b(256 + v.shown.size() * (128 + text.size() * 6));
+            BigLine b(256 + v.shown.size() *
+                                (128 + cli::kKeyFieldBytes + text.size() * 6));
             cli::at_begin(b.line, i, args.at_us);
             for (size_t n = 0; n < v.shown.size(); ++n) {
                 uint64_t host = ECUIO_RECORDING_NONE;

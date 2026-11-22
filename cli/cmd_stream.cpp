@@ -1,6 +1,7 @@
 // File/layer: cli/cmd_stream.cpp | havne-cli, stream (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliReplayTest, CliRecordTest,
-//          CliSignalTest, CliConditionsRunTest, CliExitTest (ctest);
+//          CliSignalTest, CliConditionsRunTest, CliExitTest,
+//          CliUsageTest (ctest);
 //          CliMarkLinesTest (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
@@ -308,7 +309,7 @@ int run_stream(const StreamArgs& args)
     stream->wait = replay;
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, info);
+    write_session(out, session, info);
     ShownConditions shown;
     if (conditions != nullptr) {
         if (!attach_conditions(out, session, conditions, conditions_source,
@@ -327,23 +328,32 @@ int run_stream(const StreamArgs& args)
     // pick; as in the app, a refused pick leaves the whole set asked
     if (args.pick_ranked) {
         const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-        const std::vector<uint16_t> ids = cli::default_pick(set, {});
+        const bool pick_only = session_pick_only(session);
+        const std::vector<uint16_t> ids = cli::default_pick(set, {}, pick_only);
         if (!session_asks(session)) {
             std::fprintf(stderr, "havne-cli: the session asks no signal: "
                                  "--pick ranked picks none\n");
         } else if (ids.empty()) {
-            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
-                                 "--pick ranked asks every one\n");
+            std::fprintf(stderr,
+                         pick_only ? "havne-cli: the profile ranks no signal "
+                                     "and is asked only what is picked: "
+                                     "--pick ranked asks none\n"
+                                   : "havne-cli: the profile ranks no signal: "
+                                     "--pick ranked asks every one\n");
         } else if (ecuio_session_set_focus_with(
                        session, ids.data(), static_cast<uint32_t>(ids.size()),
                        0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
-            std::fprintf(stderr, "havne-cli: asking every signal: %s\n",
-                         ecuio_last_error_detail());
+            std::fprintf(stderr, "havne-cli: asking %s signal: %s\n",
+                         pick_only ? "no" : "every", ecuio_last_error_detail());
         } else {
             BigLine b(cli::focus_line_bytes(ids.size()));
-            cli::focus_line(b.line, set, ids, 0, true);
+            cli::focus_line(b.line, set, ids, 0, true, session_signal_file());
             write_line(out, b.line);
         }
+    } else if (session_pick_only(session)) {
+        std::fprintf(stderr, "havne-cli: the profile is asked only what is "
+                             "picked: nothing is asked (--pick ranked, or log "
+                             "--signal)\n");
     }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
@@ -355,18 +365,15 @@ int run_stream(const StreamArgs& args)
     }
     // A read that completed at create (the mock's) comes first; the rest
     // as they complete
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
-    uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    const uint32_t channels = module_count(info);
+    uint32_t diag_generations[ECUIO_MAX_CHANNELS] = {};
+    uint32_t identity_generations[ECUIO_MAX_CHANNELS] = {};
     char vehicle_vin[ECUIO_VIN_TEXT_LEN] = "";
     poll_identity(out, session, channels, identity_generations, vehicle_vin);
     poll_diagnostics(out, session, channels, diag_generations);
-    cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    cli::ScanSeen scan_seen[ECUIO_MAX_CHANNELS] = {};
+    cli::SessionSeen session_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_channel_support_t scan_reports[ECUIO_MAX_CHANNELS] = {};
     poll_scan(out, session, channels, scan_seen, session_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
@@ -461,7 +468,7 @@ int run_stream(const StreamArgs& args)
             poll_refused(out, set, scan_reports, channels, refused_last,
                          refused_more_last);
         }
-        poll_timing(out, session, info, timing_snaps, timing_rows, false);
+        poll_timing(out, session, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
         poll_conditions(out, session, &shown);
 
@@ -517,7 +524,7 @@ int run_stream(const StreamArgs& args)
     if (!out.failed) {
         poll_scan(out, session, channels, scan_seen, session_seen, scan_reports,
                   true);
-        poll_timing(out, session, info, timing_snaps, timing_rows, true);
+        poll_timing(out, session, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
             covered = args.count;
@@ -561,6 +568,100 @@ int run_stream(const StreamArgs& args)
     g_done.store(true);
 #endif
     return code;
+}
+
+namespace {
+
+// The checks across stream's options: -1 to go on, else the exit code
+int check_stream_args(const StreamArgs& args)
+{
+    if (!args.uri) {
+        std::fprintf(stderr, "havne-cli: stream needs a URI\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.label && !args.record) {
+        std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.signals != nullptr && args.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
+                             "the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    return -1;
+}
+
+} // namespace
+
+// stream's arguments and its profile, then run_stream
+int cmd_stream(int argc, char** argv)
+{
+    StreamArgs args;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--values") {
+            args.values = true;
+        } else if (a == "--until-scanned") {
+            args.until_scanned = true;
+        } else if (a == "--count" && i + 1 < argc) {
+            if (!parse_count(argv[++i], args.count)) {
+                std::fprintf(
+                    stderr,
+                    "havne-cli: --count takes a whole number above 0\n");
+                return kExitUsage;
+            }
+        } else if (a == "--seconds" && i + 1 < argc) {
+            if (!parse_run_seconds(argv[++i], args.seconds)) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::run_seconds_why());
+                return kExitUsage;
+            }
+        } else if (a == "--record" && i + 1 < argc) {
+            args.record = argv[++i];
+            if (*args.record == '\0') {
+                std::fprintf(stderr, "havne-cli: --record takes a folder\n");
+                return kExitUsage;
+            }
+        } else if (a == "--label" && i + 1 < argc) {
+            args.label = argv[++i];
+        } else if (a == "--signals" && i + 1 < argc) {
+            args.signals = argv[++i];
+        } else if (a == "--plugin" && i + 1 < argc) {
+            args.plugin = argv[++i];
+        } else if (a == "--conditions" && i + 1 < argc &&
+                   args.conditions == nullptr && *argv[i + 1] != '\0') {
+            args.conditions = argv[++i];
+        } else if (a == "--conditions") {
+            std::fprintf(stderr,
+                         "havne-cli: --conditions takes one condition file\n");
+            return kExitUsage;
+        } else if (a == "--pick") {
+            if (i + 1 >= argc || !cli::parse_pick(argv[++i])) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::pick_why());
+                return kExitUsage;
+            }
+            args.pick_ranked = true;
+        } else if (a.rfind("--", 0) == 0 || args.uri) {
+            std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
+            usage(stderr);
+            return kExitUsage;
+        } else {
+            args.uri = argv[i];
+        }
+    }
+    const int checked = check_stream_args(args);
+    if (checked >= 0) {
+        return checked;
+    }
+    std::string opened;
+    const int rc =
+        take_profile_source(args.signals, args.plugin, &args.uri, &opened);
+    if (rc >= 0) {
+        return rc;
+    }
+    return run_stream(args);
 }
 
 } // namespace cmd

@@ -1,0 +1,27 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its park",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up park at 52D",
+  "signals": [
+    {
+      "key": "park_name",
+      "name": "Park Assist Module Name",
+      "kind": "text",
+      "ecu": "park",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "park_rear_distance",
+      "name": "Rear Distance",
+      "ecu": "park",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "unit": "cm",
+      "decimals": 0,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 250, "warn_low": 30}
+    }
+  ]
+}

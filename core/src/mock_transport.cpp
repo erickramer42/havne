@@ -75,24 +75,30 @@ bool reads_pids(const ecuio_signal_set_t* set)
     return false;
 }
 
-/* The engine ECU's channel, then each other the set declares, once each,
- * ECUIO_MAX_CHANNELS at most */
-void take_channels(ecuio_mock_transport* t, const ecuio_signal_set_t* set)
+/* The engine ECU's channel, then each other the set declares, once
+ * each. False when they pass ECUIO_MAX_CHANNELS: a set that declares
+ * that many and not the engine ECU's among them. */
+bool take_channels(ecuio_mock_transport* t, const ecuio_signal_set_t* set)
 {
     uint32_t rx[ECUIO_MAX_CHANNELS] = {};
     uint32_t tx[ECUIO_MAX_CHANNELS] = {};
     const uint32_t n = ecuio_resolve_channels(set, request_params{}, rx, tx);
-    for (uint32_t i = 0; i < n && t->channels < ECUIO_MAX_CHANNELS; ++i) {
+    for (uint32_t i = 0; i < n; ++i) {
         bool seen = false;
         for (uint32_t k = 0; k < t->channels; ++k) {
             seen = seen || t->rx_ids[k] == rx[i];
         }
-        if (!seen) {
-            t->rx_ids[t->channels] = rx[i];
-            t->tx_ids[t->channels] = tx[i];
-            ++t->channels;
+        if (seen) {
+            continue;
         }
+        if (t->channels == ECUIO_MAX_CHANNELS) {
+            return false;
+        }
+        t->rx_ids[t->channels] = rx[i];
+        t->tx_ids[t->channels] = tx[i];
+        ++t->channels;
     }
+    return true;
 }
 
 /* Walks each channel's supported-PID bitmaps (the simulated engine ECU's
@@ -101,14 +107,48 @@ void take_channels(ecuio_mock_transport* t, const ecuio_signal_set_t* set)
  * ECU answers, which the worker sends: core lists the set's other
  * Service 01 signals as unsupported (ADR-0039 section 6), so a front end
  * says they aren't sent rather than waiting for them. The engine is the
- * caller's to drop after: nothing is asked again. */
-void walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
+ * caller's to drop after: nothing is asked again. BAD_URI, with its
+ * detail, for a set that asks the engine ECU more than a module's most:
+ * the signals of no declared ECU are the engine ECU's here, and the
+ * first declared ECU's where registration counted them. */
+ecuio_status_t walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
 {
     const ecuio_signal_set_t* set = t->session->active_signal_set;
-    ecuio_engine_init(probe, t->channels);
-    (void)ecuio_engine_derive(probe, set, t->rx_ids, t->channels, nullptr);
+    /* The table sized from the set, as a requesting attach sizes its own
+     * (ecuio_build_requests); one past a rotation's most only counts, so
+     * its rows need no pool row */
+    std::vector<uint32_t> rows;
+    ecuio_derived derived;
+    try {
+        rows.assign(set != nullptr && set->defs != nullptr ? set->count : 0,
+                    ECUIO_ROW_NONE);
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    switch (
+        ecuio_engine_plan(set, t->rx_ids, t->channels, rows.data(), &derived)) {
+    case ecuio_plan_result::out_of_memory:
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    case ecuio_plan_result::module_full:
+        ecuio_detail_set("the profile asks the mock's engine ECU (0x%03X) "
+                         "more than %u requests: the mock reads the signals "
+                         "of no declared ECU as the engine ECU's",
+                         static_cast<unsigned>(t->rx_ids[0]),
+                         static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+        return ECUIO_ERR_BAD_URI;
+    case ecuio_plan_result::ok:
+        break;
+    }
+    if (!ecuio_engine_init(probe, t->channels, derived.total)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (derived.total > ECUIO_PROFILE_MAX_REQUESTS) {
+        ecuio_engine_pick_only(probe);
+    }
+    (void)ecuio_engine_derive_planned(probe, set, t->rx_ids, t->channels,
+                                      rows.data());
     int64_t now_us = 0;
-    ecuio_engine_probe(probe, now_us);
+    ecuio_engine_probe(probe);
     ecuio_mock_pid_walk(
         probe, 0,
         [t](const uint8_t* req, uint32_t len, uint8_t* out) {
@@ -123,6 +163,7 @@ void walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
         ecuio_publish_support(t->session, *probe, c, t->rx_ids[c], published);
     }
     ecuio_mock_pids_of(set, t->car, &t->pids);
+    return ECUIO_OK;
 }
 
 /* Reads the simulated ECU's diagnostics to their end and hands the
@@ -325,18 +366,13 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         if (reads_pids(session->active_signal_set)) {
             probe.reset(new ecuio_request_engine());
         }
-        try {
-            session->transport = new ecuio_transport_t{&kMockTransportOps, impl};
-        } catch (...) {
-            delete impl;   /* wrapper alloc failed: no leak */
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
         impl->session = session;  /* for callback dispatch */
         impl->epoch = host_clock::now();  /* session start */
     } catch (...) {
         delete impl;
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    std::unique_ptr<ecuio_mock_transport> held(impl);
     session->info.backend = ECUIO_BACKEND_MOCK;
 
     /* The simulated engine ECU's channel first, then each other the set
@@ -345,28 +381,42 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
      * Service 01 PIDs, which the engine ECU's drive cycle answers; its
      * diagnostics are read now, before start, so the report is there as
      * the session is (ADR-0037). */
-    take_channels(impl, session->active_signal_set);
-    session->info.channel_count = impl->channels;
-    {
-        std::lock_guard<std::mutex> lock(session->support_mutex);
-        session->support_count = impl->channels;
-        for (uint32_t c = 0; c < impl->channels; ++c) {
-            session->info.rx_ids[c] = impl->rx_ids[c];
-            session->info.tx_ids[c] = impl->tx_ids[c];
-            session->support[c].rx_id = impl->rx_ids[c];
-            session->identity[c].rx_id = impl->rx_ids[c];
-            session->diagnostics[c].rx_id = impl->rx_ids[c];
-        }
+    if (!take_channels(impl, session->active_signal_set)) {
+        ecuio_detail_set("the profile declares %u ECUs and none is the "
+                         "mock's engine ECU (0x%03X): with it they are one "
+                         "more than the %u a session reads",
+                         static_cast<unsigned>(ECUIO_MAX_CHANNELS),
+                         static_cast<unsigned>(impl->rx_ids[0]),
+                         static_cast<unsigned>(ECUIO_MAX_CHANNELS));
+        return ECUIO_ERR_BAD_URI;
+    }
+    if (ecuio_session_set_modules(session, impl->rx_ids, impl->tx_ids,
+                                  impl->channels) != ECUIO_OK) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     if (probe) {
-        walk_pids(impl, probe.get());
+        const ecuio_status_t walked = walk_pids(impl, probe.get());
+        if (walked != ECUIO_OK) {
+            return walked;
+        }
     }
     if (impl->diag) {
         impl->ecu.engine = &impl->car.car;
-        ecuio_engine_init(impl->diag.get(), 1);
+        if (!ecuio_engine_init(impl->diag.get(), 1)) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
         ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
         read_diagnostics(impl);
     }
+    /* The session takes the transport last, so a refusal above frees it
+     * here and leaves the session with none */
+    auto* wrap =
+        new (std::nothrow) ecuio_transport_t{&kMockTransportOps, nullptr};
+    if (wrap == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    wrap->impl = held.release();
+    session->transport = wrap;
     /* NOTE: worker thread NOT started here; explicit start required.
      * Keeps registration-only sessions single-threaded for tests. */
     return ECUIO_OK;

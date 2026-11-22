@@ -67,9 +67,11 @@ public:
     // Every kept copy loaded and its variants registered, once (later
     // calls only list): one entry a plugin, by name, { sha256, ok, words,
     // id, name, version, lineage, variants, profiles, extends, counts,
-    // owns, mine, importedFor, obdb }. extends, counts and owns run with
-    // variants: the built-in set a variant adds to ("obd2" or ""), its
-    // set's signals and those less the base's. obdb: the plugin is a
+    // owns, replacedNames, mine, importedFor, obdb }. extends, counts, owns and
+    // replacedNames run with variants: the built-in set a variant adds to
+    // ("obd2" or ""), its set's signals, the signals it adds to the base's
+    // and the names of the base's it replaces (variantshape.h; a replaced
+    // name is in neither the count's base part nor owns). obdb: the plugin is a
     // converted OBDb set. A copy that no longer loads is { sha256, ok
     // false, words }
     QVariantList all();
@@ -149,6 +151,11 @@ public:
     // words why, for a plugin the store doesn't hold or a copy that no
     // longer hashes to its name
     QByteArray packed(const QString& sha, QString* words) const;
+
+    // The text of page index of the loaded plugin with the id (ADR-0052's
+    // appendix on pages): a layout file of one page, as core writes it.
+    // "" for no such plugin or page. The Dashboard judges it
+    QString pageText(const QString& id, int index);
 
     // A variant's signal file (ADR-0064 Q7): its files merged and written
     // as one, with a notes line naming the plugin, its version and the
@@ -257,7 +264,8 @@ private:
         QStringList profiles;
         QStringList extends; // by variant: "obd2" or ""
         QVariantList counts; // by variant: the set's signals
-        QVariantList owns;   // by variant: those less the base's
+        QVariantList owns;   // by variant: the signals it adds to the base's
+        QVariantList replacedNames; // by variant: the base signals it replaces, by name
         bool obdb = false;   // a converted OBDb set
     };
     using HeldMap = std::map<QString, Held>;
@@ -265,6 +273,8 @@ private:
     static QString pathOf(const QString& sha);
     static QString indexPath();
     QVariantMap entryOf(const QString& sha, const Held& h) const;
+    // The plugin's pages, in the manifest's order: { index, form, path }
+    static QVariantList pagesOf(const ecuio_plugin_t* plugin);
     // Loads a package and registers every variant: false with *words
     // saying why not (another copy of its id loaded, a profile refused)
     bool take(const QString& sha, const QByteArray& bytes, QString* words);

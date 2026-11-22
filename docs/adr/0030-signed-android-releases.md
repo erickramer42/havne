@@ -44,7 +44,7 @@ app's identity, and the decision is mostly about keeping it.
   place again: every phone would have to uninstall it, losing its data,
   and install a new app.
 - **The setup is printed, not run,** by the release skill's
-  `android-key` (local tooling); `docs/development.md`, "The Android
+  `android-key` (local tooling); `docs/packaging.md`, "The Android
   release key", has the same steps. The password is typed into the
   owner's shell and reaches keytool and the secret through environment
   variables and stdin, never a command line.

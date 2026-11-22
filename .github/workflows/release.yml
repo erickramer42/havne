@@ -16,15 +16,18 @@ name: Release
 # attested over them.
 # A tag with -rcN publishes a pre-release, for a dry run.
 # The tagged commit must already have passed CI (ci.yml's push run on
-# main, which the release PR's merge starts).
+# main, which the release PR's merge starts), or differ from the newest
+# commit that did by docs alone (scripts/docs_only.py's list), so a fix
+# to the notes needs no second round of CI.
 #
 #   git tag v0.3.1 && git push origin v0.3.1
 #
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
 #
-# Jobs: gate (the tag and CI) -> windows, android, linux and macos, side
-# by side -> publish (the SBOM, checksums, provenance, the release). Each
+# Jobs: gate (the tag and CI) -> windows, android, linux, macos and repro
+# (the reproducible Windows build), side by side -> publish (the SBOM,
+# checksums, provenance, the release). Each
 # build job writes a <download>.components.json beside its download for
 # the SBOM (packaging/sbom.py); those lists are job artifacts only, never
 # release files. Each wheel is installed into a fresh venv and
@@ -67,6 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.TAG }}
+          fetch-depth: 0   # the ancestors the CI gate walks
 
       # The tag names the version the binaries report, so they must agree
       # before anything builds: v0.3.1 and v0.3.1-rc2 both need
@@ -92,22 +96,69 @@ jobs:
       # pushed to main, the release PR's merge (it never runs on tags). So
       # the newest push run must have finished green, or a tag pushed
       # early, or on a red commit, would publish an untested build.
+      #
+      # A docs-only change to main gets a green run that skipped the
+      # tests (ci.yml's scope job), so a run counts as having tested the
+      # commit only when its core-and-tests job passed; rename that job
+      # and this gate refuses every commit. A commit whose own run didn't
+      # test it passes when its tree differs from the newest first-parent
+      # ancestor with a tested green push run by docs alone, judged by
+      # that ancestor's own scripts/docs_only.py (a change to the list
+      # can't vouch for itself). Any doubt fails: no such ancestor in the
+      # last 50 first-parent commits or the last 100 green runs, no script
+      # there, an API or git error, an empty diff.
       - name: Check CI passed on the tagged commit
         run: |
           sha=$(git rev-parse HEAD)
+          bound=50
+          # 1 when the run's core-and-tests job ran and passed
+          tested_count() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name == "core-and-tests" and .conclusion == "success")] | length'
+          }
           run=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event push --commit "$sha" --limit 1 \
-            --json status,conclusion,url \
-            --jq '.[0] // empty | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.url)"')
-          if [ -z "$run" ]; then
-            echo "::error::ci.yml has no push run on $sha: merge it to main (or run ci.yml on it by hand) and let CI finish before tagging"
+            --json status,conclusion,databaseId,url \
+            --jq '.[0] // empty | "\(.status) \(if (.conclusion // "") == "" then "none" else .conclusion end) \(.databaseId) \(.url)"')
+          if [ -n "$run" ]; then
+            read -r status conclusion id url <<< "$run"
+            if [ "$status" != completed ] || [ "$conclusion" != success ]; then
+              echo "::error::CI on $sha is $status, conclusion $conclusion ($url): tag a commit whose CI passed"
+              exit 1
+            fi
+            tested=$(tested_count "$id")
+            if [ "$tested" = 1 ]; then
+              echo "CI passed on $sha: $url"
+              exit 0
+            fi
+            echo "The run on $sha skipped the tests, a docs-only change ($url)"
+          fi
+
+          green=
+          candidates=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main \
+            --status success --limit 100 --json headSha,databaseId --jq '.[] | "\(.headSha) \(.databaseId)"')
+          for ancestor in $(git rev-list --first-parent --skip=1 -n "$bound" "$sha"); do
+            for id in $(awk -v want="$ancestor" '$1 == want { print $2 }' <<< "$candidates"); do
+              tested=$(tested_count "$id")
+              if [ "$tested" = 1 ]; then green=$ancestor; break 2; fi
+            done
+          done
+          if [ -z "$green" ]; then
+            echo "::error::ci.yml has no tested green push run on $sha or the $bound first-parent commits before it: merge it to main (or run ci.yml on it by hand) and let CI finish before tagging"
             exit 1
           fi
-          read -r status conclusion url <<< "$run"
-          if [ "$status" != completed ] || [ "$conclusion" != success ]; then
-            echo "::error::CI on $sha is $status, conclusion $conclusion ($url): tag a commit whose CI passed"
+          if ! git cat-file -e "$green:scripts/docs_only.py" 2> /dev/null; then
+            echo "::error::${green:0:12} has no scripts/docs_only.py to judge the diff to $sha"
             exit 1
           fi
-          echo "CI passed on $sha: $url"
+          git show "$green:scripts/docs_only.py" > "$RUNNER_TEMP/docs_only.py"
+          result=$(python3 -P "$RUNNER_TEMP/docs_only.py" diff "$green" "$sha")
+          docs_only=$(sed -n 's/^docs_only=//p' <<< "$result")
+          reason=$(sed -n 's/^reason=//p' <<< "$result")
+          if [ "$docs_only" != true ]; then
+            echo "::error::$sha differs from ${green:0:12}, the newest commit CI passed on, by more than docs ($reason): tag a commit whose CI passed"
+            exit 1
+          fi
+          echo "CI passed on ${green:0:12}, and $sha differs from it by docs alone ($reason)"
 
   windows:
     needs: gate
@@ -215,7 +266,7 @@ jobs:
         shell: bash   # -eo pipefail
     timeout-minutes: 25
     # The release key's secrets live in this environment, which only
-    # release tags and main may deploy to (docs/development.md,
+    # release tags and main may deploy to (docs/packaging.md,
     # "The Android release key")
     environment: release
     env:
@@ -513,8 +564,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The Windows build twice from the tag, byte for byte (ADR-0035)
+  repro:
+    needs: gate
+    uses: ./.github/workflows/repro-windows.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+
   publish:
-    needs: [gate, windows, android, linux, macos]
+    needs: [gate, windows, android, linux, macos, repro]
     runs-on: ubuntu-latest
     defaults:
       run:

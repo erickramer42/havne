@@ -106,3 +106,17 @@ message as the vendor gave it; the transport makes it a frame. The
 client keeps one manual-reset event per handle for its overlapped
 pipe operations, created with the pipe and closed with it, in place of
 one created and closed per operation.
+
+## Appendix: one frame a reply (2026-11-19)
+
+The child asks the vendor for one message a call and makes no call for
+the rest of a batch ([ADR-0042](0042-reply-timing.md)'s notes of
+2026-11-04 and 2026-11-05: a call for more is held to its timeout by the
+VX and by any J2534-1 vendor), so a reply never carries more than one
+frame, and `ECUIO_SUR_MAX_FRAMES_PER_READ` is 1. The client's frame
+cache, the child's frame buffer and the pipe's out-buffer each hold one
+frame, about 130 KB less per session, and the client refuses a reply
+claiming two frames or more as out of step. The child's vendor buffer
+keeps room for 16 messages (`kReadCallRoom`), for a vendor that returns
+more than it asked. A listening session that wants batches on a busy bus
+would grow the constant again, on bench-prep item 34's evidence.

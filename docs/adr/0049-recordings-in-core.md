@@ -804,7 +804,7 @@ and any outside program see none of them.
   build vary by tens of percent on a desktop (`scripts/bench_ab.py`),
   so the 10% is checked as `bench_ab.py` checks a change: alternating
   runs, recorded against unrecorded, their medians compared, on the dev
-  machine, and the figures go into `docs/testing.md` ("Cost per
+  machine, and the figures go into `docs/performance.md` ("Cost per
   frame"). CI gates a looser ratio, as it gates the bench's other two
   (the recorded run at least 0.8 of the unrecorded one in the same
   bench), so a regression fails it and a noisy runner doesn't. No
@@ -1288,6 +1288,10 @@ chart shared as `app/qml/StripChart.qml`.
   own, ended at its last whole second when columns are a second or
   wider, so no sample is lost or counted twice
   (`RecordingViewTest.AWindowFromBeforeTheStartCountsEverySampleOnce`).
+
+  *Amended 2026-11-18:* the compared recording's signal drawn beside one
+  is its pair (ADR-0065's appendix "step 3 as built"): the signal of its
+  key, else of its name when each recording has that name once.
   The two pulls of `tests/fixtures/recording/` align at the times the
   CLI's goldens give.
 - **Marks.** While a session records, the header's Mark writes
@@ -1652,3 +1656,17 @@ room that came), `.OpenAndAttachRefuseWhatTheyMust`,
 `.RecordersComeAndGoWhileTheSessionStreams` (attach and close in a loop
 under the mock's frames, for the sanitizers);
 `PythonTest.test_session`'s recorder opened after `start()`.
+
+## Note: the bound of `signals.json` (2026-11-16)
+
+A recording's `signals.json` is bounded by `ECUIO_SIGNAL_SET_MAX_BYTES`,
+and its readers load it with `ECUIO_SIGNAL_FILE_LOAD_SET` (ADR-0065).
+
+## Appendix: recording format 4 (2026-11-20)
+
+Format 4 keeps a signal's values under its key, so two signals of one
+name stay two. It is described in [ADR-0065](0065-car-sized-profile.md)
+section 9 (and in ADR-0031's schema for `havne-cli`), not here; this
+record's formats end at 3 above. The reader gives it as
+`ECUIO_RECORDING_FORMAT_KEYS` and still reads formats 1 to 3 as before.
+

@@ -20,7 +20,10 @@
 #                 "purl": "pkg:deb/ubuntu/libc6?arch=amd64"}]}
 #
 # Only name is required in a component or dependency; what's unknown is
-# NOASSERTION, never guessed. Havne itself is added to every download.
+# NOASSERTION, never guessed. Havne itself is added to every download,
+# and what its core library is compiled with from other projects
+# (packaging/core-components.json, one list for every download: the
+# code under third_party/) is added to Havne.
 # The output is the same bytes for the same inputs: sorted, and created
 # at SOURCE_DATE_EPOCH (the commit's time) when it's set.
 #
@@ -43,6 +46,7 @@ import time
 from pathlib import Path
 
 REPO = "erickramer42/havne"
+CORE_COMPONENTS = Path(__file__).resolve().parent / "core-components.json"
 PURPOSES = {"APPLICATION", "FRAMEWORK", "LIBRARY", "ARCHIVE", "INSTALL", "FILE", "OTHER"}
 NOASSERTION = "NOASSERTION"
 
@@ -114,8 +118,27 @@ def load_components(download):
     return data
 
 
-def build(version, tag, downloads, created=None):
-    """The SPDX document for the downloads, as a dict."""
+def load_core_components(listing=CORE_COMPONENTS):
+    """What Havne's core library is compiled with from other projects:
+    the list's components, each with a name."""
+    try:
+        data = json.loads(Path(listing).read_text(encoding="utf-8"))
+    except OSError as e:
+        raise SbomError(f"no core component list {listing}: {e}") from e
+    except ValueError as e:
+        raise SbomError(f"{listing}: {e}") from e
+    components = data.get("components", [])
+    for entry in components:
+        if not entry.get("name"):
+            raise SbomError(f"{listing}: an entry without a name")
+    return components
+
+
+def build(version, tag, downloads, created=None, core=None):
+    """The SPDX document for the downloads, as a dict. core: what Havne's
+    core is compiled with (the committed list when None)."""
+    if core is None:
+        core = load_core_components()
     if created is None:
         epoch = os.environ.get("SOURCE_DATE_EPOCH")
         created = int(epoch) if epoch else int(time.time())
@@ -139,6 +162,17 @@ def build(version, tag, downloads, created=None):
         purl=f"pkg:github/{REPO}@{tag}",
         location=f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"))
     seen = {havne}
+    for c in sorted(core, key=lambda c: (c["name"], c.get("version", ""))):
+        ident = spdx_id("havne", c["name"], c.get("version", ""))
+        if ident in seen:
+            raise SbomError(f"core's {c['name']} {c.get('version', '')} listed twice")
+        seen.add(ident)
+        doc["packages"].append(package(
+            ident, c["name"], c.get("version"), c.get("supplier"), c.get("license"),
+            purl=c.get("purl"), location=c.get("location", NOASSERTION),
+            comment=c.get("comment")))
+        doc["relationships"].append({"spdxElementId": havne, "relationshipType": "CONTAINS",
+                                     "relatedSpdxElement": ident})
 
     for path in sorted(downloads, key=lambda p: p.name):
         data = load_components(path)
@@ -292,6 +326,42 @@ def selftest():
               "each architecture's dependency keeps its purl")
         check(build("1.2.3", "v1.2.3", [deb_arm, deb, zip_], created=0) == doc,
               "the order of the downloads doesn't matter")
+
+        # What core is compiled with hangs off Havne, once, whatever the
+        # downloads; the committed list names the WAMR the tree vendors
+        vendored = {"name": "Made-up runtime", "version": "9.9", "license": "Apache-2.0",
+                    "purl": "pkg:github/example/runtime@9.9", "location": "https://example.org/r.tgz",
+                    "comment": "compiled in"}
+        with_core = build("1.2.3", "v1.2.3", [zip_, deb], created=0, core=[vendored])
+        made = [p for p in with_core["packages"] if p["name"] == "Made-up runtime"]
+        check(len(made) == 1 and made[0]["versionInfo"] == "9.9"
+              and made[0]["downloadLocation"] == "https://example.org/r.tgz"
+              and made[0]["comment"] == "compiled in", "a core component is listed once, as given")
+        check([r for r in with_core["relationships"] if r["relatedSpdxElement"] == made[0]["SPDXID"]]
+              == [{"spdxElementId": spdx_id("havne", "1.2.3"), "relationshipType": "CONTAINS",
+                   "relatedSpdxElement": made[0]["SPDXID"]}], "Havne contains it, and only Havne")
+        check(not [p for p in build("1.2.3", "v1.2.3", [zip_], created=0, core=[])["packages"]
+                   if p["name"] not in ("Havne", zip_.name, "Qt", "Microsoft Visual C++ runtime")],
+              "no core component, none listed")
+        try:
+            build("1.2.3", "v1.2.3", [zip_], created=0, core=[vendored, vendored])
+            failures.append("a core component listed twice is refused")
+        except SbomError:
+            pass
+        (d / "core.json").write_text(json.dumps({"components": [{"version": "1"}]}))
+        for listing, why in ((d / "core.json", "a core component without a name"),
+                             (d / "none.json", "a missing core list")):
+            try:
+                load_core_components(listing)
+                failures.append(f"{why} is refused")
+            except SbomError:
+                pass
+        pin = re.search(r"^tag=WAMR-(\S+)$", (CORE_COMPONENTS.parent.parent / "scripts"
+                        / "vendor_wamr.sh").read_text(encoding="utf-8"), re.M)
+        wamr = [c for c in load_core_components() if c["name"].startswith("WAMR")]
+        check(pin and len(wamr) == 1 and wamr[0].get("version") == pin.group(1)
+              and wamr[0].get("purl", "").endswith("@WAMR-" + pin.group(1)),
+              "the committed list names WAMR at the version scripts/vendor_wamr.sh pins")
 
         out = d / "a.spdx.json"
         write(doc, out)

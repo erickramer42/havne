@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashTopBar.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtCore
 import QtQuick
@@ -17,7 +17,7 @@ ColumnLayout {
     required property DashboardPage host
     // The page strip's Loader, for the page
     readonly property Loader stripLoader: stripHost
-    visible: !topBar.host.driving
+    visible: !topBar.host.drivePart.driving
     // Over the pages, so the shown tab covers the panel's top line
     z: 1
     x: (topBar.host.width - width) / 2
@@ -58,11 +58,11 @@ ColumnLayout {
             visible: topBar.host.phoneForm
             enabled: Bridge.connected && !topBar.host.editing
             text: !Bridge.connected ? qsTr("Connect first")
-                : topBar.host.driving ? qsTr("Exit drive") : qsTr("Drive")
+                : topBar.host.drivePart.driving ? qsTr("Exit drive") : qsTr("Drive")
             Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
-                           : topBar.host.driving ? qsTr("Exit drive: leave the full-screen gauges")
+                           : topBar.host.drivePart.driving ? qsTr("Exit drive: leave the full-screen gauges")
                                           : qsTr("Drive: show the gauges full screen")
-            onClicked: topBar.host.driving ? topBar.host.leaveDrive(true) : topBar.host.enterDrive()
+            onClicked: topBar.host.drivePart.driving ? topBar.host.drivePart.leaveDrive(true) : topBar.host.drivePart.enterDrive()
         }
         Item {
             objectName: "toolRowStart"
@@ -103,7 +103,7 @@ ColumnLayout {
             objectName: "dashEdit"
             compact: topBar.host.compact || topBar.host.phoneForm
             horizontalPadding: topBar.host.phoneForm ? 18 : (compact ? 6 : 8)
-            visible: !topBar.host.editing && !topBar.host.driving
+            visible: !topBar.host.editing && !topBar.host.drivePart.driving
             text: qsTr("Edit")
             onClicked: topBar.host.startEditing()
         }
@@ -133,27 +133,27 @@ ColumnLayout {
         ThemedButton {
             objectName: "dashUndo"
             flat: true
-            enabled: topBar.host.canUndo
+            enabled: topBar.host.historyPart.canUndo
             text: qsTr("Undo")
-            Accessible.name: topBar.host.canUndo ? qsTr("Undo: %1").arg(topBar.host.undoWords) : qsTr("Undo")
-            onClicked: topBar.host.undo()
+            Accessible.name: topBar.host.historyPart.canUndo ? qsTr("Undo: %1").arg(topBar.host.historyPart.undoWords) : qsTr("Undo")
+            onClicked: topBar.host.historyPart.undo()
         }
         ThemedButton {
             objectName: "dashRedo"
             flat: true
-            enabled: topBar.host.canRedo
+            enabled: topBar.host.historyPart.canRedo
             text: qsTr("Redo")
-            Accessible.name: topBar.host.canRedo ? qsTr("Redo: %1").arg(topBar.host.redoWords) : qsTr("Redo")
-            onClicked: topBar.host.redo()
+            Accessible.name: topBar.host.historyPart.canRedo ? qsTr("Redo: %1").arg(topBar.host.historyPart.redoWords) : qsTr("Redo")
+            onClicked: topBar.host.historyPart.redo()
         }
         Item { Layout.fillWidth: true }
         ThemedButton {
             objectName: "dashAdd"
             compact: topBar.host.form === "phone"
-            enabled: DashboardBook.canAddCell(topBar.host.doc, topBar.host.pageIndex)
+            enabled: DashboardEdit.canAddCell(topBar.host.doc, topBar.host.pageIndex)
             text: topBar.host.compact ? qsTr("Add") : qsTr("Add gauge")
             Accessible.name: qsTr("Add a gauge")
-            onClicked: topBar.host.startAdd()
+            onClicked: topBar.host.addFlowPart.startAdd()
         }
         ThemedButton {
             objectName: "dashMore"
@@ -176,8 +176,53 @@ ColumnLayout {
         }
     }
 
+    // A page added: the name field, selected, so typing replaces "Page 2"
+    Connections {
+        target: topBar.host
+        function onPageNameWanted() {
+            Qt.callLater(() => {
+                pageName.forceActiveFocus()
+                pageName.selectAll()
+            })
+        }
+    }
+
+    // The desktop's edit mode in the phone form's frame (B1)
+    RowLayout {
+        objectName: "dashPhoneRow"
+        readonly property real touchMin: Theme.touchTarget
+        Layout.fillWidth: true
+        visible: topBar.host.phoneSwitchShown
+        spacing: 8
+        ThemedButton {
+            objectName: "dashPhoneSwitch"
+            compact: topBar.host.phoneForm
+            checkable: true
+            checked: topBar.host.phoneEdit
+            text: qsTr("Phone layout")
+            Accessible.name: qsTr("Edit the phone's layout in a phone-sized frame")
+            Accessible.description: qsTr("Switching drops the undo history")
+            onClicked: topBar.host.setPhoneEdit(!topBar.host.phoneEdit)
+        }
+        Label {
+            textFormat: Text.PlainText
+            objectName: "dashPhoneNote"
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 0
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: topBar.host.phoneEdit
+                  ? qsTr("The phone's layout, %1 px wide. A phone may be narrower or wider: the columns hold either way.")
+                        .arg(topBar.host.phoneFrameWidth)
+                  : qsTr("Edit the phone's layout here, then Export layout writes a file for the phone")
+        }
+    }
+
     // How a gauge is reached, while no panel is open
     Label {
+        textFormat: Text.PlainText
         objectName: "dashEditHint"
         visible: topBar.host.editing && topBar.host.panel === ""
         Layout.fillWidth: true
@@ -197,7 +242,8 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.minimumWidth: 0
         Layout.preferredWidth: 1
-        visible: topBar.host.editing && topBar.host.moreShown && !topBar.host.confirmReset && !topBar.host.confirmRemovePage
+        visible: topBar.host.editing && topBar.host.moreShown && !topBar.host.confirmReset && !topBar.host.confirmRemovePage && topBar.host.confirmReplaceKey === ""
+                 && topBar.host.presetList === ""
         spacing: 8
         ThemedTextField {
             id: pageName
@@ -209,7 +255,7 @@ ColumnLayout {
             placeholderText: qsTr("Page name")
             Accessible.name: qsTr("This page's name")
             onEditingFinished: {
-                topBar.host.renamePage(text)
+                topBar.host.editsPart.renamePage(text)
                 text = Qt.binding(() => topBar.host.pages[topBar.host.pageIndex]
                                         ? topBar.host.pages[topBar.host.pageIndex].name : "")
             }
@@ -219,9 +265,16 @@ ColumnLayout {
             id: moreAddPage
             objectName: "moreAddPage"
             visible: topBar.host.phoneForm
-            enabled: DashboardBook.canAddPage(topBar.host.doc)
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
             text: qsTr("Add page")
-            onClicked: topBar.host.addPage()
+            Accessible.name: qsTr("Add a page: choose a blank page or a preset")
+            onClicked: topBar.host.editsPart.openPresets("add")
+        }
+        ThemedButton {
+            id: moreReplace
+            objectName: "moreReplace"
+            text: qsTr("Replace this page with...")
+            onClicked: topBar.host.editsPart.openPresets("replace")
         }
         // Nothing to move with one page
         ThemedButton {
@@ -230,7 +283,7 @@ ColumnLayout {
             visible: topBar.host.pages.length > 1
             enabled: topBar.host.pageIndex > 0
             text: qsTr("Move page left")
-            onClicked: topBar.host.movePage(-1)
+            onClicked: topBar.host.editsPart.movePage(-1)
         }
         ThemedButton {
             id: moreRight
@@ -238,12 +291,12 @@ ColumnLayout {
             visible: topBar.host.pages.length > 1
             enabled: topBar.host.pageIndex < topBar.host.pages.length - 1
             text: qsTr("Move page right")
-            onClicked: topBar.host.movePage(1)
+            onClicked: topBar.host.editsPart.movePage(1)
         }
         ThemedButton {
             id: moreRemovePage
             objectName: "moreRemovePage"
-            enabled: DashboardBook.canRemovePage(topBar.host.doc)
+            enabled: DashboardEdit.canRemovePage(topBar.host.doc)
             text: qsTr("Remove page")
             onClicked: topBar.host.confirmRemovePage = true
         }
@@ -252,16 +305,18 @@ ColumnLayout {
             objectName: "moreExport"
             text: qsTr("Export layout")
             onClicked: {
-                topBar.host.noteLayout("")
+                topBar.host.layoutFilePart.noteLayout("")
                 layoutSaveDialog.open()
             }
         }
         ThemedButton {
             id: moreLoad
             objectName: "moreLoad"
-            text: qsTr("Load layout")
+            text: qsTr("Load layout (all pages)")
+            Accessible.name: qsTr("Load a layout from a file: it replaces every page")
             onClicked: {
-                topBar.host.noteLayout("")
+                topBar.host.layoutFilePart.noteLayout("")
+                topBar.host.fileAdds = false
                 layoutOpenDialog.open()
             }
         }
@@ -269,7 +324,8 @@ ColumnLayout {
             objectName: "moreResetGap"
             // The bar's width and the controls' own, never the flow's: a
             // hidden flow sizes itself from its children, and would loop
-            readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
+            readonly property real used: pageName.width + moreRemovePage.width + moreReplace.width
+                + moreRow.spacing * 2
                 + moreExport.width + moreLoad.width + 2 * moreRow.spacing
                 + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
                 + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
@@ -282,8 +338,8 @@ ColumnLayout {
             id: moreReset
             objectName: "moreReset"
             flat: true
-            text: qsTr("Reset")
-            Accessible.name: qsTr("Reset: replace this form's pages with the built-in layout")
+            text: qsTr("Reset all pages")
+            Accessible.name: qsTr("Reset all pages: replace this form's pages with the built-in layout")
             onClicked: topBar.host.confirmReset = true
         }
         // Reset peaks, when the tool row has no room for it
@@ -297,14 +353,16 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "dashLayoutNote"
-        visible: topBar.host.editing && topBar.host.moreShown && topBar.host.layoutNote !== ""
+        visible: topBar.host.editing && topBar.host.layoutFilePart.layoutNote !== ""
+                 && (topBar.host.moreShown || topBar.host.layoutFilePart.layoutNoteBad)
         Layout.fillWidth: true
         Layout.preferredWidth: 0
         wrapMode: Text.WordWrap
-        color: topBar.host.layoutNoteBad ? Theme.danger : Theme.textDim
+        color: topBar.host.layoutFilePart.layoutNoteBad ? Theme.danger : Theme.textDim
         font.pixelSize: Theme.fontCaption
-        text: topBar.host.layoutNote
+        text: topBar.host.layoutFilePart.layoutNote
     }
     DocumentSaveDialog {
         id: layoutSaveDialog
@@ -314,9 +372,9 @@ ColumnLayout {
         nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-                     + "/" + topBar.host.layoutFileName()
-        onAccepted: topBar.host.exportLayoutTo(layoutSaveDialog.selectedFile)
-        onFailed: words => topBar.host.noteLayout(qsTr("Not saved: %1").arg(words), true)
+                     + "/" + topBar.host.layoutFilePart.layoutFileName()
+        onAccepted: topBar.host.layoutFilePart.exportLayoutTo(layoutSaveDialog.selectedFile)
+        onFailed: words => topBar.host.layoutFilePart.noteLayout(qsTr("Not saved: %1").arg(words), true)
     }
     DocumentOpenDialog {
         id: layoutOpenDialog
@@ -324,8 +382,16 @@ ColumnLayout {
         title: qsTr("Load a layout")
         nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: topBar.host.loadLayoutFrom(layoutOpenDialog.selectedFile)
-        onFailed: words => topBar.host.noteLayout(words, true)
+        onAccepted: {
+            const adds = topBar.host.fileAdds
+            topBar.host.fileAdds = false
+            topBar.host.layoutFilePart.loadLayoutFrom(layoutOpenDialog.selectedFile, adds)
+        }
+        onRejected: topBar.host.fileAdds = false
+        onFailed: words => {
+            topBar.host.fileAdds = false
+            topBar.host.layoutFilePart.noteLayout(words, true)
+        }
     }
     RowLayout {
         objectName: "dashRemovePageConfirm"
@@ -334,6 +400,7 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmRemovePage
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             objectName: "removePageQuestion"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
@@ -347,13 +414,105 @@ ColumnLayout {
             objectName: "removePageConfirm"
             compact: topBar.host.form === "phone"
             text: qsTr("Remove")
-            onClicked: topBar.host.removePage()
+            onClicked: topBar.host.editsPart.removePage()
         }
         ThemedButton {
             objectName: "removePageKeep"
             compact: topBar.host.form === "phone"
             text: qsTr("Keep")
             onClicked: topBar.host.confirmRemovePage = false
+        }
+    }
+    // The presets: a new page after the shown one, or the shown page's
+    // gauges replaced. Blank page and From a file only add
+    Flow {
+        id: presetFlow
+        objectName: "dashPresetList"
+        readonly property real touchMin: Theme.touchTarget
+        readonly property bool adding: topBar.host.presetList === "add"
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        Layout.preferredWidth: 1
+        // The bar's own width: a column narrower than its widest row's
+        // minimum still lays its children out at that minimum, and the
+        // list would follow it past a narrow page's edge
+        Layout.maximumWidth: topBar.width
+        visible: topBar.host.editing && topBar.host.presetList !== ""
+        spacing: 8
+        ThemedButton {
+            objectName: "preset_blank"
+            compact: topBar.host.form === "phone"
+            visible: presetFlow.adding
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
+            text: qsTr("Blank page")
+            Accessible.name: qsTr("Add a blank page")
+            onClicked: topBar.host.editsPart.addBlankPage()
+        }
+        Repeater {
+            model: DashboardBook.presets
+            ThemedButton {
+                required property var modelData
+                objectName: "preset_" + modelData.key
+                compact: topBar.host.form === "phone"
+                enabled: !presetFlow.adding || DashboardEdit.canAddPage(topBar.host.doc)
+                text: modelData.label
+                Accessible.name: presetFlow.adding
+                    ? qsTr("Add the %1 preset as a new page").arg(modelData.label)
+                    : qsTr("Replace this page with the %1 preset").arg(modelData.label)
+                onClicked: presetFlow.adding ? topBar.host.editsPart.addPresetPage(modelData.key)
+                                             : topBar.host.editsPart.replaceChosen(modelData.key)
+            }
+        }
+        ThemedButton {
+            objectName: "preset_file"
+            compact: topBar.host.form === "phone"
+            visible: presetFlow.adding
+            enabled: DashboardEdit.canAddPage(topBar.host.doc)
+            text: qsTr("From a file...")
+            onClicked: {
+                topBar.host.layoutFilePart.noteLayout("")
+                topBar.host.fileAdds = true
+                layoutOpenDialog.open()
+            }
+        }
+        ThemedButton {
+            objectName: "preset_cancel"
+            compact: topBar.host.form === "phone"
+            flat: true
+            text: qsTr("Cancel")
+            onClicked: topBar.host.editsPart.closePresets()
+        }
+    }
+    DashPluginPages { host: topBar.host }
+    RowLayout {
+        objectName: "dashReplaceConfirm"
+        readonly property real touchMin: Theme.touchTarget
+        Layout.fillWidth: true
+        visible: topBar.host.editing && topBar.host.confirmReplaceKey !== ""
+        spacing: 8
+        Label {
+            textFormat: Text.PlainText
+            objectName: "replaceQuestion"
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            wrapMode: Text.WordWrap
+            color: Theme.warning
+            font.pixelSize: Theme.fontCaption
+            text: qsTr("Replace the gauges of the page \"%1\" with the %2 preset? They aren't kept.")
+                  .arg(topBar.host.pages[topBar.host.pageIndex] ? topBar.host.pages[topBar.host.pageIndex].name : "")
+                  .arg(topBar.host.editsPart.presetLabel(topBar.host.confirmReplaceKey))
+        }
+        ThemedButton {
+            objectName: "replaceConfirm"
+            compact: topBar.host.form === "phone"
+            text: qsTr("Replace")
+            onClicked: topBar.host.editsPart.replaceWithPreset(topBar.host.confirmReplaceKey)
+        }
+        ThemedButton {
+            objectName: "replaceKeep"
+            compact: topBar.host.form === "phone"
+            text: qsTr("Keep")
+            onClicked: topBar.host.confirmReplaceKey = ""
         }
     }
     RowLayout {
@@ -363,18 +522,19 @@ ColumnLayout {
         visible: topBar.host.editing && topBar.host.confirmReset
         spacing: 8
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             wrapMode: Text.WordWrap
             color: Theme.warning
             font.pixelSize: Theme.fontCaption
-            text: qsTr("Replace this form's pages with the built-in layout?")
+            text: qsTr("Replace all of this form's pages with the built-in layout?")
         }
         ThemedButton {
             objectName: "resetConfirm"
             compact: topBar.host.form === "phone"
-            text: qsTr("Reset")
-            onClicked: topBar.host.resetForm()
+            text: qsTr("Reset all")
+            onClicked: topBar.host.layoutFilePart.resetForm()
         }
         ThemedButton {
             objectName: "resetKeep"
@@ -390,6 +550,7 @@ ColumnLayout {
         visible: (topBar.host.problem === "damaged" || topBar.host.problem === "newer"
                   || topBar.host.problem === "dropped") && !topBar.host.problemDismissed
         Label {
+            textFormat: Text.PlainText
             objectName: "dashProblemText"
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -426,10 +587,15 @@ ColumnLayout {
                 pages: topBar.host.pages
                 current: topBar.host.pageIndex
                 editing: topBar.host.editing
-                canAddPage: DashboardBook.canAddPage(topBar.host.doc)
+                canAddPage: DashboardEdit.canAddPage(topBar.host.doc)
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
-                onAddRequested: topBar.host.addPage()
+                onAddRequested: topBar.host.editsPart.openPresets("add")
+                onRenamed: (i, name) => {
+                    if (i !== topBar.host.pageIndex)
+                        topBar.host.goTo(i)
+                    topBar.host.editsPart.renamePage(name)
+                }
             }
         }
     }
@@ -451,18 +617,28 @@ ColumnLayout {
                 opacity: linkLabel.opacity
             }
             Label {
+                textFormat: Text.PlainText
                 id: linkLabel
                 objectName: "linkLabel"
                 Layout.fillWidth: true
                 opacity: width >= 60 ? 1 : 0
-                elide: Text.ElideMiddle
+                elide: reads !== "" ? Text.ElideRight : Text.ElideMiddle
                 // Short statuses come from Theme.linkLabel; "ok" adds the
                 // address where the row leaves room for it (the header
                 // shows it anyway). Long-form detail (episode counts,
                 // error codes) stays in LiveView's banner.
                 readonly property bool roomForAddress: width >= 150
+                readonly property string withAddress: qsTr("Live · %1").arg(SessionLabel.address(Bridge.uriLabel))
+                // The vehicle's and plugin's names follow the address when
+                // it shows whole, and elide before it does
+                readonly property string reads: roomForAddress && addressFit.advanceWidth <= width
+                    ? SessionLabel.reads(topBar.host.sessionProfile, topBar.host.profileNames,
+                                         Bridge.vehicleLabel) : ""
+                TextMetrics { id: addressFit; font: linkLabel.font; text: linkLabel.withAddress }
                 text: Bridge.linkState === "ok"
-                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
+                      ? (roomForAddress ? (reads !== "" ? qsTr("%1 · %2").arg(withAddress).arg(reads)
+                                                       : withAddress)
+                                        : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
                 font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)

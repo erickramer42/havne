@@ -7,22 +7,40 @@
 #include "ecuio/core.h"
 #include "ecuio/j2534.h"
 #include "ecuio/j2534_ptypes.h"
+#include "ecuio/profile.h"
 
 #ifdef _WIN32
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
+#include <system_error>
 
 #include "j2534_backend_fixture.h"
+#include "new_counter.h"
+#include "open_handles.h"
+#include "surrogate_log_names.h"
+
+#include <tlhelp32.h>
 
 namespace {
 
 using j2534_backends::EnvSwap;
 
+/* The allocation the out-of-memory case's create runs short at, 0 between
+ * creates: one still set at TearDown threw past the test body */
+unsigned long oom_create_at = 0;
+
 class J2534ConnectTest : public j2534_backends::BackendTest {
 protected:
     ecuio_session_t* session = nullptr;
+    /* The out-of-memory case's OwnTemp, freed in TearDown: a throw past
+     * the test body may skip its frame's destructors */
+    std::shared_ptr<void> own_temp;
 
     /* The cross-arch run's surrogate hosts the Win32 tree's fake; every
      * other case loads this tree's. */
@@ -43,11 +61,16 @@ protected:
 
     void TearDown() override
     {
+        if (oom_create_at != 0) {
+            ADD_FAILURE() << "create threw at allocation " << oom_create_at;
+            oom_create_at = 0;
+        }
         if (session != nullptr) {
             (void)ecuio_session_close(session);
             ecuio_session_destroy(session);
             session = nullptr;
         }
+        own_temp.reset();
         BackendTest::TearDown();
     }
 };
@@ -427,6 +450,225 @@ TEST_F(J2534ConnectTest, ADllWithoutReadVersionReportsNoVersions)
               ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_REQUESTS);
     EXPECT_STREQ(info.firmware_version, "");
     EXPECT_STREQ(info.api_version, "");
+}
+
+/* ---- Out of memory in create (tests.md's out-of-memory loops) ---- */
+
+namespace fs = std::filesystem;
+
+/* The surrogates this process has running: the leak check. Another test
+ * process's children have another parent. A child closed a moment ago
+ * may still be listed, so it waits up to 10 s for none. */
+unsigned surrogate_children()
+{
+    static const wchar_t kName[] = L"ecuio-j2534-surrogate";
+    const DWORD self = GetCurrentProcessId();
+    unsigned n = 0;
+    for (int waited_ms = 0;; waited_ms += 10) {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) {
+            ADD_FAILURE() << "no process snapshot (error " << GetLastError()
+                          << ")";
+            return 0;
+        }
+        n = 0;
+        PROCESSENTRY32W e{};
+        e.dwSize = sizeof(e);
+        for (BOOL more = Process32FirstW(snap, &e); more;
+             more = Process32NextW(snap, &e)) {
+            if (e.th32ParentProcessID == self &&
+                _wcsnicmp(e.szExeFile, kName, wcslen(kName)) == 0) {
+                ++n;
+            }
+        }
+        CloseHandle(snap);
+        if (n == 0 || waited_ms >= 10000) {
+            return n;
+        }
+        Sleep(10);
+    }
+}
+
+/* TMP and TEMP (GetTempPathW reads TMP first) name a folder of the case's
+ * own while it lives: the session logs go there, and the folder's names
+ * decide the prune's allocations. */
+class OwnTemp {
+public:
+    OwnTemp()
+    {
+        wchar_t base[MAX_PATH + 1] = {};
+        GetTempPathW(MAX_PATH + 1, base);
+        dir_ = fs::path(base) /
+               (L"havne-j2534-oom-" + std::to_wstring(GetCurrentProcessId()));
+        std::error_code ec;
+        fs::remove_all(dir_, ec);
+        fs::create_directories(dir_);
+        const std::wstring value = dir_.wstring() + L"\\";
+        for (Saved& v : saved_) {
+            const DWORD n = GetEnvironmentVariableW(v.name, nullptr, 0);
+            v.had = n > 0;
+            if (v.had) {
+                v.value.resize(n);
+                GetEnvironmentVariableW(v.name, &v.value[0], n);
+                v.value.resize(n - 1);
+            }
+            SetEnvironmentVariableW(v.name, value.c_str());
+        }
+    }
+    ~OwnTemp()
+    {
+        for (const Saved& v : saved_) {
+            SetEnvironmentVariableW(v.name, v.had ? v.value.c_str() : nullptr);
+        }
+        std::error_code ec;
+        fs::remove_all(dir_, ec);
+    }
+    OwnTemp(const OwnTemp&) = delete;
+    OwnTemp& operator=(const OwnTemp&) = delete;
+
+    /* SUR_LOG_KEEP + 1 of the names a concurrent session's log takes, so
+     * each prune holds them all and deletes one: the one it took is put
+     * back before the next try */
+    void top_up() const
+    {
+        for (size_t i = 0; i <= SUR_LOG_KEEP; ++i) {
+            const std::wstring name =
+                L"ecuio-surrogate-9" + std::to_wstring(i) + L"-1.log";
+            ASSERT_TRUE(sur_log_is_per_spawn_name(name.c_str()));
+            const fs::path p = dir_ / name;
+            if (!fs::exists(p)) {
+                std::ofstream(p) << 'x';
+            }
+        }
+    }
+
+private:
+    struct Saved {
+        const wchar_t* name;
+        bool had = false;
+        std::wstring value;
+    };
+    fs::path dir_;
+    Saved saved_[2] = {{L"TMP"}, {L"TEMP"}};
+};
+
+struct CreateLoop {
+    unsigned long news = 0;
+    unsigned long refused = 0;
+    unsigned long spawned = 0;
+    unsigned long refused_after_spawn = 0;
+};
+
+/* An OK session holds every module, and the last one's report */
+void expect_whole(ecuio_session_t* s, uint32_t modules, unsigned long n)
+{
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK) << "at " << n;
+    EXPECT_EQ(info.module_count, modules) << "at " << n;
+    ecuio_channel_decl_t last{};
+    ASSERT_EQ(ecuio_session_get_module(s, modules - 1, &last), ECUIO_OK)
+        << "at " << n;
+    ecuio_channel_support_t support{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s, modules - 1, &support),
+              ECUIO_OK)
+        << "at " << n;
+    EXPECT_EQ(support.rx_id, last.rx_id) << "at " << n;
+}
+
+/* Create with its nth allocation failed: answered, nothing thrown, and the
+ * child it spawned shut down and gone */
+void one_try(const std::string& uri, unsigned long n, uint32_t modules,
+             const OwnTemp& temp, fake_control::Page* page, CreateLoop* c)
+{
+    ASSERT_NO_FATAL_FAILURE(temp.top_up());
+    fake_control::reset(page);
+    ecuio_session_t* s = nullptr;
+    /* MSVC lets a throw out of the C call pass any catch here (/EHsc), so
+     * the fixture's TearDown names the allocation */
+    oom_create_at = n;
+    new_counter::fail_new(n);
+    const ecuio_status_t rc = ecuio_session_create(uri.c_str(), &s);
+    new_counter::fail_new(0);
+    oom_create_at = 0;
+    const bool spawned = fake_control::opener_pid(page) != 0;
+    if (rc == ECUIO_OK) {
+        ASSERT_NE(s, nullptr) << "at " << n;
+        EXPECT_NO_FATAL_FAILURE(expect_whole(s, modules, n));
+        ecuio_session_destroy(s);
+    } else {
+        ++c->refused;
+        c->refused_after_spawn += spawned ? 1 : 0;
+        EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY)
+            << "at " << n << ": " << ecuio_last_error_detail();
+        EXPECT_EQ(s, nullptr) << "at " << n;
+    }
+    if (spawned) {
+        ++c->spawned;
+        EXPECT_EQ(fake_control::closes(page), 1u)
+            << "at " << n << ": the child wasn't shut down";
+    }
+    EXPECT_EQ(surrogate_children(), 0u)
+        << "at " << n << ": a surrogate outlived its create";
+}
+
+/* Every allocation of one URI's create in turn */
+void create_loop(const std::string& uri, const OwnTemp& temp,
+                 fake_control::Page* page, uint32_t modules, CreateLoop* c)
+{
+    ASSERT_NO_FATAL_FAILURE(temp.top_up());
+    ecuio_session_t* s = nullptr;
+    const unsigned long before = new_counter::on_this_thread();
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    c->news = new_counter::on_this_thread() - before;
+    ASSERT_NO_FATAL_FAILURE(expect_whole(s, modules, 0));
+    ecuio_session_destroy(s);
+    ASSERT_GT(c->news, 5u);
+    /* Windows makes a thread-pool wait handle at a process's second session
+     * and keeps it, so the count starts after a second create */
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ecuio_session_destroy(s);
+    ASSERT_EQ(surrogate_children(), 0u);
+    const unsigned long handles = open_handles();
+    for (unsigned long n = 1; n <= c->news; ++n) {
+        ASSERT_NO_FATAL_FAILURE(one_try(uri, n, modules, temp, page, c));
+    }
+    EXPECT_EQ(open_handles(), handles) << "a refused create left a handle open";
+}
+
+/* Out of memory at each of create's allocations in turn, for obd2's
+ * default (the probe, identification, diagnostics, the timing table) and
+ * a session of six modules with a DID scan: OK or OUT_OF_MEMORY, nothing
+ * thrown, an OK session whole, and no surrogate or handle left. Only the
+ * tries failing at or past the spawn start a child. */
+TEST_F(J2534ConnectTest, OutOfMemoryAnywhereInCreateIsAnsweredNotThrown)
+{
+    own_temp = std::make_shared<OwnTemp>();
+    const OwnTemp& temp = *static_cast<const OwnTemp*>(own_temp.get());
+    const struct {
+        const char* query;
+        uint32_t modules;
+    } cases[] = {
+        {"", 1},
+        {"?profile=uds-generic&did=1E1C,7E9:D800-D801,7EA:D800-D801,"
+         "7EB:D800-D801,7EC:D800-D801,7ED:D800-D801&identify=0&diagnose=0",
+         6},
+    };
+    for (const auto& one : cases) {
+        SCOPED_TRACE(one.query);
+        CreateLoop c;
+        const auto t0 = std::chrono::steady_clock::now();
+        ASSERT_NO_FATAL_FAILURE(
+            create_loop(uri(one.query), temp, page, one.modules, &c));
+        const double s = std::chrono::duration<double>(
+                             std::chrono::steady_clock::now() - t0)
+                             .count();
+        std::printf("[ loop ] '%s': %lu allocations, %lu spawned a child, "
+                    "%lu refused, %.2f s\n",
+                    one.query, c.news, c.spawned, c.refused, s);
+        EXPECT_GT(c.refused, 0u);
+        EXPECT_GT(c.refused_after_spawn, 0u) << "no refusal reached the spawn";
+    }
 }
 
 /* The surrogate's own failures: the x64 fake in the x64 surrogate, or

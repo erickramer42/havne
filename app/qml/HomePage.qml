@@ -1,5 +1,5 @@
 // File/layer: app/qml/HomePage.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.home, QmlTest.gauges, QmlTest.linkhealth, QmlTest.phone (test_qml); Manual smoke
+// Testing: QML: QmlTest.home, QmlTest.gauges, QmlTest.linkhealth, QmlTest.phone_* (test_qml); Manual smoke
 
 import QtQuick
 import QtQuick.Controls
@@ -43,14 +43,20 @@ Rectangle {
     }
     Component.onCompleted: if (Bridge.connected) connectedAt = new Date()
 
+    // The address's profile as written, "" with none
+    function profileKey(uri) {
+        const found = /[?&]profile=([^&]+)/.exec(uri)
+        return found ? SessionLabel.decoded(found[1]) : ""
+    }
     // The address's profile in words: profile=, a plugin's by its name,
     // or the default
     function profileOf(uri) {
         const found = /[?&]profile=([^&]+)/.exec(uri)
         if (!found)
             return qsTr("default")
-        const name = decodeURIComponent(found[1])
-        return profileNames[name] !== undefined ? profileNames[name] : name
+        const name = SessionLabel.decoded(found[1])
+        const plugin = SessionLabel.nameIn(profileNames, name)
+        return plugin !== undefined ? plugin : name
     }
 
     // Scrolls when the page is shorter than the column: a window on its
@@ -250,6 +256,7 @@ Rectangle {
                     }
 
                     Text {
+                        textFormat: Text.PlainText
                         anchors.horizontalCenter: parent.horizontalCenter
                         y: logo.cy + logo.r * 0.42
                         text: qsTr("RPM")
@@ -295,12 +302,14 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 2
                     Label {
+                        textFormat: Text.PlainText
                         text: qsTr("Havne")
                         font.pixelSize: Theme.fontHero
                         font.bold: true
                         color: Theme.text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeCoreVersion"
                         text: qsTr("core %1").arg(Bridge.coreVersion)
                         font.pixelSize: Theme.fontCaption
@@ -351,6 +360,7 @@ Rectangle {
                             color: Theme.linkColor(Bridge.linkState)
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "linkLabel"
                             text: Theme.linkLabel(Bridge.linkState)
                             font.pixelSize: Theme.fontEmphasis
@@ -359,20 +369,25 @@ Rectangle {
                         }
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeSessionAddress"
                         Layout.fillWidth: true
                         elide: Text.ElideMiddle
                         color: Theme.text
-                        text: Bridge.uriLabel
+                        text: SessionLabel.address(Bridge.uriLabel)
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "homeSessionDetail"
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
                         font.pixelSize: Theme.fontCaption
                         color: Theme.textDim
-                        text: [qsTr("Profile %1").arg(home.profileOf(Bridge.currentUri))]
-                              .concat(Bridge.vehicleLabel !== "" ? [Bridge.vehicleLabel] : [])
+                        readonly property string reads: SessionLabel.reads(
+                            home.profileKey(Bridge.currentUri), home.profileNames, Bridge.vehicleLabel)
+                        text: (reads !== "" ? [reads]
+                               : [qsTr("Profile %1").arg(home.profileOf(Bridge.currentUri))]
+                                 .concat(Bridge.vehicleLabel !== "" ? [Bridge.vehicleLabel] : []))
                               .concat(home.connectedAt !== null
                                       ? [qsTr("since %1").arg(Qt.formatTime(home.connectedAt,
                                                                              Locale.ShortFormat))]
@@ -400,6 +415,7 @@ Rectangle {
             }
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "homeHint"
                 visible: !Bridge.connected
                 Layout.fillWidth: true

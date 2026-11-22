@@ -3,7 +3,7 @@
 - **Status:** Accepted.
 - **Date:** 2026-10-29.
 - **Builds on:** the release workflow (`.github/workflows/release.yml`;
-  `docs/development.md`, "Releases");
+  `docs/packaging.md`, "Releases");
   [ADR-0001](0001-qt-free-core-c-abi.md) (the C ABI the core package
   carries); [ADR-0031](0031-command-line-client.md) (`havne-cli`);
   [ADR-0034](0034-debug-symbols-and-probes.md) section 2 (Linux debug info, which
@@ -163,6 +163,38 @@ out:** MSVC needs `/Brepro` and more, and Gradle its own settings.
 > builds of one commit then match (`docs/testing.md`). It stays
 > measured, not gated: CI builds it once per run, and its bundled
 > libraries follow Ubuntu's updates between runs.
+
+> **Amended 2026-11-18:** the Windows release's executables and DLLs are
+> reproducible: two builds of one commit, in different folders and with
+> different file times, give the same bytes for `havne.exe`,
+> `havne-cli.exe`, `ecuio.dll` and both surrogates (and Qt's and the C
+> runtime's DLLs, which are copied inputs). Three settings do it, for
+> Release builds (`HAVNE_REPRODUCIBLE`, on by default):
+>
+> - `/Brepro` for `cl` and `link` replaces the PE timestamp and the
+>   debug GUID with a hash of the content.
+> - `/d1trimfile:<source folder>` keeps the source path out of
+>   `__FILE__`, assertions and the debug info.
+> - `SOURCE_DATE_EPOCH` and `QT_RCC_SOURCE_DATE_OVERRIDE` are the
+>   commit's time, as for Linux, so `rcc` embeds no file time.
+>
+> `LINK=/PDBALTPATH:%_PDB%` (ADR-0034) stays: it keeps the PDB's folder
+> out of each PE. `qmlcachegen` needed nothing. The release zip is
+> written by `stage.ps1`'s own writer (entries in name order, each dated
+> `SOURCE_DATE_EPOCH`, one compression level) in place of
+> `Compress-Archive`, and matches too. **The PDBs differ** (they record
+> absolute paths, and MSVC's linker has no path map), so the symbols zip
+> differs: reported, not promised.
+>
+> `repro-windows.yml` (a push to `build/**` or `dev` that changes the
+> build settings or the packaging, a manual run, or a call from another
+> workflow) builds the tree twice on one runner, the second copy in
+> another folder with every file a day newer, and
+> `packaging/windows/repro-compare.ps1` requires every `.exe` and `.dll`
+> to match. The zips are compared and reported; the release zip becomes
+> a gate after it has matched over several runs. It takes about 30
+> minutes of runner, so it is not part of every CI run. Android, macOS
+> and the installer stay out.
 
 ### 5. An SBOM with each release
 

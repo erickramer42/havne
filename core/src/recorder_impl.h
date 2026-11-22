@@ -8,9 +8,10 @@
 //
 // struct ecuio_recorder and what its files share: the ring's records, the
 // caller's items and the constants its fields are sized by. Its member
-// functions live in recorder.cpp (the worker's puts, the ABI),
-// recorder_writer.cpp (the writer thread) and recorder_armed.cpp (an armed
-// recorder's windows); recorder_text.h has the text helpers. Only those
+// functions live in recorder.cpp (the worker's puts),
+// recorder_attach.cpp, recorder_control.cpp (the ABI), recorder_writer.cpp
+// (the writer thread) and recorder_armed.cpp (an armed recorder's windows);
+// recorder_text.h has the text helpers. Only those
 // files include it.
 #ifndef ECUIO_RECORDER_IMPL_H
 #define ECUIO_RECORDER_IMPL_H
@@ -116,7 +117,7 @@ struct value_head {
 struct def_entry {
     uint16_t id;
     bool text;
-    std::string name; /* CSV-quoted as signals.csv writes it */
+    std::string key; /* what signals.csv's signal cell holds */
     std::string unit;
 };
 
@@ -132,6 +133,9 @@ struct focus_named {
         return ids == o.ids && pick == o.pick && min_sweep_ms == o.min_sweep_ms;
     }
 };
+
+/* The session's focus; the caller holds focus_mutex (recorder_control.cpp) */
+focus_named focus_now(const ecuio_session_t* session);
 
 /* What the caller's threads hand the writer; asleep is an armed writer's
  * own, held with the notes until it knows the window it falls in */
@@ -211,13 +215,16 @@ struct ecuio_recorder {
     std::string signals_json;
     std::string signals_sha;
     std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
+    /* The file's keys in its set's order (it names a computed signal),
+     * empty with no file: the set's own keys then */
+    std::vector<ecuio_signal_key_t> signal_keys;
 
     /* Fixed at attach; zero_us is this recording's, which the link's
      * stops being once a later recorder attaches */
     std::shared_ptr<ecuio_record_link> link;
     uint64_t zero_us = 0;
     std::vector<def_entry> defs; /* sorted by id */
-    uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    std::vector<uint32_t> rx_ids; /* each module's reply ID */
     uint32_t channels = 0;
     std::chrono::system_clock::time_point start_wall{};
     std::atomic<bool> attached{false};

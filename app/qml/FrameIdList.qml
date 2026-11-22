@@ -1,5 +1,5 @@
 // File/layer: app/qml/FrameIdList.qml | Qt Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 pragma ComponentBehavior: Bound
 
@@ -75,13 +75,13 @@ Rectangle {
             anchors.rightMargin: 12
             spacing: 8
             // Widths MUST match the delegate's columns below
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 104 }   // a 29-bit ID and its E
-            Label { text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Frames"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Rate"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: 52 }
-            Label { text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Last payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true; elide: Text.ElideRight }
         }
     }
@@ -142,6 +142,7 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 8
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: "0x" + idRow.model.arbId.toString(16).toUpperCase()
                           + (idRow.model.extended ? " E" : "")
@@ -151,6 +152,7 @@ Rectangle {
                     elide: Text.ElideRight
                 }
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: idRow.model.frames
                     color: Theme.textDim
@@ -158,6 +160,7 @@ Rectangle {
                     Layout.preferredWidth: 52
                 }
                 Label {
+                    textFormat: Text.PlainText
                     Accessible.ignored: true
                     text: idTable.rateText(idRow.model.rate)
                     color: Theme.textDim
@@ -183,6 +186,7 @@ Rectangle {
         }
 
         Label {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             visible: idList.count === 0
             text: idTable.emptyText

@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingImportPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // Import: the file picked, its kind, a CSV's column map and the guess's
 // preview, then Import and Cancel; one part of RecordingsPage, which holds the
 // state
@@ -10,7 +10,7 @@ import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
 
-// ---- Import: the file picked, its kind, a CSV's column map ----
+// Import: the file picked, its kind, a CSV's column map
 ColumnLayout {
     id: root
     objectName: "importPanel"
@@ -23,6 +23,7 @@ ColumnLayout {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         objectName: "importFileName"
         Layout.fillWidth: true
         wrapMode: Text.WrapAnywhere
@@ -37,7 +38,7 @@ ColumnLayout {
             text: qsTr("Import")
             highlighted: true
             enabled: !Bridge.recordingImport.busy && root.host.importReady
-            onClicked: root.host.startImport()
+            onClicked: root.host.openPart.startImport()
         }
         ThemedButton {
             objectName: "importCancel"
@@ -56,6 +57,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importBusy"
             visible: Bridge.recordingImport.busy
             Layout.fillWidth: true
@@ -69,7 +71,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importLabel
             objectName: "importLabel"
@@ -94,7 +96,7 @@ ColumnLayout {
                 onClicked: {
                     root.host.importKind = RecordingImport.Csv
                     if (guessPreview.guess === null && !root.host.importGuessing)
-                        root.host.guessImportFile()
+                        root.host.openPart.guessImportFile()
                 }
             }
             SegmentButton {
@@ -110,6 +112,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: Theme.textDim
@@ -130,6 +133,7 @@ ColumnLayout {
             onClicked: root.host.mapDialog.open()
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "importMapName"
             Layout.fillWidth: true
             wrapMode: Text.WrapAnywhere
@@ -144,7 +148,7 @@ ColumnLayout {
                  && (root.host.savedMaps.length > 0 || root.host.importMap.toString() !== "")
         Layout.fillWidth: true
         spacing: Theme.spacing
-        ComboBox {
+        PlainComboBox {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, root.host.touchMin)
@@ -159,7 +163,7 @@ ColumnLayout {
             currentIndex: 0
             onActivated: index => {
                 if (index > 0)
-                    root.host.chooseImportMap(root.host.savedMaps[index - 1].url)
+                    root.host.openPart.chooseImportMap(root.host.savedMaps[index - 1].url)
                 currentIndex = 0
             }
         }
@@ -170,10 +174,11 @@ ColumnLayout {
             Layout.preferredHeight: Theme.touchTarget
             text: qsTr("Use the guess")
             enabled: !Bridge.recordingImport.busy
-            onClicked: root.host.useTheGuess()
+            onClicked: root.host.openPart.useTheGuess()
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "importGuessing"
         visible: root.host.importGuessing
         Layout.fillWidth: true
@@ -194,7 +199,7 @@ ColumnLayout {
         visible: root.host.importKind === RecordingImport.Candump && root.host.importAsksInterface
         Layout.fillWidth: true
         spacing: Theme.spacing
-        Label { text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Interface"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: importInterface
             objectName: "importInterface"

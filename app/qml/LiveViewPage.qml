@@ -1,6 +1,6 @@
 // File/layer: app/qml/LiveViewPage.qml | Qt6 Quick, UI layer
-// Testing: BRIDGE: test_bridge; QML: QmlTest.liveview, QmlTest.linkhealth,
-//          QmlTest.chartlayout, QmlTest.phone (test_qml); Manual smoke
+// Testing: BRIDGE: test_bridge; QML: QmlTest.liveview{,_pause}, QmlTest.linkhealth,
+//          QmlTest.chartlayout{,_panes}, QmlTest.phone_* (test_qml); Manual smoke
 
 import QtCore
 import QtQuick
@@ -162,11 +162,18 @@ Page {
     function cursorSample(samples) {
         if (isNaN(cursorMs))
             return -1
-        let best = -1
-        for (let i = 0; i + 1 < samples.length; i += 2) {
-            if (best < 0 || Math.abs(samples[i] - cursorMs) < Math.abs(samples[best] - cursorMs))
-                best = i
+        // The samples are in time order: the nearest is beside the first
+        // one at or after the cursor (the earlier of two equally near)
+        let lo = 0, hi = samples.length >> 1
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            if (samples[mid * 2] < cursorMs) lo = mid + 1
+            else hi = mid
         }
+        let best = lo > 0 ? (lo - 1) * 2 : -1
+        if (lo < samples.length >> 1
+                && (best < 0 || Math.abs(samples[lo * 2] - cursorMs) < Math.abs(samples[best] - cursorMs)))
+            best = lo * 2
         return best >= 0 && Math.abs(samples[best] - cursorMs) <= staleMs ? best : -1
     }
     // The snapshot's samples in view, thinned to each column's lowest,
@@ -180,18 +187,25 @@ Page {
         for (const s of snapshot) {
             const sp = s.samples
             const picked = []
-            let col = -1, lo = -1, hi = -1, last = -1
+            let col = NaN, lo = -1, hi = -1, last = -1
             const flush = () => {
                 const keep = [lo, hi, last].filter((v, k, all) => all.indexOf(v) === k)
                 for (const i of keep.sort((a, b) => a - b))
                     picked.push(sp[i], sp[i + 1])
             }
-            for (let i = 0; i + 1 < sp.length; i += 2) {
-                if (sp[i] < t0 || sp[i] > t1)
-                    continue
+            // Samples are in time order: start at the first one in view
+            let first = 0, end = sp.length >> 1
+            while (first < end) {
+                const mid = (first + end) >> 1
+                if (sp[mid * 2] < t0) first = mid + 1
+                else end = mid
+            }
+            for (let i = first * 2; i + 1 < sp.length; i += 2) {
+                if (sp[i] > t1)
+                    break
                 const c = Math.floor(sp[i] / colMs)
                 if (c !== col) {
-                    if (col >= 0)
+                    if (!isNaN(col))
                         flush()
                     col = c
                     lo = hi = last = i
@@ -201,7 +215,7 @@ Page {
                 if (sp[i + 1] > sp[hi + 1]) hi = i
                 last = i
             }
-            if (col >= 0)
+            if (!isNaN(col))
                 flush()
             const series = { row: s.row, unit: s.unit, decimals: s.decimals, samples: picked }
             const at = cursorSample(sp)
@@ -359,7 +373,8 @@ Page {
         // (the first vehicle's did), so the hint goes here too
         case "quiet":    return qsTr("Vehicle not responding: quiet bus; check the ignition")
         case "requests": return qsTr("Requests failing: check the vehicle connection and ignition")
-        case "fault":    return qsTr("Adapter fault: %1 episode(s), retrying with backoff").arg(episodes)
+        case "fault":    return episodes === 1 ? qsTr("Adapter fault: 1 episode, retrying with backoff")
+                                               : qsTr("Adapter fault: %1 episodes, retrying with backoff").arg(episodes)
         // A replay's file changed under it (ADR-0023): nothing more will come
         case "stopped":  return qsTr("Replay stopped: the recording changed after it was opened")
         default:         return qsTr("Link degraded (error %1)").arg(errorCode)
@@ -411,6 +426,7 @@ Page {
             color: Qt.alpha(Theme.linkColor(Bridge.linkState), 0.15)
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "linkBannerText"
                 anchors.centerIn: parent
                 text: root.bannerText(Bridge.linkState, Bridge.errorEpisodes, Bridge.linkErrorCode)
@@ -427,6 +443,7 @@ Page {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 text: root.statusText()
@@ -442,6 +459,7 @@ Page {
         }
         // The first pause's hint, once: a paused chart isn't a recording
         Label {
+            textFormat: Text.PlainText
             objectName: "pauseHint"
             visible: root.paused && root.hintShown
             Layout.fillWidth: true
@@ -579,6 +597,7 @@ Page {
                         opacity: swatch.drawn ? 1.0 : 0.5
                     }
                     Label {
+                        textFormat: Text.PlainText
                         id: nameLabel
                         objectName: "nameLabel"
                         Accessible.ignored: true
@@ -600,6 +619,7 @@ Page {
                         text: signalDelegate.refused
                     }
                     Label {
+                        textFormat: Text.PlainText
                         id: valueLabel
                         objectName: "valueLabel"
                         Accessible.ignored: true
@@ -621,7 +641,8 @@ Page {
                                    ? signalDelegate.refused
                                    : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
                               : signalDelegate.unasked ? qsTr("Not asked")
-                              : !signalDelegate.hasValue ? qsTr("—")
+                              : !signalDelegate.hasValue
+                                ? (Bridge.replayFinished ? qsTr("Not in this recording") : qsTr("—"))
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,
@@ -630,10 +651,14 @@ Page {
                         // keeps its room
                         // and, on a row too narrow for its cap beside the
                         // box, the swatch and the name's least, what is left
+                        // Each neighbor's fractional width rounds up in the
+                        // layout, so the room left rounds down
                         Layout.maximumWidth: Math.max(0, Math.min(
                             Math.round(signalDelegate.width * 0.6),
-                            signalDelegate.width - 24 - plotBox.width - swatch.width
-                            - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
+                            Math.floor(signalDelegate.width - 24 - Math.ceil(plotBox.width)
+                                       - Math.ceil(swatch.width)
+                                       - Math.ceil(nameLabel.Layout.minimumWidth)
+                                       - 3 * rowLayout.spacing)))
                         elide: Text.ElideRight
                         color: signalDelegate.alertLevel === 2 ? Theme.textOnAlertDanger
                                : signalDelegate.alertLevel === 1 ? Theme.textOnAlertWarn
@@ -674,24 +699,17 @@ Page {
             }
         }
 
-        // What the list leaves out, and why: rows an ECU's supported-PID
-        // bitmaps mark unsupported, and fields its replies come without
-        // (core's absent signals). The Dashboard keeps them.
-        Label {
+        // What the list leaves out, and why (HiddenSignals)
+        HiddenSignals {
             id: hiddenNote
-            objectName: "hiddenNote"
             visible: Bridge.signalModel.hiddenCount > 0 && !root.chartMaximized
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: Bridge.signalModel.hiddenCount === 1
-                  ? qsTr("1 signal hidden: the ECU doesn't send it")
-                  : qsTr("%1 signals hidden: the ECU doesn't send them")
-                        .arg(Bridge.signalModel.hiddenCount)
+            rowHeight: root.rowHeight
         }
         // What the focus leaves unasked (ADR-0056 section 2): a tick asks a
         // row, except under a log, whose signals stay as it started
         Label {
+            textFormat: Text.PlainText
             id: unaskedNote
             objectName: "unaskedNote"
             visible: Bridge.connected && Bridge.signalModel.unaskedCount > 0
@@ -726,6 +744,7 @@ Page {
             // The caption gives way under 360 px: with it the row's least
             // width is past the narrowest phone's
             Label {
+                textFormat: Text.PlainText
                 visible: !windowRow.tight && root.width >= 360
                 text: qsTr("Window")
                 color: Theme.textDim
@@ -773,7 +792,7 @@ Page {
             }
         }
 
-        // ---- Strip chart: per-signal rolling history, one repaint per
+        // Strip chart: per-signal rolling history, one repaint per
         // coalesced batch. Each trace takes its list row's color
         // (root.seriesColor), so the list is the legend. ChartLayout
         // works out where everything goes; StripChart strokes it.

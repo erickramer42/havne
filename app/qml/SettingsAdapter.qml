@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsAdapter.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The adapter list and the presets: one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -21,12 +21,13 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
 
-    // ---- Adapters: J2534 interfaces and serial ports ----
+    // Adapters: J2534 interfaces and serial ports
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
 
         Label {
+            textFormat: Text.PlainText
             objectName: "deviceCount"
             text: root.host.devicesShown === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
@@ -56,14 +57,15 @@ ColumnLayout {
         }
     }
 
-    // ---- Bluetooth (Android): why the list is short, and a
-    // scan for BLE adapters, which aren't paired ----
+    // Bluetooth (Android): why the list is short, and a
+    // scan for BLE adapters, which aren't paired
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         visible: Bluetooth.available
 
         Label {
+            textFormat: Text.PlainText
             objectName: "bluetoothStatus"
             text: Bluetooth.status !== ""
                   ? Bluetooth.status
@@ -76,7 +78,7 @@ ColumnLayout {
         ThemedButton {
             objectName: "bleScanButton"
             text: Bluetooth.scanning ? qsTr("Scanning…") : qsTr("Scan for BLE")
-            enabled: root.host.idle && !Bluetooth.scanning
+            enabled: root.host.ownPart.idle && !Bluetooth.scanning
             onClicked: Bluetooth.scan()
         }
     }
@@ -126,9 +128,9 @@ ColumnLayout {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(row.modelData.base)
+                    root.host.uriPart.fillUri(row.modelData.base)
                     root.host.showUriField()
                 }
             }
@@ -143,11 +145,13 @@ ColumnLayout {
                     spacing: Theme.spacing
 
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "deviceTitle"
                         text: row.modelData.title
-                        color: root.host.idle ? Theme.text : Theme.textDim
+                        color: root.host.ownPart.idle ? Theme.text : Theme.textDim
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "deviceVersions"
                         visible: text !== ""
                         text: row.modelData.versions === ""
@@ -161,6 +165,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "deviceDetail"
                     text: row.modelData.detail
                     color: Theme.textDim
@@ -172,9 +177,9 @@ ColumnLayout {
         }
     }
 
-    // ---- Relay (the phone, developer mode; ADR-0047): the
+    // Relay (the phone, developer mode; ADR-0047): the
     // selected Bluetooth adapter relayed to a computer over USB,
-    // for havne-cli there ----
+    // for havne-cli there
     ColumnLayout {
         objectName: "relayBox"
         visible: Relay.available && Theme.developerMode
@@ -182,6 +187,7 @@ ColumnLayout {
         spacing: Theme.spacing
 
         Label {
+            textFormat: Text.PlainText
             objectName: "relayStatus"
             text: Relay.running
                   ? Relay.status
@@ -198,6 +204,7 @@ ColumnLayout {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "relayTraffic"
                 visible: Relay.running
                 text: qsTr("%1 from the adapter, %2 to it")
@@ -213,26 +220,26 @@ ColumnLayout {
                 text: Relay.running ? qsTr("Stop relaying") : qsTr("Relay")
                 // Not beside a session: the adapter takes one link
                 enabled: Relay.running
-                         || (root.host.idle && /^elm327:\/\/bt:/i.test(root.host.uriField.text))
+                         || (root.host.ownPart.idle && /^elm327:\/\/bt:/i.test(root.host.connectPart.uriField.text))
                 onClicked: {
                     if (Relay.running) {
                         Relay.stop()
                         return
                     }
-                    const why = Relay.start(root.host.uriField.text)
-                    root.host.errorLabel.text = why
-                    root.host.errorLabel.visible = why !== ""
+                    const why = Relay.start(root.host.connectPart.uriField.text)
+                    root.host.connectPart.errorLabel.text = why
+                    root.host.connectPart.errorLabel.visible = why !== ""
                     // A refusal goes to the log, so Show log has it to show
                     if (why !== "")
                         Bridge.logEvent(qsTr("Relay: %1").arg(why))
-                    root.host.logExplains = why !== ""
+                    root.host.connectPart.logExplains = why !== ""
                 }
             }
         }
     }
 
-    // ---- Presets: the URI's base, for what the list doesn't show. Closed
-    // until the row is tapped: five buttons would fill a phone's page ----
+    // Presets: the URI's base, for what the list doesn't show. Closed
+    // until the row is tapped: five buttons would fill a phone's page
     property bool presetsOpen: false
     // A J2534 interface is a Windows driver
     property bool j2534Offered: Qt.platform.os === "windows"
@@ -275,9 +282,9 @@ ColumnLayout {
                 width: Math.min(implicitWidth, parent.width)
                 visible: root.presetsOpen
                          && (modelData.name !== "j2534" || root.j2534Offered)
-                enabled: root.host.idle
+                enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(modelData.uri)
+                    root.host.uriPart.fillUri(modelData.uri)
                     root.host.showUriField()
                 }
                 // The name, and the address smaller under it. The width is
@@ -286,6 +293,7 @@ ColumnLayout {
                     implicitWidth: Math.max(nameText.implicitWidth, hintText.implicitWidth)
                     implicitHeight: nameText.height + (hintText.visible ? hintText.height : 0)
                     Text {
+                        textFormat: Text.PlainText
                         id: nameText
                         width: parent.width
                         text: preset.text
@@ -295,6 +303,7 @@ ColumnLayout {
                         horizontalAlignment: Text.AlignHCenter
                     }
                     Text {
+                        textFormat: Text.PlainText
                         id: hintText
                         y: nameText.height
                         width: parent.width

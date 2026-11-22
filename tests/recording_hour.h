@@ -1,6 +1,6 @@
 // File/layer: tests/recording_hour.h | test-only, C++17, Qt-free,
 //             header-only, no gtest
-// Testing: HARNESS: RecordingTest's hour (tests/test_recording.cpp), which
+// Testing: HARNESS: RecordingTest's hour (tests/test_recording_hour.cpp), which
 //          checks every query against these samples; bench_recording times
 //          the reader's open on the folder it writes
 //

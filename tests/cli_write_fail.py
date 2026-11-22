@@ -69,6 +69,15 @@ def main():
             "conditions-no-profile": lambda n: [
                 "conditions", "check", os.path.join(CONDITIONS, "example.json"),
                 "--profile", "none-such"],
+            "expr": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json"),
+                "margin / 2", "--value", "coolant=95", "--value", "oil=110"],
+            "expr-names": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json")],
+            "expr-refused": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json"),
+                "max(coolant, oli)"],
+            "expr-unread": lambda n: ["signals", "expr", "--signals", missing, "a"],
             "wrap": lambda n: ["plugins", "wrap",
                                os.path.join(SIGNALS, "extras.json"),
                                "--out", os.path.join(tmp, n + ".json")],
@@ -99,15 +108,26 @@ def main():
             "stream-bad-uri": lambda n: ["stream", bad_uri],
             "stream-unrecorded": lambda n: ["stream", "mock://write-fail",
                                             "--count", "5", "--record", unmade],
+            "signals-check-unread": lambda n: ["signals", "check", missing],
+            "signals-import-unread": lambda n: [
+                "signals", "import", "obdb", missing, "--out",
+                os.path.join(tmp, n + ".json")],
+            "sim-bad-uri": lambda n: ["sim", bad_uri, "--elm327", "tcp:0", "--seconds", "1"],
+            "clear-bad-uri": lambda n: ["clear", bad_uri, "--yes"],
+            "stream-signals-unread": lambda n: ["stream", "mock://write-fail",
+                                                "--signals", missing],
         }
         # A run into a writable file ends with this exit
         exits = {"layout-refused": 3, "conditions-refused": 3,
                  "conditions-unread": 3, "conditions-no-profile": 3,
+                 "expr-refused": 3, "expr-unread": 3,
                  "wrap-refused": 3, "wrap-unread": 3, "put-unread": 3,
                  "drop-unread": 3, "match-unread": 3, "check-unread": 3,
                  "log-unread": 3, "log-bad-uri": 3, "log-unrecorded": 1,
                  "health-bad-uri": 3, "stream-unread": 3, "stream-bad-uri": 3,
-                 "stream-unrecorded": 1}
+                 "stream-unrecorded": 1, "signals-check-unread": 3,
+                 "signals-import-unread": 3, "sim-bad-uri": 3,
+                 "clear-bad-uri": 3, "stream-signals-unread": 3}
         if sys.platform.startswith("linux"):
             # play is Linux's alone; elsewhere it is usage, before any line
             commands["play-no-interface"] = lambda n: [

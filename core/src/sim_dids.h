@@ -265,6 +265,20 @@ inline bool ecuio_sim_plan_modules(const ecuio_signal_set_t& set,
         plan->rx[plan->count] = c.rx_id;
         ++plan->count;
     }
+    /* A frame on a node's reply ID is another node answering, which
+     * silences it (yield): no request may go out on a reply ID */
+    for (uint32_t i = 0; i < set.channel_count; ++i) {
+        for (uint32_t k = 0; k < set.channel_count; ++k) {
+            if (set.channels[i].tx_id == set.channels[k].rx_id) {
+                std::snprintf(why, why_cap,
+                              "channel %u's request ID 0x%X is channel %u's "
+                              "reply ID: the simulated ECU would take its "
+                              "requests for another node's replies",
+                              i, set.channels[i].tx_id, k);
+                return false;
+            }
+        }
+    }
     return true;
 }
 

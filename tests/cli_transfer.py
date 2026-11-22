@@ -2,111 +2,52 @@
 # Testing: HARNESS (ctest CliTransferRunTest.*): havne-cli import and
 #          export (ADR-0054) from outside the process
 #
+# The modes are in three scripts: this one (the export side),
+# cli_transfer_import.py and cli_transfer_interrupt.py, which share
+# cli_transfer_kit.py.
+#
 #   python tests/cli_transfer.py roundtrip <havne-cli>
 #   python tests/cli_transfer.py refusals <havne-cli>
 #   python tests/cli_transfer.py tshark <havne-cli>
 #   python3 tests/cli_transfer.py candump <havne-cli>          (Linux)
 #   python tests/cli_transfer.py csv <havne-cli> <recording>
 #   python tests/cli_transfer.py folder <havne-cli> <findings> <values>
-#   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
-#   python tests/cli_transfer.py csv-guess <havne-cli> <csv fixtures>
-#   python tests/cli_transfer.py interrupt <havne-cli> <recording>
-#   python tests/cli_transfer.py interrupt-twice <havne-cli> <recording>
-#   python tests/cli_transfer.py interrupt-late <havne-cli> <recording>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
 # struct: one interface of LINKTYPE_CAN_SOCKETCAN in microseconds, each
-# frame as it arrived at the log's time. refusals: a log of two buses
-# with none named, and an export whose check finds a DID echoing the
-# VIN, each exit 3 with core's words and nothing written. tshark: the
-# export read by Wireshark's own tshark, its CAN frames and its ISO-TP
-# reassembled; exit 77 (a skip) without tshark. candump: the simulated
-# car (canned values) on vcan0 answering a direct obd2 session while
-# candump -L logs the bus; the log imported and read through obd2 by
-# view --frames holds each signal's values as the session read them;
-# exit 77 without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED=1. csv: a
-# recording core wrote (the replay fixture under obd2) exported as CSV and
-# read back with the standard library's csv module after its comment line:
-# each row its signals.csv row, host_us as seconds; the same bytes twice;
-# a range its rows alone. folder: copies of the findings fixture (its
-# frames; raw, then scrubbed, which leaves its torn ISO-TP message out),
-# a recording of values alone and a mock's recording made with a label;
-# each copy's info, view or replay the source's, the mock's label in
-# neither the copy's URI nor its name. csv-import: the made-up loggers'
-# CSVs imported by their column maps and viewed (each signal's samples and
-# range, the UTC start or null); a missing map, a map core refuses and a
-# folder already there each exit 3 with words, leaving nothing made; an
-# interval logger-a is slower than says so in the estimate and the export.
-# csv-guess: the same CSVs with no map: --print-map prints each logger's
-# guessed-map.json byte for byte, and the import writes the guess's line
-# (that map) before its own; a time column named so, of whole numbers
-# with no unit, reads as ms with a note and --time-unit gives another; one
-# with fractions is refused until --time-unit gives one; logger-c, a tuner
-# log's shape (padded cells, a trailing comma, a sparse counter), imports
-# with its notes, its text trimmed but a quoted cell kept, and its wide
-# export keeps the counter, which paces no sweep; logger-d, whose rows
-# with no time (one mid-file, a last one of padding) are left out, counted
-# in the imported line and said on stderr; a file with no header
-# is refused, exit 3 with words and nothing made. interrupt: an
-# export to pcapng, a folder copy, a CSV's sizing, a wide CSV and its
-# sizing during their named columns' check, a wide CSV at an interval
-# during its sweep's sizing, an import of a candump log
-# and of a CSV, and a recording's health report, each held at its first
-# ask (HAVNE_CLI_EXPORT_HOLD_MS, which names that ask on stderr: the wide
-# CSVs' must be the check's, the interval's the interval check's, an
-# import's the import's, the report's the health report's) and stopped by Ctrl+Break or SIGINT once held,
-# end within a few seconds with an interrupted end line and exit 1,
-# nothing at the file or folder named and no partial beside it; exit 77
-# where there's no console to send the event through.
+# frame as it arrived at the log's time. refusals: a log of two buses with
+# none named, and an export whose check finds a DID echoing the VIN, each
+# exit 3 with core's words and nothing written. tshark: the export read by
+# Wireshark's own tshark, its CAN frames and its ISO-TP reassembled; exit
+# 77 (a skip) without tshark. candump: the simulated car (canned values)
+# on vcan0 answering a direct obd2 session while candump -L logs the bus;
+# the log imported and read through obd2 by view --frames holds each
+# signal's values as the session read them; exit 77 without vcan0 or can-
+# utils unless ECUIO_VCAN_REQUIRED=1. csv: a recording core wrote (the
+# replay fixture under obd2) exported as CSV and read back with the
+# standard library's csv module after its comment line: each row its
+# signals.csv row, host_us as seconds and the key named by events.log's
+# header, the key last; the same bytes twice; a range its rows alone.
+# folder: copies of the findings fixture (its frames; raw, then scrubbed,
+# which leaves its torn ISO-TP message out), a recording of values alone
+# and a mock's recording made with a label; each copy's info, view or
+# replay the source's, the mock's label in neither the copy's URI nor its
+# name.
 
 import csv
 import json
 import os
 import shutil
-import signal
 import struct
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 
-LOG = (
-    "(1700000000.250000) can0 7DF#0201000000000000\n"
-    "(1700000000.254000) can0 7E8#04410C1AF8\n"
-    "(1700000000.350000) can0 7E0#05010C0D0504\n"
-    "(1700000000.354000) can0 7E8#100A410C0FA00D32\n"
-    "(1700000000.354500) can0 7E0#3000000000000000\n"
-    "(1700000000.355000) can0 7E8#21055A0480\n"
-    "(1700000000.400000) can0 456##3AABBCCDDEEFF00112233\n"
-)
+from cli_transfer_kit import LOG, one, partial_left, run, same
+
 UTC = 1700000000250000
-
-
-def partial_left(path):
-    """Whether core's own file or folder, <path>.partial-..., is left beside path"""
-    folder, name = os.path.split(path)
-    return any(e.startswith(name + ".partial-") for e in os.listdir(folder))
-
-
-def run(cli, args, want=0):
-    # No standard input: stream --record reads it as marks, and a test
-    # run's own input (a script fed to a shell) would become markers
-    done = subprocess.run([cli] + args, capture_output=True,
-                          stdin=subprocess.DEVNULL)
-    lines = [json.loads(l) for l in done.stdout.decode("utf-8").splitlines()]
-    if done.returncode != want:
-        raise SystemExit(f"FAIL  {' '.join(args)} exited {done.returncode}, "
-                         f"not {want}: {lines} {done.stderr.decode()}")
-    return lines
-
-
-def one(lines, kind):
-    found = [l for l in lines if l["type"] == kind]
-    if len(found) != 1:
-        raise SystemExit(f"FAIL  {len(found)} {kind} lines in {lines}")
-    return found[0]
 
 
 def pcapng(path):
@@ -342,10 +283,10 @@ def candump(cli):
 
 def csv_rows(path):
     """The comment line, then the rows under the header"""
-    with open(path, encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         comment = f.readline()
         rows = list(csv.reader(f))
-    if rows[0] != ["time_s", "signal", "unit", "value"]:
+    if rows[0] != ["time_s", "signal", "unit", "value", "key"]:
         raise SystemExit(f"FAIL  the header reads {rows[0]}")
     return comment, rows[1:]
 
@@ -354,8 +295,15 @@ def csv_export(cli, recording):
     with open(os.path.join(recording, "signals.csv"), encoding="utf-8-sig",
               newline="") as f:
         recorded = list(csv.reader(f))[1:]
-    want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name, unit, value]
-            for t, name, value, unit in recorded]
+    # signals.csv keeps each value under its key, which events.log's header
+    # names; the export writes the name and the key
+    with open(os.path.join(recording, "events.log"), encoding="utf-8") as f:
+        name_of = {cells[0]: cells[1] for cells in csv.reader(
+            l[len("signal  "):] for l in f.read().splitlines()
+            if l.startswith("signal  "))}
+    want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name_of[key],
+             unit, value, key]
+            for t, key, value, unit in recorded]
     # --estimate's bytes are the wide file's, at a sweep and on a grid
     with tempfile.TemporaryDirectory() as d:
         sized = one(run(cli, ["export", recording, "--format", "csv",
@@ -378,7 +326,7 @@ def csv_export(cli, recording):
                                  "--layout", "long"]), "exported")
         if (exported["layout"], exported["row_ms"]) != ("long", 0):
             raise SystemExit(f"FAIL  exported {exported}")
-        names = {r[1] for r in want}
+        names = {r[4] for r in want}  # the signals, one per key
         if (exported["values"], exported["signals"], exported["frames"],
                 exported["scrubbed"]) != (len(want), len(names), 0, True):
             raise SystemExit(f"FAIL  exported {exported}")
@@ -461,7 +409,7 @@ def csv_export(cli, recording):
 def wide_rows(path):
     """The wide CSV: its header cells and its rows, each cell a number or
     empty and the times whole ms ascending"""
-    with open(path, encoding="utf-8", newline="") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         raw = f.read()
     if "\r\n" not in raw or "\n" in raw.replace("\r\n", ""):
         raise SystemExit("FAIL  the wide CSV isn't CRLF throughout")
@@ -495,11 +443,6 @@ def folder_copy(cli, source, out, want_files, raw=False):
     if partial_left(out):
         raise SystemExit("FAIL  the partial folder is left")
     return exported
-
-
-def same(what, a, b):
-    if a != b:
-        raise SystemExit(f"FAIL  {what} differs: {a} then {b}")
 
 
 def folder_export(cli, findings, values):
@@ -550,780 +493,18 @@ def folder_export(cli, findings, values):
     return 0
 
 
-LOGGERS = [
-    # name, lines, values, columns ignored, utc start, duration, each
-    # signal (name, text, samples, lowest, highest)
-    ("logger-a", 11, 22, 1, None, 1750000,
-     [("RPM", False, 8, 780.5, 3420.25), ("Engine Load", False, 7, 12, 88.5),
-      ("Lambda", False, 7, 0.86, 1.98)]),
-    ("logger-b", 9, 16, 2, 1793883802250000, 3500000,
-     [("Vehicle Speed", False, 8, 0, 48.5), ("Gear", True, 8, None, None)]),
-]
-
-
-def csv_import(cli, fixtures):
-    with tempfile.TemporaryDirectory() as d:
-        for name, lines, values, ignored, utc, duration, signals in LOGGERS:
-            base = os.path.join(fixtures, name)
-            log = os.path.join(base, "log.csv")
-            cmap = os.path.join(base, "map.json")
-            rec = os.path.join(d, name)
-            imported = one(run(cli, ["import", "csv", log, rec, "--map", cmap]),
-                           "imported")
-            want = {"type": "imported", "format": "csv", "folder": rec,
-                    "lines": lines, "values": values,
-                    "columns_ignored": ignored, "rows_no_time": 0,
-                    "utc_start_us": utc, "duration_us": duration}
-            same(f"{name}'s imported line", want, imported)
-            if sorted(os.listdir(rec)) != ["events.log", "signals.csv"]:
-                raise SystemExit(f"FAIL  {name} made {os.listdir(rec)}")
-            viewed = run(cli, ["view", rec, "--columns", "4"])
-            opened = one(viewed, "opened")
-            if (opened["utc_start_us"], opened["duration_us"]) != (utc,
-                                                                    duration):
-                raise SystemExit(f"FAIL  {name} opened {opened}")
-            got = [(s["name"], s["text"], s["samples"], s.get("lowest"),
-                    s.get("highest"))
-                   for s in viewed if s["type"] == "signal"]
-            same(f"{name}'s signals", signals, got)
-        # Refused, each exit 3 with words and no folder: no map file, a map
-        # core refuses, a folder already there
-        a = os.path.join(fixtures, "logger-a")
-        log = os.path.join(a, "log.csv")
-        rec = os.path.join(d, "refused")
-        error = one(run(cli, ["import", "csv", log, rec, "--map",
-                              os.path.join(d, "none.json")], 3), "error")
-        if error["detail"] != ("the column map can't be read: there's no "
-                               "such file"):
-            raise SystemExit(f"FAIL  a missing map said {error}")
-        bad = os.path.join(d, "bad.json")
-        with open(bad, "w", newline="\n") as f:
-            f.write('{"havne_column_map": 1, "shade": "red"}\n')
-        error = one(run(cli, ["import", "csv", log, rec, "--map", bad], 3),
-                    "error")
-        if "'shade'" not in error["detail"]:
-            raise SystemExit(f"FAIL  an unknown key said {error}")
-        if os.path.exists(rec) or partial_left(rec):
-            raise SystemExit("FAIL  a refused import left a folder")
-        there = os.path.join(d, "logger-a")
-        error = one(run(cli, ["import", "csv", log, there, "--map",
-                              os.path.join(a, "map.json")], 3), "error")
-        if sorted(os.listdir(there)) != ["events.log", "signals.csv"]:
-            raise SystemExit(f"FAIL  the folder there changed: {error}")
-        slower_than_its_intervals(cli, there, d)
-    print(f"ok    {len(LOGGERS)} loggers' CSVs imported and viewed; a missing "
-          "map, a refused map and a folder already there refused; an "
-          "interval logger-a is slower than said so")
-    return 0
-
-
-def slower_than_its_intervals(cli, rec, d):
-    """logger-a holds about four rows per second: an interval of 100 or
-    250 ms gives no fewer rows than the sweep's, which the estimate and
-    the export say, and one of 1000 ms thins them, which neither says"""
-    sized = one(run(cli, ["export", rec, "--format", "csv", "--estimate"]),
-                "estimate")
-    flagged = [s["row_ms"] for s in sized["sizes"]
-               if s.get("no_fewer_than_sweep")]
-    if flagged != [100, 250]:
-        raise SystemExit(f"FAIL  the estimate flagged {flagged}: {sized}")
-    for rows, says in [("100", True), ("1000", False)]:
-        alone = one(run(cli, ["export", rec, "--format", "csv", "--estimate",
-                              "--rows", rows]), "estimate")
-        if ([s["row_ms"] for s in alone["sizes"]] != [int(rows)] or
-                alone["sizes"][0].get("no_fewer_than_sweep", False) != says):
-            raise SystemExit(f"FAIL  --rows {rows}'s estimate {alone}")
-        out = os.path.join(d, f"logger-a-{rows}.csv")
-        done = subprocess.run([cli, "export", rec, out, "--format", "csv",
-                               "--rows", rows], capture_output=True,
-                              stdin=subprocess.DEVNULL)
-        lines = [json.loads(l) for l in
-                 done.stdout.decode("utf-8").splitlines()]
-        said = done.stderr.decode("utf-8").replace("\r", "")
-        exported = one(lines, "exported")
-        if done.returncode != 0 or exported["rows"] != alone["sizes"][0]["rows"]:
-            raise SystemExit(f"FAIL  --rows {rows} exported {lines} {said}")
-        line = (f"havne-cli: every {rows} ms gives no fewer rows than every "
-                "sweep: the recording is slower than that\n")
-        if exported.get("no_fewer_than_sweep", False) != says or \
-                (said == line) != says or (not says and said):
-            raise SystemExit(f"FAIL  --rows {rows} said {exported} {said!r}")
-
-
-GUESSED = [
-    # name, values imported with the guessed map (each column's samples)
-    ("logger-a", 25),
-    ("logger-b", 27),
-    # a row with no time and a text among the three columns' first rows
-    ("logger-e", 12),
-]
-
-
-def printed(cli, args, want=0):
-    """--print-map's stdout as bytes and its stderr, which aren't lines"""
-    done = subprocess.run([cli] + args, capture_output=True,
-                          stdin=subprocess.DEVNULL)
-    if done.returncode != want:
-        raise SystemExit(f"FAIL  {' '.join(args)} exited {done.returncode}, "
-                         f"not {want}: {done.stderr.decode()}")
-    return done.stdout, done.stderr.decode("utf-8")
-
-
-def committed(path):
-    with open(path, "rb") as f:
-        return f.read().replace(b"\r", b"")
-
-
-def wide_columns(path):
-    """A wide CSV's header and each column's cells, its comment line
-    left out"""
-    with open(path, newline="", encoding="utf-8") as f:
-        rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
-    head = rows[0]
-    return head, {h: [r[i] for r in rows[1:]] for i, h in enumerate(head)}
-
-
-def logger_c(cli, fixtures, d):
-    """A tuner log's shape (fixture A): a space after each comma, a
-    trailing comma, a bare ms Time, a sparse counter of " " blanks, a
-    padded text column with one quoted cell"""
-    base = os.path.join(fixtures, "logger-c")
-    log = os.path.join(base, "log.csv")
-    want = committed(os.path.join(base, "guessed-map.json"))
-    out, err = printed(cli, ["import", "csv", log, "--print-map"])
-    if out != want or err:
-        raise SystemExit(f"FAIL  logger-c's printed map: {out!r} {err}")
-    rec = os.path.join(d, "logger-c")
-    lines = run(cli, ["import", "csv", log, rec])
-    guessed = one(lines, "guessed")
-    same("logger-c's guessed map", json.loads(want), guessed["map"])
-    for note in ["the time column 'Time' has no unit: read as ms; change it "
-                 "if it isn't",
-                 "'Flux counter' holds a value in 3 of 200 rows read: a "
-                 "wide export by sweep holds its newest value in the rows "
-                 "the other columns set"]:
-        if note not in guessed["notes"]:
-            raise SystemExit(f"FAIL  logger-c's notes lack {note!r}: "
-                             f"{guessed['notes']}")
-    imported = one(lines, "imported")
-    if (imported["values"], imported["columns_ignored"],
-            imported["duration_us"]) != (420 * 14 + 6, 1, 121521000):
-        raise SystemExit(f"FAIL  logger-c imported {imported}")
-    # The padded text arrives trimmed, the one quoted cell as written
-    with open(os.path.join(rec, "signals.csv"), newline="",
-              encoding="utf-8-sig") as f:
-        modes = [r[2] for r in csv.reader(f) if r[1:2] == ["Mode"]]
-    if (len(modes) != 420 or modes.count("OL ") != 1 or
-            set(modes) != {"OL", "CL", "OL "}):
-        raise SystemExit(f"FAIL  logger-c's modes {sorted(set(modes))}")
-    # Its wide export keeps the sparse counter; far sparser than the rest,
-    # it paces no sweep, so by sweep there is a row for each of the log's
-    for rows, count in [(None, 420), ("300", 401)]:
-        out_csv = os.path.join(d, f"logger-c-{rows or 'sweep'}.csv")
-        args = ["export", rec, out_csv, "--format", "csv"]
-        if rows:
-            args += ["--rows", rows]
-        exported = one(run(cli, args), "exported")
-        head, cells = wide_columns(out_csv)
-        flux = [c for c in cells.get("Flux counter", []) if c != ""]
-        # a grid row repeats a cell's latest value: each value's run once
-        runs = [v for k, v in enumerate(flux) if k == 0 or flux[k - 1] != v]
-        if (exported["signals"] != 14 or "Flux counter" not in head or
-                runs != ["1", "2", "3", "4", "5", "6"] or
-                exported["rows"] != count):
-            raise SystemExit(f"FAIL  logger-c exported {exported} {head} "
-                             f"{flux}")
-    # 10 s to 20 s holds one counter value: with no interval of its own it
-    # is still sparse, so the range keeps a row for each of its 34 log rows
-    out_csv = os.path.join(d, "logger-c-range.csv")
-    exported = one(run(cli, ["export", rec, out_csv, "--format", "csv",
-                             "--from", "10", "--to", "20"]), "exported")
-    head, cells = wide_columns(out_csv)
-    flux = [c for c in cells.get("Flux counter", []) if c != ""]
-    if exported["rows"] != 34 or not flux or set(flux) != {"1"}:
-        raise SystemExit(f"FAIL  logger-c's range exported {exported} {flux}")
-
-
-def logger_d(cli, fixtures, d):
-    """Rows with no time, one mid-file holding values and a last one of
-    padding: the guess notes them, the import leaves them out, counts
-    them in its line and says so on stderr; a file where no row has a
-    time is refused both ways"""
-    base = os.path.join(fixtures, "logger-d")
-    log = os.path.join(base, "log.csv")
-    want = committed(os.path.join(base, "guessed-map.json"))
-    out, err = printed(cli, ["import", "csv", log, "--print-map"])
-    if out != want or err:
-        raise SystemExit(f"FAIL  logger-d's printed map: {out!r} {err}")
-    rec = os.path.join(d, "logger-d")
-    done = subprocess.run([cli, "import", "csv", log, rec],
-                          capture_output=True, stdin=subprocess.DEVNULL)
-    lines = [json.loads(l) for l in done.stdout.decode("utf-8").splitlines()]
-    said = done.stderr.decode("utf-8").replace("\r", "")
-    if done.returncode != 0:
-        raise SystemExit(f"FAIL  logger-d exited {done.returncode}: {said}")
-    note = ("2 of the 10 rows read have no time (the first on line 5): the "
-            "import leaves such a row out")
-    guessed = one(lines, "guessed")
-    if note not in guessed["notes"]:
-        raise SystemExit(f"FAIL  logger-d's notes lack {note!r}: "
-                         f"{guessed['notes']}")
-    imported = one(lines, "imported")
-    if (imported["rows_no_time"], imported["values"], imported["lines"],
-            imported["duration_us"]) != (2, 24, 11, 1740000):
-        raise SystemExit(f"FAIL  logger-d imported {imported}")
-    if said != "havne-cli: 2 rows with no time left out\n":
-        raise SystemExit(f"FAIL  logger-d said {said!r}")
-    with open(os.path.join(rec, "events.log"), encoding="utf-8") as f:
-        events = f.read()
-    if ("import  rows left out: 2 with no time (the first on line 5)\n"
-            not in events):
-        raise SystemExit(f"FAIL  logger-d's events.log: {events}")
-    # The untimed row's values are nowhere: 8 samples a signal
-    viewed = run(cli, ["view", rec, "--columns", "4"])
-    samples = {s["name"]: s["samples"] for s in viewed
-               if s["type"] == "signal"}
-    if samples != {"Engine speed": 8, "Widget pressure": 8,
-                   "Gizmo state": 8}:
-        raise SystemExit(f"FAIL  logger-d's signals {samples}")
-    # One such row is said as one, through a map as through the guess
-    single = os.path.join(d, "single.csv")
-    with open(single, "w", newline="\n") as f:
-        f.write("time (s),A\n0,1\n,2\n1,3\n")
-    done = subprocess.run([cli, "import", "csv", single,
-                           os.path.join(d, "single")],
-                          capture_output=True, stdin=subprocess.DEVNULL)
-    said = done.stderr.decode("utf-8").replace("\r", "")
-    if done.returncode != 0 or said != ("havne-cli: 1 row with no time left "
-                                        "out\n"):
-        raise SystemExit(f"FAIL  one row with no time said {said!r}")
-    # A file with none says nothing on stderr
-    done = subprocess.run([cli, "import", "csv",
-                           os.path.join(fixtures, "logger-b", "log.csv"),
-                           os.path.join(d, "logger-b-quiet")],
-                          capture_output=True, stdin=subprocess.DEVNULL)
-    if done.returncode != 0 or done.stderr:
-        raise SystemExit(f"FAIL  a file with every time said {done.stderr!r}")
-    # No row with a time: the import's words from the guess too
-    untimed = os.path.join(d, "untimed.csv")
-    with open(untimed, "w", newline="\n") as f:
-        f.write("time (s),A\n,1\n,2\n")
-    for args in [[], ["--time-unit", "s"]]:
-        error = one(run(cli, ["import", "csv", untimed,
-                              os.path.join(d, "untimed")] + args, 3), "error")
-        if error["detail"] != "no row below the header has a time":
-            raise SystemExit(f"FAIL  no time said {error}")
-    out, err = printed(cli, ["import", "csv", untimed, "--print-map"], 3)
-    if out or err.replace("\r", "") != ("havne-cli: no row below the header "
-                                        "has a time\n"):
-        raise SystemExit(f"FAIL  no time printed {out!r} {err!r}")
-    if os.path.exists(os.path.join(d, "untimed")):
-        raise SystemExit("FAIL  a file with no time left a folder")
-
-
-def csv_guess(cli, fixtures):
-    with tempfile.TemporaryDirectory() as d:
-        for name, values in GUESSED:
-            base = os.path.join(fixtures, name)
-            log = os.path.join(base, "log.csv")
-            want = committed(os.path.join(base, "guessed-map.json"))
-            # --print-map is core's slice byte for byte, which
-            # CsvGuessTest.TheMadeUpLoggersAreGuessedAndImported pins too
-            out, err = printed(cli, ["import", "csv", log, "--print-map"])
-            if out != want or err:
-                raise SystemExit(f"FAIL  {name}'s printed map: {out!r} {err}")
-            # With no map: the guess on a line, then the import with it
-            rec = os.path.join(d, name)
-            lines = run(cli, ["import", "csv", log, rec])
-            if [l["type"] for l in lines] != ["start", "guessed", "imported"]:
-                raise SystemExit(f"FAIL  {name} wrote {lines}")
-            guessed = one(lines, "guessed")
-            same(f"{name}'s guessed map", json.loads(want), guessed["map"])
-            if not all(c["used"] for c in guessed["columns"]):
-                raise SystemExit(f"FAIL  {name} left a column out: {guessed}")
-            imported = one(lines, "imported")
-            if (imported["values"], imported["columns_ignored"]) != (values, 0):
-                raise SystemExit(f"FAIL  {name} imported {imported}")
-            if sorted(os.listdir(rec)) != ["events.log", "signals.csv"]:
-                raise SystemExit(f"FAIL  {name} made {os.listdir(rec)}")
-        # A time named so, of whole numbers with no unit: read as ms
-        # with a note, printed so, and --time-unit still gives another
-        plain = os.path.join(d, "plain.csv")
-        with open(plain, "w", newline="\n") as f:
-            f.write("time,A\n0,1\n1,2\n")
-        rec = os.path.join(d, "plain")
-        lines = run(cli, ["import", "csv", plain, rec])
-        guessed = one(lines, "guessed")
-        if (guessed["map"]["time"].get("unit") != "ms" or
-                "the time column 'time' has no unit: read as ms; change it "
-                "if it isn't" not in guessed["notes"]):
-            raise SystemExit(f"FAIL  a bare time guessed {guessed}")
-        imported = one(lines, "imported")
-        if (imported["values"], imported["duration_us"]) != (2, 1000):
-            raise SystemExit(f"FAIL  a bare time imported {imported}")
-        out, err = printed(cli, ["import", "csv", plain, "--print-map"])
-        if json.loads(out)["time"]["unit"] != "ms" or err:
-            raise SystemExit(f"FAIL  a bare time printed {out!r} {err}")
-        out, err = printed(cli, ["import", "csv", plain, "--print-map",
-                                 "--time-unit", "s"])
-        if json.loads(out)["time"]["unit"] != "s" or err:
-            raise SystemExit(f"FAIL  --time-unit printed {out!r} {err}")
-        imported = one(run(cli, ["import", "csv", plain,
-                                 os.path.join(d, "plain-s"), "--time-unit",
-                                 "s"]), "imported")
-        if (imported["values"], imported["duration_us"]) != (2, 1000000):
-            raise SystemExit(f"FAIL  --time-unit imported {imported}")
-        # A time with fractions may be seconds: refused without
-        # --time-unit, printed with a word on stderr, imported with one
-        fraction = os.path.join(d, "fraction.csv")
-        with open(fraction, "w", newline="\n") as f:
-            f.write("time,A\n0.0,1\n0.5,2\n")
-        rec = os.path.join(d, "fraction")
-        lines = run(cli, ["import", "csv", fraction, rec], 3)
-        if "unit" in one(lines, "guessed")["map"]["time"]:
-            raise SystemExit(f"FAIL  a unit came from nowhere: {lines}")
-        error = one(lines, "error")
-        if "--time-unit" not in error["detail"] or os.path.exists(rec):
-            raise SystemExit(f"FAIL  no unit said {error}")
-        out, err = printed(cli, ["import", "csv", fraction, "--print-map"])
-        if "unit" in json.loads(out)["time"] or "--time-unit" not in err:
-            raise SystemExit(f"FAIL  no unit printed {out!r} {err}")
-        imported = one(run(cli, ["import", "csv", fraction, rec,
-                                 "--time-unit", "s"]), "imported")
-        if (imported["values"], imported["duration_us"]) != (2, 500000):
-            raise SystemExit(f"FAIL  --time-unit imported {imported}")
-        logger_c(cli, fixtures, d)
-        logger_d(cli, fixtures, d)
-        # ISO 8601 times with no offset: no --time-unit gives them a unit,
-        # so the refusal and stderr name a map, never --time-unit
-        zoneless = os.path.join(d, "zoneless.csv")
-        with open(zoneless, "w", newline="\n") as f:
-            f.write("timestamp,A\n2026-11-05T22:03:22.250,1\n"
-                    "2026-11-05T22:03:22.750,2\n")
-        rec = os.path.join(d, "zoneless")
-        error = one(run(cli, ["import", "csv", zoneless, rec, "--time-unit",
-                              "ms"], 3), "error")
-        if ("--time-unit" in error["detail"] or "--map" not in error["detail"]
-                or os.path.exists(rec)):
-            raise SystemExit(f"FAIL  a zoneless time said {error}")
-        out, err = printed(cli, ["import", "csv", zoneless, "--print-map"])
-        if "unit" in json.loads(out)["time"] or "--time-unit" in err or "zone" not in err:
-            raise SystemExit(f"FAIL  a zoneless time printed {out!r} {err}")
-        # A file with no header: core's words, exit 3, nothing printed
-        numbers = os.path.join(d, "numbers.csv")
-        with open(numbers, "w", newline="\n") as f:
-            f.write("1,2\n3,4\n")
-        error = one(run(cli, ["import", "csv", numbers,
-                              os.path.join(d, "none")], 3), "error")
-        if not error["detail"].startswith("no row within the file's first"):
-            raise SystemExit(f"FAIL  no header said {error}")
-        out, err = printed(cli, ["import", "csv", numbers, "--print-map"], 3)
-        if out or not err.startswith("havne-cli: no row within"):
-            raise SystemExit(f"FAIL  no header printed {out!r} {err}")
-        if os.path.exists(os.path.join(d, "none")):
-            raise SystemExit("FAIL  a refused guess left a folder")
-    print(f"ok    {len(GUESSED) + 2} loggers' maps guessed, printed as "
-          "committed and imported, logger-c's wide export with its sparse "
-          "counter, logger-d's rows with no time left out and counted; "
-          "a whole-number time read as ms, a fractional one refused; "
-          "a file with no header "
-          "refused")
-    return 0
-
-
-# Long enough that a stop the export never asks about fails the case
-HOLD_MS = 20000
-# How long a run may take to reach its first ask and say it holds there
-HELD_WAIT_S = 30
-
-
-# The run's deadline after its second interrupt
-TWICE_WITHIN_S = 2
-
-
-def twice(cli, args, where):
-    """args run held at the first ask, deaf to the first interrupt
-    (HAVNE_CLI_EXPORT_HOLD_DEAF), then interrupted twice half a second
-    apart: the second ends the process at once, exit 1, its last line the
-    end line. None, a failure's words, or "skip" with no console"""
-    env = dict(os.environ)
-    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
-    env["HAVNE_CLI_EXPORT_HOLD_DEAF"] = "1000"
-    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
-          "stdin": subprocess.DEVNULL, "env": env}
-    if os.name == "nt":
-        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    p = subprocess.Popen([cli] + args, **kw)
-    held = []
-    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
-    reader.start()
-    reader.join(HELD_WAIT_S)
-    if reader.is_alive() or not held or \
-            not held[0].startswith(b"havne-cli: holding the " + where + b"'s"):
-        p.kill()
-        p.communicate()
-        reader.join()
-        return f"didn't hold at the {where.decode()} within {HELD_WAIT_S} s"
-    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
-    try:
-        p.send_signal(interrupt_with)
-        time.sleep(0.5)
-        if p.poll() is not None:
-            return f"the first interrupt ended it (exit {p.returncode}): the hold isn't deaf"
-        p.send_signal(interrupt_with)
-    except OSError as e:
-        p.kill()
-        p.communicate()
-        print(f"skip  no console to send the interrupt through: {e}")
-        return "skip"
-    sent = time.monotonic()
-    try:
-        out, err = p.communicate(timeout=TWICE_WITHIN_S)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        p.communicate()
-        return f"still running {TWICE_WITHIN_S} s after the second interrupt"
-    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
-    if p.returncode != 1 or not lines or \
-            lines[-1] != {"type": "end", "reason": "interrupted"}:
-        return (f"exit {p.returncode}, lines {lines}, "
-                f"{err.decode('utf-8', 'replace')}")
-    print(f"ok    {case_name(args)}: a second interrupt ended it "
-          f"{time.monotonic() - sent:.2f} s after it")
-    return None
-
-
-def interrupt_twice(cli, recording):
-    with tempfile.TemporaryDirectory(prefix="havne-cli-int2-") as root:
-        log = os.path.join(root, "bus.log")
-        with open(log, "w", encoding="utf-8", newline="\n") as f:
-            f.write(LOG)
-        cases = [
-            (["import", "candump", log, os.path.join(root, "from-log")], b"import"),
-            (["export", recording, os.path.join(root, "out.pcapng"),
-              "--format", "pcapng"], b"export"),
-            (["health", recording, os.path.join(root, "report.json"),
-              "--format", "json"], b"health report"),
-        ]
-        failed = 0
-        for args, where in cases:
-            why = twice(cli, args, where)
-            if why == "skip":
-                return 77
-            if why is not None:
-                print(f"FAIL  {case_name(args)}: {why}")
-                failed += 1
-    if failed:
-        return 1
-    print("ok    a second interrupt ends an export, an import and a "
-          "recording's health report at once")
-    return 0
-
-
-# How long a run waits once core's call has returned
-TAIL_MS = 3000
-
-
-def late(cli, args, where, result, made):
-    """args run to the end of core's call and held there
-    (HAVNE_CLI_EXPORT_TAIL_HOLD_MS), then interrupted twice: the run is
-    done, so it ends as it would have, its result line whole, exit 0, no
-    end line. None, a failure's words, or "skip" with no console"""
-    env = dict(os.environ)
-    env["HAVNE_CLI_EXPORT_TAIL_HOLD_MS"] = str(TAIL_MS)
-    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
-          "stdin": subprocess.DEVNULL, "env": env}
-    if os.name == "nt":
-        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    p = subprocess.Popen([cli] + args, **kw)
-    held = []
-    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
-    reader.start()
-    reader.join(HELD_WAIT_S)
-    if reader.is_alive() or not held or \
-            not held[0].startswith(b"havne-cli: holding after the " + where):
-        p.kill()
-        out, err = p.communicate()
-        reader.join()
-        return (f"didn't hold after the {where.decode()}'s call within "
-                f"{HELD_WAIT_S} s: exit {p.returncode}, "
-                f"{(held[0] if held else b'') + err!r}")
-    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
-    try:
-        p.send_signal(interrupt_with)
-        time.sleep(0.3)
-        if p.poll() is None:
-            p.send_signal(interrupt_with)
-    except OSError as e:
-        p.kill()
-        p.communicate()
-        print(f"skip  no console to send the interrupt through: {e}")
-        return "skip"
-    try:
-        out, err = p.communicate(timeout=TAIL_MS / 1000 + 20)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        p.communicate()
-        return "still running long after its hold"
-    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
-    types = [l["type"] for l in lines]
-    if p.returncode != 0 or types != ["start", result]:
-        return (f"exit {p.returncode}, lines {lines}, "
-                f"{err.decode('utf-8', 'replace')}")
-    if made is not None and (not os.path.exists(made) or partial_left(made)):
-        return f"{os.path.basename(made)} isn't whole in place"
-    print(f"ok    {case_name(args)}: two interrupts after core's call "
-          f"changed nothing")
-    return None
-
-
-def canceled_late(cli, recording, root):
-    """A column check canceled by the first interrupt, then held before the
-    end line (HAVNE_CLI_EXPORT_TAIL_HOLD_MS) and interrupted again: the
-    second interrupt changes nothing, so the run waits out its hold and
-    writes the one interrupted end line, exit 1, nothing made. None, a
-    failure's words, or "skip" with no console"""
-    out_csv = os.path.join(root, "late-check.csv")
-    env = dict(os.environ)
-    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
-    env["HAVNE_CLI_EXPORT_TAIL_HOLD_MS"] = str(TAIL_MS)
-    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
-          "stdin": subprocess.DEVNULL, "env": env}
-    if os.name == "nt":
-        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    p = subprocess.Popen([cli, "export", recording, out_csv, "--format",
-                          "csv", "--signal", "Engine RPM"], **kw)
-    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
-
-    def next_line(prefix):
-        got = []
-        reader = threading.Thread(
-            target=lambda: got.append(p.stderr.readline()))
-        reader.start()
-        reader.join(HELD_WAIT_S)
-        if reader.is_alive() or not got or not got[0].startswith(prefix):
-            p.kill()
-            p.communicate()
-            reader.join()
-            return None, (f"no {prefix.decode()!r} within {HELD_WAIT_S} s: "
-                          f"{got[0] if got else b''!r}")
-        return got[0], None
-
-    _, why = next_line(b"havne-cli: holding the column check's first ask")
-    if why:
-        return why
-    try:
-        p.send_signal(interrupt_with)
-    except OSError as e:
-        p.kill()
-        p.communicate()
-        print(f"skip  no console to send the interrupt through: {e}")
-        return "skip"
-    _, why = next_line(b"havne-cli: holding after the column check's call")
-    if why:
-        return why
-    held_at = time.monotonic()
-    p.send_signal(interrupt_with)
-    try:
-        out, err = p.communicate(timeout=TAIL_MS / 1000 + 20)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        p.communicate()
-        return "still running long after its hold"
-    waited = time.monotonic() - held_at
-    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
-    if p.returncode != 1 or [l["type"] for l in lines] != ["start", "end"]             or lines[1] != {"type": "end", "reason": "interrupted"}:
-        return (f"exit {p.returncode}, lines {lines}, "
-                f"{err.decode('utf-8', 'replace')}")
-    if waited < TAIL_MS / 1000 - 0.5:
-        return (f"ended {waited:.2f} s into a {TAIL_MS / 1000:.0f} s hold: "
-                f"the second interrupt ended it")
-    if os.path.exists(out_csv) or partial_left(out_csv):
-        return f"something was left beside {os.path.basename(out_csv)}"
-    print("ok    export --signal: a second interrupt after the canceled "
-          "column check changed nothing")
-    return None
-
-
-def interrupt_late(cli, recording):
-    with tempfile.TemporaryDirectory(prefix="havne-cli-int3-") as root:
-        log = os.path.join(root, "bus.log")
-        with open(log, "w", encoding="utf-8", newline="\n") as f:
-            f.write(LOG)
-        cases = [
-            (["import", "candump", log, os.path.join(root, "from-log")],
-             b"import", "imported", os.path.join(root, "from-log")),
-            (["export", recording, os.path.join(root, "out.csv"),
-              "--format", "csv"], b"export", "exported",
-             os.path.join(root, "out.csv")),
-            (["export", recording, "--format", "csv", "--estimate"],
-             b"estimate", "estimate", None),
-            (["health", recording, os.path.join(root, "report.json"),
-              "--format", "json"], b"health report", "health",
-             os.path.join(root, "report.json")),
-        ]
-        failed = 0
-        for args, where, result, made in cases:
-            why = late(cli, args, where, result, made)
-            if why == "skip":
-                return 77
-            if why is not None:
-                print(f"FAIL  {case_name(args)}: {why}")
-                failed += 1
-        why = canceled_late(cli, recording, root)
-        if why == "skip":
-            return 77
-        if why is not None:
-            print(f"FAIL  export --signal: {why}")
-            failed += 1
-    if failed:
-        return 1
-    print("ok    interrupts after core's call leave an export, its sizing, "
-          "an import and a recording's health report as they ended")
-    return 0
-
-
-def interrupted(cli, args, where):
-    """args run held at the first ask, which must be where's (b"export",
-    b"column check", b"interval check", b"import" or b"health report"),
-    then interrupted:
-    None, a failure's words, or "skip" with no console"""
-    env = dict(os.environ)
-    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
-    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
-          "stdin": subprocess.DEVNULL, "env": env}
-    if os.name == "nt":
-        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    p = subprocess.Popen([cli] + args, **kw)
-    held = []
-    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
-    reader.start()
-    reader.join(HELD_WAIT_S)
-    if reader.is_alive() or not held or \
-            not held[0].startswith(b"havne-cli: holding the " + where + b"'s"):
-        p.kill()
-        out, err = p.communicate()
-        reader.join()
-        return (f"didn't hold at the {where.decode()} within "
-                f"{HELD_WAIT_S} s: exit "
-                f"{p.returncode}, {(held[0] if held else b'') + err!r}")
-    try:
-        p.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt"
-                      else signal.SIGINT)
-    except OSError as e:
-        p.kill()
-        p.communicate()
-        print(f"skip  no console to send the interrupt through: {e}")
-        return "skip"
-    sent = time.monotonic()
-    try:
-        out, err = p.communicate(timeout=HOLD_MS / 2000)
-    except subprocess.TimeoutExpired:
-        p.kill()
-        p.communicate()
-        return f"still running {HOLD_MS / 2000:.0f} s after the interrupt"
-    took = time.monotonic() - sent
-    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
-    if p.returncode != 1 or not lines or \
-            lines[-1] != {"type": "end", "reason": "interrupted"}:
-        return (f"exit {p.returncode}, lines {lines}, "
-                f"{err.decode('utf-8', 'replace')}")
-    if any(l["type"] in ("exported", "estimate", "imported", "health",
-                         "health_failed", "error")
-           for l in lines):
-        return f"an interrupted run says more than its end: {lines}"
-    print(f"ok    {case_name(args)}: interrupted, ended {took:.2f} s after it")
-    return None
-
-
-def case_name(args):
-    """The command and its options, or the import's kind"""
-    return args[0] + " " + " ".join(args[args.index("--format"):]) \
-        if "--format" in args else " ".join(args[:2])
-
-
-def interrupt(cli, recording):
-    """Each long command interrupted at its first ask. Core has made
-    nothing by then, so the leftover check here is that first ask's alone;
-    what a stop at each later ask leaves is
-    ExportCancelTest.AStopAtEachAskInTurnLeavesNothingBehind's and
-    ImportCancelTest's"""
-    with tempfile.TemporaryDirectory(prefix="havne-cli-int-") as root:
-        log = os.path.join(root, "bus.log")
-        with open(log, "w", encoding="utf-8", newline="\n") as f:
-            f.write(LOG)
-        values = os.path.join(root, "values.csv")
-        with open(values, "w", encoding="utf-8", newline="\n") as f:
-            f.write("t,Engine Speed\n0,800\n1,810\n")
-        cmap = os.path.join(root, "map.json")
-        with open(cmap, "w", encoding="utf-8", newline="\n") as f:
-            json.dump({"havne_column_map": 1,
-                       "time": {"column": "t", "unit": "s"},
-                       "signals": [{"column": "Engine Speed", "name": "RPM",
-                                    "unit": "rpm"}]}, f)
-        cases = [
-            (["import", "candump", log, os.path.join(root, "from-log")],
-             os.path.join(root, "from-log"), b"import"),
-            (["import", "csv", values, os.path.join(root, "from-csv"),
-              "--map", cmap], os.path.join(root, "from-csv"), b"import"),
-            (["export", recording, os.path.join(root, "out.pcapng"),
-              "--format", "pcapng"], os.path.join(root, "out.pcapng"),
-             b"export"),
-            (["export", recording, os.path.join(root, "copy"),
-              "--format", "folder"], os.path.join(root, "copy"), b"export"),
-            (["export", recording, "--format", "csv", "--estimate"], None,
-             b"export"),
-            (["export", recording, os.path.join(root, "out.csv"),
-              "--format", "csv", "--signal", "Engine RPM"],
-             os.path.join(root, "out.csv"), b"column check"),
-            (["export", recording, "--format", "csv", "--estimate",
-              "--signal", "Engine RPM"], None, b"column check"),
-            # an interval: the sweep's sizing before the export holds
-            (["export", recording, os.path.join(root, "grid.csv"),
-              "--format", "csv", "--rows", "100"],
-             os.path.join(root, "grid.csv"), b"interval check"),
-            (["health", recording, os.path.join(root, "report.json"),
-              "--format", "json"], os.path.join(root, "report.json"),
-             b"health report"),
-        ]
-        failed = 0
-        for args, made, where in cases:
-            why = interrupted(cli, args, where)
-            if why == "skip":
-                return 77
-            if why is None and made is not None and (
-                    os.path.exists(made) or partial_left(made)):
-                why = (f"something was left at or beside "
-                       f"{os.path.basename(made)}: {os.listdir(root)}")
-            if why is not None:
-                print(f"FAIL  {case_name(args)}: {why}")
-                failed += 1
-    if failed:
-        return 1
-    print("ok    an interrupt stops an export, its sizing, an import and a "
-          "recording's health report, leaving nothing")
-    return 0
 
 
 if __name__ == "__main__":
     modes = {"roundtrip": roundtrip, "refusals": refusals, "tshark": tshark,
              "candump": candump}
-    if len(sys.argv) == 4 and sys.argv[1] == "csv-import":
-        sys.exit(csv_import(sys.argv[2], sys.argv[3]))
-    if len(sys.argv) == 4 and sys.argv[1] == "csv-guess":
-        sys.exit(csv_guess(sys.argv[2], sys.argv[3]))
-    if len(sys.argv) == 4 and sys.argv[1] == "interrupt":
-        sys.exit(interrupt(sys.argv[2], sys.argv[3]))
-    if len(sys.argv) == 4 and sys.argv[1] == "interrupt-twice":
-        sys.exit(interrupt_twice(sys.argv[2], sys.argv[3]))
-    if len(sys.argv) == 4 and sys.argv[1] == "interrupt-late":
-        sys.exit(interrupt_late(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":
         sys.exit(folder_export(sys.argv[2], sys.argv[3], sys.argv[4]))
     if len(sys.argv) != 3 or sys.argv[1] not in modes:
-        print(__doc__ or "usage: cli_transfer.py roundtrip|refusals|tshark "
-              "<havne-cli>")
+        print(__doc__ or "usage: cli_transfer.py roundtrip|refusals|tshark|"
+              "candump <havne-cli>, csv <havne-cli> <recording>, "
+              "folder <havne-cli> <findings> <values>")
         sys.exit(2)
     sys.exit(modes[sys.argv[1]](sys.argv[2]))

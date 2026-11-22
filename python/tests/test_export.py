@@ -13,6 +13,8 @@
 # cancel stopping each call at each of its asks in turn, raising, or a
 # Ctrl+C: nothing written, the exception reaching the caller.
 
+import codecs
+import csv
 import os
 import signal
 import threading
@@ -158,10 +160,17 @@ def test_a_wide_csv_of_named_columns_names_the_missing_one(tmp_path, car):
     same_counts(got, line)
     assert got.missing == ("No Such Signal",) and line["missing"] == 1
     assert got.signal_count == 3
-    with open(tmp_path / "py.csv", encoding="utf-8") as f:
+    with open(tmp_path / "py.csv", encoding="utf-8-sig") as f:
         head = f.readline().rstrip("\r\n").split(",")
     assert head[0] == "Time (ms)" and head[1].startswith(names[0])
     assert head[2].startswith(names[1]) and head[3].startswith("No Such Signal")
+    # Named by its key a column is the same column, and not a missing one
+    with havne.Recording(car) as r:
+        keys = [r.signal(n).key for n in picks(car)]
+    assert all(keys)
+    by_key = havne.export_csv(car, tmp_path / "key.csv", signals=keys + ["No Such Signal"])
+    assert by_key.missing == ("No Such Signal",)
+    assert tree(tmp_path / "key.csv") == tree(tmp_path / "py.csv")
 
 
 def test_a_csv_on_a_grid_in_imperial_is_the_clis(tmp_path, car):
@@ -189,9 +198,27 @@ def test_a_csv_over_a_range_is_the_clis(tmp_path):
 def test_the_long_csv_is_the_clis(tmp_path, car):
     got = both(tmp_path, car, "csv", ["--layout", "long"], havne.export_csv, layout="long")
     assert got.values > 0 and got.rows == 0
-    with open(tmp_path / "py.csv", encoding="utf-8") as f:
+    with open(tmp_path / "py.csv", encoding="utf-8-sig") as f:
         f.readline()
-        assert f.readline().rstrip("\r\n") == "time_s,signal,unit,value"
+        assert f.readline().rstrip("\r\n") == "time_s,signal,unit,value,key"
+
+
+def test_a_csv_starts_with_a_byte_order_mark_and_reads_as_the_docs_say(tmp_path, car):
+    # Excel reads a CSV with no byte order mark as ANSI: the units garble
+    havne.export_csv(car, tmp_path / "long.csv", layout="long")
+    havne.export_csv(car, tmp_path / "wide.csv")
+    for name in ("long.csv", "wide.csv"):
+        raw = (tmp_path / name).read_bytes()
+        assert raw[:3] == codecs.BOM_UTF8 and raw[3:6] != codecs.BOM_UTF8
+    # the long one as pandas reads it, skiprows=1 and utf-8-sig, and the
+    # wide one by utf-8-sig: the first cell is the header's, whole
+    with open(tmp_path / "long.csv", encoding="utf-8-sig", newline="") as f:
+        f.readline()
+        assert next(csv.reader(f))[:4] == ["time_s", "signal", "unit", "value"]
+    with open(tmp_path / "wide.csv", encoding="utf-8-sig", newline="") as f:
+        assert next(csv.reader(f))[0] == "Time (ms)"
+    with open(tmp_path / "wide.csv", encoding="utf-8", newline="") as f:
+        assert next(csv.reader(f))[0] == chr(0xFEFF) + "Time (ms)"
 
 
 def test_a_text_signal_is_left_out_of_a_csv_and_refused_as_a_column(tmp_path, values_only):

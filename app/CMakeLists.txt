@@ -45,10 +45,16 @@ qt_add_library(app_ui STATIC
     obdbimport.h
     readonce.cpp
     readonce.h
+    exprcheck.cpp
+    exprcheck.h
+    variantshape.cpp
+    variantshape.h
     pluginstore.cpp
+    pluginstore_pages.cpp
+    pluginstore_import.cpp
+    pluginstore_picks.cpp
     pluginstore.h
-    signalstore.cpp
-    signalstore.h
+    pluginstore_parts.h
     alerttone.cpp
     alerttone.h
     conditionmodel.cpp
@@ -61,9 +67,18 @@ qt_add_library(app_ui STATIC
     recordingimport.h
     recordingexport.cpp
     recordingexport.h
+    recording_frameset.cpp
+    recording_frameset.h
+    refusing_network.h
+    recording_pairs.cpp
     recordingframes.cpp
     recordingframes.h
     recordingview.cpp
+    recordingview_asks.cpp
+    recordingview_queries.cpp
+    recordingview_stretches.cpp
+    recordingview_conditions.cpp
+    recordingview_internal.h
     recordingview.h
     ${APP_BRIDGE_SOURCES}
     signalfilter.cpp
@@ -76,9 +91,9 @@ qt_add_library(app_ui STATIC
     windowtheme.h
 )
 
-set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml
-                            qml/ConditionBook.qml PROPERTIES
+set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/ChartViews.qml qml/ChartBands.qml qml/ComparePairs.qml qml/VehicleBook.qml
+                            qml/DashboardBook.qml qml/DashboardEdit.qml qml/SignalForm.qml qml/Immersive.qml
+                            qml/ConditionBook.qml qml/SessionLabel.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -90,11 +105,15 @@ qt_add_qml_module(app_ui
     QML_FILES
         qml/Main.qml
         qml/Immersive.qml
+        qml/SessionLabel.qml
+        qml/HiddenSignals.qml
         qml/KeepAwake.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
         qml/ThemedCheckBox.qml
         qml/ThemedTextField.qml
+        qml/PlainComboBox.qml
+        qml/PlainMenuItem.qml
         qml/SegmentButton.qml
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
@@ -109,6 +128,28 @@ qt_add_qml_module(app_ui
         qml/RecordingZoomRow.qml
         qml/RecordingSignalRows.qml
         qml/RecordingFramesView.qml
+        qml/RecordingBaselineGone.qml
+        qml/RecordingRefresh.qml
+        qml/RecordingKeys.qml
+        qml/RecordingSplitter.qml
+        qml/RecordingSpanLine.qml
+        qml/RecordingDetailRow.qml
+        qml/RecordingEvents.qml
+        qml/RecordingWatchers.qml
+        qml/RecordingViews.qml
+        qml/RecordingDialogs.qml
+        qml/RecordingViewerTitle.qml
+        qml/RecordingCompare.qml
+        qml/RecordingDecode.qml
+        qml/RecordingRowInfo.qml
+        qml/RecordingFormat.qml
+        qml/RecordingTexts.qml
+        qml/RecordingSeries.qml
+        qml/RecordingCursors.qml
+        qml/RecordingOpen.qml
+        qml/RecordingPanes.qml
+        qml/RecordingReport.qml
+        qml/RecordingFrameTest.qml
         qml/RecordingAbout.qml
         qml/RecordingList.qml
         qml/RecordingImportPanel.qml
@@ -123,6 +164,13 @@ qt_add_qml_module(app_ui
         qml/DashDriveStatus.qml
         qml/DashDriveSheet.qml
         qml/DashTopBar.qml
+        qml/DashHistory.qml
+        qml/DashLayoutFile.qml
+        qml/DashAddFlow.qml
+        qml/DashEdits.qml
+        qml/DashPluginPages.qml
+        qml/DashDrive.qml
+        qml/DashPages.qml
         qml/LogNotice.qml
         qml/ConnectList.qml
         qml/DashPageStrip.qml
@@ -133,16 +181,26 @@ qt_add_qml_module(app_ui
         qml/RecordingsPage.qml
         qml/SettingsPage.qml
         qml/Captioned.qml
+        qml/HeaderButton.qml
         qml/Heading.qml
+        qml/MainHeader.qml
+        qml/MainTabBar.qml
         qml/LabeledFlow.qml
         qml/SettingsAdapter.qml
         qml/SettingsAdvanced.qml
         qml/SettingsList.qml
+        qml/SettingsOwnComputed.qml
         qml/SettingsOwnForm.qml
         qml/SettingsSubpage.qml
         qml/SettingsConnect.qml
         qml/SettingsDisplay.qml
         qml/SettingsOwnSignals.qml
+        qml/SettingsUri.qml
+        qml/SettingsConnectFrom.qml
+        qml/SettingsPicks.qml
+        qml/SettingsImport.qml
+        qml/SettingsRowActions.qml
+        qml/SettingsOwn.qml
         qml/RemoveQuestion.qml
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
@@ -158,9 +216,13 @@ qt_add_qml_module(app_ui
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
+        qml/ChartViews.qml
+        qml/ChartBands.qml
+        qml/ComparePairs.qml
         qml/StripChart.qml
         qml/VehicleBook.qml
         qml/DashboardBook.qml
+        qml/DashboardEdit.qml
         qml/SignalForm.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml
@@ -187,6 +249,13 @@ qt_add_qml_module(app_ui
         fonts/Barlow-SemiBold.ttf
         fonts/Barlow-Bold.ttf
         fonts/BarlowSemiCondensed-Bold.ttf
+        # The Dashboard's presets (DashboardBook.presetText reads them)
+        layouts/desktop/standard.json
+        layouts/desktop/temperatures.json
+        layouts/desktop/showcase.json
+        layouts/phone/standard.json
+        layouts/phone/temperatures.json
+        layouts/phone/showcase.json
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

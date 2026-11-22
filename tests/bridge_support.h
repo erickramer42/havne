@@ -2,7 +2,7 @@
 // Testing: the helpers more than one test_bridge file uses (test_bridge)
 //
 // What the BridgeTest files share: waiting on the GUI thread, files and
-// folders, the fake J2534 DLL's control page, and the signal store's scratch
+// folders, the fake J2534 DLL's control page, and the settings' scratch
 // folders. Each is inline, so every file that includes this keeps its own
 // copy and an unused one costs nothing.
 
@@ -152,11 +152,10 @@ inline void plotOnly(SignalListModel* model, const std::vector<uint16_t>& ids)
         }
         const auto id = static_cast<uint16_t>(
             model->data(i, SignalListModel::IdRole).toUInt());
-        const QString name =
-            model->data(i, SignalListModel::NameRole).toString();
+        const QString key = model->data(i, SignalListModel::KeyRole).toString();
         (std::find(ids.begin(), ids.end(), id) != ids.end() ? plotted
                                                             : unplotted)
-            << name;
+            << key;
     }
     model->setPlotChoices(plotted, unplotted);
 }
@@ -174,6 +173,40 @@ inline QStringList namesOf(SignalListModel* model, const std::vector<uint16_t>& 
         }
     }
     return names;
+}
+
+/* The keys a recording of the bridge's connected session keeps the model's
+ * rows with these ids under, in the model's order: core's keys for the
+ * session's set, which has no signal file */
+inline QStringList keysOf(SessionBridge& bridge, SignalListModel* model,
+                          const std::vector<uint16_t>& ids)
+{
+    QStringList keys;
+    const ecuio_signal_set_t* set =
+        ecuio_session_signal_set(bridge.sessionForTesting());
+    EXPECT_NE(set, nullptr) << "keysOf needs a connected session";
+    if (set == nullptr) {
+        return keys;
+    }
+    std::vector<ecuio_signal_key_t> all(set->count);
+    uint32_t count = 0;
+    EXPECT_EQ(
+        ecuio_signal_set_keys(set, nullptr, all.data(), set->count, &count),
+        ECUIO_OK);
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const auto id = static_cast<uint16_t>(
+            model->data(model->index(r), SignalListModel::IdRole).toUInt());
+        if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+            continue;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            if (set->defs[i].id == id) {
+                keys << QString::fromUtf8(all[i].text);
+            }
+        }
+    }
+    EXPECT_EQ(keys.size(), static_cast<qsizetype>(ids.size()));
+    return keys;
 }
 
 /* Minimal two-signal set, built test-side. Plain assignments only:
@@ -282,7 +315,6 @@ public:
     SettingsDirScope& operator=(const SettingsDirScope&) = delete;
 
     bool valid() const { return m_dir.isValid(); }
-    QString store() const { return m_dir.path() + QStringLiteral("/signals"); }
 
 private:
     QTemporaryDir m_dir;
@@ -324,11 +356,6 @@ inline bool registered(const char* profile)
     return ecuio_profile_lookup(profile, &set) == ECUIO_OK;
 }
 
-inline QStringList storeFiles(const QString& store)
-{
-    return QDir(store).entryList(QDir::Files, QDir::Name);
-}
-
 /* The value Live shows for the signal named name, NaN with no row or no
  * value yet */
 inline double liveValue(SessionBridge& bridge, const QString& name)
@@ -348,25 +375,24 @@ inline double liveValue(SessionBridge& bridge, const QString& name)
     return std::nan("");
 }
 
-/* A mock session decoded by the store's file `bytes` (profile
- * user.recorded), recorded under root until signal A has a value; the
- * recording's folder */
+/* A mock session decoded by `bytes` (a file named "Recorded") kept as a
+ * plugin of the user's own, profile plugin.recorded.base, recorded under
+ * root until signal A has a value; the recording's folder, whose
+ * signals.json is the variant's written file */
 inline QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
                              const QByteArray& bytes)
 {
-    QTemporaryDir from;
-    const QString sha = sha256Of(bytes);
-    EXPECT_TRUE(
-        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
-            .value(QStringLiteral("ok"))
-            .toBool());
-    EXPECT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    const QVariantMap kept = bridge.keepSignalText(
+        QString::fromUtf8(bytes), QString(), QString(), QString());
+    EXPECT_EQ(kept.value(QStringLiteral("profiles")).toStringList(),
+              QStringList{QStringLiteral("plugin.recorded.base")})
+        << kept.value(QStringLiteral("words")).toString().toStdString();
     bridge.setRecordingsRootForTesting(root);
     bridge.setRecording(true);
-    EXPECT_TRUE(
-        bridge
-            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
-            .isEmpty());
+    EXPECT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://rec?profile=plugin.recorded.base"))
+                    .isEmpty());
     EXPECT_TRUE(spinUntil(
         [&bridge]() {
             return !std::isnan(liveValue(bridge, QStringLiteral("A")));
@@ -380,6 +406,22 @@ inline QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
                              : root + QLatin1Char('/') + folders.first();
 }
 
+/* Every plugin the store keeps removed, as Remove does: how many went */
+inline int removeEveryPlugin(SessionBridge& bridge)
+{
+    int gone = 0;
+    for (const QVariant& p : bridge.plugins()) {
+        gone += bridge
+                        .removePlugin(
+                            p.toMap().value(QStringLiteral("sha256")).toString())
+                        .value(QStringLiteral("ok"))
+                        .toBool()
+                    ? 1
+                    : 0;
+    }
+    return gone;
+}
+
 /* The app's Replay of folder, at max speed: connected, and signal A
  * given a value, or the connect's error */
 inline QString replayFolder(SessionBridge& bridge, const QString& folder,
@@ -387,7 +429,7 @@ inline QString replayFolder(SessionBridge& bridge, const QString& folder,
 {
     const QString uri =
         SessionBridge::replayUriFor(
-            folder, QStringLiteral("mock://rec?profile=user.recorded")) +
+            folder, QStringLiteral("mock://rec?profile=plugin.recorded.base")) +
         QStringLiteral("&speed=max");
     const QString err = bridge.connectSession(uri);
     if (err.isEmpty() && expectValue) {

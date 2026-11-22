@@ -19,6 +19,7 @@
 #define HAVNE_CLI_LOG_LINES_H
 
 #include "jsonl.h"
+#include "key_field.h"
 
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
@@ -173,54 +174,60 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
     return true;
 }
 
-// The picks' ids, each name's first def in the set, in the names' order;
-// false with *why for a name the set lacks or one given twice (usage: the
-// names are the caller's typing, checked before any line is written)
+// The picks' ids in the names' order, each name a signal's key or a name
+// one signal of the set has (ecuio_signal_set_find; file the session's
+// signal file or NULL); false with *why, core's words, for text no signal
+// has and for a name several have, and for one signal named twice (usage:
+// the names are the caller's typing, checked before any line is written)
 inline bool resolve_focus(const ecuio_signal_set_t* set,
                           const std::vector<const char*>& names,
-                          std::vector<uint16_t>& ids, std::string* why)
+                          std::vector<uint16_t>& ids, std::string* why,
+                          const ecuio_signal_file_t* file = nullptr)
 {
     ids.clear();
+    const std::vector<ecuio_signal_key_t> keys = set_keys(set, file);
     for (const char* name : names) {
-        const ecuio_signal_def_t* found = nullptr;
-        for (uint32_t i = 0; set != nullptr && set->defs != nullptr &&
-                             i < set->count && found == nullptr;
-             ++i) {
-            const ecuio_signal_def_t& d = set->defs[i];
-            if (std::strncmp(d.name, name, sizeof d.name) == 0) {
-                found = &d;
-            }
-        }
-        if (found == nullptr) {
-            *why = std::string("no signal named '") + name +
-                   "' in the session's profile";
+        uint32_t index = 0;
+        if (keys.empty()) {
+            *why = std::string("no signal with the key or name '") + name + "'";
             return false;
         }
+        if (ecuio_signal_set_find(set, keys.data(),
+                                  static_cast<uint32_t>(keys.size()), name,
+                                  &index) != ECUIO_OK) {
+            *why = ecuio_last_error_detail();
+            return false;
+        }
+        const uint16_t found = set->defs[index].id;
         for (uint16_t id : ids) {
-            if (id == found->id) {
+            if (id == found) {
                 *why = std::string("--signal names '") + name + "' twice";
                 return false;
             }
         }
-        ids.push_back(found->id);
+        ids.push_back(found);
     }
     return true;
 }
 
 // Room for the focus line: a def's name is at most 31 bytes, 6 a byte
-// quoted, plus its id and the punctuation, and the minimum's field
+// quoted, plus its id, its key and the punctuation, and the minimum's
+// field
 inline size_t focus_line_bytes(size_t picks)
 {
-    return 96 + picks * 256;
+    return 96 + picks * (256 + kKeyFieldBytes);
 }
 
-// {"type":"focus","signals":[{id, name}...]}: the picks, in order; empty
-// for none (the whole set is read); "pick":"ranked" under --pick ranked;
-// min_sweep_ms when one is set
+// {"type":"focus","signals":[{id, name, key}...]}: the picks, in order,
+// each with the key a recording keeps it under (file the session's
+// signal file or NULL); empty for none (the whole set is read);
+// "pick":"ranked" under --pick ranked; min_sweep_ms when one is set
 inline void focus_line(Line& l, const ecuio_signal_set_t* set,
                        const std::vector<uint16_t>& ids,
-                       uint32_t min_sweep_ms = 0, bool pick_ranked = false)
+                       uint32_t min_sweep_ms = 0, bool pick_ranked = false,
+                       const ecuio_signal_file_t* file = nullptr)
 {
+    const std::vector<ecuio_signal_key_t> keys = set_keys(set, file);
     l.raw("{\"type\":\"focus\"");
     l.key("signals");
     l.ch('[');
@@ -241,6 +248,8 @@ inline void focus_line(Line& l, const ecuio_signal_set_t* set,
             l.u64(d.id);
             l.key("name");
             l.string(d.name, sizeof d.name);
+            key_field(l, i < keys.size() ? keys[i].text : nullptr,
+                      sizeof keys[i].text);
             l.ch('}');
             break;
         }

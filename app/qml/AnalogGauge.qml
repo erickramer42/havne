@@ -4,7 +4,7 @@
 //          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
-//          QML: QmlTest.dashboard (no negative tick count while a
+//          QML: QmlTest.dashboard{,_pages,_panel} (no negative tick count while a
 //          reused cell rebinds), QmlTest.gauges (no bezel, no face)
 
 import QtQuick
@@ -68,7 +68,7 @@ GaugeBase {
     function px(deg, radius) { return cx + radius * Math.cos(deg * Math.PI / 180) }
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
 
-    // ---- Chapter ring and zone washes behind the ticks
+    // Chapter ring and zone washes behind the ticks
     Shape {
         anchors.fill: parent
         preferredRendererType: Shape.CurveRenderer
@@ -142,7 +142,7 @@ GaugeBase {
         }
     }
 
-    // ---- Progress ring: track, two-step glow, core
+    // Progress ring: track, two-step glow, core
     Shape {
         anchors.fill: parent
         visible: gauge.showProgress
@@ -173,7 +173,7 @@ GaugeBase {
         }
     }
 
-    // ---- Ticks: full-size items rotated about the dial center
+    // Ticks: full-size items rotated about the dial center
     Repeater {
         model: gauge.minorCount
         delegate: Item {
@@ -202,6 +202,7 @@ GaugeBase {
     Repeater {
         model: gauge.majorCount
         delegate: Text {
+            textFormat: Text.PlainText
             required property int index
             Accessible.ignored: true
             readonly property real v: gauge.from + index * gauge.majorStep
@@ -218,7 +219,7 @@ GaugeBase {
         }
     }
 
-    // ---- Peak tell-tale: an amber wedge between ring and rim
+    // Peak tell-tale: an amber wedge between ring and rim
     Item {
         width: gauge.width; height: gauge.height
         visible: gauge.showPeak && !isNaN(gauge.peakValue)
@@ -240,15 +241,21 @@ GaugeBase {
         }
     }
 
-    // ---- Readout: caption above the hub, value below it
+    // Readout: caption above the hub, value below it
     Text {
+        textFormat: Text.PlainText
         Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
-        y: gauge.cy - gauge.r * 0.36 - height / 2
+        // Below the upper numerals' ring (they sit at 45 degrees off the
+        // vertical), which a small dial's text sizes would otherwise reach
+        y: Math.max(gauge.cy - gauge.r * 0.36 - height / 2,
+                    gauge.cy - gauge.numRadius * Math.SQRT1_2 + gauge.numSize * 0.7 + 1)
         objectName: "gaugeCaption"
         text: gauge.caption
-        // A signal's name can be long: it stays inside the dial's face
-        width: Math.min(implicitWidth, gauge.r * 1.3)
+        // A signal's name can be long: it stays inside the face, between the
+        // numerals at the sides
+        width: Math.max(0, Math.min(implicitWidth,
+                                    2 * (gauge.numRadius - gauge.numSize * gauge.labelEm / 2 - 2)))
         elide: Text.ElideRight
         font.pixelSize: Math.max(10, gauge.size * 0.038)
         color: gauge.titleColor
@@ -263,6 +270,7 @@ GaugeBase {
             width: valueLabel.width
             height: valueLabel.height
             Text {
+                textFormat: Text.PlainText
                 id: valueLabel
                 objectName: "readout"
                 Accessible.ignored: true
@@ -285,6 +293,7 @@ GaugeBase {
             }
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.unit
@@ -292,6 +301,7 @@ GaugeBase {
             color: Theme.textDim
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
             topPadding: gauge.size * 0.012
@@ -306,7 +316,7 @@ GaugeBase {
         }
     }
 
-    // ---- Needle: flat, tapered, drawn pointing at 3 o'clock
+    // Needle: flat, tapered, drawn pointing at 3 o'clock
     Shape {
         id: needle
         objectName: "needle"
@@ -343,7 +353,7 @@ GaugeBase {
         }
     }
 
-    // ---- Hub cap
+    // Hub cap
     Rectangle {
         objectName: "hub"
         anchors.centerIn: parent

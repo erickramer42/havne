@@ -383,3 +383,5 @@ its computed programs, two pointers and two counts that the set's
 program, and defines the first flag, `ECUIO_DEF_FLAG_COMPUTED`; the
 validator accepts that bit and refuses any other. `reserved[0]` stays
 earmarked for the unit's quantity, and `reserved[2..5]` stay free.
+
+Note of 2026-11-16: the set's layout is 5 ([ADR-0065](0065-car-sized-profile.md)): `ecuio_channel_decl_t` is 16 bytes, `flags` and `reserved` after the IDs, both zero.

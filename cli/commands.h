@@ -44,9 +44,11 @@ struct StreamArgs {
 };
 
 int run_stream(const StreamArgs& args);
+int cmd_stream(int argc, char** argv);
 
 // cmd_log.cpp
 int run_log(const cli::LogArgs& args);
+int cmd_log(int argc, char** argv);
 
 // cmd_view.cpp
 void write_signal_line(Output& out, const ecuio_recording_t* r,
@@ -89,6 +91,9 @@ struct RecordingCloser {
 
 int run_view(ViewArgs& args);
 
+// cmd_view_args.cpp
+int cmd_view(int argc, char** argv);
+
 // cmd_info.cpp
 struct InfoArgs {
     const char* folder = nullptr;
@@ -96,6 +101,7 @@ struct InfoArgs {
 };
 
 int run_info(const InfoArgs& args);
+int cmd_info(int argc, char** argv);
 
 // cmd_plugins.cpp
 int run_plugins_list(const std::vector<const char*>& paths);
@@ -130,6 +136,7 @@ int run_plugins_put(const PluginMakeArgs& args);
 int run_plugins_drop(const PluginMakeArgs& args);
 bool parse_plugin_make(const std::string& word, int first, int argc,
                        char** argv, PluginMakeArgs* args, std::string* why);
+int cmd_plugins(int argc, char** argv);
 
 // cmd_signals.cpp
 int run_signals_check(const char* path);
@@ -144,10 +151,14 @@ struct ImportArgs {
 };
 
 int run_signals_import(const ImportArgs& args);
+int run_signals_expr(int argc, char** argv);
+int cmd_signals(int argc, char** argv);
 
 // cmd_check.cpp
 int run_conditions_check(const cli::ConditionsCheckArgs& args);
 int run_layout_check(const char* path, const std::string& form);
+int cmd_conditions(int argc, char** argv);
+int cmd_layout(int argc, char** argv);
 
 // cmd_transfer.cpp
 ecuio_status_t guess_map(const cli::ImportArgs& im, std::string* text,
@@ -156,10 +167,14 @@ int print_guessed_map(const cli::ImportArgs& im);
 bool missing_columns(const cli::ExportArgs& ex, bool* asked,
                      std::vector<const char*>* missing);
 int run_frames(const cli::FramesArgs& args);
+int cmd_frames(int argc, char** argv);
+int cmd_export(int argc, char** argv);
+int cmd_import(int argc, char** argv);
 
 // cmd_health.cpp
 int run_health_recording(cli::HealthArgs& a);
 int run_health_session(cli::HealthArgs& a, const char* uri);
+int cmd_health(int argc, char** argv);
 
 // cmd_sim.cpp
 struct SimArgs {
@@ -175,6 +190,7 @@ struct SimArgs {
 
 int run_sim_elm327(const SimArgs& args);
 int run_sim(const SimArgs& args);
+int cmd_sim(int argc, char** argv);
 
 // cmd_play.cpp
 #if HAVNE_CLI_PLAY
@@ -187,6 +203,7 @@ struct PlayArgs {
 
 int run_play(const PlayArgs& args);
 #endif
+int cmd_play(int argc, char** argv);
 
 // cmd_small.cpp
 std::vector<ecuio_can_interface_t> can_interfaces();
@@ -194,6 +211,7 @@ int run_clear_command(const char* uri, uint32_t flags);
 int run_vin(const char* typed);
 int run_dtc(const char* typed);
 int run_devices();
+int cmd_clear(int argc, char** argv);
 
 } // namespace cmd
 

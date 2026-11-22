@@ -1,6 +1,6 @@
 // File/layer: app/qml/LogNotice.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
 import QtQuick.Controls
@@ -27,6 +27,7 @@ RowLayout {
         color: Theme.warning
     }
     Label {
+        textFormat: Text.PlainText
         objectName: notice.name + "Text"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

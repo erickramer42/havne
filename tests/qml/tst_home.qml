@@ -138,6 +138,23 @@ TestCase {
         compare(page.profileOf("mock://demo"), "default")
     }
 
+    // A plugin's session reads as the vehicle then the plugin; any other
+    // keeps "Profile X" and the vehicle after it
+    function test_theSessionDetailNamesTheVehicleAndPlugin() {
+        const page = createPage(1280, 720)
+        const card = find(page, "homeSession")
+        const detail = find(card, "homeSessionDetail")
+        page.profileNames = { "mock": "Daily driver extras" }
+        Bridge.vehicleLabel = "Project car"
+        compare(Bridge.connectSession("mock://demo?profile=mock"), "", "connects")
+        tryVerify(() => card.visible, 5000, "the card")
+        verify(detail.text.startsWith("Project car · Daily driver extras · since "), detail.text)
+        verify(!detail.text.includes("Profile"), detail.text)
+        page.profileNames = ({})
+        tryVerify(() => detail.text.startsWith("Profile mock · Project car · since "), 2000, detail.text)
+        Bridge.vehicleLabel = ""
+    }
+
     // Connect hands Main the chosen row; a tapped one is the choice
     function test_homeConnectsTheChosenRow() {
         const page = createPage(1280, 720)
@@ -167,7 +184,7 @@ TestCase {
         verify(!find(page, "homeConnectList").visible, "the list gives way")
         verify(find(page, "homeLogo").visible, "the logo stays")
         compare(find(card, "linkLabel").text, Theme.linkLabel(Bridge.linkState))
-        compare(find(card, "homeSessionAddress").text, Bridge.uriLabel)
+        compare(find(card, "homeSessionAddress").text, SessionLabel.address(Bridge.uriLabel))
         verify(find(card, "homeSessionDetail").text.startsWith("Profile default · since "),
                find(card, "homeSessionDetail").text)
         const dash = find(card, "homeDashboard")
@@ -176,6 +193,17 @@ TestCase {
         verify(off.flat, "ending a session is quiet")
         off.clicked()
         tryVerify(() => !card.visible && find(page, "homeConnectList").visible, 5000, "the list again")
+    }
+
+    // The card's address leaves the profile to its detail line
+    function test_theSessionCardsAddressDropsTheProfile() {
+        const page = createPage(1280, 720)
+        const card = find(page, "homeSession")
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "connects")
+        tryVerify(() => card.visible, 5000, "the card")
+        compare(find(card, "homeSessionAddress").text, "mock://demo")
+        verify(find(card, "homeSessionDetail").text.startsWith("Profile obd2"),
+               find(card, "homeSessionDetail").text)
     }
 
     // Held still, in front of the user (the offscreen window may not count

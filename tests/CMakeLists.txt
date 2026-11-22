@@ -22,13 +22,29 @@ if(MSVC)
 endif()
 
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
-    test_recorder.cpp test_recording.cpp test_recording_check.cpp
+add_executable(test_core test_core.cpp test_core_dispatch.cpp
+    test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
+    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
+    test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
+    test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
+    test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
+    test_recorder_attach.cpp test_recorder_file.cpp
+    test_recording.cpp test_recording_reader.cpp
+    test_recording_hour.cpp test_recording_stats.cpp
+    test_recording_stretches.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
-    test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
-    test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp)
+    test_export_csv.cpp test_export_folder.cpp test_export_range.cpp
+    test_export_frames.cpp test_export_cancel.cpp
+    test_recording_keys.cpp
+    test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
+    test_health_baseline.cpp test_csv_import.cpp test_csv_import_recording.cpp
+    test_frames_read.cpp test_csv_guess.cpp test_csv_guess_rows.cpp
+    test_csv_guess_call.cpp test_recording_aids.cpp
+    test_condition_session.cpp test_condition_session_link.cpp
+    test_condition_recording.cpp test_condition_recording_events.cpp
+    test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
+    test_key_window_setup.cpp test_security_store.cpp
+    test_security_store_file.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -81,7 +97,7 @@ add_test(NAME NoticesTest.EachBundledFontIsNamed
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
-# (docs/testing.md "Performance") ---
+# (docs/performance.md) ---
 add_executable(bench_recording bench_recording.cpp)
 target_include_directories(bench_recording PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(bench_recording PRIVATE ecuio-core)
@@ -91,10 +107,16 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
+add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
+    test_signal_eval.cpp
+    test_signal_keys.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp
-    test_condition_file.cpp test_condition_eval.cpp)
+    test_plugin.cpp test_plugin_variants.cpp
+    test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
+    test_plugin_conversation_rules.cpp test_plugin_conversation_gate.cpp test_base64.cpp
+    test_condition_file.cpp test_condition_file_resolve.cpp
+    test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
 # programs' checker and stack machine, which are internal
@@ -121,7 +143,28 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp)
+add_executable(test_obd2 test_obd2.cpp
+    test_obd2_engine.cpp
+    test_obd2_walk.cpp
+    test_obd2_scan.cpp
+    test_obd2_identification.cpp
+    test_obd2_diagnostics.cpp
+    test_obd2_clear.cpp
+    test_obd2_packing.cpp
+    test_obd2_pid_support.cpp
+    test_obd2_sim_ecu.cpp
+    test_obd2_sim_dids.cpp
+    test_obd2_sim_ask.cpp
+    test_obd2_focus.cpp
+    test_session_control.cpp
+    test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
+    test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
+    test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
+    test_request_quiet.cpp
+    test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
+    test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
+    test_sim_timing.cpp
+    test_scan_retry.cpp test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -149,10 +192,21 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # request_engine.h, which it also includes to hand it the replies.
 # test_elm327_session.cpp: the transport against the fake ELM327 behind
 # internal.h's port opener, and on POSIX the OS's port over a
-# pseudo-terminal (elm327_port.h); it holds the binary's new_counter.h.
+# pseudo-terminal (elm327_port.h); it is in parts by theme
+# (test_elm327_session_*.cpp, helpers in test_elm327_support.h), and
+# test_elm327_session_alloc.cpp holds the binary's new_counter.h.
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
+# test_elm327_talk.cpp: a talk through the test seam, against the fake.
+# test_elm327_turns.cpp: which ECU asks next (request_turns.h), against it.
+# test_elm327_pack.cpp: packs sized by their reply's frames, against it.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp)
+    test_elm327_session_diag.cpp test_elm327_session_close.cpp
+    test_elm327_session_scan.cpp test_elm327_session_listen.cpp
+    test_elm327_session_uri.cpp test_elm327_session_ports.cpp
+    test_elm327_session_stream.cpp test_elm327_session_links.cpp
+    test_elm327_session_alloc.cpp
+    test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
+    test_elm327_pack.cpp test_elm327_gate.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -167,11 +221,28 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
+# --- The sandbox: Qt-free, every platform (UNIT, ADR-0066 section 2) ---
+# test_wamr_build.cpp asks the vendored WAMR itself (third_party/wamr.cmake)
+# what core relies on; its header comes from WAMR_INCLUDE_DIR.
+# test_wasm_check.cpp, test_sandbox.cpp and test_sandbox_budget.cpp:
+# core/src's wasm_check.h and wasm_sandbox.h, internal. verify.sh's
+# cross-arch step builds and runs them all against the x86 core, which CI
+# never builds.
+add_executable(test_sandbox test_wamr_build.cpp test_wasm_check.cpp
+    test_sandbox.cpp test_sandbox_budget.cpp)
+target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_definitions(test_sandbox PRIVATE ${WAMR_EMBED_DEFINITIONS})
+target_link_libraries(test_sandbox PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_sandbox)
+gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
 # test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
-add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
+add_executable(test_socketcan test_socketcan.cpp test_socketcan_clock.cpp
+    test_isotp.cpp test_socketcan_send.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 # the simulated ECU loads the replay fixture (SimTest, Linux)
@@ -189,23 +260,35 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # test_vcan_requests.cpp: socketcan:// requesting through ISO-TP against
 # that ECU (ADR-0040, SocketCanRequestTest), and against the test car's
 # recording as the ECU, its replies broken at the ISO-TP level
-# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
+# (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest); it is in
+# parts by theme (test_vcan_requests_*.cpp, helpers in
+# test_vcan_requests_support.h).
 # test_vcan_isotp.cpp: core's ISO-TP against the kernel's
 # (IsoTpConformanceTest).
-# RUN_SERIAL: the cases share the bus, and an error frame passes every
-# session's ID filter.
+# test_vcan_talk.cpp: a request longer than a frame through a requesting
+# session, to the kernel's ISO-TP and the simulated ECU's (ADR-0066
+# section 2.4, SocketCanTalkTest).
+# test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
+# pace doesn't wait on another's (SocketCanTurnsTest).
+# RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
+# every session's ID filter; every vcan0 user takes the lock, so they run
+# one at a time while the rest of the suite runs beside them.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
-                   test_vcan_requests.cpp test_vcan_isotp.cpp)
+                   test_vcan_requests.cpp test_vcan_requests_focus.cpp
+                   test_vcan_requests_close.cpp
+                   test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     # core/src: isotp.h, pure and internal (test_socketcan's precedent)
     target_include_directories(test_vcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
     app_enable_warnings(test_vcan)
-    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+    gtest_discover_tests(test_vcan DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30 RESOURCE_LOCK vcan0)
 endif()
 
 # --- Golden-output comparator: Python 3, no packages ---
@@ -217,6 +300,11 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # (growth into a struct's reserved room passes, a break fails): its
 # self-test runs over reports of real mutants, on every platform.
 if(Python3_Interpreter_FOUND)
+    # The names a CTest include sets properties on still exist (the include
+    # ignores a missing one)
+    add_test(NAME CtestIncludeNamesTest.TheJ2534TimeoutNamesExist
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ctest_include_names.py)
+    set_tests_properties(CtestIncludeNamesTest.TheJ2534TimeoutNamesExist PROPERTIES TIMEOUT 60)
     add_test(NAME GoldenTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     # recording_compare.py, golden.py's like for recording folders
@@ -231,9 +319,28 @@ if(Python3_Interpreter_FOUND)
     # scripts/verify_scope.py, which steps verify.sh --changed takes
     add_test(NAME VerifyScopeTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/verify_scope.py selftest)
+    # scripts/docs_only.py, which diffs CI runs and the release gate takes as docs alone
+    add_test(NAME DocsOnlyTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/docs_only.py selftest)
+    # scripts/tidy-size-ratchet.sh over made-up size lines and baselines
+    # (skip 77 where no bash is found)
+    add_test(NAME TidyRatchetTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tidy_ratchet_selftest.py)
+    set_tests_properties(TidyRatchetTest.SelfTest PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+    # scripts/filelength_check.py, the file-length ratchet (skip 77 where no git is found)
+    add_test(NAME FileLengthTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/filelength_check.py selftest)
+    set_tests_properties(FileLengthTest.SelfTest PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vendored_check.py: third_party/wamr against its committed
+    # list of hashes, with no network. A change to that folder is a patch
+    # beside it, never an edit in it (third_party/README.md)
+    add_test(NAME VendoredTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py selftest)
+    add_test(NAME VendoredTest.WamrIsItsListedBytes
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py check)
     # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
     # made-up PE, ELF and Mach-O files and a made-up package
     add_test(NAME WheelTest.SelfTest
@@ -249,6 +356,13 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
                 ${CMAKE_SOURCE_DIR})
+    # Every Text and Label in app/qml sets textFormat: a text's <img> loads
+    # a file: URL's host with no interceptor asked, so outside text is plain
+    add_test(NAME PlainTextPinTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py --selftest)
+    add_test(NAME PlainTextPinTest.EveryTextSetsItsFormat
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py
+                ${CMAKE_SOURCE_DIR})
 endif()
 
 # --- havne-cli (ADR-0031): Qt-free, every desktop platform ---
@@ -259,9 +373,12 @@ endif()
 # too, which is the host's clock). Rewrite one after a deliberate change
 # with the same command plus --update, and read its diff.
 if(TARGET havne-cli)
-    add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
+    add_executable(test_cli test_cli.cpp test_cli_view.cpp test_cli_files.cpp
+        test_cli_signals.cpp test_cli_elm327.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp)
+        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
+        test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
+        test_cli_summary.cpp test_cli_emulator.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -320,6 +437,12 @@ if(TARGET havne-cli)
                --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
+        # A session of more modules than its info lists itself: the
+        # session line names each one (ADR-0065)
+        app_cli_golden(ASessionLineNamesEveryModule stream-modules.jsonl --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream
+               "mock://golden?profile=uds-generic&diagnose=0&did=7E8:D100:u8,7E9:D101:u8,7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8"
+               --count 8)
         # A typed VIN's decode (ADR-0043), made up around FAKE: the model
         # year a letter in position 7 places, the make by vPIC's code
         app_cli_golden(AVinIsDecoded vin.jsonl
@@ -363,6 +486,9 @@ if(TARGET havne-cli)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
+        app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
+        set_tests_properties(CliElm327RunTest.TheMadeUpCarsModulesAllAnswer PROPERTIES TIMEOUT 180)
         app_cli_elm327(PythonObdReadsIt python-obd)
         set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
@@ -404,7 +530,7 @@ if(TARGET havne-cli)
         # candump log and of a CSV, each interrupted mid-run: an interrupted
         # end, nothing left behind
         add_test(NAME CliTransferRunTest.interrupt
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
@@ -413,7 +539,7 @@ if(TARGET havne-cli)
         # import and a recording's health report at once: the end line,
         # exit 1
         add_test(NAME CliTransferRunTest.interrupt-twice
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-twice $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
@@ -421,7 +547,7 @@ if(TARGET havne-cli)
         # Interrupts once core's call has returned change nothing: the
         # result line whole, exit 0, the file in place
         add_test(NAME CliTransferRunTest.interrupt-late
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_interrupt.py
                     interrupt-late $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-late PROPERTIES
@@ -429,14 +555,14 @@ if(TARGET havne-cli)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-import $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-import PROPERTIES TIMEOUT 60)
         # The same CSVs with no map: guessed, printed as committed, imported;
         # a time with no unit and a file with no header refused
         add_test(NAME CliTransferRunTest.csv-guess
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer_import.py
                     csv-guess $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
         set_tests_properties(CliTransferRunTest.csv-guess PROPERTIES TIMEOUT 60)
@@ -473,7 +599,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
                         candump $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliTransferRunTest.candump PROPERTIES
-                TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                TIMEOUT 90 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # A replay cut short under it stops early, and the stream ends
         # with it instead of waiting for a last frame that never comes
@@ -525,7 +651,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
                         sim $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
-                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # A clear through core's gate against the fake DLL's ECU (Windows)
         # or the simulated ECU on vcan0 (Linux; skipped without it unless
@@ -543,7 +669,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
                         TheSimulatedEcuIsCleared $<TARGET_FILE:havne-cli>)
             set_tests_properties(CliClearRunTest.TheSimulatedEcuIsCleared
-                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 90 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # Every path havne-cli takes, under a folder named outside any one
         # code page: on Windows its arguments come as UTF-16
@@ -588,13 +714,15 @@ if(TARGET havne-cli)
             PROPERTIES TIMEOUT 60)
         # A live stream whose reader stalls drops condition lines, and the
         # end line counts each one: the lines received and the count are
-        # the recording's cond lines (about 30 s)
+        # the recording's cond lines (about 60 s: the rev limiter at 51-56 s)
+        # The script bounds a wedged child at 150 s itself: ctest's bound is
+        # past that, so a wedge ends in the script's words
         add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
-            PROPERTIES TIMEOUT 90 COST 30)
+            PROPERTIES TIMEOUT 200 COST 70)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -656,10 +784,20 @@ if(TARGET havne-cli)
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.PickRankedAsksTheRankedSignals
             PROPERTIES TIMEOUT 120)
+        # A set past a rotation is asked only its picks (ADR-0065): the
+        # session line, stream's and log's words and log's refusal
+        add_test(NAME CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick-only
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} replay $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        add_test(NAME CliLogRunTest.TheSummaryAgreesWithTheRecording
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} summary $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         add_test(NAME CliLogRunTest.AnArmedLogWritesAFolderPerWindow
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} armed $<TARGET_FILE:havne-cli>
@@ -671,6 +809,7 @@ if(TARGET havne-cli)
         set_tests_properties(CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
             CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            CliLogRunTest.TheSummaryAgreesWithTheRecording
             CliLogRunTest.AnArmedLogWritesAFolderPerWindow
             CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
             PROPERTIES TIMEOUT 60)
@@ -728,6 +867,20 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/page-dropped.json)
         app_cli_golden(LayoutCheckNamesAMissingFile layout-check-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/none.json)
+        # The Dashboard's presets (app/layouts, compiled into the app): each
+        # file reads whole for its form, nothing dropped, no plugin's file
+        foreach(_form phone desktop)
+            foreach(_preset standard temperatures showcase)
+                add_test(NAME CliLayoutPresetTest.${_form}_${_preset}
+                    COMMAND havne-cli layout check
+                            ${CMAKE_SOURCE_DIR}/app/layouts/${_form}/${_preset}.json
+                            --form ${_form})
+                set_tests_properties(CliLayoutPresetTest.${_form}_${_preset} PROPERTIES
+                    TIMEOUT 60
+                    PASS_REGULAR_EXPRESSION
+                        "\"ok\":true.*\"dropped\":.\"pages\":0,\"cells\":0..*\"needs_files\":..,")
+            endforeach()
+        endforeach()
         # The app's read before any rule: a file of exactly the bound, its BOM
         # counted as the app counts it, reads; one byte more is refused, and
         # so is a file in Latin-1
@@ -762,6 +915,39 @@ if(TARGET havne-cli)
         app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
             signals-replaces-refused.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
+        # An expression against a loaded file (ADR-0062): what it reads
+        # and its value from the values given; where and why one is
+        # refused, as a new signal and in a signal's place; why there is
+        # no value; the format a call needs in a format 1 file; the names
+        # an expression can read; a plugin variant's own signals; a file
+        # that isn't there
+        app_cli_golden(SignalsExprReadsAnExpressionAndWorksItOut signals-expr.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               "margin / 2 + oil" --value coolant=95 --value oil=110@1)
+        app_cli_golden(SignalsExprSaysWhereAnExpressionIsRefused
+            signals-expr-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               "max(coolant, oli)")
+        app_cli_golden(SignalsExprRefusesAnEditThatReadsItself
+            signals-expr-circle.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               --key hottest "margin + 1")
+        app_cli_golden(SignalsExprSaysWhyThereIsNoValue signals-expr-stale.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               hot --value coolant=120@3.5 --value oil=90)
+        app_cli_golden(SignalsExprNamesTheFormatACallNeeds signals-expr-format.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/extras.json
+               "max(obd2.rpm, road_speed) / 1000"
+               --value obd2.pid_0c=2500 --value road_speed=40)
+        app_cli_golden(SignalsExprListsTheNamesAnExpressionReads signals-expr-inputs.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json)
+        app_cli_golden(SignalsExprReadsAPluginsVariant signals-expr-plugin.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr
+               --plugin ${CMAKE_SOURCE_DIR}/plugins/example-sim --variant my2019
+               "clutch_slip / obd2.rpm" --value clutch_slip=30 --value obd2.rpm=1500)
+        app_cli_golden(SignalsExprNamesAMissingFile signals-expr-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/none.json
+               "a + b")
         # A condition file through the loader (ADR-0063): what it holds;
         # how its references meet obd2's set, the mock's and a signal
         # file's (a level in another unit, a text signal, an enumeration
@@ -893,6 +1079,29 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
             plugins-check-format2.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
+        # A plugin's Dashboard pages (ADR-0052's appendix on pages): a page
+        # line for each, through the layout check, and the requires_core
+        # line its older requires.core earns
+        app_cli_golden(PluginsCheckJudgesAPluginsPages plugins-check-pages.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages)
+        # A key no variant has, a cell the layout check drops and a second
+        # page of one name: each page fails, so the check does
+        app_cli_golden(PluginsCheckFailsAPageThatWontRead plugins-check-pages-bad.jsonl
+            --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages-bad.json)
+        # A format 2 plugin with the conversation tier (ADR-0066): what its
+        # manifest lets its module cause to be sent, after the plugin line;
+        # then the same plugin as a folder with its module a file, a
+        # changed module, a put and a drop refused, and every bound at once
+        app_cli_golden(PluginsCheckSaysWhatAConversationDeclares
+            plugins-check-conversation.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/conversation.json)
+        add_test(NAME CliPluginConversationTest.AFolderReadsAsItsPackedForm
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_conversation.py
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
+        set_tests_properties(CliPluginConversationTest.AFolderReadsAsItsPackedForm
+            PROPERTIES TIMEOUT 120)
         app_cli_golden(PluginsCheckNamesARefusedFixtureFile
             plugins-check-bad-fixture.jsonl --exit 1
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)
@@ -929,7 +1138,7 @@ if(TARGET havne-cli)
                         $<TARGET_FILE:havne-cli> ${CMAKE_SOURCE_DIR}/plugins
                         ${_cli_plugins}/repeat)
             set_tests_properties(CliPluginRunTest.EveryPluginsFixturesPass
-                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
             # python/examples/isotp_fuzz.py against havne-cli's sim on
             # vcan0 (ADR-0053's appendix "the examples as built"): outside
             # pytest, so the sanitizer tree runs it on its ASan havne-cli
@@ -937,7 +1146,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_isotp_fuzz.py
                         $<TARGET_FILE:havne-cli>)
             set_tests_properties(ExampleTest.isotp_fuzz_cli
-                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE LABELS "python")
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0 LABELS "python")
         endif()
         # An OBDb signal set, synthetic (ADR-0051 section 7): imported for a
         # model year, its notes and the file written whole, beside nothing
@@ -985,7 +1194,7 @@ if(TARGET havne-cli)
                 COMMAND ${Python3_EXECUTABLE} ${_cli_make} vcan $<TARGET_FILE:havne-cli>
                         ${_cli_signals})
             set_tests_properties(CliPluginMakeTest.AWrappedFileDecodesAsTheFileOnVcan
-                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         app_cli_golden(PluginsCheckNamesEachVariantsLicense plugins-check-licenses.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_made}/plugins-put-renamed.json)
@@ -1088,6 +1297,21 @@ if(TARGET havne-cli)
             view-frames-missing-folder.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view
                ${CMAKE_CURRENT_BINARY_DIR}/never-there --frames)
+        # A signal named by its key or by a name one signal has (ADR-0065
+        # section 9): view and export on a recording with two signals of
+        # one name, log on the mock
+        add_test(NAME CliKeysRunTest.ViewAndExportTakeAKeyOrANameOneSignalHas
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py recording
+                    $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.LogTakesAKeyOrANameOneSignalHas
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py log
+                    $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.AComputedSignalGoesByItsAuthorsKey
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py file
+                    $<TARGET_FILE:havne-cli>)
+        add_test(NAME CliKeysRunTest.ADeltaPairsByKeyElseByANameEachHasOnce
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_keys.py delta
+                    $<TARGET_FILE:havne-cli>)
         add_test(NAME CliViewRunTest.ColumnsCountEverySampleOnce
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py once
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
@@ -1236,7 +1460,8 @@ if(TARGET havne-cli)
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
-    app_cli_usage(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|")
+    app_cli_usage_says(LogAnEmptySignalIsUsage "log|mock://x|f|--signal|"
+        "--signal takes a signal's name")
     # The names are checked against the session's set after the connect,
     # before any line: a typo and a repeat are usage with nothing written
     app_cli_usage(LogAnUnknownSignalIsUsage "log|mock://x|f|--signal|Nothing")
@@ -1255,6 +1480,10 @@ if(TARGET havne-cli)
         app_cli_usage_says(PlaySecondsPastTheCapIsUsage
             "play|mock://x|--to|vcan0|--seconds|31622401"
             "--seconds takes a whole number from 1 to 31622400")
+        app_cli_usage_says(PlayWithoutAnInterfaceIsUsage "play|mock://x"
+            "play needs a URI and --to <interface>")
+        app_cli_usage_says(PlayACountOfZeroIsUsage "play|mock://x|--to|vcan0|--count|0"
+            "--count takes a whole number above 0")
     else()
         app_cli_usage_says(PlayNeedsLinux
             "play|mock://x|--to|vcan0" "play needs Linux")
@@ -1302,37 +1531,96 @@ if(TARGET havne-cli)
         "log|mock://x|f|--conditions|" "--conditions takes one condition file")
     app_cli_usage_says(LogArmedWithoutConditionsIsUsage
         "log|mock://x|f|--armed" "--armed goes with --conditions")
-    app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
-    app_cli_usage(SignalsWithoutCheckIsUsage "signals")
-    app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
-    app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
-    app_cli_usage(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json")
-    app_cli_usage(SignalsImportFromAnotherFormatIsUsage
-        "signals|import|dbc|a.json|--out|b.json")
-    app_cli_usage(SignalsImportAYearBeforeOBDIIIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--year|1979")
-    app_cli_usage(SignalsImportAnUnknownOptionIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--fast")
-    app_cli_usage(SignalsImportAWmiWithoutAPluginIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ")
-    app_cli_usage(SignalsImportYearsWithoutAPluginIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ|--years|2015-2020")
-    app_cli_usage(SignalsImportYearsWithoutAWmiIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--years|2015-2020")
-    app_cli_usage(SignalsImportAWmiThatIsntOneIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZI")
-    app_cli_usage(SignalsImportYearsBackwardsIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZZ|--years|2020-2015")
-    app_cli_usage(SignalsImportAWmiWithoutCodesIsUsage
-        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi")
+    app_cli_usage_says(SignalsCheckWithoutAFileIsUsage "signals|check"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsWithoutCheckIsUsage "signals"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsAnUnknownWordIsUsage "signals|lint|x.json"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsExprWithoutAFileIsUsage "signals|expr|a + b"
+        "signals expr takes --signals")
+    app_cli_usage_says(SignalsExprAFileAndAPluginIsUsage
+        "signals|expr|--signals|a.json|--plugin|p" "signals expr takes --signals")
+    app_cli_usage_says(SignalsExprTwoExpressionsIsUsage
+        "signals|expr|--signals|a.json|a|b" "signals expr takes one expression")
+    app_cli_usage_says(SignalsExprAKeyWithoutAnExpressionIsUsage
+        "signals|expr|--signals|a.json|--key|boost" "--key goes with an expression")
+    app_cli_usage_says(SignalsExprAKeyThatIsNoKeyIsUsage
+        "signals|expr|--signals|a.json|a|--key|Boost" "--key takes a signal's key")
+    app_cli_usage_says(SignalsExprAValueWithoutAnExpressionIsUsage
+        "signals|expr|--signals|a.json|--value|a=1" "--value goes with an expression")
+    app_cli_usage_says(SignalsExprAValueWithoutANumberIsUsage
+        "signals|expr|--signals|a.json|a|--value|a" "--value takes")
+    app_cli_usage_says(SignalsExprANameGivenTwoValuesIsUsage
+        "signals|expr|--signals|a.json|a|--value|a=1|--value|a=2"
+        "--value gives 'a' two values")
+    app_cli_usage_says(SignalsExprAVariantWithoutAPluginIsUsage
+        "signals|expr|--signals|a.json|--variant|base"
+        "--variant names a --plugin's variant")
+    app_cli_usage_says(SignalsExprAnUnknownOptionIsUsage
+        "signals|expr|--signals|a.json|--fast"
+        "unexpected '--fast': an expression that starts with -- goes in parentheses")
+    # A value's name is read in the file, so these load one
+    set(_cli_expr_chain "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/chain.json")
+    app_cli_usage_says(SignalsExprAValueForNoSignalIsUsage
+        "signals|expr|--signals|${_cli_expr_chain}|oil|--value|oli=1"
+        "--value oli: the expression reads 'oli', which no signal is")
+    app_cli_usage_says(SignalsExprAValueForAComputedSignalIsUsage
+        "signals|expr|--signals|${_cli_expr_chain}|hot|--value|margin=1"
+        "--value margin: the signal is computed")
+    app_cli_usage_says(SignalsExprOneSignalGivenTwoValuesIsUsage
+        "signals|expr|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json|obd2.rpm|--value|obd2.rpm=1|--value|obd2.pid_0c=2"
+        "--value gives one signal two values, as 'obd2.rpm' and 'obd2.pid_0c'")
+    app_cli_usage_says(SignalsExprAPluginOfSeveralVariantsNeedsOne
+        "signals|expr|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|oil_temp"
+        "--plugin needs --variant to name one of its variants: base, my2019")
+    app_cli_usage_says(SignalsExprAVariantThePluginLacksIsUsage
+        "signals|expr|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|--variant|my2020|oil_temp"
+        "--plugin needs --variant to name one of its variants: base, my2019")
+    app_cli_usage_says(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json"
+        "signals import obdb needs --out <file>")
+    app_cli_usage_says(SignalsImportFromAnotherFormatIsUsage
+        "signals|import|dbc|a.json|--out|b.json"
+        "signals takes check <file>")
+    app_cli_usage_says(SignalsImportAYearBeforeOBDIIIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--year|1979"
+        "--year takes a model year, 1980 to 2100")
+    app_cli_usage_says(SignalsImportAnUnknownOptionIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--fast"
+        "unexpected '--fast'")
+    app_cli_usage_says(SignalsImportAWmiWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ"
+        "--wmi and --years go with --plugin")
+    app_cli_usage_says(SignalsImportYearsWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ|--years|2015-2020"
+        "--wmi and --years go with --plugin")
+    app_cli_usage_says(SignalsImportYearsWithoutAWmiIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--years|2015-2020"
+        "--years goes with --wmi")
+    app_cli_usage_says(SignalsImportAWmiThatIsntOneIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZI"
+        "--wmi takes manufacturer codes")
+    app_cli_usage_says(SignalsImportYearsBackwardsIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZZ|--years|2020-2015"
+        "--years takes <from>-<to>")
+    app_cli_usage_says(SignalsImportAWmiWithoutCodesIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi"
+        "unexpected '--wmi'")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
-    app_cli_usage(PluginsAnUnknownWordIsUsage "plugins|lint|x")
+    app_cli_usage_says(PluginsAnUnknownWordIsUsage "plugins|lint|x"
+        "plugins takes list <pkg>")
     app_cli_usage(PluginsListWithoutAPackageIsUsage "plugins|list")
-    app_cli_usage(PluginsListAnOptionIsUsage "plugins|list|x|--fast")
+    app_cli_usage_says(PluginsListAnOptionIsUsage "plugins|list|x|--fast"
+        "unexpected '--fast'")
     app_cli_usage(PluginsCheckWithoutAPackageIsUsage "plugins|check")
-    app_cli_usage(PluginsCheckAnUnknownOptionIsUsage "plugins|check|x|--of|vcan0")
+    app_cli_usage_says(PluginsCheckAnUnknownOptionIsUsage
+        "plugins|check|x|--of|vcan0" "plugins check takes <pkg>")
+    app_cli_usage_says(PluginsCheckAnEmptyInterfaceIsUsage "plugins|check|x|--on|"
+        "plugins check takes <pkg>")
     app_cli_usage(PluginsCheckOnWithoutAnInterfaceIsUsage "plugins|check|x|--on")
     app_cli_usage(PluginsCheckAFlagForThePackageIsUsage "plugins|check|--on")
     app_cli_usage(PluginsCheckHelpForThePackageIsUsage "plugins|check|--help")
@@ -1340,7 +1628,8 @@ if(TARGET havne-cli)
         "plugins|match|--x|--vin|ZZZFAKE11K0000001")
     app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
     app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
-    app_cli_usage(PluginsWrapWithoutAnOutIsUsage "plugins|wrap|a.json")
+    app_cli_usage_says(PluginsWrapWithoutAnOutIsUsage "plugins|wrap|a.json"
+        "plugins wrap needs --out <pkg>")
     app_cli_usage(PluginsWrapAnOutWithoutAFileIsUsage "plugins|wrap|a.json|--out")
     app_cli_usage(PluginsWrapAFlagForTheFileIsUsage "plugins|wrap|--out|b.json")
     app_cli_usage(PluginsWrapAnUnknownOptionIsUsage
@@ -1366,6 +1655,9 @@ if(TARGET havne-cli)
         "stream|mock://x?profile=plugin.example-sim.base|--plugin|${_usage_example}|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
     app_cli_usage(SimPluginWithoutItsVariantIsUsage
         "sim|mock://sim|--on|vcan0|--plugin|${_usage_example}")
+    app_cli_usage_says(SimSignalsAndAPluginIsUsage
+        "sim|mock://sim|--on|vcan0|--signals|a.json|--plugin|p"
+        "--signals and --plugin each give the profile")
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
@@ -1396,52 +1688,88 @@ if(TARGET havne-cli)
     app_cli_usage(ClearAnUnknownOptionIsUsage "clear|mock://x|--yes|--force")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
-    app_cli_usage(ViewWithoutARecordingIsUsage "view")
-    app_cli_usage(ViewColumnsOfZeroIsUsage "view|x|--columns|0")
-    app_cli_usage(ViewTooManyColumnsIsUsage "view|x|--columns|10001")
-    app_cli_usage(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways")
-    app_cli_usage(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM")
-    app_cli_usage(ViewHysteresisWithoutARiseIsUsage
-        "view|x|--align-on|marker:pull|--hysteresis|5")
-    app_cli_usage(ViewANegativeHysteresisIsUsage
-        "view|x|--align-on|rise:RPM:1|--hysteresis|-1")
-    app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
-        "view|x|--align-on|engine-start|--hysteresis|400")
-    app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
-    app_cli_usage(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:")
-    app_cli_usage(ViewPullZeroIsUsage "view|x|--align-on|pull:0")
-    app_cli_usage(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first")
+    app_cli_usage_says(ViewWithoutARecordingIsUsage "view"
+        "view needs a recording's folder")
+    app_cli_usage_says(ViewColumnsOfZeroIsUsage "view|x|--columns|0"
+        "--columns takes 1 to 10000")
+    app_cli_usage_says(ViewTooManyColumnsIsUsage "view|x|--columns|10001"
+        "--columns takes 1 to 10000")
+    app_cli_usage_says(ViewAnUnknownAlignmentIsUsage "view|x|--align-on|sideways"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewARiseWithoutALevelIsUsage "view|x|--align-on|rise:RPM"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewHysteresisWithoutARiseIsUsage
+        "view|x|--align-on|marker:pull|--hysteresis|5"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewANegativeHysteresisIsUsage
+        "view|x|--align-on|rise:RPM:1|--hysteresis|-1"
+        "--hysteresis takes 0 or more")
+    app_cli_usage_says(ViewHysteresisWithAnEngineStartIsUsage
+        "view|x|--align-on|engine-start|--hysteresis|400"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewPullZeroIsUsage "view|x|--align-on|pull:0"
+        "--align-on takes rise:<signal>:<level>")
+    app_cli_usage_says(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first"
+        "--align-on takes rise:<signal>:<level>")
     app_cli_usage_says(ViewAPullForEachOfAnotherCountIsUsage
         "view|x|y|--align-on|pull:1,2,3" "one for each of the 2")
-    app_cli_usage(ViewHysteresisWithAPullIsUsage
-        "view|x|--align-on|pull:1|--hysteresis|5")
-    app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
-    app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
-    app_cli_usage(ViewASpanWithoutItsEndIsUsage "view|x|--span|5")
-    app_cli_usage(ViewASpanBackwardsIsUsage "view|x|--span|5:3")
-    app_cli_usage(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5")
-    app_cli_usage(ViewASpanOfWordsIsUsage "view|x|--span|soon:later")
-    app_cli_usage(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3")
-    app_cli_usage(ViewAStretchLevelWithoutStretchesIsUsage
-        "view|x|--stretch-level|pull-gap=1")
-    app_cli_usage(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM")
-    app_cli_usage(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial")
-    app_cli_usage(ViewAnUnknownStretchLevelIsUsage
-        "view|x|--stretches|--stretch-level|pull-speed=1")
-    app_cli_usage(ViewANegativeStretchLevelIsUsage
-        "view|x|--stretches|--stretch-level|pull-gap=-1")
-    app_cli_usage(ViewANegativePullRiseIsUsage
-        "view|x|--stretches|--stretch-level|pull-rise=-1")
-    app_cli_usage(ViewAPullGainOfWordsIsUsage
-        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
-    app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewHysteresisWithAPullIsUsage
+        "view|x|--align-on|pull:1|--hysteresis|5"
+        "--hysteresis goes with --align-on rise: or fall:")
+    app_cli_usage_says(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5"
+        "--from must come before --to")
+    app_cli_usage_says(ViewSecondsThatArentAreUsage "view|x|--at|soon"
+        "--at takes seconds")
+    app_cli_usage_says(ViewASpanWithoutItsEndIsUsage "view|x|--span|5"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanBackwardsIsUsage "view|x|--span|5:3"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanOfWordsIsUsage "view|x|--span|soon:later"
+        "--span takes A:B")
+    app_cli_usage_says(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3"
+        "--span takes A:B")
+    app_cli_usage_says(ViewAStretchLevelWithoutStretchesIsUsage
+        "view|x|--stretch-level|pull-gap=1"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial"
+        "--stretch-level, --role, --pull-end and --units go with")
+    app_cli_usage_says(ViewAnUnknownStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-speed=1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewANegativeStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-gap=-1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewANegativePullRiseIsUsage
+        "view|x|--stretches|--stretch-level|pull-rise=-1"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewAPullGainOfWordsIsUsage
+        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some"
+        "--stretch-level takes <key>=<value>")
+    app_cli_usage_says(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal"
+        "--role takes throttle=, load=, speed= or rpm=")
+    app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
+        "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
+    app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
+        "view|x|--pull-end|lift" "--pull-end and --units go with")
+    app_cli_usage_says(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end"
+        "unexpected '--pull-end'")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")
     app_cli_usage_says(ViewStretchesPullsNamesNoFolder "view|--stretches|pulls"
         "view needs a recording's folder")
-    app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
-    app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
+    app_cli_usage_says(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs"
+        "--units takes metric or imperial")
+    app_cli_usage_says(ViewAnUnknownOptionIsUsage "view|x|--fast"
+        "unexpected '--fast'")
     set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
     app_cli_usage(ViewASignalNoRecordingHasIsUsage
         "view|${_cli_pull_early}|--signal|Boost")
@@ -1456,11 +1784,15 @@ if(TARGET havne-cli)
         "view|${_cli_pull_early}|--stretches|--role|speed=Speed")
     app_cli_usage(ViewARoleOnTextIsUsage
         "view|${_cli_pull_early}|--stretches|--role|throttle=VIN")
-    app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
-    app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
-    app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
-    app_cli_usage(ViewSignalsAndAPluginIsUsage
-        "view|x|--frames|--signals|a.json|--plugin|b")
+    app_cli_usage_says(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a"
+        "--profile, --signals and --plugin go with --frames")
+    app_cli_usage_says(ViewSignalsAndAPluginIsUsage
+        "view|x|--frames|--signals|a.json|--plugin|b"
+        "--signals or --plugin, not both")
     app_cli_usage(ViewAProfileThatIsntTheSignalFilesIsUsage
         "view|${_cli_pull_early}|--frames|--profile|obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signal-files/daily-driver-extras.json")
     app_cli_usage(ViewAProfileThatIsntAVariantIsUsage
@@ -1642,7 +1974,7 @@ endif()
 # Windows the J2534 case finds the fake DLL and this tree's surrogate
 # (x64, or build-win32's x86) through the environment, as a wheel's
 # package sets the surrogates from its own folder. test_vcan shares vcan0
-# with test_vcan's suites: RUN_SERIAL. Only where the tests' Python has
+# with test_vcan's suites: RESOURCE_LOCK vcan0. Only where the tests' Python has
 # the tree's pointer size: a 64-bit Python can't load build-win32's x86
 # core, so that tree registers them only when configured with a 32-bit
 # Python (verify.sh's cross-arch step, HAVNE_PYTHON32).
@@ -1679,8 +2011,11 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         endif()
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
-        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")   # vcan0
-            set_tests_properties(PythonTest.${_app_name} PROPERTIES RUN_SERIAL TRUE)
+        # The cases that need vcan0 take its lock and the "vcan" label, which
+        # linux-build's run of them selects (-L vcan): a new one is named here only
+        if(_app_name MATCHES "^test_(vcan|did_scan|isotp_fuzz)$")
+            set_tests_properties(PythonTest.${_app_name} PROPERTIES
+                RESOURCE_LOCK vcan0 LABELS "python;vcan")
         endif()
     endforeach()
 
@@ -1777,26 +2112,65 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_bridge_session.cpp
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
+        test_bridge_frames_filter.cpp
         test_bridge_readonce.cpp
+        test_bridge_expr.cpp
         test_bridge_obdb.cpp
         test_bridge_health.cpp
         test_bridge_replay.cpp
+        test_bridge_replay_carryover.cpp
+        test_bridge_replay_end.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
+        test_bridge_signalfiles_plugin.cpp
+        test_bridge_signalfiles_picks.cpp
         test_bridge_live.cpp
         test_bridge_fake.cpp
+        test_bridge_fake_pick.cpp
         test_bridge_signals.cpp
+        test_bridge_signals_trace.cpp
+        test_bridge_ticks.cpp
         test_bridge_recorder.cpp
+        test_bridge_recorder_armed.cpp
         test_bridge_conditions.cpp
+        test_bridge_conditions_firing.cpp
+        test_bridge_conditions_stale.cpp
+        test_bridge_conditions_tones.cpp
+        test_bridge_conditions_alloc.cpp
         test_recording_view.cpp
+        test_recording_view_stretches.cpp
+        test_recording_view_stats.cpp
+        test_recording_view_open.cpp
+        test_recording_view_passes.cpp
+        test_recording_view_conditions.cpp
+        test_recording_view_keys.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
+        test_recording_import_map.cpp
         test_recording_export.cpp
+        test_recording_export_estimate.cpp
         test_one_store.cpp
+        test_one_store_update.cpp
+        test_one_store_index.cpp
+        test_one_store_wrap.cpp
+        test_bridge_variantshape.cpp
+        test_bridge_plugincopies.cpp
+        test_bridge_pluginpages.cpp
+        test_bridge_gate.cpp
         test_store_migration.cpp
+        test_store_migration_marks.cpp
+        test_store_removal.cpp
         ../app/recordingview.cpp
+        ../app/recordingview_asks.cpp
+        ../app/recordingview_queries.cpp
+        ../app/recordingview_stretches.cpp
+        ../app/recordingview_conditions.cpp
+        ../app/recordingview_internal.h
+        ../app/recording_frameset.cpp
+        ../app/recording_pairs.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
         ${APP_BRIDGE_SOURCES}
@@ -1805,8 +2179,12 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
         ../app/readonce.cpp
+        ../app/exprcheck.cpp
         ../app/pluginstore.cpp
-        ../app/signalstore.cpp
+        ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
+        ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
         ../app/conditionstore.cpp
@@ -1818,6 +2196,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/adapterrelay.cpp
         ../app/windowtheme.cpp
         bridge_support.h
+        old_state.h
         fake_bt_socket.h
         fake_theme.h
     )
@@ -1870,11 +2249,17 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
 
     # Listing its cases loads Qt's DLLs first, which on a loaded machine
-    # took past the default 5 s and failed the build
-    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
+    # took past the default 5 s and failed the build. The "qt" label marks
+    # this block's tests, which linux-build runs
+    gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60 PROPERTIES LABELS "qt")
+    # The dense-recording cases generate and read a million-row file, so
+    # each counts as two jobs against ctest's -j; the include runs after
+    # the discovery's, which defines the tests
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_SOURCE_DIR}/bridge_processors.cmake)
 
     # The GUI thread's cost per frame by profile size, a measurement for
-    # docs/testing.md; built with the tests, never run by ctest
+    # docs/performance.md; built with the tests, never run by ctest
     add_executable(bench_bridge
         bench_bridge.cpp
         ${APP_BRIDGE_SOURCES}
@@ -1884,7 +2269,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/obdbimport.cpp
         ../app/readonce.cpp
         ../app/pluginstore.cpp
-        ../app/signalstore.cpp
+        ../app/pluginstore_pages.cpp
+        ../app/pluginstore_import.cpp
+        ../app/pluginstore_picks.cpp
+        ../app/variantshape.cpp
         ../app/alerttone.cpp
         ../app/conditionmodel.cpp
         ../app/conditionstore.cpp
@@ -1977,97 +2365,93 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" _qml_fonts)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
-    # Files whose cases together run near ctest's bound on a slow runner
-    set(_qml_split_files dashboard dashedit driveview phone)
-    # The shares a file runs as, where not three: tst_phone's longest share
-    # otherwise outlasts the rest of the suite
-    set(_qml_shares_phone 5)
-    set(_qml_shares_dashedit 4)
-    # Seconds a file's entry (or one share of it) took in a full run's
+    # Seconds a file's entry took in a full run's
     # CTestCostData.txt, so a tree with no history starts the long ones first
-    set(_qml_cost_dashboard 40)
-    set(_qml_cost_dashedit 52)
-    set(_qml_cost_driveview 37)
-    set(_qml_cost_phone 33)
-    set(_qml_cost_recordings 25)
+    set(_qml_cost_dashboard 8)
+    set(_qml_cost_dashboard_pages 54)
+    set(_qml_cost_dashboard_panel 19)
+    set(_qml_cost_dashedit 28)
+    set(_qml_cost_dashedit_panel 17)
+    set(_qml_cost_dashedit_gesture 28)
+    set(_qml_cost_dashedit_color 29)
+    set(_qml_cost_dashedit_cells 18)
+    set(_qml_cost_dashedit_undo 38)
+    set(_qml_cost_dashedit_layout 23)
+    set(_qml_cost_driveview 28)
+    set(_qml_cost_driveview_sheet 17)
+    set(_qml_cost_driveview_platform 20)
+    set(_qml_cost_phone_fit 35)
+    set(_qml_cost_phone_viewer 35)
+    set(_qml_cost_phone_frame 35)
+    set(_qml_cost_phone_headers 25)
+    set(_qml_cost_phone_connect 40)
+    set(_qml_cost_recordings 4)
+    set(_qml_cost_recordings_export 3)
+    set(_qml_cost_recordings_layout 3)
+    set(_qml_cost_recordings_cursors 4)
+    set(_qml_cost_recordings_panes 3)
+    set(_qml_cost_recordings_stretches 4)
+    set(_qml_cost_recordings_compare 3)
+    set(_qml_cost_recordings_baseline 3)
     set(_qml_cost_diagnostics 7)
+    set(_qml_cost_accessibility 1)
+    set(_qml_cost_alerts 7)
+    set(_qml_cost_chartlayout_panes 1)
+    set(_qml_cost_dashboardbook_files 1)
+    set(_qml_cost_dashboardbook_writes 1)
+    set(_qml_cost_dashedit_plugpages 4)
+    set(_qml_cost_dashedit_side 5)
+    set(_qml_cost_documentpicker 3)
+    set(_qml_cost_home 6)
+    set(_qml_cost_kinds 4)
+    set(_qml_cost_linkhealth 5)
+    set(_qml_cost_liveview 14)
+    set(_qml_cost_liveview_pause 11)
+    set(_qml_cost_log 25)
+    set(_qml_cost_recordings_keys 3)
+    set(_qml_cost_settings 6)
+    set(_qml_cost_settings_devices 9)
+    set(_qml_cost_settings_listobdb 6)
+    set(_qml_cost_settings_plugins 6)
+    set(_qml_cost_settings_vehicle 10)
+    set(_qml_cost_theme 6)
+    set(_qml_cost_alertband 1)
+    set(_qml_cost_buttons 1)
+    set(_qml_cost_chartfonts 1)
+    set(_qml_cost_chartlayout 1)
+    set(_qml_cost_dashboardbook 1)
+    set(_qml_cost_driveplatform 1)
+    set(_qml_cost_fields 1)
+    set(_qml_cost_gauges 1)
+    set(_qml_cost_segments 1)
+    set(_qml_cost_sessionlabel 1)
+    set(_qml_cost_settings_computed 2)
+    set(_qml_cost_settings_own 5)
+    set(_qml_cost_settings_rows 1)
+    set(_qml_cost_settings_store 4)
+    set(_qml_cost_settings_unloadable 1)
+    set(_qml_cost_settings_uri 4)
+    set(_qml_cost_signalform 1)
+    set(_qml_cost_storemove 1)
+    set(_qml_cost_vehiclebook 1)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
         string(REGEX REPLACE "^tst_" "" _qml_name ${_qml_name})
         # A file's bound is a hang guard, not a measurement: each case
-        # waits for what it checks with tryVerify, and tst_recordings
-        # alone opens a 10,200-frame recording, which a machine building
+        # waits for what it checks with tryVerify, and the recordings
+        # files open a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
-        # A file near the bound runs as _qml_parts ctest entries, each
-        # a disjoint share of its cases (every nth one, so the slow
-        # ones spread), named as the TestCase names them; QmlTest.<name>
-        # then reads QmlTest.<name>-<k>of<n>
-        set(_qml_parts 1)
-        if(_qml_name IN_LIST _qml_split_files)
-            set(_qml_parts 3)
-            if(DEFINED _qml_shares_${_qml_name})
-                set(_qml_parts ${_qml_shares_${_qml_name}})
-            endif()
-        endif()
-        if(_qml_parts EQUAL 1)
-            add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+        add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+        set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+            ENVIRONMENT "${_qml_test_env}"
+            TIMEOUT 180
+            PROCESSORS 2
+            LABELS "qt"
+        )
+        if(DEFINED _qml_cost_${_qml_name})
             set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-                ENVIRONMENT "${_qml_test_env}"
-                TIMEOUT 180
-            )
-            if(DEFINED _qml_cost_${_qml_name})
-                set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-                    COST ${_qml_cost_${_qml_name}})
-            endif()
-        else()
-            # The shares are read from the file: an edit configures again,
-            # or a case added to it would be in no share and never run
-            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-                         ${_qml_test})
-            file(STRINGS ${_qml_test} _qml_title REGEX "^    name: \"")
-            string(REGEX REPLACE "^.*\"(.*)\".*$" "\\1" _qml_title "${_qml_title}")
-            file(STRINGS ${_qml_test} _qml_cases
-                 REGEX "^    function test_[A-Za-z0-9_]+\\(")
-            # A case written another way, or a second TestCase, would drop
-            # out of every share unseen
-            file(STRINGS ${_qml_test} _qml_any REGEX "function test_")
-            list(LENGTH _qml_title _qml_titles)
-            list(LENGTH _qml_cases _qml_found)
-            list(LENGTH _qml_any _qml_all)
-            if(NOT _qml_titles EQUAL 1 OR NOT _qml_found EQUAL _qml_all)
-                message(FATAL_ERROR "${_qml_test}: the split needs one TestCase name "
-                        "and every case as '    function test_x(' "
-                        "(${_qml_titles} names, ${_qml_found} of ${_qml_all} cases read)")
-            endif()
-            set(_qml_index 0)
-            foreach(_qml_case IN LISTS _qml_cases)
-                string(REGEX REPLACE "^    function (test_[A-Za-z0-9_]+)\\(.*$" "\\1"
-                       _qml_case "${_qml_case}")
-                if(NOT _qml_case MATCHES "_data$")
-                    math(EXPR _qml_share "${_qml_index} % ${_qml_parts}")
-                    list(APPEND _qml_share_${_qml_share} "${_qml_title}::${_qml_case}")
-                    math(EXPR _qml_index "${_qml_index} + 1")
-                endif()
-            endforeach()
-            math(EXPR _qml_last "${_qml_parts} - 1")
-            foreach(_qml_share RANGE 0 ${_qml_last})
-                # An empty share would run the whole file
-                if(NOT _qml_share_${_qml_share})
-                    message(FATAL_ERROR "${_qml_test}: ${_qml_parts} shares of "
-                            "${_qml_found} cases leave share ${_qml_share} empty")
-                endif()
-                math(EXPR _qml_k "${_qml_share} + 1")
-                set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
-                add_test(NAME ${_qml_part}
-                         COMMAND test_qml -input ${_qml_test} ${_qml_share_${_qml_share}})
-                set_tests_properties(${_qml_part} PROPERTIES
-                    ENVIRONMENT "${_qml_test_env}"
-                    TIMEOUT 180
-                    COST ${_qml_cost_${_qml_name}}
-                )
-                unset(_qml_share_${_qml_share})
-            endforeach()
+                COST ${_qml_cost_${_qml_name}})
         endif()
     endforeach()
 endif()
@@ -2119,6 +2503,9 @@ endif()
 if(WIN32)
     add_library(fake_j2534 SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534.def
     )
 
@@ -2126,8 +2513,11 @@ if(WIN32)
         TEST_HOOKS_ENABLED
     )
 
+    # core/src: sim_security.h, the simulated ECU's security access that
+    # the fakes' ECU answers with (fake_ecus.h)
     target_include_directories(fake_j2534 PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     set_target_properties(fake_j2534 PROPERTIES
@@ -2145,6 +2535,9 @@ if(WIN32)
     # fallback resolver.
     add_library(fake_j2534_legacy SHARED
         fake_j2534.cpp
+        fake_j2534_read.cpp
+        fake_j2534_write.cpp
+        fake_j2534_ioctl.cpp
         fake_j2534_legacy.def
     )
 
@@ -2154,6 +2547,7 @@ if(WIN32)
 
     target_include_directories(fake_j2534_legacy PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     set_target_properties(fake_j2534_legacy PROPERTIES
@@ -2208,6 +2602,16 @@ endif()
 if(WIN32)
     add_executable(test_j2534_stream
         ../tests/test_j2534_stream.cpp
+        ../tests/test_j2534_stream_requests.cpp
+        ../tests/test_j2534_stream_rotation.cpp
+        ../tests/test_j2534_stream_probe.cpp
+        ../tests/test_j2534_stream_session.cpp
+        ../tests/test_j2534_stream_clear.cpp
+        ../tests/test_j2534_stream_stamps.cpp
+        ../tests/test_j2534_stream_focus.cpp
+        ../tests/test_j2534_stream_condition.cpp
+        ../tests/test_j2534_clock.cpp
+        ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
     target_include_directories(test_j2534_stream PRIVATE
@@ -2237,6 +2641,9 @@ endif()
 if(WIN32)
     add_executable(test_j2534_surrogate
         test_j2534_surrogate.cpp
+        test_j2534_surrogate_open.cpp
+        test_j2534_surrogate_wedged.cpp
+        test_j2534_surrogate_reads.cpp
     )
     target_link_libraries(test_j2534_surrogate PRIVATE
         ecuio-core
@@ -2264,14 +2671,26 @@ endif()
 
 # J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
 # session through the surrogate: in this tree the x64 one beside the
-# test, in the cross-arch run the Win32 tree's.
+# test, in the cross-arch run the Win32 tree's. test_j2534_talk.cpp's
+# cases (a request longer than a frame, through the test seam) and
+# test_j2534_car.cpp's (18 modules on the fake) run the same way.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_health_vx.cpp
+        test_j2534_health_replies.cpp
+        test_j2534_health_overflow.cpp
+        test_j2534_hold_bus.cpp
+        test_j2534_talk.cpp
+        test_j2534_car.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
         GTest::gtest_main
+    )
+    # core/src: sim_security.h, whose key the talk cases compute
+    target_include_directories(test_j2534_health PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
     )
     target_compile_definitions(test_j2534_health PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
@@ -2299,6 +2718,11 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
     )
+    # core/src for surrogate_log_names.h: the out-of-memory loop seeds the
+    # session log's folder with the names the client prunes
+    target_include_directories(test_j2534_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
+    )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
     app_deploy_surrogate(test_j2534_connect)
@@ -2306,6 +2730,10 @@ if(WIN32)
     gtest_discover_tests(test_j2534_connect DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
+    # The out-of-memory loop outlasts the ceiling's margin under load; the
+    # include runs after the discovery's, which defines the test
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_SOURCE_DIR}/j2534_timeouts.cmake)
 endif()
 
 # J2534 routing tests (Win32-only, HARNESS tier: the surrogate chosen by
@@ -2314,6 +2742,7 @@ endif()
 if(WIN32)
     add_executable(test_j2534_routing
         test_j2534_routing.cpp
+        test_j2534_pipe.cpp
     )
     target_link_libraries(test_j2534_routing PRIVATE
         ecuio-core
@@ -2331,11 +2760,29 @@ if(WIN32)
 endif()
 
 # Reply timing against the fakes' ECU through each transport this
-# platform has (ADR-0042 section 4), a measurement for docs/testing.md;
+# platform has (ADR-0042 section 4), a measurement for docs/performance.md;
 # built with the tests, never run by ctest
 find_package(Threads REQUIRED)
+# The request engine on a simulated clock (tests/pacing_bench.h):
+# test_pacing gates the pacing on the model's figures; bench_pacing
+# prints them for docs/performance.md (not in ctest)
+add_executable(test_pacing test_pacing.cpp test_pacing_quiet.cpp
+                           test_pacing_stall.cpp)
+target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_pacing)
+gtest_discover_tests(test_pacing DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+add_executable(bench_pacing bench_pacing.cpp)
+target_include_directories(bench_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
+    ${CMAKE_SOURCE_DIR}/cli)
+target_link_libraries(bench_pacing PRIVATE ecuio-core)
+app_enable_warnings(bench_pacing)
+
 add_executable(bench_timing bench_timing.cpp)
 target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
+# core/src: fake_ecus.h's sim_security.h
+target_include_directories(bench_timing PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 app_enable_warnings(bench_timing)
 if(WIN32)
     target_compile_definitions(bench_timing PRIVATE

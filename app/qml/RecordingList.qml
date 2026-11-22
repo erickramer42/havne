@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingList.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The recordings a session saved, newest first, a row each with Open and
 // Replay: one part of RecordingsPage, which holds the state
 
@@ -40,7 +40,7 @@ ListView {
             anchors.fill: parent
             hoverEnabled: true
             Accessible.name: qsTr("Open %1").arg(recordingRow.modelData.title)
-            onClicked: root.host.open(recordingRow.modelData)
+            onClicked: root.host.openPart.open(recordingRow.modelData)
             HoverHandler { cursorShape: Qt.PointingHandCursor }
         }
 
@@ -54,6 +54,7 @@ ListView {
                 Layout.fillWidth: true
                 spacing: 2
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingTitle"
                     text: recordingRow.modelData.title
                     color: Theme.text
@@ -61,17 +62,19 @@ ListView {
                     Layout.fillWidth: true
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingFacts"
                     visible: text !== ""
-                    text: root.host.rowFacts(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowFacts(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "recordingDetail"
-                    text: root.host.rowDetail(recordingRow.modelData)
+                    text: root.host.rowInfoPart.rowDetail(recordingRow.modelData)
                     color: Theme.textDim
                     font.pixelSize: Theme.fontCaption
                     elide: Text.ElideMiddle
@@ -80,6 +83,7 @@ ListView {
             }
             // The picked vehicle's baseline
             Label {
+                textFormat: Text.PlainText
                 objectName: "baselineBadge"
                 visible: root.host.baselineFolder !== ""
                          && recordingRow.modelData.folder === root.host.baselineFolder
@@ -108,7 +112,7 @@ ListView {
                 baseColor: Theme.surface
                 enabled: root.host.sessionIdle
                 Layout.maximumWidth: enabled ? 96 : 160
-                Accessible.name: root.host.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
+                Accessible.name: root.host.refreshPart.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
                 onClicked: root.host.replayRequested(recordingRow.modelData.uri)
             }
         }

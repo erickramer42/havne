@@ -6,19 +6,29 @@
 #
 # A live stream whose reader stops reading drops lines, and a condition
 # event whose line is dropped is counted on the end line. mock://demo
-# idles fast from about 17 s to 34 s, its engine speed hunting a few rpm
-# on each tick; 64 conditions on it, levels 0.75 rpm apart across the
-# idle's band, give many events a second. The line ring is at its floor
+# holds the rev limiter from its 1018th tick to its 1118th (5 s of the
+# drive cycle, about 50.9 s to 55.9 s while the worker keeps 20 ticks a
+# second), its engine speed sawing between about 6860 and 7000 rpm on each
+# tick; 64 conditions on it, levels 2.5 rpm apart across that band, cross
+# several dozen levels on every tick, so the events come with the
+# session's ticks, not with the machine's speed. The drive cycle moves a
+# tick at a time and a worker that falls a whole interval behind starts
+# its schedule over (mock_transport.cpp), so on a loaded runner the cycle
+# runs behind the wall clock: the stall and the run's end are counted in
+# frames (ticks), never in seconds. The line ring is at its floor
 # (HAVNE_CLI_RING_BYTES) and the stream records: the recorder's ring is
 # its own, so the recording's cond lines are every event the session
-# gave. Read to 17 s of session time, then stop reading until the stream
-# must be dropping, whatever the system's buffers hold:
-# - the bytes the kernel holds for the reader stop growing, so the
-#   child's writes wait;
-# - the ring (and the batch the writer took from it) fills at the rate
-#   the stream ran at before the stall;
-# - the recording, written live, holds PAST_FULL events timed after
-#   that, and each of them is a dropped line.
+# gave. Read to STALL_AT_FRAMES frames, then stop reading until the stream
+# must be dropping, whatever the system's buffers hold and however
+# loaded the machine is:
+# - the cond lines since the stall go to the reader's buffer, the pipe,
+#   the ring (and the batch the writer took from it), or are dropped;
+# - the recording, written live, counts them, and the bytes the kernel
+#   holds, read after each count, bound the pipe's share: they only grow
+#   while nothing reads, so a child starved or blocked reads the same;
+# - once the cond lines, at the least a line of them takes, outweigh all
+#   those bytes by PAST_FULL lines, each of those is a dropped line:
+#   counted in events, never in time, which load stretches.
 # Read to the end; then the lines received plus conditions_dropped are
 # the cond lines, at least PAST_FULL dropped, and each line received is
 # one of them. Linux's pipe is cut to a page, and on macOS (whose pipe
@@ -27,6 +37,7 @@
 
 import collections
 import ctypes
+import io
 import json
 import os
 import shutil
@@ -42,25 +53,38 @@ try:
 except ImportError:
     fcntl = termios = None
 
-SECONDS = 27
-STALL_FROM_US = 17 * 1000 * 1000
+# --count ends the run on the worker's ticks; --seconds is only the bound
+# for a run that has wedged
+COUNT = 1250
+SECONDS = 150
+STALL_AT_FRAMES = 1000
 STALL_MAX_S = 25.0
-STILL_S = 0.5
 POLL_S = 0.05
+# The ring at its floor and the batch the writer took from it
 FILL_BYTES = 2 * (32 * 1024 + 256)
-MARGIN_US = 1000 * 1000
+# The lines the reader's buffer took past the stall's frame, received later
+READ_AHEAD_BYTES = io.DEFAULT_BUFFER_SIZE
+LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
+# The limiter crosses the band's levels about 110 times in each three
+# ticks, and holds it for 100 ticks: thousands of events a loop, where the fill
+# is about 600 (the pipe's and the ring's bytes over a cond line's). A long
+# key (the limit is 31 bytes) makes each cond line longer, so fewer events
+# fill them
+LEVEL_FROM_RPM = 6855.0
+LEVEL_STEP_RPM = 2.5
+KEY_PREFIX = "idle_level_at_rpm_threshold_"
 
 
 def condition_file(folder):
     conditions = []
     for k in range(LEVELS):
         conditions.append({
-            "key": "idle_%02d" % k,
+            "key": KEY_PREFIX + "%02d" % k,
             "name": "Idle %02d" % k,
             "when": {"signal": ["id:1001"], "unit": "RPM",
-                     "above": 1405.875 + 0.75 * k},
+                     "above": LEVEL_FROM_RPM + LEVEL_STEP_RPM * k},
         })
     path = os.path.join(folder, "idle.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -98,36 +122,32 @@ def held_bytes(fd):
     return n.value
 
 
-def stall(fd, root, stall_us, rate):
-    """Holds the reading until the recording has PAST_FULL events timed
-    after the ring must be full: (full_us, held bytes, words why not)"""
+def stall(fd, root, stall_us, cond_bytes):
+    """Holds the reading until the recording has PAST_FULL events past
+    the ones that fill the reader's buffer, the pipe and the ring:
+    (events needed, held bytes, words why not)"""
     begun = time.monotonic()
     deadline = begun + STALL_MAX_S
-    held = held_bytes(fd)
-    still_since = time.monotonic()
-    while time.monotonic() - still_since < STILL_S:
-        if time.monotonic() > deadline:
-            return 0, held, "the kernel's buffer never stopped growing"
-        time.sleep(POLL_S)
-        now = held_bytes(fd)
-        if now != held:
-            held, still_since = now, time.monotonic()
-    # The session's clock runs no faster than this one, so the ring is
-    # full by then on its clock
-    full_us = int(stall_us + (still_since - begun) * 1e6 +
-                  FILL_BYTES / rate * 1e6 + MARGIN_US)
     while True:
         folders = os.listdir(root)
-        past = []
+        after = 0
         if len(folders) == 1:
             log = os.path.join(root, folders[0], "events.log")
             if os.path.exists(log):
-                past = [e for e in cond_events(log) if e[4] > full_us]
-        if len(past) >= PAST_FULL:
-            return full_us, held, ""
+                after = len([e for e in cond_events(log) if e[4] >= stall_us])
+        # Read after the count: with nothing read, the held bytes only grow,
+        # so these are at least the ones held when the counted events came
+        held = held_bytes(fd)
+        full = -(-(held + FILL_BYTES + READ_AHEAD_BYTES) // cond_bytes)
+        if after >= full + PAST_FULL:
+            return full, held, ""
         if time.monotonic() > deadline:
-            return full_us, held, (f"{len(past)} events recorded after "
-                                   f"{full_us / 1e6:.1f} s")
+            spent = time.monotonic() - begun
+            return full, held, (f"{after} events recorded from "
+                                f"{stall_us / 1e6:.1f} s of session time, {full + PAST_FULL} "
+                                f"needed, in {spent:.1f} s of waiting "
+                                f"({after / spent:.0f} events a second), "
+                                f"cond lines of {cond_bytes} B")
         time.sleep(POLL_S)
 
 
@@ -146,39 +166,55 @@ def main():
             for side in (ours, theirs):
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        cut_r = cut_w = None
+        if pipe_cut:
+            # Cut before the child exists: Linux refuses (EBUSY) to shrink a
+            # pipe already holding more than the new size
+            cut_r, cut_w = os.pipe()
+            fcntl.fcntl(cut_w, fcntl.F_SETPIPE_SZ, 4096)
         proc = subprocess.Popen(
             [cli, "stream", "mock://demo", "--values", "--conditions", named,
-             "--record", root, "--seconds", str(SECONDS)],
+             "--record", root, "--count", str(COUNT), "--seconds",
+             str(SECONDS)],
             stdin=subprocess.DEVNULL,
-            stdout=theirs.fileno() if theirs else subprocess.PIPE,
+            stdout=(theirs.fileno() if theirs else
+                    cut_w if pipe_cut else subprocess.PIPE),
             stderr=subprocess.PIPE, env=env)
         if theirs:
             theirs.close()
             reader = ours.makefile("rb")
+        elif pipe_cut:
+            os.close(cut_w)
+            reader = os.fdopen(cut_r, "rb")
         else:
             reader = proc.stdout
-            if pipe_cut:
-                fcntl.fcntl(reader.fileno(), fcntl.F_SETPIPE_SZ, 4096)
         held_fd = ours.fileno() if ours else reader.fileno()
         lines = []
         stalled = None
-        received = 0
-        first_us = None
+        shortest = None
+        frames = 0
+        stall_us = 0
+        begun = time.monotonic()
         for raw in reader:
-            received += len(raw)
             line = json.loads(raw)
             lines.append(line)
-            t = line.get("t_us")
-            if t is None:
+            if line.get("type") == "condition":
+                shortest = min(shortest or len(raw), len(raw))
+            if line.get("type") != "frame":
                 continue
-            if first_us is None:
-                first_us = t
-            if stalled is None and t >= STALL_FROM_US:
-                rate = received / max((t - first_us) / 1e6, 1.0)
-                stalled = stall(held_fd, root, t, rate)
-                print(f"      the stall: {rate:.0f} B/s, the kernel held "
-                      f"{stalled[1]} B, the ring full by "
-                      f"{stalled[0] / 1e6:.1f} s")
+            frames += 1
+            if stalled is None and frames >= STALL_AT_FRAMES:
+                stall_us = line["t_us"]
+                cond_bytes = max(int((shortest or 0) * 0.9), LEAST_COND_BYTES)
+                spent = time.monotonic() - begun
+                print(f"      {frames} frames in {spent:.1f} s of waiting, "
+                      f"session time {stall_us / 1e6:.1f} s: "
+                      f"{frames / max(stall_us / 1e6, 0.001):.1f} ticks a "
+                      f"second")
+                stalled = stall(held_fd, root, stall_us, cond_bytes)
+                print(f"      the stall: the kernel held {stalled[1]} B, "
+                      f"{stalled[0]} cond lines of {cond_bytes} B or more "
+                      f"fill the ring")
         err = proc.stderr.read().decode(errors="replace")
         proc.wait(timeout=60)
         end = [l for l in lines if l.get("type") == "end"]
@@ -209,7 +245,9 @@ def main():
         print(f"      {len(got)} condition lines received, "
               f"conditions_dropped {dropped}, {len(truth)} cond lines "
               f"recorded; dropped_frames {end.get('dropped_frames')}, "
-              f"dropped_values {end.get('dropped_values')}")
+              f"dropped_values {end.get('dropped_values')}; "
+              f"{len([e for e in truth if e[4] >= stall_us])} recorded "
+              f"from {stall_us / 1e6:.1f} s on")
         if dropped is None:
             print("FAIL  the end line has no conditions_dropped")
             ok = False

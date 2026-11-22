@@ -135,3 +135,5 @@ version reading".
   `fake_j2534.def` alone, so the legacy fixture lacks it. It refuses
   either reading on request (`ECUIO_FAKE_VBATT_STATUS`,
   `ECUIO_FAKE_VERSION_STATUS`).
+
+Note of 2026-11-16: `module_count` sits at 384 in the reserved room ([ADR-0065](0065-car-sized-profile.md)). `channel_count` is how many of the modules the info lists itself (4 at most); `ecuio_session_get_module` (profile.h) gives the rest.

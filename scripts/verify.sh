@@ -23,8 +23,9 @@
 #               discovery test demand a device from the registry, since
 #               the dev machine has a Pass-Thru driver installed;
 #               --no-devices for a machine without one
-#   cross-arch  J2534Routing, J2534Surrogate, J2534HealthTest and
-#               J2534ConnectTest, against the x86 surrogate and fake
+#   cross-arch  J2534Routing, J2534Surrogate, J2534HealthTest,
+#               J2534ConnectTest, J2534TalkTest and J2534CarTest,
+#               against the x86 surrogate and fake
 #               (Windows, needs build-win32; skipped with -R). Its line
 #               names each case that skipped. Fails if the env-gated
 #               routing case skips, since that means the paths were wrong;
@@ -332,12 +333,13 @@ ctest_failed() {
 
 if [ "$do_build" = 1 ]; then
     if [ "$do_win32" = 1 ] && [ "$have_win32" = 1 ]; then
-        # test_signals builds here for the cross-arch ComputedTest step.
+        # test_signals and test_sandbox build here for the cross-arch step's
+        # x86 core checks (ComputedTest and test_sandbox's suites).
         # The x86 shared core and havne-cli (whose ELM327 emulator
         # PythonTest.test_read_pids runs) join the one build call when the
         # cache has the option; an older tree's cache gets it from the
         # first call's configure, so those targets follow in a second
-        win32_targets="ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy test_signals"
+        win32_targets="ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy test_signals test_sandbox"
         shared_listed=0
         if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
             win32_targets="$win32_targets ecuio test_c_abi_shared havne-cli"
@@ -386,7 +388,7 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release -j "$jobs" --output-on-failure \
-        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\."
+        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
     skips=$(skipped_cases "$LOGDIR/cross-arch.log" | paste -sd ',' - | sed 's/,/, /g')
@@ -395,17 +397,23 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
         line cross-arch FAIL "$dur" "$summary ($skips): the routing case skipped, so the x86 paths are wrong"
         exit 1
     fi
-    # The x86 computed machine (test_signals' ComputedTest), then the
-    # shared core's two checks and the Python package's tests where a
-    # 32-bit Python registered them, in build-win32's own ctest
+    # The x86 computed machine (test_signals' ComputedTest) and the x86
+    # WAMR and sandbox (test_sandbox's suites), then the shared core's two
+    # checks and the Python package's tests where a 32-bit Python
+    # registered them, in build-win32's own ctest
     cross_dur=$dur
-    want=$(ctest --test-dir build-win32 -C Release -N -R '^ComputedTest\.' 2>/dev/null \
-        | sed -n 's/^Total Tests: //p' | tr -d '\r')
-    [ "${want:-0}" -gt 0 ] || {
-        line cross-arch FAIL "$dur" "$summary: build-win32 lists no ComputedTest case (is test_signals built there?)"
-        exit 1
-    }
-    pattern='ComputedTest\..*'
+    want=0
+    pattern=''
+    for suite in ComputedTest WamrBuildTest WasmCheckTest SandboxTest; do
+        cases=$(ctest --test-dir build-win32 -C Release -N -R "^$suite\\." 2>/dev/null \
+            | sed -n 's/^Total Tests: //p' | tr -d '\r')
+        [ "${cases:-0}" -gt 0 ] || {
+            line cross-arch FAIL "$dur" "$summary: build-win32 lists no $suite case (is its test binary built there?)"
+            exit 1
+        }
+        want=$((want + cases))
+        pattern="${pattern:+$pattern|}$suite\\..*"
+    done
     if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
         py32=$(ctest --test-dir build-win32 -C Release -N -R '^PythonTest\.' 2>/dev/null \
             | sed -n 's/^Total Tests: //p' | tr -d '\r')

@@ -30,14 +30,17 @@ GaugeBase {
         onRunningChanged: gauge.flashOn = flasher.running
     }
 
-    readonly property real led: Math.max(6, Math.min(height * 0.62,
-        (width - (count - 1) * ledSpacing) / count))
+    // The gap gives way before the lights shrink below 6, so a one-column
+    // cell holds the strip; the lights shrink only past that
+    readonly property real gap: Math.max(1, Math.min(ledSpacing, (width - count * 6) / Math.max(1, count - 1)))
+    readonly property real led: Math.max(3, Math.min(height * 0.62,
+        (width - (count - 1) * gap) / count))
 
     Row {
         id: lights
         objectName: "lights"
         anchors.centerIn: parent
-        spacing: gauge.ledSpacing
+        spacing: gauge.gap
         opacity: gauge.stale ? 0.45 : 1.0
 
         Repeater {
@@ -81,6 +84,7 @@ GaugeBase {
 
     // A stale value's word, where the strip leaves room at its end
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { right: parent.right; verticalCenter: parent.verticalCenter }

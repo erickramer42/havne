@@ -170,7 +170,7 @@ def _csv_args(layout, signals, row_ms, units):
 
 
 def _recorded_names(folder, asks):
-    """(the recording's signal names, None) from a reader's open under the
+    """(the recording's signal names and keys, None) from a reader's open under the
     caller's cancel; ((), status) when the open was stopped; None, None
     when the reader can't open it (the export says why)"""
     r = ctypes.POINTER(e.ecuio_recording_t)()
@@ -188,6 +188,7 @@ def _recorded_names(folder, asks):
             s = e.ecuio_recording_signal_t()
             if lib.ecuio_recording_get_signal(r, i, ctypes.byref(s)) == e.ECUIO_OK:
                 names.append(text(s.name))
+                names.append(text(s.key))
         return names, None
     finally:
         lib.ecuio_recording_close(r)
@@ -258,11 +259,14 @@ def export_csv(folder, out, *, layout="wide", signals=None, row_ms=0, units="met
     first: signals names the columns in order (None takes the recording's
     focus line, else every number signal with a sample in range), row_ms 0 a
     row for each sweep, else a grid that many ms apart (to 86400000), units
-    "metric" or "imperial". A named signal the recording has no values for
+    "metric" or "imperial". A column is named by its signal's key or by a
+    name one signal has; a named signal the recording has no values for
     is an empty column, named in Exported.missing. layout "long" has a row
-    for each value (time_s,signal,unit,value after a comment line: pandas
-    skiprows=1) and takes none of signals, row_ms or units. Returns an
-    Exported."""
+    for each value (time_s,signal,unit,value, and key in a recording kept
+    by key, after a comment line: pandas skiprows=1) and takes none of
+    signals, row_ms or units. Both layouts start with a UTF-8 byte order
+    mark, so Excel shows the units: read one with encoding="utf-8-sig".
+    Returns an Exported."""
     layout, names, row_ms, units = _csv_args(layout, signals, row_ms, units)
     return _write(e.ECUIO_EXPORT_CSV, "csv", folder, out, raw, from_us, to_us, cancel,
                   (layout, row_ms, units), names)

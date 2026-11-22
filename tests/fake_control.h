@@ -18,8 +18,9 @@
 //     last connect's parameters, the last filter started and stopped,
 //     how often it was disconnected and closed by the IDs it handed
 //     out, its PassThruReadMsgs calls (counted, the first
-//     kReadDepth calls' Timeout kept), and how many received messages
-//     it still held, unread, when the last filter stopped.
+//     kReadDepth calls' Timeout kept), how many received messages
+//     it still held, unread, when the last filter stopped, and the
+//     replies ECUIO_FAKE_LOST_UNDER_SEGMENTS dropped.
 // Fixed-size fields and no pointers, so an x64 test process and an x86
 // child map the same bytes; the size is pinned below and the layout
 // versioned (kLayout).
@@ -41,7 +42,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 6;
+constexpr uint32_t kLayout = 7;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -103,10 +104,11 @@ struct Page {
     uint32_t read_timeouts[kReadDepth]; /* the first reads' Timeout */
     uint32_t unread_at_stop; /* messages queued, arrived or due, when the
                               * last filter stopped */
+    volatile LONG lost_under_segments; /* replies the knob dropped */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
                                   kWriteDepth * 76 + 12 + 48 + 4 + 4 +
-                                  kReadDepth * 4 + 4,
+                                  kReadDepth * 4 + 4 + 4,
               "the page's layout must match in x86 and x64 builds");
 
 class Guard {
@@ -277,6 +279,7 @@ inline void reset(Page* p)
     memset(&p->last_filter, 0, sizeof(p->last_filter));
     p->last_stopped = 0;
     p->unread_at_stop = 0;
+    InterlockedExchange(&p->lost_under_segments, 0);
 }
 
 /* Queues a message for the fake's receive queue; it moves there on the
@@ -437,6 +440,19 @@ inline uint32_t last_stopped(Page* p)
 {
     Guard g(p);
     return p->last_stopped;
+}
+
+/* Fake side: n replies ECUIO_FAKE_LOST_UNDER_SEGMENTS dropped */
+inline void count_lost(Page* p, uint32_t n)
+{
+    InterlockedExchangeAdd(&p->lost_under_segments, static_cast<LONG>(n));
+}
+
+/* The replies ECUIO_FAKE_LOST_UNDER_SEGMENTS dropped since the reset */
+inline uint32_t lost_under_segments(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->lost_under_segments, 0, 0));
 }
 
 /* The messages the fake held unread when the last filter stopped */

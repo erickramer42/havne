@@ -111,10 +111,7 @@ SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
     if (set == nullptr) {
         return nullptr;
     }
-    const ecuio_signal_file_t* file = m_signalStore.fileFor(set);
-    if (file == nullptr) {
-        file = m_pluginStore.fileFor(set);
-    }
+    const ecuio_signal_file_t* file = m_pluginStore.fileFor(set);
     for (auto it = m_replayFiles.begin();
          file == nullptr && it != m_replayFiles.end(); ++it) {
         if (ecuio_signal_file_set(it->second.file) == set) {
@@ -122,6 +119,14 @@ SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
         }
     }
     return file;
+}
+
+QByteArray
+SessionBridge::signalFileTextOfSet(const ecuio_signal_set_t* set) const
+{
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(fileOfSet(set), &length);
+    return QByteArray(text, static_cast<qsizetype>(length));
 }
 
 QString SessionBridge::profileOfUri(const QString& uri)

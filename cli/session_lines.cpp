@@ -16,6 +16,7 @@
 #include "scan_line.h"
 #include "signal_file_lines.h"
 
+#include "partial_file.h"
 #include "profile_source.h"
 #include "session_lines.h"
 #include "common.h"
@@ -118,9 +119,10 @@ const char* backend_name(uint32_t backend)
 
 } // namespace
 
-void write_session(Output& out, const ecuio_session_info_t& info)
+void write_session(Output& out, const ecuio_session_t* session,
+                   const ecuio_session_info_t& info)
 {
-    char buf[2048];
+    char buf[4096];
     cli::Line l(buf, sizeof buf);
     l.raw("{\"type\":\"session\"");
     l.key("backend");
@@ -133,19 +135,18 @@ void write_session(Output& out, const ecuio_session_info_t& info)
     l.u64(info.baud);
     l.key("channels");
     l.ch('[');
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const uint32_t channels = module_count(info);
     for (uint32_t i = 0; i < channels; ++i) {
+        ecuio_channel_decl_t m{};
+        (void)ecuio_session_get_module(session, i, &m);
         if (i) {
             l.ch(',');
         }
         l.ch('{');
         l.key("rx");
-        l.hex_id(info.rx_ids[i]);
+        l.hex_id(m.rx_id);
         l.key("tx");
-        l.hex_id(info.tx_ids[i]);
+        l.hex_id(m.tx_id);
         l.ch('}');
     }
     l.ch(']');
@@ -167,6 +168,10 @@ void write_session(Output& out, const ecuio_session_info_t& info)
     }
     if (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) {
         l.key("listen_only");
+        l.raw("true");
+    }
+    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
+        l.key("pick_only");
         l.raw("true");
     }
     if (info.backend == ECUIO_BACKEND_REPLAY) {
@@ -363,7 +368,7 @@ void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
 // time, and once at the end (final), a timing line for each request whose
 // counts changed since the last; rows is sized before the session starts
 void poll_timing(Output& out, ecuio_session_t* session,
-                 const ecuio_session_info_t& info, cli::TimingSnapshots& snaps,
+                 cli::TimingSnapshots& snaps,
                  std::vector<ecuio_request_timing_t>& rows, bool final)
 {
     ecuio_session_timing_t t;
@@ -382,9 +387,9 @@ void poll_timing(Output& out, ecuio_session_t* session,
         if (!snaps.changed(i, rows[i])) {
             continue;
         }
-        const uint32_t rx = rows[i].channel < ECUIO_SESSION_INFO_MAX_CHANNELS
-                                ? info.rx_ids[rows[i].channel]
-                                : 0;
+        ecuio_channel_decl_t m{}; /* rx 0 for a channel the session lacks */
+        (void)ecuio_session_get_module(session, rows[i].channel, &m);
+        const uint32_t rx = m.rx_id;
         char buf[1024];
         cli::Line l(buf, sizeof buf);
         cli::timing_line(l, t.snapshot_us, rx, rows[i], t.interval_clock);
@@ -484,7 +489,7 @@ void poll_refused(Output& out, const ecuio_signal_set_t* set,
     write_line(out, b.line);
 }
 
-// The session's signals: each def's id, name, unit, decimals and group,
+// The session's signals: each def's id, name, key, unit, decimals and group,
 // its "gauge" when the session's signal file gives one, then for an enum
 // "enum":true and its "labels" ({"<raw>": label}, as a signal file's
 // "values"), for a computed def "computed":true
@@ -492,7 +497,8 @@ void write_signals(Output& out, const ecuio_signal_set_t* set,
                    const ecuio_signal_file_t* file)
 {
     const uint32_t count = set ? set->count : 0;
-    size_t bytes = 256 + size_t{count} * 512;
+    const std::vector<ecuio_signal_key_t> keys = cli::set_keys(set, file);
+    size_t bytes = 256 + size_t{count} * (512 + cli::kKeyFieldBytes);
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t labels = 0;
         cli::def_labels(*set, set->defs[i], &labels);
@@ -516,6 +522,8 @@ void write_signals(Output& out, const ecuio_signal_set_t* set,
         l.u64(d.id);
         l.key("name");
         l.string(d.name, sizeof d.name);
+        cli::key_field(l, i < keys.size() ? keys[i].text : nullptr,
+                       sizeof keys[i].text);
         l.key("unit");
         l.string(d.unit, sizeof d.unit);
         l.key("decimals");
@@ -562,6 +570,20 @@ void write_recording(Output& out, const char* state, const char* key,
     write_line(out, l);
 }
 
+// A recorder that never attached: its folder holds only the open's three
+// files, empty, so it goes as the app's goes and no list shows it
+void remove_unattached(const std::string& folder)
+{
+    for (const char* file : {"/frames.csv", "/signals.csv", "/events.log"}) {
+        cli::remove_file(folder + file);
+    }
+#ifdef _WIN32
+    RemoveDirectoryW(cli::utf8_to_wide(folder.c_str()).c_str());
+#else
+    rmdir(folder.c_str());
+#endif
+}
+
 } // namespace
 
 // stream --record and log: a recorder opened under root (with the label)
@@ -599,8 +621,18 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
         why = ecuio_last_error_detail();
     }
     if (st != ECUIO_OK) {
+        char made[4096] = "";
+        uint32_t made_len = 0;
+        const bool named =
+            !armed &&
+            ecuio_recorder_get_folder(*recorder, made, sizeof made,
+                                      &made_len) == ECUIO_OK &&
+            made_len < sizeof made;
         ecuio_recorder_close(*recorder, "the session couldn't be recorded");
         *recorder = nullptr;
+        if (named) {
+            remove_unattached(made);
+        }
         write_recording(out, "failed", "reason",
                         armed && !why.empty() ? why.c_str()
                                               : ecuio_status_string(st));
@@ -702,6 +734,16 @@ bool session_asks(ecuio_session_t* session)
     std::memset(&info, 0, sizeof info);
     return ecuio_session_get_info(session, &info) == ECUIO_OK &&
            (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+}
+
+// Whether a session is asked only what is picked (a car-sized set): with
+// no focus it asks nothing
+bool session_pick_only(ecuio_session_t* session)
+{
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    return ecuio_session_get_info(session, &info) == ECUIO_OK &&
+           (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) != 0;
 }
 
 // A replay that doesn't loop has ended when every row is read and every

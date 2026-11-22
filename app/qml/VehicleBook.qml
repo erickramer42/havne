@@ -8,7 +8,9 @@ import QtQml
 // { format, salt, picked, list: [{ id, label, vinKey, uri, plotted,
 // unplotted, picks, own, vinMatches, baseline, unmigrated }], unmigrated }:
 // plotted and unplotted are the rows ticked past Live's default and
-// unticked from it (ADR-0039 section 8).
+// unticked from it (ADR-0039 section 8), each by its signal's key
+// (ADR-0065 section 9); a list kept by name is read as it stands and
+// written by key at the next tick (SignalListModel::setPlotChoices).
 // picks are the plugin variants picked for the vehicle, by their profiles
 // (plugin.<id>.<variant>), in the order picked; the plugins themselves are
 // the app's, not a vehicle's. own is the profile of the variant the
@@ -420,8 +422,10 @@ QtObject {
 
     // ADR-0027 section 4: the VIN key settles which vehicle this is. Returns
     // { doc, outcome, label, previous }: outcome "same", "learned",
-    // "switched" or "new"; label the vehicle now picked; previous the
-    // one picked before, "" for none
+    // "switched" or "new"; label the vehicle the VIN names; previous the
+    // one picked, "" for none. The pick never changes: the session reads
+    // the picked vehicle's profile, so a vehicle the VIN names is offered
+    // (the pick at the next connect), and a new one is added unpicked
     function recognize(doc, key, uri) {
         const before = picked(doc)
         const previous = before === null ? "" : before.label
@@ -429,16 +433,18 @@ QtObject {
             return { doc: doc, outcome: "same", label: previous, previous: previous }
         const other = doc.list.find(v => v.vinKey === key)
         if (other)
-            return { doc: pick(doc, other.id), outcome: "switched", label: other.label,
+            return { doc: doc, outcome: "switched", label: other.label,
                      previous: previous }
         if (before !== null && before.vinKey === "")
             return { doc: change(doc, v => v.vinKey = key), outcome: "learned",
                      label: previous, previous: previous }
         const label = defaultNewLabel(doc)
         const d = add(doc, label)
-        picked(d).vinKey = key
+        const v = picked(d)
+        v.vinKey = key
         if (isAdapterUri(uri))
-            picked(d).uri = withoutFileProfile(uri)
+            v.uri = withoutFileProfile(uri)
+        d.picked = before === null ? "" : before.id
         return { doc: d, outcome: "new", label: label, previous: previous }
     }
 
@@ -477,15 +483,17 @@ QtObject {
         return s + sep + "profile=" + profile
     }
 
-    // Beside the vehicles, for a recognize() that picked another: the
-    // pick is the car's, not the user's, so the section says so until
-    // the user picks; "" for any other result
+    // Beside the vehicles, for a recognize() that named another saved
+    // vehicle: the session keeps the pick, so the section offers the
+    // named one; "" for any other result
     function pickNote(r) {
         if (r.outcome !== "switched")
             return ""
         return r.previous === ""
-                ? qsTr("The connected car's VIN picked %1").arg(r.label)
-                : qsTr("The connected car's VIN picked %1 (%2 was picked)").arg(r.label, r.previous)
+                ? qsTr("This car's VIN is %1's and no vehicle is picked. Pick %1 to read its signals at the next connect")
+                      .arg(r.label)
+                : qsTr("This car's VIN is %1's and %2 is picked. Pick %1 to read its signals at the next connect")
+                      .arg(r.label, r.previous)
     }
 
     // The activity log's line for a recognize() result
@@ -496,12 +504,15 @@ QtObject {
         case "learned":
             return qsTr("Vehicle: %1 (recognized from now on)").arg(r.label)
         case "switched":
-            return r.previous === "" ? qsTr("Vehicle: %1 (picked)").arg(r.label)
-                                     : qsTr("Vehicle: %1 (picked; %2 was)").arg(r.label, r.previous)
+            return r.previous === ""
+                    ? qsTr("Vehicle: none picked (the car's VIN is %1's; pick it for the next connect)").arg(r.label)
+                    : qsTr("Vehicle: %2 (the car's VIN is %1's; pick %1 for the next connect)")
+                          .arg(r.label, r.previous)
         default:
             return r.previous === ""
-                    ? qsTr("Vehicle: saved as %1").arg(r.label)
-                    : qsTr("Vehicle: not %1 (its VIN differs); saved as %2").arg(r.previous, r.label)
+                    ? qsTr("Vehicle: none picked (the car's VIN is new; saved as %1)").arg(r.label)
+                    : qsTr("Vehicle: %1 (the car's VIN differs; saved as %2, not picked)")
+                          .arg(r.previous, r.label)
         }
     }
 }

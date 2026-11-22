@@ -146,19 +146,21 @@ inline bool pull_rises(const samples& measure, bool trim,
 }
 
 /* Pulls: gate's runs at or above the level that rise as pull_rises asks.
- * With trim (a vehicle-speed measure) a run ends at the measure's first
- * sample within tolerance of its highest in the run, so the limiter's
- * flat speed ends a pull; an engine-speed measure keeps the whole run,
- * since an upshift's drop would end it at the first shift. engine_speed
- * is NULL for a recording with none. */
+ * A run ends at the gate's last sample in it, the lift. With
+ * top_speed_end and trim (a vehicle-speed measure) it ends instead at the
+ * measure's first sample within tolerance of its highest in the run, so
+ * the limiter's flat speed ends a pull; an engine-speed measure keeps the
+ * whole run either way, since an upshift's drop would end it at the first
+ * shift. engine_speed is NULL for a recording with none. */
 inline void find_pulls(const samples& gate, const samples& measure, bool trim,
-                       const samples* engine_speed, const pull_rules& rules,
-                       uint32_t flags, std::vector<stretch>& out)
+                       bool top_speed_end, const samples* engine_speed,
+                       const pull_rules& rules, uint32_t flags,
+                       std::vector<stretch>& out)
 {
     for (const auto& run : runs_at_or_above(gate, rules.level, rules.gap_us)) {
         const uint64_t from = gate[run.first].us;
         uint64_t to = gate[run.second].us;
-        if (trim) {
+        if (trim && top_speed_end) {
             auto lo = std::lower_bound(
                 measure.begin(), measure.end(), from,
                 [](const sample& x, uint64_t v) { return x.us < v; });

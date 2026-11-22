@@ -148,7 +148,7 @@ Run every item on the laptop that goes to the car.
       on the surrogate's payload logging: the session log at
       `%TEMP%\ecuio-surrogate.log` reads "frame logging on" and has an
       `OP_WRITE frame` / `OP_READ frame` line per request and reply
-      ([j2534.md](../j2534.md#surrogate)). Each connect keeps the
+      ([surrogate.md](../surrogate.md)). Each connect keeps the
       previous log beside it as
       `ecuio-surrogate.<YYYYMMDD-HHMMSS-mmm>.log`, the newest 50
 - [ ] Know the four link states (see

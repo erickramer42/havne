@@ -13,6 +13,9 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QStyleHints>
+#include <QHostAddress>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QKeyEvent>
 #include <QLocale>
 #include <QObject>
@@ -28,13 +31,16 @@
 #include <QWindow>
 #include <QtQuickTest>
 
+#include <ecuio/plugin.h>
+
 #include "conditionstore.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "recordingexport.h"
+#include "recording_frameset.h"
 #include "recordingimport.h"
+#include "refusing_network.h"
 #include "recordingview.h"
-#include "signalstore.h"
 #include "storemigration.h"
 #include "windowtheme.h"
 
@@ -322,6 +328,38 @@ public:
         model->applyUnasked(ids);
     }
 
+    // What the engines' URL interceptor has emptied so far
+    Q_INVOKABLE int urlsRefused() const
+    {
+        return RefusingUrlInterceptor::refused();
+    }
+
+    // Whether the engines' network manager lets a request for the URL go on
+    Q_INVOKABLE bool networkStays(const QUrl& url) const
+    {
+        return RefusingNetworkManager::stays(url);
+    }
+
+    // The interceptor's answer for a URL of the named kind: "string" (an
+    // Image's source), "qml", "js" or "qmldir"
+    Q_INVOKABLE QUrl intercepted(const QUrl& url, const QString& kind) const
+    {
+        RefusingUrlInterceptor interceptor;
+        const auto type = kind == QLatin1String("qml")
+                              ? QQmlAbstractUrlInterceptor::QmlFile
+                          : kind == QLatin1String("js")
+                              ? QQmlAbstractUrlInterceptor::JavaScriptFile
+                          : kind == QLatin1String("qmldir")
+                              ? QQmlAbstractUrlInterceptor::QmldirFile
+                              : QQmlAbstractUrlInterceptor::UrlString;
+        return interceptor.intercept(url, type);
+    }
+
+    Q_INVOKABLE bool namesAnotherHost(const QUrl& url) const
+    {
+        return RefusingUrlInterceptor::names_another_host(url);
+    }
+
     // A file of text in a scratch folder of the harness's own, as a URL a
     // file dialog would give; an empty URL when it can't be written
     Q_INVOKABLE QUrl writeScratchFile(const QString& name, const QString& text)
@@ -410,13 +448,6 @@ public:
         return ecuio_import(&o, &r) == ECUIO_OK ? folder : QString();
     }
 
-    // The signal store's copies (SignalStore::root, the test's settings
-    // folder), by file name
-    Q_INVOKABLE QStringList storedSignalFiles() const
-    {
-        return QDir(SignalStore::root()).entryList(QDir::Files, QDir::Name);
-    }
-
     // The repository's example plugin, packed as a phone imports it
     // (tests/packed_plugin.h), written as a scratch file named name: its
     // URL, empty when it can't be; version replaces its own when given
@@ -427,6 +458,12 @@ public:
         return bytes.isEmpty()
                    ? QUrl()
                    : writeScratchFile(name, QString::fromUtf8(bytes));
+    }
+
+    // The first plugin format this Havne doesn't read
+    Q_INVOKABLE int pluginFormatPast() const
+    {
+        return ECUIO_PLUGIN_FORMAT_MAX + 1;
     }
 
     // The plugin store's copies, by file name
@@ -555,6 +592,30 @@ public:
     }
     Q_INVOKABLE QString emulatorWhy() const { return m_emulatorWhy; }
 
+    // A listener on the loopback that counts what connects: a case proves
+    // the engine opened no connection by this count, not by a timeout
+    Q_INVOKABLE int startListener()
+    {
+        if (m_listener == nullptr) {
+            m_listener = new QTcpServer(this);
+            connect(m_listener, &QTcpServer::newConnection, this, [this] {
+                ++m_listenerConnections;
+                while (QTcpSocket* s = m_listener->nextPendingConnection()) {
+                    s->deleteLater();
+                }
+            });
+        }
+        m_listenerConnections = 0;
+        return m_listener->isListening() ||
+                       m_listener->listen(QHostAddress::LocalHost)
+                   ? m_listener->serverPort()
+                   : 0;
+    }
+    Q_INVOKABLE int listenerConnections() const
+    {
+        return m_listenerConnections;
+    }
+
     // How many of the emulator's client lines carried this event
     // (connected, closed, refused): it serves one host at a time, so a
     // case waits for a closed before the next connect
@@ -632,6 +693,8 @@ private:
     QStringList m_storesMoved;
     std::unique_ptr<QProcess> m_emulator;
     QString m_emulatorWhy;
+    QTcpServer* m_listener = nullptr;
+    int m_listenerConnections = 0;
     QHash<QString, int> m_clientEvents;
 };
 
@@ -676,6 +739,26 @@ void stageOldStores(const QString& settingsDir)
     (void)store.import(packed_plugin::example());
 }
 
+// The example plugin's kept copy as a Havne past this one's format would
+// have left it: named by its own hash, a format core no longer loads. The
+// store reads its copies once, at its first list, so this runs before the
+// bridge is made
+void stageUnloadablePluginCopy()
+{
+    QByteArray bytes = packed_plugin::example();
+    bytes.replace("\"havne_plugin\": 1,",
+                  "\"havne_plugin\": " +
+                      QByteArray::number(ECUIO_PLUGIN_FORMAT_MAX + 1) + ",");
+    const QString sha = QString::fromLatin1(
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    QDir().mkpath(PluginStore::root());
+    QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+               QStringLiteral(".havne-plugin.json"));
+    if (copy.open(QIODevice::WriteOnly)) {
+        copy.write(bytes);
+    }
+}
+
 // The relay's adapter as main() makes it on the phone, opening at once:
 // with it the relay is available, and Settings shows its box
 class OpenAdapter : public RelayAdapter
@@ -707,6 +790,13 @@ public:
     }
 
 public slots:
+    // Every engine the tests make has main()'s network manager
+    void qmlEngineAvailable(QQmlEngine* engine)
+    {
+        engine->setNetworkAccessManagerFactory(&m_networkFactory);
+        engine->addUrlInterceptor(&m_urlInterceptor);
+    }
+
     void applicationAvailable()
     {
         // HAVNE_TEST_LOCALE (for example "C") runs a file under that locale, as CI
@@ -719,7 +809,7 @@ public slots:
         QCoreApplication::setOrganizationName(QStringLiteral("Havne"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
-        // The vehicles' signal files there too (SignalStore::root), as
+        // The plugin store there too (PluginStore::root), as
         // HAVNE_SETTINGS_DIR puts a second instance's
         qputenv("HAVNE_SETTINGS_DIR", m_settingsDir.path().toUtf8());
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it
@@ -735,6 +825,11 @@ public slots:
         if (staged) {
             stageOldStores(m_settingsDir.path());
         }
+        if (std::any_of(args.begin(), args.end(), [](const QString& a) {
+                return a.endsWith(QStringLiteral("tst_settings_unloadable.qml"));
+            })) {
+            stageUnloadablePluginCopy();
+        }
 
         m_bridge = std::make_unique<SessionBridge>();
         // As main() does, before any page reads the vehicle book
@@ -747,6 +842,11 @@ public slots:
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
         m_harness.setRecordingsRoot(m_recordingsDir.path());
         BridgeSingleton::instance = m_bridge.get();
+        SessionBridge* bridge = m_bridge.get();
+        RecordingFrameSet::setSignalFileText(
+            [bridge](const ecuio_signal_set_t* set) {
+                return bridge->signalFileTextOfSet(set);
+            });
         // As main() wires it: a bt: URI is refused before core is asked
         m_bluetooth = std::make_unique<BluetoothDevices>();
         BluetoothDevices::instance = m_bluetooth.get();
@@ -762,6 +862,7 @@ public slots:
     void cleanupTestCase()
     {
         m_harness.clearFakeKnobs();
+        RecordingFrameSet::setSignalFileText({});
         m_bridge.reset();   // ends a session a test left up, joining its threads
         BridgeSingleton::instance = nullptr;
         m_bluetooth.reset(); // after the bridge: its sessions are closed
@@ -773,6 +874,8 @@ public slots:
 private:
     QTemporaryDir m_settingsDir;
     QTemporaryDir m_recordingsDir;
+    RefusingNetworkFactory m_networkFactory;
+    RefusingUrlInterceptor m_urlInterceptor;
     Harness m_harness;
     std::unique_ptr<BluetoothDevices> m_bluetooth;
     std::unique_ptr<SessionBridge> m_bridge;

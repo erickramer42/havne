@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsVinLookup.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The VIN lookup: one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -16,7 +16,7 @@ ColumnLayout {
 
     property alias vinLookupField: vinLookupField
 
-    // ---- A VIN looked up (ADR-0043): decoded here, never kept ----
+    // A VIN looked up (ADR-0043): decoded here, never kept
     LabeledFlow {
         label: qsTr("Look up a VIN:")
 
@@ -31,6 +31,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         readonly property string summary: Bridge.describeVin(vinLookupField.text)
         objectName: "vinLookupResult"
         visible: summary !== ""
@@ -41,6 +42,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "vinLookupHint"
         text: qsTr("By 49 CFR 565 and NHTSA's vPIC list (%1), on this device; the VIN isn't saved. The connected car's goes in the activity log.")
                   .arg(Bridge.vinSource())

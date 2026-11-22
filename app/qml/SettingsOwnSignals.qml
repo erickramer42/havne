@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsOwnSignals.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The vehicle's own signals and Add a signal: one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -17,8 +17,9 @@ ColumnLayout {
     spacing: Theme.spacing * 2
 
 
-    // ---- The vehicle's own signals (ADR-0051's form) ----
+    // The vehicle's own signals (ADR-0051's form)
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsTitle"
         visible: root.host.pickedVehicle !== null
         text: qsTr("Your own signals")
@@ -37,6 +38,7 @@ ColumnLayout {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "ownSignalText"
                 text: qsTr("%1: %2").arg(ownRow.modelData.name,
                                          SignalForm.describe(root.host.ownFile, ownRow.modelData))
@@ -49,7 +51,7 @@ ColumnLayout {
                 text: qsTr("Edit")
                 enabled: root.host.confirming === ""
                 onClicked: {
-                    root.host.editOwnSignal(ownRow.modelData.key)
+                    root.host.ownPart.editOwnSignal(ownRow.modelData.key)
                     root.host.openOwnForm()
                 }
             }
@@ -57,8 +59,8 @@ ColumnLayout {
                 objectName: "ownRemove_" + ownRow.index
                 flat: true
                 text: qsTr("Remove")
-                enabled: root.host.idle && root.host.confirming === ""
-                onClicked: root.host.removeOwnSignal(ownRow.modelData.key)
+                enabled: root.host.ownPart.idle && root.host.confirming === ""
+                onClicked: root.host.ownPart.removeOwnSignal(ownRow.modelData.key)
             }
         }
     }
@@ -66,16 +68,17 @@ ColumnLayout {
     // The last signal's Remove asks here, under the list it was pressed in
     RemoveQuestion {
         objectName: "ownConfirm"
-        words: root.host.ownQuestion()
-        canRemove: root.host.idle
-        onRemoveChosen: root.host.confirmRemoval()
+        words: root.host.rowActionsPart.ownQuestion()
+        canRemove: root.host.ownPart.idle
+        onRemoveChosen: root.host.rowActionsPart.confirmRemoval()
         onCancelChosen: root.host.confirming = ""
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsNote"
         visible: text !== ""
-        text: root.host.formNote
+        text: root.host.ownPart.formNote
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -87,7 +90,7 @@ ColumnLayout {
         enabled: root.host.confirming === ""
         onClicked: {
             // A new signal starts from an empty form, not the last one edited
-            root.host.clearForm()
+            root.host.ownPart.clearForm()
             root.host.openOwnForm()
         }
     }

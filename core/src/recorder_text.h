@@ -30,10 +30,10 @@ std::tm local_tm(std::time_t t);
  * several lines, each far inside a row's bound */
 constexpr size_t kFocusPartBytes = 4096;
 
-/* The picks' names quoted as signals.csv quotes them, in pick order, in
- * parts of at most kFocusPartBytes (a name never split); named counts
- * them. name_of(id, &name) finds a pick's name; one it lacks names
- * nothing. */
+/* The picks as signals.csv names them, in pick order, in parts of at
+ * most kFocusPartBytes (one never split); named counts them.
+ * name_of(id, &name) finds what a pick is written as; one it lacks
+ * names nothing. */
 template <typename NameOf>
 std::vector<std::string> focus_parts_with(const std::vector<uint16_t>& ids,
                                           NameOf name_of, size_t* named)
@@ -57,7 +57,7 @@ std::vector<std::string> focus_parts_with(const std::vector<uint16_t>& ids,
     return parts;
 }
 
-std::vector<std::string> focus_parts(const ecuio_signal_set_t* set,
+std::vector<std::string> focus_parts(const std::vector<def_entry>& defs,
                                      const std::vector<uint16_t>& ids,
                                      size_t* named);
 std::string focus_header(const std::vector<std::string>& parts, size_t named,

@@ -1,6 +1,6 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
 // Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility,
-//          QmlTest.dashboard, QmlTest.dashedit;
+//          QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit;
 //          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
@@ -59,6 +59,7 @@ GaugeBase {
         id: heading
         anchors { left: parent.left; right: parent.right; top: parent.top }
         Text {
+            textFormat: Text.PlainText
             objectName: "gaugeTitle"
             Accessible.ignored: true
             width: parent.width
@@ -69,6 +70,7 @@ GaugeBase {
             color: gauge.titleColor
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             width: parent.width
             visible: gauge.roomy && text !== ""
@@ -87,6 +89,7 @@ GaugeBase {
         spacing: 4
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             id: readout
             objectName: "readout"
             Accessible.ignored: true
@@ -107,6 +110,7 @@ GaugeBase {
             anchors.verticalCenter: readout.verticalCenter
         }
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             visible: gauge.hasValue
@@ -152,6 +156,7 @@ GaugeBase {
     // Beside the value on a card too short for a trace; else in the trace's
     // place, or after the holds while a stale value keeps its trace
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         readonly property bool atHolds: !gauge.brief && gauge.hasValue
@@ -177,6 +182,7 @@ GaugeBase {
         // Two fixed items: a Repeater over the holds would rebuild both at
         // each new low or peak
         component Hold: Text {
+            textFormat: Text.PlainText
             required property string tag
             required property real held
             text: "%1  %2".arg(tag).arg(isNaN(held) ? qsTr("—") : gauge.format(held))

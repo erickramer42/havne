@@ -766,6 +766,14 @@ TEST(RecordingCheckTest, AFormat3EventsLogReadsAsFormat2s)
     ASSERT_EQ(three.rc, ECUIO_OK) << ecuio_last_error_detail();
     EXPECT_EQ(three.found, two.found);
     EXPECT_EQ(three.summary.flags, two.summary.flags);
+    /* Format 4 (ADR-0065 section 9) keeps them too */
+    std::string v4 = v2;
+    v4.replace(0, first.size(), "ecuio session recording, format 4 (ADR-0049)");
+    f.write("events.log", v4);
+    const Checked four(f.utf8());
+    ASSERT_EQ(four.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(four.found, two.found);
+    EXPECT_EQ(four.summary.flags, two.summary.flags);
 }
 
 TEST(RecordingCheckTest, AnOlderRecordingsSleepLineKeepsItFromBeingAGap)

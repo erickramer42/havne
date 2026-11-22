@@ -11,7 +11,7 @@
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording and export
-# harnesses' a folder ('F', or '3' for format 3's first line), with the
+# harnesses' a folder ('F', or '3' or '4' for that format's first line), with the
 # pieces cut at 0x1E bytes (a recording's conditions in a fifth), or the
 # stretches' rules ('S') over two fixtures' samples. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
@@ -20,10 +20,25 @@
 # fuzz_computed's are programs in the harness's built form (computed()),
 # where the format 1 machine and this one would part if they ever
 # differed: no coverage tells the fuzzer that a value went wrong.
+# fuzz_wasm_module's are WebAssembly modules written here byte by byte
+# (wasm_module()), with the exports the harness calls: from nothing the
+# fuzzer rarely gets a module past its header.
+# fuzz_sim's are runs of requests that enter the simulated ECU's extended
+# session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
+# would have to guess; and URIs whose faults aim at one module.
+# fuzz_security_store's are stores with an entry of each kind, the
+# vehicles, addresses, levels and seconds made up, and a store of as
+# many of the longest entry as one holds, and of one more.
+# fuzz_sur_reply's are scripts of requests and the replies the surrogate
+# child would send (sur_seeds()), in the wire's layout: a whole READ
+# reply, empty READs with each kind of status, a bare one, a cut one, a
+# skewed count (late too), a wrong ID, a late reply,
+# an IOCTL past its limit and texts with no terminator.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
 
+import base64
 import glob
 import hashlib
 import json
@@ -99,7 +114,6 @@ def main(argv):
         for path in variant["files"]:
             if path not in data_files:
                 data_files.append(path)
-    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
 
     # The JSON reader: every JSON file above, whole after the bounds
     # byte (0x1F: depth 32, the loaders' bound, and no size bound)
@@ -138,6 +152,26 @@ def main(argv):
              "signals": leaves + [{"key": k, "name": k.upper(), "kind": "computed", "expr": e}
                                   for k, e in chain_exprs]}
     write(out, "fuzz_signal_file", "chain_format2.json", json.dumps(chain).encode())
+    # An expression checked against each (the harness's "x-expr", for the
+    # signal "x-key" names or a new one): one that passes, an edit that
+    # closes a circle, a format 1 file given a function, an edit refused
+    # for its own form, and one cut short
+    for n, (base, expr, key) in enumerate([
+            (chain, "max(top, a) - side", ""), (chain, "top + 1", "low"),
+            (dict(grammar, havne_signals=1, signals=leaves), "clamp(a, b, c)", ""),
+            (grammar, "if(a > b, c)", "e0"), (chain, "mid +", "")]):
+        checked = dict(base, **{"x-expr": expr, "x-key": key})
+        write(out, "fuzz_signal_file", "checked_expr_%d.json" % n, json.dumps(checked).encode())
+    # Keys an expression reads as numbers (a digit first), one of them in
+    # a base def's place, where it goes by obd2's name
+    digits = [("2nd", "Second"), ("9map", "Intake Manifold Pressure"), ("x9", "Later")]
+    digit_keys = {"havne_signals": 2, "name": "Digits", "source": {"name": "Havne's seeds"},
+                  "extends": "obd2", "ecus": [{"id": "pcm", "rx": "7E8"}],
+                  "signals": [{"key": k, "name": name, "field": {"byte": 0},
+                               "read": {"service": "22", "number": "D11%d" % n}}
+                              for n, (k, name) in enumerate(digits)],
+                  "x-expr": "obd2.map + x9"}
+    write(out, "fuzz_signal_file", "digit_keys.json", json.dumps(digit_keys).encode())
 
     # The condition-file loader (ADR-0063): each fixture alone, and again
     # before a signal file to resolve it against (cut at 0x1E). One of
@@ -184,19 +218,52 @@ def main(argv):
     write(out, "fuzz_validate_set", "two_defs", two)
     write(out, "fuzz_validate_set", "two_defs_one_name",
           two[:15] + b"\x80" + two[16:])
+    # Four bytes for each channel after the defs: one channel (0x7E8 and
+    # 0x6E8), the same with its flags set, then one more than a set holds
+    most = int(re.search(rb"#define ECUIO_MAX_CHANNELS (\d+)",
+                         read("core/include/ecuio/signals.h")).group(1))
+    head = bytes([0, layout, 0])
+    write(out, "fuzz_validate_set", "one_channel",
+          head + bytes([1, 0, 0xE8, 0x07, 0x00, 0x06]))
+    write(out, "fuzz_validate_set", "one_channel_flags",
+          head + bytes([1, 0, 0xE8, 0x07, 0x04, 0x06]))
+    write(out, "fuzz_validate_set", "a_channel_too_many",
+          head + bytes([most + 1, 0]) +
+          b"".join(bytes([0x10 + i, 0x07, 0x00, 0x06])
+                   for i in range(most + 1)))
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even
-    # first byte; the files inlined, no fixtures key, then a fixture)
-    after = SEP + fixtures[0] if fixtures else b""
-    folder = b"\x01" + manifest_bytes
-    for path in data_files:
-        folder += SEP + read(plugin + "/" + path)
-    write(out, "fuzz_plugin_manifest", "folder_example-sim", folder + after)
-    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
-    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
-    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
-    write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
+    # first byte; the files inlined, no fixtures key, then a fixture), for
+    # each example: example-car is a whole car of 18 modules
+    text, after = plugin_seeds(out, plugin)
+    plugin_seeds(out, "plugins/example-car")
+    # The conversation tier (format 2): a packed package with its module
+    # a binary file, the same as a folder (the module a piece of its own),
+    # then one whose hash is another module's, one whose module imports,
+    # and one whose security level the services don't declare
+    for name, data in conversation_seeds().items():
+        write(out, "fuzz_plugin_manifest", name, data)
+    talker = conversation_seeds()["packed_conversation"][1:]
+    # A page for each form (ADR-0052's appendix on pages): the folder's
+    # pieces in the loader's order, its pages before its data files
+    pages_dir = "tests/fixtures/plugins/pages"
+    pages_bytes = read(pages_dir + "/manifest.json")
+    pages_manifest = json.loads(pages_bytes)
+    pages_data = []
+    for variant in pages_manifest["variants"]:
+        for path in variant["files"]:
+            if path not in pages_data:
+                pages_data.append(path)
+    pages_folder = b"\x01" + pages_bytes
+    for path in pages_manifest["pages"] + pages_data:
+        pages_folder += SEP + read(pages_dir + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_pages", pages_folder)
+    pages_packed = dict(pages_manifest)
+    pages_packed["files"] = {p: json.loads(read(pages_dir + "/" + p))
+                             for p in pages_data + pages_manifest["pages"]}
+    pages_text = json.dumps(pages_packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_pages", b"\x00" + pages_text)
 
     # Making and changing a packed plugin: a switches byte, then a signal
     # file to wrap, 0x1E and a signal file to put into the result; with
@@ -213,6 +280,8 @@ def main(argv):
         write(out, "fuzz_plugin_wrap", "wrap_options_" + name, b"\x0f" + data)
         write(out, "fuzz_plugin_wrap", "packed_put_" + name, b"\x40" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "packed_slug_" + name, b"\x50" + text + SEP + data)
+        write(out, "fuzz_plugin_wrap", "conversation_put_" + name, b"\x40" + talker + SEP + data)
+        write(out, "fuzz_plugin_wrap", "pages_put_" + name, b"\x40" + pages_text + SEP + data)
         for other, second in wrap_files:
             write(out, "fuzz_plugin_wrap", "put_" + name + "_" + other,
                   b"\x00" + data + SEP + second)
@@ -300,6 +369,23 @@ def main(argv):
         b"2000000,2000000,0x7E8,0x100,41 0C 0F A0\n"
         b"3000000,3000000,0x7E8,0x100,41 0C 32 00\n",
         conditions))
+    # A recording kept by key ('4': format 4's first line): two signals
+    # of one name told apart by their keys, a label by its signal's key,
+    # a focus of keys, a row whose key no signal line declares
+    folder_seeds["keys"] = b"4" + SEP.join((
+        b"profile  obd2\nframe flags  complete\n"
+        b"focus  7E8:410C:2.0:16,7E9:410C:2.0:16\n"
+        b"signal  7E8:410C:2.0:16,RPM,number,RPM,0,1,1\n"
+        b"signal  7E9:410C:2.0:16,RPM,number,RPM,0,1,1\n"
+        b"signal  7E8:4103:2.0:8,Fuel System,enum,,0,0,3\n"
+        b"label  7E8:4103:2.0:8,2,Closed loop\n\n"
+        b"12:00:03.000  +3.000  end  done: 3 frames, 4 values, "
+        b"0 records dropped, 0 notes dropped\n",
+        b"host_us,signal,value,unit\n1000000,7E8:410C:2.0:16,3000,RPM\n"
+        b"1000000,7E9:410C:2.0:16,900,RPM\n"
+        b"2000000,7E8:4103:2.0:8,2,\n3000000,id:7,1.5,V\n",
+        b"host_us,label\n",
+        header + b"1000000,1000000,0x7E8,0x100,41 0C 2E E0\n"))
     # Its edges: a key past a set's 64, a cond line past the longest row
     # (32768 bytes) and a torn last one (a copy past the loader's 256 KiB
     # can't fit the harness's input, so RecordingTest has that one)
@@ -328,6 +414,14 @@ def main(argv):
     write(out, "fuzz_recording", "stretches-cruise",
           stretch_seed(3, cruise.get("Throttle", []),
                        cruise.get("Vehicle Speed", []), []))
+    # Both ends of a pull on a speed measure: the road log's throttle and
+    # speeds (switches 1, speed measures; 16, an engine speed; 32, a pull
+    # ends at top speed)
+    twice = signal_rows("tests/fixtures/recording/pull-twice/signals.csv")
+    write(out, "fuzz_recording", "stretches-pull-top-speed",
+          stretch_seed(1 | 16 | 32, twice.get("Throttle", []),
+                       twice.get("Vehicle Speed", []),
+                       [(t, v / 60) for t, v in twice.get("RPM", [])]))
     vin = b"ZZZFAKE11M0000001"
     ecu = header + (
         b"100000,100000,0x7E8,0x100,49 02 01 " + b" ".join(b"%02X" % c for c in vin) + b"\n"
@@ -345,10 +439,18 @@ def main(argv):
     signals = b"\xef\xbb\xbfhost_us,signal,value,unit\n1500000,RPM,1726,RPM\n"
     write(out, "fuzz_export", "engine-ecu",
           b"F" + events + SEP + signals + SEP + SEP + ecu)
+    # A focus key named twice, holding the harness's scratch folder's
+    # name: the wide CSV's refusal quotes it, which names no folder
+    write(out, "fuzz_export", "focus-twice-folder-word",
+          b"4profile  obd2\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"focus  7E8:ecuio-fuzz-export:2.0:16\n"
+          b"signal  7E8:410C:2.0:16,RPM,number,RPM,0,1,1\n\n" + SEP +
+          b"host_us,signal,value,unit\n1000000,7E8:410C:2.0:16,900,RPM\n")
 
     # The ELM327 emulator: a mode byte (bit 0 a second module, bit 1 the
     # faults), then what a host sends, CR-ended: python-OBD's opening,
-    # Havne's setup (core/src/elm327_transport.cpp) and a VIN read, each
+    # Havne's setup (core/src/elm327_setup.cpp) and a VIN read, each
     # in every mode
     hosts = {
         "python-obd": ["ATZ", "ATE0", "ATH1", "ATL0", "AT RV", "ATSP0", "0100",
@@ -439,7 +541,172 @@ def main(argv):
                           bytes([0x00, 0x01, 0x21]), *([0.0] * 16), 0, 0, 0, 0)
     write(out, "fuzz_computed", "struct-boost",
           b"\x01" + program + b"\x00" + b"".join(number_bytes(v) for v in (28.5, 25.0, 0, 0)))
+
+    # The sandbox: a budget of 1024 instructions and three argument picks
+    # (1, 2, 0x7F), then the module
+    for name, module in wasm_seeds().items():
+        write(out, "fuzz_wasm_module", name + ".wasm", b"\x0a\x01\x02\x03" + module)
+
+    # The simulated ECU's session and security access (sim_security.h),
+    # the canned car with no faults
+    enter, did = b"\x10\x03", b"\x22\xD2\x10"
+    for name, requests in {
+        "unlock-level-01": [enter, did, b"\x27\x01", sim_key(0x01), did],
+        "unlock-level-03": [enter, b"\x27\x03", sim_key(0x03), did],
+        "lockout": [enter] + [b"\x27\x01", sim_key(0x01, wrong=True)] * 3 + [b"\x27\x01"],
+        "locked-by-the-session": [enter, b"\x27\x01", sim_key(0x01), b"\x10\x01", did,
+                                  enter, did],
+        "default-session": [b"\x27\x01", did, b"\x3E\x00", b"\x27"],
+        "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
+    }.items():
+        write(out, "fuzz_sim", name, sim_run(0x02, requests))
+    # Its URIs (an odd first byte): faults and timing for every module and
+    # aimed at one
+    for name, uri in {
+        "uri-aimed": "mock://sim?modules=2&faults=late:3@7E9,silent:5,pending:2@7e8",
+        "uri-aimed-replaced": "mock://sim?faults=late:1,late:2@7E8,stalled:4@7E8",
+        "uri-aimed-refused": "mock://sim?faults=late:3@800",
+        "uri-timing": "mock://sim?modules=2&delay=3000:9000,900:30000@7E9&fc=4000"
+                      "&cf=5000,800@7E9&seed=7",
+        "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
+        "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
+        "uri-busy-bus": "mock://sim?modules=2&busy=ignore,21@7E9&bus=500",
+    }.items():
+        write(out, "fuzz_sim", name, b"\x01" + uri.encode())
+
+    # The security store (security_store.h): no entry, a failure kept, a
+    # delay with no failure, an attempt marked and never ended, another
+    # vehicle's entry of the same address and level, each value at its
+    # top, an entry twice, and the longest entry 256 times (a full store)
+    # and 257 (one past it)
+    kept = {"vehicle": "0123456789ABCDEF", "rx": "7E8", "level": 1,
+            "failed": 2, "last_utc": 1795132800, "pending_utc": 0}
+    top = {"vehicle": "FFFFFFFFFFFFFFFF", "rx": "1FFFFFFF", "level": 125,
+           "failed": 2147483647, "last_utc": 253402300799,
+           "pending_utc": 253402300799}
+    longest = [dict(top, rx="%X" % (0x1FFFFFFF - k)) for k in range(257)]
+    for name, entries in {
+        "empty": [],
+        "kept": [kept],
+        "delayed": [dict(kept, level=3, failed=0)],
+        "pending": [kept, dict(kept, rx="7E9", pending_utc=1795132860)],
+        "vehicles": [kept, dict(kept, vehicle="FEDCBA9876543210")],
+        "top": [top],
+        "twice": [kept, kept],
+        "full": longest[:256],
+        "past_full": longest,
+    }.items():
+        store = {"havne_security_store": 1, "entries": entries}
+        write(out, "fuzz_security_store", name + ".json",
+              json.dumps(store, indent=2).encode())
+    for name, data in sur_seeds().items():
+        write(out, "fuzz_sur_reply", name, data)
     return 0
+
+
+# surrogate_protocol.h's reply (328 bytes) and j2534_ptypes.h's frame
+# (4140), as fuzz_sur_reply's static_asserts pin them
+SUR_TEXT = 80
+SUR_DATA = 64
+PT_DATA = 4128
+
+
+def sur_reply(rid, status=0, num_frames=0, data=b"", data_len=None, text=b""):
+    texts = b"".join(text.ljust(SUR_TEXT, b"\0")[:SUR_TEXT] for _ in range(3))
+    return (struct.pack("<IiII", rid, status, 0, 0) + texts +
+            data.ljust(SUR_DATA, b"\0")[:SUR_DATA] +
+            struct.pack("<II", len(data) if data_len is None else data_len,
+                        num_frames))
+
+
+def sur_frame(payload):
+    return struct.pack("<III", 0, 0x1234, len(payload)) + payload.ljust(PT_DATA, b"\0")
+
+
+def sur_seeds():
+    """fuzz_sur_reply's inputs: [count - 1][kind, cap] per request, then
+    the pipe. Kinds: 0 READ, 1 IOCTL, 2 text, 3 plain; 0x04 late"""
+    def script(*ops):
+        return bytes([len(ops) - 1]) + b"".join(bytes(op) for op in ops)
+
+    frame = sur_frame(bytes.fromhex("000007E8") + bytes.fromhex("0641000000"))
+    return {
+        "read-one": script((0, 0)) + sur_reply(1, num_frames=1) + frame,
+        "read-empty-then-one": script((0, 0), (0, 0)) +
+        sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame,
+        "loss-then-two-frames": script((0, 0), (0, 0), (0, 0)) +
+        sur_reply(1, status=0x12) + sur_reply(2, num_frames=1) + frame +
+        sur_reply(3, num_frames=1) + frame,
+        "read-empty-statuses": script((0, 0), (0, 0), (0, 0), (0, 0)) +
+        sur_reply(1, status=0x09) + sur_reply(2, status=0x10) +
+        sur_reply(3, status=0x00) + sur_reply(4, status=0x07),
+        "bare": script((3, 0)) + sur_reply(1),
+        "cut": script((0, 0)) + sur_reply(1, num_frames=1) + frame[:100],
+        "skewed-read": script((0, 0)) + sur_reply(1, num_frames=2),
+        "skewed-plain": script((3, 0)) + sur_reply(1, num_frames=1),
+        "wrong-id": script((3, 0)) + sur_reply(2),
+        "late": script((3 | 0x04, 0), (3, 0)) + sur_reply(1) + sur_reply(2),
+        "late-wrong-id": script((3 | 0x04, 0), (3, 0)) + sur_reply(5) + sur_reply(2),
+        "late-skewed": script((3 | 0x04, 0), (3, 0)) +
+        sur_reply(1, num_frames=2) + frame + sur_reply(2),
+        "late-read": script((0 | 0x04, 0), (3, 0)) +
+        sur_reply(1, num_frames=1) + frame + sur_reply(2),
+        "ioctl": script((1, 8)) + sur_reply(1, data=bytes(range(12))),
+        "ioctl-past": script((1, 64)) + sur_reply(1, data=bytes(64), data_len=65),
+        "texts": script((2, 0)) + sur_reply(1, text=b"A" * SUR_TEXT),
+    }
+
+
+# sim_security.h's levels: the seed request's sub-function and its seed
+SIM_SEEDS = {
+    0x01: bytes([0x5A, 0x17, 0xC3, 0x08]),
+    0x03: bytes([0x11, 0x92, 0x23, 0xA4, 0x35, 0xB6, 0x47, 0xC8, 0x59, 0xDA, 0x6B, 0xEC,
+                 0x7D, 0xFE, 0x8F, 0x10]),
+}
+
+
+def plugin_seeds(out, plugin):
+    """fuzz_plugin_manifest's folder and packed seeds of one plugin folder;
+    the packed text and the fixture that follows a seed"""
+    manifest_bytes = read(plugin + "/manifest.json")
+    manifest = json.loads(manifest_bytes)
+    data_files = []  # each variant's files, in the order the loader asks for them
+    for variant in manifest["variants"]:
+        for path in variant["files"]:
+            if path not in data_files:
+                data_files.append(path)
+    fixtures = [read(plugin + "/" + p) for p in manifest.get("fixtures", [])]
+    name = os.path.basename(plugin)
+    after = SEP + fixtures[0] if fixtures else b""
+    folder = b"\x01" + manifest_bytes
+    for path in data_files:
+        folder += SEP + read(plugin + "/" + path)
+    write(out, "fuzz_plugin_manifest", "folder_" + name, folder + after)
+    packed = {k: v for k, v in manifest.items() if k != "fixtures"}
+    packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
+    text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
+    write(out, "fuzz_plugin_manifest", "packed_" + name, b"\x00" + text + after)
+    return text, after
+
+
+def sim_key(level, wrong=False):
+    """A level's key request: 27, the next sub-function, then the seed's
+    bytes in reverse, each XORed with a letter of HAVNE"""
+    seed = SIM_SEEDS[level]
+    key = bytes(seed[len(seed) - 1 - i] ^ b"HAVNE"[i % 5] for i in range(len(seed)))
+    if wrong:
+        key = key[:-1] + bytes([key[-1] ^ 0x01])
+    return bytes([0x27, level + 1]) + key
+
+
+def sim_run(config, requests):
+    """fuzz_sim's form: the ECU's byte (even), then each request behind
+    its length byte: bits 0 to 3, and bit 5 for 16 more"""
+    out = bytes([config])
+    for r in requests:
+        assert len(r) < 32
+        out += bytes([(len(r) - 16) | 0x20 if len(r) >= 16 else len(r)]) + r
+    return out
 
 
 # fuzz_computed's edges, in its kEdges' order (the last, NaN, left out)
@@ -477,6 +744,214 @@ def computed(format1, steps, constants, inputs):
     for v in inputs:
         data += number_bytes(0.0 if v is None else v)
     return data
+
+
+def leb(v):
+    """An unsigned LEB128 number"""
+    out = b""
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if v == 0:
+            return out + bytes([b])
+        out += bytes([b | 0x80])
+
+
+def sleb(v):
+    """A signed LEB128 number"""
+    out = b""
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if (v == 0 and not b & 0x40) or (v == -1 and b & 0x40):
+            return out + bytes([b])
+        out += bytes([b | 0x80])
+
+
+def wasm_section(kind, content):
+    return bytes([kind]) + leb(len(content)) + content
+
+
+def wasm_name(text):
+    return leb(len(text)) + text.encode()
+
+
+def wasm_module(funcs, memory=b"\x01\x01\x01", table=b"", global_=b"", element=b"",
+                data=b"", imports=b"", start=None, tail=b""):
+    """A module's bytes. funcs: (export name or None, parameters, results,
+    body), the types as text of 'i' (i32); each function type is written
+    once. memory, table, global_, element, data and imports are a
+    section's entries after its count of one (memory's: its limits)"""
+    types = []
+    for _, params, results, _ in funcs:
+        if (params, results) not in types:
+            types.append((params, results))
+    out = b"\x00asm\x01\x00\x00\x00"
+    out += wasm_section(1, leb(len(types)) + b"".join(
+        b"\x60" + leb(len(p)) + b"\x7f" * len(p) + leb(len(r)) + b"\x7f" * len(r)
+        for p, r in types))
+    if imports:
+        out += wasm_section(2, b"\x01" + imports)
+    out += wasm_section(3, leb(len(funcs)) + b"".join(
+        leb(types.index((p, r))) for _, p, r, _ in funcs))
+    if table:
+        out += wasm_section(4, b"\x01" + table)
+    if memory:
+        out += wasm_section(5, b"\x01" + memory)
+    if global_:
+        out += wasm_section(6, b"\x01" + global_)
+    exports = [(name, i) for i, (name, _, _, _) in enumerate(funcs) if name]
+    out += wasm_section(7, leb(len(exports)) + b"".join(
+        wasm_name(name) + b"\x00" + leb(i) for name, i in exports))
+    if start is not None:
+        out += wasm_section(8, leb(start))
+    if element:
+        out += wasm_section(9, b"\x01" + element)
+    bodies = [b"\x00" + body + b"\x0b" for _, _, _, body in funcs]
+    out += wasm_section(10, leb(len(funcs)) + b"".join(leb(len(b)) + b for b in bodies))
+    if data:
+        out += wasm_section(11, b"\x01" + data)
+    return out + tail
+
+
+def guest_module(buffer_at=1024, imports=b""):
+    """The least module the guest ABI takes (core/src/guest_abi.h): its six
+    exports, each returning a constant, and one page of memory"""
+    const = lambda v: b"\x41" + sleb(v)   # i32.const
+    return wasm_module([("ecuio_abi", "", "i", const(1)),
+                        ("ecuio_buffer", "", "i", const(buffer_at)),
+                        ("begin", "ii", "i", const(0)),
+                        ("next_request", "", "i", const(0)),
+                        ("accept", "ii", "i", const(0)),
+                        ("end", "", "", b"")], imports=imports)
+
+
+def conversation_seeds():
+    """fuzz_plugin_manifest's seeds for a format 2 plugin with the
+    conversation tier, by name"""
+    data = {"havne_signals": 1, "signals": [
+        {"key": "oil_temp", "name": "Oil Temp", "ecu": "pcm",
+         "read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}}]}
+
+    def plugin(module, packed, sha=None, level="01"):
+        doc = {"havne_plugin": 2, "id": "talker", "name": "Talker", "version": "1.0.0",
+               "requires": {"core": "0.1.0"}, "source": {"name": "Havne's fuzz seeds"},
+               "tiers": ["data", "conversation"],
+               "ecus": [{"id": "pcm", "rx": "7E8"}, {"id": "tcm", "rx": "7E9"}],
+               "variants": [{"id": "base", "files": ["a.json"]}]}
+        if packed:
+            doc["files"] = {"a.json": data, "guest.wasm": {
+                "kind": "wasm", "base64": base64.b64encode(module).decode()}}
+        doc["conversation"] = {
+            "code": {"file": "guest.wasm",
+                     "sha256": sha or hashlib.sha256(module).hexdigest()},
+            "budget": 100000, "ecus": ["pcm", "tcm"],
+            "services": [{"sid": "10", "sub": ["03"]}, {"sid": "22"}, {"sid": "19"},
+                         {"sid": "27", "sub": ["01", "02", "03", "04"]},
+                         {"sid": "2C", "sub": ["01", "03"]}, {"sid": "3E", "sub": ["00"]}],
+            "security": [{"ecu": "pcm", "level": level, "seed_bytes": 4, "key_bytes": 4},
+                         {"ecu": "tcm", "level": "03", "seed_bytes": 16, "key_bytes": 16,
+                          "delay_ms": 30000, "key_window_ms": 250}]}
+        return json.dumps(doc, indent=1).encode()
+
+    module = guest_module()
+    plain = guest_module(buffer_at=0)   # no 0x1E byte: a folder's piece
+    assert SEP not in plain
+    importing = guest_module(imports=wasm_name("env") + wasm_name("now") + b"\x00\x00")
+    return {
+        "packed_conversation": b"\x00" + plugin(module, True),
+        "folder_conversation": b"\x01" + plugin(plain, False) + SEP +
+                               json.dumps(data).encode() + SEP + plain,
+        "packed_conversation_other_hash": b"\x00" + plugin(module, True, sha="0" * 64),
+        "packed_conversation_imports": b"\x00" + plugin(importing, True),
+        "packed_conversation_undeclared_level": b"\x00" + plugin(module, True, level="05"),
+    }
+
+
+def wasm_seeds():
+    """fuzz_wasm_module's seeds by name: its five exports doing each thing
+    a module can do to the sandbox, and a module the check refuses of
+    each kind"""
+    const = lambda v: b"\x41" + sleb(v)   # i32.const
+    get = lambda i: bytes([0x20, i])      # local.get
+    load = b"\x28\x02\x00"                # i32.load, aligned, no offset
+    store = b"\x36\x02\x00"
+    add, drop, unreachable = b"\x6a", b"\x1a", b"\x00"
+    spin = b"\x03\x40\x0c\x00\x0b"       # loop, br 0, end
+    five = [("a", "", "", b""),
+            ("b", "", "i", const(42)),
+            ("c", "i", "i", get(0)),
+            ("d", "ii", "i", get(0) + get(1) + add),
+            ("e", "iiii", "i", get(0) + get(1) + add + get(2) + add + get(3) + add)]
+    nest = 64
+    seeds = {
+        "exports": wasm_module(five),
+        # One export that doesn't return in each: the first ends the instance
+        "spin": wasm_module(five[1:2] + [("c", "i", "i", spin + const(0))]),
+        "trap-unreachable": wasm_module(five[1:3] + [("a", "", "", unreachable)]),
+        "trap-outside": wasm_module([("b", "", "i", const(-1) + load)]),  # past the memory
+        "trap-divide": wasm_module([("c", "i", "i", get(0) + const(0) + b"\x6e")]),  # i32.div_u by 0
+        "trap-overflow": wasm_module([    # an f64 past an i32: f64.const, i32.trunc_f64_s
+            ("b", "", "i", b"\x44" + bytes(7) + b"\x7f" + b"\xaa")]),
+        "recurse": wasm_module([("a", "", "", b"\x10\x00")]),       # calls itself
+        "recurse-argument": wasm_module([("c", "i", "i", get(0) + b"\x10\x00")]),
+        "memory": wasm_module([
+            ("b", "", "i", const(65532) + load),                   # its last word
+            ("c", "i", "i", get(0) + get(0) + store + get(0) + load),
+            ("d", "ii", "i", get(0) + get(1) + b"\x3a\x00\x00" + b"\x3f\x00")],  # store8, size
+            memory=b"\x01\x01\x01"),
+        "memory-largest": wasm_module(five[:3], memory=b"\x01\x10\x10"),
+        "grow": wasm_module([
+            ("b", "", "i", const(1) + b"\x40\x00"),               # memory.grow
+            ("c", "i", "i", get(0) + b"\x40\x00" + b"\x3f\x00" + add)]),
+        "blocks": wasm_module([("a", "", "", b"\x02\x40" * nest + b"\x0b" * nest),
+                               ("b", "", "i", b"\x02\x7f" + const(1) + const(1) +
+                                b"\x0d\x00" + drop + const(2) + b"\x0b")]),  # br_if with a value
+        "table": wasm_module([
+            ("b", "", "i", const(7)),
+            (None, "", "i", const(9)),
+            ("c", "i", "i", get(0) + b"\x11\x00\x00")],           # call_indirect, type 0
+            table=b"\x70\x00\x02",                               # two function references
+            element=b"\x00" + const(0) + b"\x0b" + b"\x02\x00\x01"),
+        "globals": wasm_module([
+            ("b", "", "i", b"\x23\x00"),                          # global.get
+            ("c", "i", "i", get(0) + b"\x24\x00" + b"\x23\x00")],
+            global_=b"\x7f\x01" + const(5) + b"\x0b"),            # a mutable i32 of 5
+        "data": wasm_module([("b", "", "i", const(0) + load)],
+                            data=b"\x00" + const(0) + b"\x0b" + b"\x04\xde\xad\xbe\xef"),
+        "data-outside": wasm_module(five[:1],
+                                    data=b"\x00" + const(65534) + b"\x0b" + b"\x04abcd"),
+        "numbers": wasm_module([
+            ("c", "i", "i", get(0) + b"\xac" + b"\x42\x03" + b"\x7f" + b"\xa7"),  # i64: extend, div_s, wrap
+            ("d", "ii", "i", get(0) + b"\xc0" + get(1) + b"\x74")]),   # i32.extend8_s, shl
+        # Work the budget counts beyond instructions: blocks scanned for
+        # their ends on every turn of a loop, a block left by a branch,
+        # br_tables the runtime keeps in its list (a depth past 255)
+        "scan-if": wasm_module([("a", "", "", b"\x03\x40" + (
+            b"\x41\x00\x04\x40" + b"\x01" * 2043 + b"\x0b") * 3 + b"\x0c\x00\x0b")]),
+        "scan-block": wasm_module([("a", "", "", b"\x02\x40\x0c\x00" + b"\x01" * 2000 + b"\x0b")]),
+        "table-list": wasm_module([("a", "", "", b"\x02\x40" * 256 + (
+            b"\x02\x40\x41\x01\x0e\x01\x80\x02\x00\x0b") * 8 + b"\x0b" * 256)]),
+        # What the check refuses, each of its kinds
+        "refused-start": wasm_module(five, start=0),
+        "refused-import": wasm_module(five[1:2], imports=wasm_name("env") + wasm_name("f") +
+                                      b"\x00\x00"),
+        "refused-no-maximum": wasm_module(five, memory=b"\x00\x01"),
+        "refused-grows": wasm_module(five, memory=b"\x01\x01\x02"),
+        "refused-large": wasm_module(five, memory=b"\x01\x11\x11"),
+        "refused-no-memory": wasm_module(five, memory=b""),
+        "refused-initialize": wasm_module(five + [("_initialize", "", "", spin)]),
+        "refused-kind": wasm_module(five, tail=wasm_section(12, b"\x00")),
+        "refused-two-exports": wasm_module(five, tail=wasm_section(7, b"\x00")),
+        "refused-nul-name": wasm_module(five + [("b\x00c", "", "", b"")]),
+        "refused-twice": wasm_module(five + [("b", "", "i", const(7))]),
+        "refused-types": wasm_module(five[:1], tail=wasm_section(
+            1, leb(1025) + b"\x60\x00\x00" * 1025)),
+        "refused-body": wasm_module(five[:1] + [("b", "", "i", b"\x01" * 65536 + const(1))]),
+        # What only the runtime refuses: an add with nothing to add
+        "invalid-code": wasm_module([("b", "", "i", add)]),
+    }
+    return seeds
 
 
 if __name__ == "__main__":

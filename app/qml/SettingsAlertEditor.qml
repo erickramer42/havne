@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsAlertEditor.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alerts, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alerts, QmlTest.phone_* (test_qml)
 // One condition (ADR-0063 section 5): its name, up to four terms, its hold and its uses, saved through core's loader; the Alerts page's own page
 
 import QtQuick
@@ -74,7 +74,7 @@ ColumnLayout {
     // Dashboard's zones are where the unit system converted it
     function stored(unit, typed) {
         const v = Bridge.decodedValue(unit, typed)
-        return v === typed ? v : DashboardBook.roundStored(v)
+        return v === typed ? v : DashboardEdit.roundStored(v)
     }
 
     function textsOf(t) {
@@ -119,9 +119,9 @@ ColumnLayout {
         root.alerts.refreshRows()
     }
 
-    // ---- Terms
+    // Terms
     function rowOf(t) {
-        const all = DashboardBook.lookupRefs(t.signal ?? [], root.alerts.gaugeSets)
+        const all = DashboardEdit.lookupRefs(t.signal ?? [], root.alerts.gaugeSets)
         for (const r of root.alerts.rows) {
             if (all.indexOf(r.ref) >= 0)
                 return r
@@ -184,7 +184,7 @@ ColumnLayout {
     // The picked row's refs as a Dashboard cell builds them, and its unit
     function setSignal(i, row) {
         const t = ConditionBook.copy(terms[i])
-        t.signal = DashboardBook.counterparts(row.ref, root.alerts.gaugeSets).slice(0, ConditionBook.maxRefs)
+        t.signal = DashboardEdit.counterparts(row.ref, root.alerts.gaugeSets).slice(0, ConditionBook.maxRefs)
         t.unit = row.decodedUnit
         // Another unit reads the shown texts afresh
         if (t.unit !== terms[i].unit) {
@@ -202,7 +202,7 @@ ColumnLayout {
         picking = -1
     }
 
-    // ---- Save: the condition built from the fields, null with problem set
+    // Save: the condition built from the fields, null with problem set
     function build() {
         const c = ConditionBook.copy(root.alerts.draft)
         c.name = nameInput.text.trim()
@@ -313,7 +313,7 @@ ColumnLayout {
         root.alerts.problem = ""
     }
 
-    // ---- The page
+    // The page
     LabeledFlow {
         label: qsTr("Name:")
         ThemedTextField {
@@ -399,6 +399,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertTermCheck"
                     visible: termCard.kind === "check"
                     text: qsTr("A recording's frames check (%1): kept as the file has it").arg(String(termCard.term.check))
@@ -467,6 +468,7 @@ ColumnLayout {
                         onTextEdited: root.texts[termCard.index].level = text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertLevelUnit"
                         visible: termCard.ordered
                         text: termCard.shownUnit
@@ -491,6 +493,7 @@ ColumnLayout {
                         onTextEdited: root.texts[termCard.index].clear = text
                     }
                     Label {
+                        textFormat: Text.PlainText
                         text: termCard.shownUnit
                         color: Theme.textDim
                         height: clearField.height
@@ -535,7 +538,7 @@ ColumnLayout {
         onClicked: root.addTerm()
     }
 
-    // ---- How long: a hold before it turns on, and before it clears
+    // How long: a hold before it turns on, and before it clears
     LabeledFlow {
         label: qsTr("On after:")
         ThemedTextField {
@@ -546,6 +549,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s, off after:")
             color: Theme.textDim
             height: forInput.height
@@ -559,6 +563,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s")
             color: Theme.textDim
             height: clearForInput.height
@@ -566,7 +571,7 @@ ColumnLayout {
         }
     }
 
-    // ---- What it does
+    // What it does
     ThemedCheckBox {
         id: alertCheck
         objectName: "alertUseAlert"
@@ -606,6 +611,7 @@ ColumnLayout {
             text: qsTr("Sound")
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "alertSoundNote"
             text: qsTr("Sound plays on Android.")
             color: Theme.textDim
@@ -631,6 +637,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s, after:")
             color: Theme.textDim
             height: beforeInput.height
@@ -644,6 +651,7 @@ ColumnLayout {
             placeholderText: "0"
         }
         Label {
+            textFormat: Text.PlainText
             text: qsTr("s")
             color: Theme.textDim
             height: afterInput.height
@@ -657,6 +665,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertEditorProblem"
         visible: text !== ""
         text: root.problem
@@ -696,6 +705,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             objectName: "alertRemoveText"
             text: qsTr("Remove %1?").arg(nameInput.text.trim())
             color: Theme.text

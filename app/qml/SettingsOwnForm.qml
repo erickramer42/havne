@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsOwnForm.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The form for a vehicle's own signal (Add a signal, Edit): a page of its own in Settings
 
 import QtQuick
@@ -25,6 +25,8 @@ ColumnLayout {
     property alias formUnit: formUnit
     property alias formDecimals: formDecimals
     property alias formValues: formValues
+    property alias computedPart: computedPart
+    readonly property bool computed: root.host.ownPart.formKind === "computed"
 
     objectName: "signalForm"
     visible: root.host.pickedVehicle !== null
@@ -45,6 +47,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Reply ID")
             ThemedTextField {
                 id: formRx
@@ -55,6 +58,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Request ID")
             ThemedTextField {
                 id: formTx
@@ -67,6 +71,7 @@ ColumnLayout {
 
     LabeledFlow {
         objectName: "formReadBy"
+        visible: !root.computed
         label: qsTr("Read by:")
         Repeater {
             model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
@@ -75,16 +80,16 @@ ColumnLayout {
                 objectName: "formService_" + modelData.name
                 text: modelData.label
                 checkable: true
-                checked: root.host.formService === modelData.name
-                onClicked: root.host.formService = modelData.name
+                checked: root.host.ownPart.formService === modelData.name
+                onClicked: root.host.ownPart.formService = modelData.name
             }
         }
         Captioned {
-            caption: root.host.formService === "22" ? qsTr("DID") : qsTr("PID")
+            caption: root.host.ownPart.formService === "22" ? qsTr("DID") : qsTr("PID")
             ThemedTextField {
                 id: formNumber
                 objectName: "formNumber"
-                placeholderText: root.host.formService === "22" ? qsTr("DID, 4 hex digits")
+                placeholderText: root.host.ownPart.formService === "22" ? qsTr("DID, 4 hex digits")
                                                            : qsTr("PID, 2 hex digits")
                 width: Theme.controlHeight * 5
             }
@@ -101,8 +106,8 @@ ColumnLayout {
                 objectName: "formKind_" + modelData
                 text: modelData
                 checkable: true
-                checked: root.host.formKind === modelData
-                onClicked: root.host.formKind = modelData
+                checked: root.host.ownPart.formKind === modelData
+                onClicked: root.host.ownPart.formKind = modelData
             }
         }
     }
@@ -110,6 +115,7 @@ ColumnLayout {
     Flow {
         Layout.fillWidth: true
         spacing: Theme.spacing
+        visible: !root.computed
         Captioned {
             caption: qsTr("Byte")
             ThemedTextField {
@@ -122,7 +128,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Bits")
-            visible: root.host.formKind === "number" || root.host.formKind === "enum"
+            visible: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum"
             ThemedTextField {
                 id: formBits
                 objectName: "formBits"
@@ -133,7 +139,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Start bit")
-            visible: root.host.formKind === "number" || root.host.formKind === "enum"
+            visible: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum"
             ThemedTextField {
                 id: formBit
                 objectName: "formBit"
@@ -143,7 +149,7 @@ ColumnLayout {
         }
         Captioned {
             caption: qsTr("Bytes")
-            visible: !(root.host.formKind === "number" || root.host.formKind === "enum")
+            visible: !(root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum")
             ThemedTextField {
                 id: formBytes
                 objectName: "formBytes"
@@ -152,36 +158,43 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "formOrderLabel"
-            visible: root.host.formKind === "number" || root.host.formKind === "enum"
+            visible: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum"
             text: qsTr("Byte order:")
             color: Theme.textDim
             topPadding: 8
         }
         Repeater {
-            model: root.host.formKind === "number" || root.host.formKind === "enum" ? ["be", "le"] : []
+            model: root.host.ownPart.formKind === "number" || root.host.ownPart.formKind === "enum" ? ["be", "le"] : []
             ThemedButton {
                 required property string modelData
                 objectName: "formOrder_" + modelData
                 text: modelData === "be" ? qsTr("big") : qsTr("little")
                 checkable: true
-                checked: root.host.formOrder === modelData
-                onClicked: root.host.formOrder = modelData
+                checked: root.host.ownPart.formOrder === modelData
+                onClicked: root.host.ownPart.formOrder = modelData
             }
         }
         ThemedCheckBox {
             id: formSigned
             objectName: "formSigned"
-            visible: root.host.formKind === "number"
+            visible: root.host.ownPart.formKind === "number"
             text: qsTr("Signed")
         }
+    }
+
+    SettingsOwnComputed {
+        id: computedPart
+        host: root.host
     }
 
     Flow {
         Layout.fillWidth: true
         spacing: Theme.spacing
-        visible: root.host.formKind === "number"
+        visible: root.host.ownPart.formKind === "number" || root.computed
         Captioned {
+            visible: !root.computed
             caption: qsTr("Scale")
             ThemedTextField {
                 id: formScale
@@ -191,6 +204,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Offset")
             ThemedTextField {
                 id: formOffset
@@ -222,7 +236,7 @@ ColumnLayout {
     ThemedTextField {
         id: formValues
         objectName: "formValues"
-        visible: root.host.formKind === "enum"
+        visible: root.host.ownPart.formKind === "enum"
         placeholderText: qsTr("Values: 0=Park, 1=Reverse, 2=Neutral")
         Layout.fillWidth: true
     }
@@ -236,8 +250,8 @@ ColumnLayout {
                 objectName: "formGroup_" + (modelData === "" ? "other" : modelData)
                 text: modelData === "" ? qsTr("other") : modelData
                 checkable: true
-                checked: root.host.formGroup === modelData
-                onClicked: root.host.formGroup = modelData
+                checked: root.host.ownPart.formGroup === modelData
+                onClicked: root.host.ownPart.formGroup = modelData
             }
         }
     }
@@ -248,21 +262,22 @@ ColumnLayout {
         ThemedButton {
             objectName: "formReadOnce"
             text: Bridge.readingOnce ? qsTr("Reading...") : qsTr("Read once")
-            enabled: root.host.idle && !Bridge.readingOnce && root.host.confirming === ""
-            onClicked: root.host.readOnceDraft()
+            visible: !root.computed
+            enabled: root.host.ownPart.idle && !Bridge.readingOnce && root.host.confirming === ""
+            onClicked: root.host.ownPart.readOnceDraft()
         }
         // The form's one action
         ThemedButton {
             objectName: "formSave"
             text: qsTr("Save")
             highlighted: true
-            enabled: root.host.idle && root.host.confirming === ""
+            enabled: root.host.ownPart.idle && root.host.confirming === ""
             onClicked: {
-                if (root.host.saveDraft()) {
+                if (root.host.ownPart.saveDraft()) {
                     // Saved: the form empties for the next, and Signals shows the note
-                    const note = root.host.formNote
-                    root.host.clearForm()
-                    root.host.formNote = note
+                    const note = root.host.ownPart.formNote
+                    root.host.ownPart.clearForm()
+                    root.host.ownPart.formNote = note
                     root.host.back()
                 }
             }
@@ -271,30 +286,33 @@ ColumnLayout {
             objectName: "formClear"
             flat: true
             text: qsTr("Clear")
-            onClicked: root.host.clearForm()
+            onClicked: root.host.ownPart.clearForm()
         }
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "formReadResult"
         visible: text !== ""
-        text: root.host.readResultText(root.host.readResult)
-        color: root.host.readResult !== null && root.host.readResult.ok ? Theme.text : Theme.warning
+        text: root.host.ownPart.readResultText(root.host.ownPart.readResult)
+        color: root.host.ownPart.readResult !== null && root.host.ownPart.readResult.ok ? Theme.text : Theme.warning
         wrapMode: Text.WrapAnywhere
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "formProblem"
         visible: text !== ""
-        text: root.host.formProblem
+        text: root.host.ownPart.formProblem
         color: Theme.warning
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "formNote"
         visible: text !== ""
-        text: root.host.formNote
+        text: root.host.ownPart.formNote
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true

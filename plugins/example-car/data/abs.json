@@ -1,0 +1,51 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its abs",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up abs at 521",
+  "signals": [
+    {
+      "key": "abs_name",
+      "name": "Brakes Module Name",
+      "kind": "text",
+      "ecu": "abs",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "abs_wheel_fl",
+      "name": "Wheel Speed FL",
+      "ecu": "abs",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 16, "order": "be"},
+      "scale": 0.01,
+      "unit": "km/h",
+      "decimals": 1,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 260}
+    },
+    {
+      "key": "abs_wheel_fr",
+      "name": "Wheel Speed FR",
+      "ecu": "abs",
+      "read": {"service": "22", "number": "4A11"},
+      "field": {"byte": 0, "bits": 16, "order": "be"},
+      "scale": 0.01,
+      "unit": "km/h",
+      "decimals": 1,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 260}
+    },
+    {
+      "key": "abs_wheel_spread",
+      "name": "Front Wheel Spread",
+      "kind": "computed",
+      "expr": "abs_wheel_fl - abs_wheel_fr",
+      "unit": "km/h",
+      "decimals": 1,
+      "group": "vehicle",
+      "plot": 3,
+      "gauge": {"min": -10, "max": 10, "warn_low": -5, "warn_high": 5}
+    }
+  ]
+}

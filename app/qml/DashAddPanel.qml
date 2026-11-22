@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashAddPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
 import QtQuick.Controls
@@ -25,6 +25,7 @@ GaugeCard {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 font.pixelSize: Theme.fontBody
                 font.bold: true
@@ -37,7 +38,7 @@ GaugeCard {
                 text: addCard.host.changingKind ? qsTr("Back") : qsTr("Close")
                 onClicked: {
                     if (addCard.host.changingKind) {
-                        addCard.host.leaveKindList()
+                        addCard.host.addFlowPart.leaveKindList()
                         return
                     }
                     addCard.host.commitTyping()
@@ -102,7 +103,7 @@ GaugeCard {
                                                         && addCard.host.selectedCell.kind === kindTile.modelData
                         checkable: current
                         checked: current
-                        onClicked: addCard.host.pickKind(kindTile.modelData)
+                        onClicked: addCard.host.addFlowPart.pickKind(kindTile.modelData)
                     }
                 }
             }

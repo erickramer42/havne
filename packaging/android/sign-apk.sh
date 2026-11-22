@@ -2,7 +2,7 @@
 # File/layer: packaging/android/sign-apk.sh | release packaging, Android arm64-v8a
 # Testing: run by .github/workflows/release.yml on every release tag, and
 #          by hand against a local Release build with a throwaway key
-#          (docs/development.md, "Releases").
+#          (docs/packaging.md, "Releases").
 #
 # Checks the unsigned Release APK, signs it with the release key and
 # checks the result (ADR-0030):
@@ -56,7 +56,7 @@ alias=${HAVNE_KEY_ALIAS:-havne}
 expected=${HAVNE_CERT_SHA256:-}
 if [ -z "$expected" ]; then
     [ -f "$HERE/release-cert.sha256" ] \
-        || die "no $HERE/release-cert.sha256: the release key's certificate fingerprint (docs/development.md, \"The Android release key\")"
+        || die "no $HERE/release-cert.sha256: the release key's certificate fingerprint (docs/packaging.md, \"The Android release key\")"
     expected=$(head -n 1 "$HERE/release-cert.sha256")
 fi
 expected=$(printf '%s' "$expected" | tr -d ': \r' | tr 'A-F' 'a-f')

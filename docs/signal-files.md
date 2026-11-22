@@ -152,7 +152,7 @@ place, and a gauge or layout that named `obd2`'s signal reads yours. So does a c
 
 ### `ecus`
 
-Each module the file reads from, at most four, the base set's counted
+Each module the file reads from, at most 32, the base set's counted
 when the file extends one:
 
 ```json
@@ -357,6 +357,26 @@ for data", in none of the unsupported, absent or unasked lists). A
 Delivery line and the support report give the sweep, and a `max_age` is
 at most 60 s), or asking fewer signals, fixes it.
 
+**Trying an expression.** `havne-cli signals expr --signals my.json
+"max(coolant, oil) - 40"` reads the expression as a computed signal of
+that file would be read: what it reads, or the character it is refused at
+and why. Add `--value coolant=95 --value oil=110@1.5` (a value, and
+optionally its age in seconds after an `@`) to work it out from those
+values; with no value the line says which signal is missing or too old.
+`--key hottest` checks it as an edit of that signal, which catches an
+expression that would read itself. With no expression the command lists
+the name each signal is read by: a file's own key, or `obd2.rpm` and its
+kin in a file that extends `obd2`. A plugin's variant is checked the same
+with `--plugin <pkg> --variant <id>`.
+
+**In the app.** Settings, Signals, Add a signal has a computed type that
+writes the signal for you ([user-guide.md](user-guide.md)). It writes
+`kind`, `expr`, `unit`, `decimals` and `group` and no `read` or `field`,
+and raises `havne_signals` to 2 when the expression needs it. A computed
+signal whose key starts with a digit loads, but another expression can't
+read it by that key (an expression reads a leading digit as a number), so
+the form refuses such a name for a new signal.
+
 ### Units
 
 A unit is shown exactly as written. These convert when the imperial
@@ -422,9 +442,10 @@ files use `gauge` and its `requires.core` names an older version.
 | What | Bound |
 |---|---|
 | A file | 1 MiB, UTF-8 |
-| Signals | 1024 a file |
-| Modules | 4, the base set's counted |
-| A session's requests | 1024, the base set's counted (`obd2` alone asks over 90) |
+| Signals | 1024 for each file |
+| Modules | 32, the base set's counted |
+| An ECU's requests | 1024, the base set's counted (`obd2` alone asks over 90 of the engine ECU) |
+| A variant's files together | 16,384 signals; its one written file 4 MiB |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
 | `decimals` | 0 to 3 |
@@ -466,13 +487,13 @@ A file is refused for:
   Recordings are CSV, often opened in a spreadsheet
   ([ADR-0049](adr/0049-recordings-in-core.md) section 8).
 - **Its modules:** a `tx` left out where the standard doesn't give one
-  (above); a `tx` of another width than its `rx`; more than four; and
+  (above); a `tx` of another width than its `rx`; more than 32; and
   **11-bit and 29-bit IDs in one file**, the base set's counted. One
   connection carries one width (a J2534 or ELM327 session refuses the
   mix before it opens the adapter), and `obd2`'s modules are 11-bit, so
   a file that extends it takes 11-bit modules only.
-- **Its size:** more signals than fit a session's 1024 requests with
-  the base set's.
+- **Its size:** more signals than one ECU's 1024 requests
+  hold with the base set's.
 
 Every refusal names the line and column of what it refuses, then why:
 
@@ -573,23 +594,30 @@ written, and `signals check` says it won't convert.
 
 ### Where Havne keeps them
 
-The app keeps a copy of each file it imports, so the vehicle still has
-it when the original moves or the phone's picker loses access to it:
+The app keeps each file it imports as a plugin of its own, so the vehicle
+still has it when the original moves or the phone's picker loses access
+to it:
 
-- **The folder:** `signals/` in the app's data folder (Windows
-  `%APPDATA%\Havne\Havne\signals`, Linux `~/.local/share/Havne/Havne/signals`,
-  macOS `~/Library/Application Support/Havne/Havne/signals`, and the
-  app's own storage on a phone), or `signals/` under
+- **The folder:** `plugins/` in the app's data folder (Windows
+  `%APPDATA%\Havne\Havne\plugins`, Linux `~/.local/share/Havne/Havne/plugins`,
+  macOS `~/Library/Application Support/Havne/Havne/plugins`, and the
+  app's own storage on a phone), or `plugins/` under
   `HAVNE_SETTINGS_DIR` when that's set.
-- **The name:** `<sha256>.json`, the SHA-256 of the file's bytes in
-  lower-case hex, the bytes as imported. Two vehicles with the same file
-  share one copy, and the hash is the one a recording names.
-- **Which vehicle has which:** the vehicle list in the app's preferences
-  names each vehicle's files by their hash; the copies are only read.
-- **When a copy goes:** when no vehicle has its file any more (Remove,
-  Forget, Forget all), its profile first. A copy that is missing, has
-  changed, or no longer loads is shown with why, and its profile isn't
-  offered.
+- **The name:** `<sha256>.havne-plugin.json`: the plugin Havne wraps the
+  file in, with the file as its one variant, named by the SHA-256 of the
+  plugin's own bytes. The variant's file is the one a recording names.
+- **Which vehicle has which:** the vehicle book in the app's preferences
+  names each vehicle's picks; `store.json` beside the plugins holds the
+  store's facts about them.
+- **When a copy goes:** when you remove the plugin. A copy that is
+  missing, has changed, or no longer loads is shown with why, and its
+  profile isn't offered.
+- **Before v0.8.0** the app kept each file as `<sha256>.json` in
+  `signals/`. The first start of v0.8.0 or later moves those files into
+  plugins, and the second removes the folder and the old vehicle list,
+  except the files that couldn't be moved: those stay until each is saved
+  or removed. Files an older version added after the move are removed with
+  the rest, so a downgrade past v0.8.0 shows no vehicles or signal files.
 
 **Not settled:** whether Read once reads while a session is connected.
 
@@ -632,7 +660,7 @@ What converts:
 - **Commands:** Service 01 and 22 on 11-bit IDs. `hdr` is the module's
   request ID and `rax` its reply's; with no `rax`, a request ID from
   7E0 to 7E7 takes the reply ID the standard gives it, 8 above, and
-  any other is left out. At most four modules, `obd2`'s counted unless
+  any other is left out. At most 32 modules, `obd2`'s counted unless
   `--alone` leaves `obd2` out. A command's `filter` takes the model years
   it names: give `--year` for those, or they're left out.
 - **Fields:** OBDb counts bits from the top of the first byte after the

@@ -24,6 +24,7 @@ TestCase {
     Component { id: readoutC;  SegmentReadout { width: 260; height: 90; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: sparkC;    SparkGauge { width: 300; height: 110; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: digitalC;  DigitalGauge { width: 180; height: 122; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: metricsC;  FontMetrics { font.pixelSize: 10; font.features: Theme.valueFeatures } }
     Component { id: barC;      BarGauge { width: 300; height: 72; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;     RingGauge { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: analogC;   AnalogGauge { width: 260; height: 260; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
@@ -169,6 +170,14 @@ TestCase {
         compare(find(narrow, "lights").opacity, 0.45, "it still dims")
         narrow.stale = false
         compare(find(narrow, "lights").opacity, 1)
+    }
+
+    // A one-column cell on a wide page is about 150 px: the strip stays inside it
+    function test_theShiftLightsFitAOneColumnCell() {
+        const g = make(shiftC, { width: 148, height: 60, hasValue: true, value: 50, ledSpacing: 10 })
+        const lights = find(g, "lights")
+        verify(lights.width <= g.width + 0.5, "the strip is " + lights.width + " in " + g.width)
+        verify(lights.mapToItem(g, 0, 0).x >= -0.5, "and starts inside")
     }
 
     // ---- SegmentReadout's shape
@@ -764,6 +773,39 @@ TestCase {
         verify(find(g, "scaleMarks").visible, "marks by default")
         g.marks = false
         verify(!find(g, "scaleMarks").visible, "left out")
+    }
+
+    // The scale's numbers never run into each other: a short flat bar
+    // drops alternate interior ones and keeps both ends
+    function test_aShortBarThinsItsScaleNumbers() {
+        const marks = (g) => find(g, "scaleMarks").children.filter(c => c.text !== undefined && c.visible)
+        const wide = make(barC, { width: 400, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
+        waitForRendering(wide)
+        compare(marks(wide).length, 5, "room enough: every number")
+        const narrow = make(barC, { width: 110, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
+        waitForRendering(narrow)
+        const texts = marks(narrow).map(c => c.text)
+        verify(texts.length < 5 && texts.length >= 2, "thinned: " + texts)
+        compare(texts[0], Number(0).toLocaleString(Qt.locale(), 'f', 0), "the low end stays")
+        compare(texts[texts.length - 1], Number(8000).toLocaleString(Qt.locale(), 'f', 0), "the high end stays")
+        const m = marks(narrow)
+        for (let i = 1; i < m.length; ++i)
+            verify(m[i].x >= m[i - 1].x + m[i - 1].width, "no overlap: " + texts)
+    }
+
+    // The stride follows the widest label drawn, not the one with the most
+    // characters: "0.5" is as long as "100" and narrower, whatever the order
+    function test_theMarkStrideMeasuresEveryLabel() {
+        const a = make(barC, { width: 100, to: 700, scaleMarks: [0.5, 100, 300, 500, 700] })
+        const b = make(barC, { width: 100, to: 700, scaleMarks: [100, 300, 500, 700, 0.5] })
+        const metrics = createTemporaryObject(metricsC, testCase)
+        const narrow = metrics.advanceWidth(a.formatScale(0.5))
+        const wide = metrics.advanceWidth(a.formatScale(100))
+        verify(wide > narrow, "the longer-looking label is the wider: " + wide + " vs " + narrow)
+        // The gauge's own metrics may differ from this one's by a pixel
+        verify(a.widestMarkWidth >= wide - 1, "the widest label sets it, not the first longest: "
+               + a.widestMarkWidth + " vs " + wide)
+        compare(a.widestMarkWidth, b.widestMarkWidth, "the order of the marks changes nothing")
     }
 
     function test_thePeakShowsOnTheBarAndTheRing_data() {

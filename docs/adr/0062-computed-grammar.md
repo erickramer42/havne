@@ -782,3 +782,100 @@ no computed signal), 9 alternated runs of each on a quiet machine:
 GUI at 100x, 0.32 ms both. A set of 7 runs just before it was bimodal
 (each build's runs near either 350k or 480k frames/s), so its median
 said which mode the runs landed in, not which build was faster.
+
+## Appendix: an expression checked and worked out apart from a file (2026-11-16)
+
+Section 9 left a front end one way to learn whether an expression is
+good: write the signal into a file and load it. An editor needs the
+answer at each keystroke, for a signal that is in no file yet, and it
+needs a value to show beside it. Four calls in `signals.h` give both
+against a file that is already loaded. None of them changes the grammar,
+the program or the loader's rules: the loader's compiler moved into
+`core/src/signal_expr.cpp` behind a table of names, and both the loader
+and the check call it.
+
+**The check.** `ecuio_signal_file_check_expr(file, key, expr, length,
+out)` compiles the expression as a computed signal of the file: the names
+the file's own expressions read, the grammar at its newest format, a
+program's bounds, and the chain rules of section 4. `key` names the signal
+the expression is for. With one of the file's keys the expression stands
+in that signal's place, so a circle through it is found and a reader that
+keeps an age bound on it is refused when the signal turns from a number
+to a computed one (section 5); with none it is a new signal, which nothing
+reads yet. A refusal carries the character, counted from 1, and the
+loader's own middle words behind "the expression" ("the expression reads
+'bost', which no signal is"): the place is a number of its own, so the
+words neither quote the expression nor repeat the place, as the loader's
+sentence must for a reader who has only the file's line and column.
+
+**The format is reported, not enforced.** The check compiles at the
+newest format and says the oldest `havne_signals` whose loader takes the
+expression: 2 when it uses a call, a comparison or `if()`, reads a
+computed signal, or is read by one; else 1. Holding the check to the
+file's own format was the first design, and it would refuse every
+function in a format 1 file in words about a number the user never typed.
+The front end decides: an editor writes the file's format up on Save and
+says that an older Havne can't read it, and `havne-cli signals expr` says
+the two numbers. The number is the one file's: in a plugin variant made of
+several files, each file whose signals read the checked one needs it too.
+
+**The name an expression reads a def by.** `ecuio_signal_file_expr_ref`
+gives it: the key for a signal of the file's own, and for a base def of a
+file that extends obd2 `obd2.` and obd2's key (the short name where it has
+one, else `pid_14`, or `pid_14_1` for a PID's second field). Compiling the
+name reads that def. obd2's computed Boost has no name, since obd2's keys
+name its Service 01 fields; a front end leaves it out of what it offers.
+A signal whose key starts with a digit has none either: the loader takes
+such a key, and the grammar reads it as a number. One that stands in a
+base def's place goes by obd2's name for that def.
+
+**A program's value with no session.** The check hands back the program,
+and `ecuio_signal_file_evaluate` works any program out over the file's set
+from values the caller gives, each with its age, so the expression being
+typed previews with no draft file. `ecuio_signal_file_expr_leaves` lists
+the numbers under a program through any chain: what there is to give a
+value. The freshness rule is the decoder's own code (`computed.h`'s
+`ecuio_computed_bound_us` and `ecuio_computed_fresh`: a value at its bound
+counts), and a test holds the two to the same bits over made-up frames.
+A program a caller builds is refused where the set's validator would
+refuse it as one of the set's own.
+
+**Why there is no value, by rule.** With no value the result names the
+leaf of the first read without one, in the order the reads are made,
+missing or stale with the bound it is past;
+"the steps gave no number" is said only when no leaf lacked a value. A
+stale leaf that only an `if`'s untaken branch reads is therefore named
+ahead of a division by zero in the taken branch: giving that leaf a value
+then shows the division. An exact cause would need a second machine
+beside `ecuio_computed_run` or a slower worker, for a case one more test
+value settles.
+
+**Not judged.** The signal's name, unit, gauge and `max_age`, and the
+file's own bounds, stay the loader's when the file is read. A checked
+program has no age bounds (they are the file's `max_age` member); a caller
+that wants a preview under a typed bound sets it in the program, where the
+validator's bounds apply.
+
+**Room to grow.** An evaluation's input carries `flags` and `reserved0`,
+and a nonzero one is refused, so a later core can give them a meaning
+without an older one passing it by.
+
+All four calls only read the file, so any thread may call them while it
+lives.
+
+## Appendix: the editor and where a computed signal is kept (2026-11-17)
+
+The signal form writes a computed signal into the vehicle's own variant
+through `ecuio_plugin_put_variant` ([ADR-0064](0064-one-store.md) Q7.3),
+checking it as typed with the calls of the appendix above. A channel over
+another plugin's signals waits for a plugin that extends another's variant
+(ADR-0064 Q8).
+
+- **Not taken:** a layer for each vehicle merged by core (a second store,
+  a profile or URI key, a CLI flag), and a second data file in the picked
+  variant kept across re-imports.
+- **The first `obd2.` input adds `extends: "obd2"`** to the own variant, so
+  a vehicle's signals read with obd2's from the save that needs it; every
+  own plugin extending obd2 from its first save was the other pick.
+- **The preview is typed values, not a live timer.** The form can fill
+  them once from the connected session; nothing re-evaluates by itself.

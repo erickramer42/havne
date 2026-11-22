@@ -1,5 +1,5 @@
 // File/layer: app/qml/RemoveQuestion.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // A removal's question, asked in place where it was asked: the words, then
 // Remove and Cancel that wrap under them on a phone
 
@@ -19,6 +19,7 @@ Flow {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         objectName: "signalsConfirmText"
         text: root.words
         color: Theme.text

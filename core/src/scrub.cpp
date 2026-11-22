@@ -305,9 +305,10 @@ namespace {
 bool kept_query_key(const std::string& key)
 {
     static const char* const kKeys[] = {
-        "profile", "did",   "baud",     "serial",   "filter",      "txid",
-        "poll",    "probe", "identify", "diagnose", "pack",        "speed",
-        "loop",    "from",  "to",       "session",  "keepalive_ms"};
+        "profile", "did",          "baud",       "serial",   "filter",
+        "txid",    "poll",         "probe",      "identify", "diagnose",
+        "pack",    "speed",        "loop",       "from",     "to",
+        "session", "keepalive_ms", "packframes", "hold"};
     for (const char* k : kKeys) {
         if (key == k) {
             return true;

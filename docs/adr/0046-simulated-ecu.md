@@ -393,3 +393,71 @@ through the same ECU under a profile that reads PIDs
 this date), so the demo car and the sim give one car's values.
 `SimEcuTest.DriveValuesAreTheDriveCyclesThroughTheObd2Defs`,
 `.TheKeyOnWithTheEngineStopped`, `.TheBitmapsListWhatEachModeAnswers`.
+
+Note of 2026-11-16: the nodes are as many as the set's modules, sized at create, and `ECUIO_SIM_MAX_REPLIES` is 66 ([ADR-0065](0065-car-sized-profile.md)). Faults for each module are a later step's.
+
+## Appendix: faults for each module and a car's pace (2026-11-18)
+
+[ADR-0065](0065-car-sized-profile.md) section 10 makes the simulated
+ECU a whole car, up to 32 modules. Two things follow in the URI.
+
+- **Faults for each module:** `faults=<fault>:<n>[@<reply ID>]`. An item
+  without `@` sets that fault's period for every module; an item with
+  one aims it at the module with that reply ID and replaces the
+  fault's period for that module alone. Each module counts its own
+  requests, so a profile's modules don't share one count. An aim at a
+  reply ID the car has no module for is refused after the profile is
+  read; at most 32 aims for a key.
+- **A car's pace:** four keys, `delay=<p50 us>:<p99 us>`, `fc=<us>`,
+  `cf=<us>` and `seed=<n>`, each aimable with `@<reply ID>` as the
+  faults are (at most 32 aims for each key across its repeats, a later
+  item for a module replacing an earlier one). `delay` takes a median
+  of 1 or more up to the 99th percentile, which is at most 10 s; `fc`
+  and `cf` are at most 1 s. With none set the car answers as before.
+  - **The draw:** each module has a generator of its own
+    (splitmix64 of the seed and the reply ID seeding an `mt19937_64`),
+    so adding a module to a run never moves another's draws. A module
+    draws once for each request it answers, before the fault's fate: a
+    late fault adds its 130 ms to the draw, a pending reply keeps its
+    own timing, and a silent one draws and sends nothing. A draw is a
+    uniform in (0, 1), the normal quantile of Wichura's AS241 at it,
+    and `llround(exp(ln p50 + z ln(p99/p50) / 2.3263478740))`, at most
+    60 s. It is pinned bit for bit, because the pacing bench copies it
+    and a bench figure never moves when its source changes.
+  - **On the bus:** the First Frame waits the draw; the first
+    Consecutive Frame waits `fc` after a Flow Control's go; the rest
+    wait the longer of `cf` and the tester's STmin.
+  - **The unbound ask** hands the draw as `delay_us`, and `fc` and `cf`
+    as `fc_us` and `cf_us` in `ecuio_sim_reply_t`, two of its reserved
+    words (the struct's size and other offsets unchanged); the caller
+    times the frames. `havne-cli sim --elm327` paces a reply's frames
+    at them, at least the emulator's 500 us.
+
+`SimTimingTest` pins the draws and the keys' grammar, `SimAskTest` the
+ask's fields and `SimCarBusTest` (on `vcan`) a fault aimed at one
+module.
+
+## Appendix: busy= and bus= (2026-11-18)
+
+[ADR-0065](0065-car-sized-profile.md) step 6 gives the simulated car two
+more keys, in the grammar of "a car's pace" above.
+
+- **`busy=ignore|21[@<reply ID>]`:** a module is busy from a request until
+  its reply's last frame. `ignore` (and no key, on a bus) drops another
+  request; `21` answers it `7F <service> 21` at once while the reply waits,
+  and stays silent while its frames are under way, since a Single Frame on
+  the reply ID would cut its own message. The refusal draws nothing and
+  moves no fault count. In the unbound ask a busy window is
+  `t + delay + fc + (CFs - 1) x cf`, and the ask's time is kept monotonic.
+- **`bus=<kbit/s>`, 1 to 1000:** each frame of the simulated modules is 111
+  bits (an 8-byte classic frame, bit stuffing left out) and the frames take
+  the bus one at a time across every module, each held from when its write
+  returned, so the worker's own lateness never shortens a frame. A reply's
+  start and a due Consecutive Frame wait for the bus; the sim's Flow
+  Control, the pending `7F 78` and the busy `7F 21` go at once, even while
+  another module's frame holds the bus, and hold it after. Only the sim's
+  own frames are counted: the tester's arrive on `vcan` at once and take
+  no bus time, since a sim can't hold the tester's frames back. An unbound
+  sim refuses `bus=` (`BAD_URI`), since its caller times its frames. The
+  worker waits with `ppoll`, to the microsecond, as a frame's time is under
+  a millisecond.

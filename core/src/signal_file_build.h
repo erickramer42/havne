@@ -1,6 +1,6 @@
 // File/layer: core/src/signal_file_build.h | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest, ConditionFileTest (test_signals);
-//          RecorderTest (test_core)
+// Testing: UNIT: SignalFileTest, PluginTest, PluginWrapTest,
+//          ConditionFileTest (test_signals); RecorderTest (test_core)
 //
 // The signal-file loader's inside (ADR-0051), shared with the plugin
 // loader (ADR-0052): a set built from parts, so a signal file and a
@@ -13,10 +13,12 @@
 
 #include "ecuio/signals.h"
 #include "json.h"
+#include "least_core.h"
 
 #include <cstdint>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,10 +35,13 @@ struct ecuio_signal_file {
         gauges; /* def index */
     std::vector<std::pair<uint32_t, std::string>> exprs; /* def index */
     uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
+    /* The least core that reads the file's format and what it uses
+     * (least_core.h), raised by build at each gate */
+    ecuio_least::version least = ecuio_least::kSignalFile;
     ecuio_signal_set_t set{};
     /* The bytes a recording copies as signals.json (ADR-0051 section 4):
      * those ecuio_signal_file_load read, or a plugin variant's files
-     * merged and written as one file (plugin.cpp); empty when that text
+     * merged and written as one file (plugin_merge.cpp); empty when that text
      * doesn't read back to this set */
     std::string bytes;
     /* A plugin variant's "<id>,<version>,<variant>", a recording's plugin
@@ -75,6 +80,9 @@ struct parts {
      * the own list's at format */
     uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
     std::vector<uint32_t> formats;
+    /* The most signals of its own the set holds: a data file's, or a
+     * set's for several files merged and for a recording's copy */
+    size_t max_signals = ECUIO_SIGNAL_FILE_MAX_SIGNALS;
 };
 
 /* A file's "havne_signals", checked first: its first key, a format this
@@ -83,6 +91,11 @@ uint32_t format_of(const ecuio_json::Value& root, const char* what);
 
 /* The set from in into f, or a refused thrown (std::bad_alloc too) */
 void build(const parts& in, ecuio_signal_file& f);
+
+/* A signal file's bytes into *out, read to max_bytes and max_signals:
+ * ecuio_signal_file_load's inside, its statuses and detail */
+ecuio_status_t load(const char* bytes, size_t length, size_t max_bytes,
+                    size_t max_signals, ecuio_signal_file** out);
 
 /* A "source" block's rules */
 void read_source(const ecuio_json::Value& source);
@@ -111,8 +124,10 @@ void only_keys(const ecuio_json::Value& obj,
  * other characters one '-'; "" when there are none */
 std::string profile_of(const std::string& name);
 
+/* what is a view: a temporary std::string bound to a reference parameter
+ * trips GCC's -Wdangling-reference where a caller keeps the result */
 const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
-                           const std::string& what);
+                           std::string_view what);
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,
                  const std::string& what);
 double finite_of(const ecuio_json::Value& v, const std::string& what);

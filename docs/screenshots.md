@@ -1,6 +1,6 @@
 # Screenshots
 
-Every page of Havne on the desktop and the phone, all on the simulated
+Every page of Havne on a desktop or laptop and on the phone, all on the simulated
 vehicle (`mock://demo`) in US units. Dark is the default look; Night
 dims it for a dark cabin in amber or red (Settings, Display). The
 gallery shows those looks on the Dashboard: Dark, Light (dark text on

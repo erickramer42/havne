@@ -298,8 +298,10 @@ ecuio_status_t ecuio_session_get_error_state(
  * values below are append-only, like the status codes. */
 #define ECUIO_SESSION_INFO_TEXT_LEN      80   /* PassThruReadVersion's
                                                  buffers (J2534-1 v04.04) */
-#define ECUIO_SESSION_INFO_MAX_CHANNELS  4    /* signals.h's
-                                                 ECUIO_MAX_CHANNELS */
+#define ECUIO_SESSION_INFO_MAX_CHANNELS  4    /* the modules the info
+                                                 lists itself; the rest
+                                                 by profile.h's
+                                                 ecuio_session_get_module */
 #define ECUIO_SESSION_INFO_PROFILE_LEN   64   /* profile.h's
                                                  ECUIO_PROFILE_NAME_MAX + 1 */
 
@@ -349,6 +351,11 @@ ecuio_status_t ecuio_session_get_error_state(
                                                           reads: a focus's
                                                           minimum time between
                                                           sweeps applies */
+/* The set derives more requests than ECUIO_PROFILE_MAX_REQUESTS
+ * (profile.h): the session asks only what a focus or an attached
+ * condition picks, and nothing until one does (ADR-0065 section 2). Set
+ * at create, and only with ECUIO_SESSION_INFO_REQUESTS. */
+#define ECUIO_SESSION_INFO_PICK_ONLY     0x00000080u
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -365,9 +372,10 @@ typedef struct ecuio_session_info {
     uint32_t vbatt_mv;        /* battery voltage at connect, millivolts
                                  (READ_VBATT; an ELM327's STVR or AT RV);
                                  with ECUIO_SESSION_INFO_VBATT */
-    uint32_t channel_count;   /* CAN channels the session filters and
-                                 requests on; 0 for a passive session,
-                                 1 for mock (its simulated engine ECU) */
+    uint32_t channel_count;   /* how many of the session's modules rx_ids
+                                 and tx_ids list: module_count, or
+                                 ECUIO_SESSION_INFO_MAX_CHANNELS when
+                                 there are more */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
                                                            receive ID */
     uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
@@ -391,19 +399,27 @@ typedef struct ecuio_session_info {
     /* 1 when the recording's last row had no newline and was left out (a
      * write cut short, ADR-0049 section 7); 0 otherwise */
     uint32_t replay_rows_torn;
-    uint32_t reserved[12];    /* zero; ABI growth space */
+    uint32_t module_count;    /* CAN channels (modules) the session filters
+                                 and requests on, up to signals.h's
+                                 ECUIO_MAX_CHANNELS; 0 for a passive
+                                 session, 1 for mock (its simulated engine
+                                 ECU). The reports below are read by an
+                                 index under it */
+    uint32_t reserved[11];    /* zero; ABI growth space */
 } ecuio_session_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-_Static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
 #endif
 
 /* Copies what the session runs on into *out_info. Filled once, while
@@ -454,7 +470,11 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_SUPPORT_MAX_DROPPED        8
 
 /* flags */
-#define ECUIO_SUPPORT_PROBED             0x00000001u   /* the chain was asked */
+#define ECUIO_SUPPORT_PROBED             0x00000001u   /* a walk of the chain has
+                                                          ended, answered or not
+                                                          (ranges 0: no bitmap
+                                                          answered); clear while a
+                                                          first walk is asking */
 #define ECUIO_SUPPORT_COMPLETE           0x00000002u   /* answered to its end,
                                                           so every PID is judged */
 #define ECUIO_SUPPORT_SCAN_COMPLETE      0x00000004u   /* every scanned DID was
@@ -583,7 +603,7 @@ _Static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support rese
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
- * into the session info's channels, below its channel_count, so a
+ * into the session's modules, below the info's module_count, so a
  * passive session has none (ECUIO_ERR_INVALID_ARGUMENT); the mock's one
  * channel learns nothing. Callable from any thread until destroy; after
  * close it keeps the last update. */
@@ -642,8 +662,8 @@ typedef struct ecuio_identity_item {
 typedef struct ecuio_channel_identity {
     uint32_t flags;           /* ECUIO_IDENTITY_* */
     uint32_t rx_id;           /* the channel's receive ID: its ECU */
-    uint32_t generation;      /* changes with every item settled; 0 until
-                                 one has been */
+    uint32_t generation;      /* changes with every item settled, but one
+                                 unanswered again; 0 until one has been */
     uint32_t items;           /* entries of list in use; 0 when the session
                                  identifies nothing (?identify=0, ?poll=,
                                  a passive session) */
@@ -664,7 +684,7 @@ _Static_assert(offsetof(ecuio_channel_identity_t, list) == 32, "identity list of
 
 /* Copies what channel `channel` has learned of its ECU into
  * *out_identity, under the same rules as the support report: the channel
- * is an index below the session info's channel_count
+ * is an index below the session info's module_count
  * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
  * destroy, and after close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_identity(
@@ -832,8 +852,8 @@ typedef struct ecuio_freeze_value {
 typedef struct ecuio_channel_diagnostics {
     uint32_t flags;           /* ECUIO_DIAG_* */
     uint32_t rx_id;           /* the channel's receive ID: its ECU */
-    uint32_t generation;      /* changes with every item settled; 0 until
-                                 one has been */
+    uint32_t generation;      /* changes with every item settled, but one
+                                 unanswered again; 0 until one has been */
     uint8_t readiness;        /* 01 01's outcome (ECUIO_DIAG_UNASKED ..) */
     uint8_t readiness_nrc;
     uint8_t dtc_count;        /* PID 01's A6-A0: the confirmed codes */
@@ -1006,7 +1026,7 @@ ecuio_status_t ecuio_diag_inspect(
 
 /* Copies what channel `channel`'s ECU has reported of its diagnostics
  * (ADR-0037) into *out_diagnostics, under the identity report's rules:
- * the channel is an index below the session info's channel_count
+ * the channel is an index below the session info's module_count
  * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
  * destroy, and after close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_diagnostics(
@@ -1035,8 +1055,8 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
  * (01 0C); 04 goes out only at 0 rpm. The report's clear field says
  * what became of it (ECUIO_CLEAR_*), and after a clear the report is
  * read again. Returns at once, from any thread.
- * ECUIO_ERR_INVALID_ARGUMENT for a channel past the session info's
- * channel_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
+ * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past the session info's
+ * module_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
  * ecuio_session_clear_diagnostics_with and flags 0. */
 ecuio_status_t ecuio_session_clear_diagnostics(
     ecuio_session_t* session,
@@ -1062,10 +1082,10 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
 
 /*
  * The analysis log's focus (ADR-0056 section 2): asks only the requests
- * that carry these signals, until called again; count 0 asks the whole
- * set again. The picked requests run in the fast class, so the rotation
- * is as short as the picks allow; the rest are parked: kept in the
- * table, not refused, asked again on a count of 0. The probe, the DID
+ * that carry these signals, until called again; count 0 ends the focus
+ * and asks the whole set again. The picked requests run in the fast
+ * class, so the rotation is as short as the picks allow; the rest are
+ * parked: kept in the table, not refused, asked again on a count of 0. The probe, the DID
  * scan, identification and diagnostics are untouched, and a request the
  * probe dropped stays dropped. A DID the scan finds while a focus is on
  * is asked when the focus picks it, parked otherwise. The signals an
@@ -1079,6 +1099,14 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * when the call is made: a pick dropped later (by the probe's walk, an
  * NRC, or the first walk after a focus set before start) can leave a
  * requesting session asking nothing until the focus changes or ends.
+ * A session that asks only its picks (ECUIO_SESSION_INFO_PICK_ONLY: its
+ * set derives more than ECUIO_PROFILE_MAX_REQUESTS requests, profile.h)
+ * asks nothing with no focus but an attached condition's signals: there
+ * a count of 0 is taken as on any session and parks every request a
+ * condition doesn't read, and a focus whose requests, with the attached
+ * conditions', number more than ECUIO_PROFILE_MAX_REQUESTS is refused,
+ * the counts in the detail. On a session without the flag the whole set
+ * fits a rotation, so that refusal never comes.
  * Takes effect on the worker between two requests, never inside an
  * exchange; before start it applies from the first pass. mock://,
  * replay:// and a listening session ask nothing, so they accept any
@@ -1091,8 +1119,9 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
- * detail, for an id the session's set lacks or a focus that leaves
- * nothing to request; ECUIO_ERR_SESSION_CLOSED after close.
+ * detail, for an id the session's set lacks, a focus that leaves
+ * nothing to request or one of more requests than a rotation holds;
+ * ECUIO_ERR_SESSION_CLOSED after close.
  */
 ecuio_status_t ecuio_session_set_focus(
     ecuio_session_t* session,
@@ -1132,7 +1161,8 @@ ecuio_status_t ecuio_session_set_focus(
  * detail, for any other flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a
  * time with no signals picked, ECUIO_FOCUS_DEFAULT_PICK with no signals
  * picked (a front end whose pick is empty sets no focus, and the whole set
- * is asked), and whatever ecuio_session_set_focus refuses.
+ * is asked, or nothing on a session that asks only its picks), and
+ * whatever ecuio_session_set_focus refuses.
  */
 ecuio_status_t ecuio_session_set_focus_with(
     ecuio_session_t* session,

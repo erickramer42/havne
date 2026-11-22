@@ -101,6 +101,11 @@ freeze-frame values (a def ID and its value). Reserved words for growth.
 `ecuio_session_get_channel_diagnostics` copies it under the identity
 report's rules.
 
+> **Amended 2026-11-21:** `generation` moves as each item settles, but not
+> when an item asked again goes unanswered again (a quiet module's step,
+> [ADR-0065](0065-car-sized-profile.md)'s appendix of 2026-11-21), the same
+> as the identification report's ([ADR-0021](0021-vehicle-identification.md)).
+
 - `ecuio_dtc_format(code, out)` names a code: A7-A6 the letter (P, C,
   B, U), then four hex digits ("P0301"). `ecuio_monitor_name(id,
   compression)` names a monitor; C and D's bits mean different monitors

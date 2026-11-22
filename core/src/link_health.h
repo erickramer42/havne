@@ -5,7 +5,8 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core);
 //          HARNESS: J2534HealthTest (test_j2534_health), J2534ConditionTest
-//          (test_j2534_stream), Elm327SessionTest (test_elm327)
+//          and J2534AdoptionTest (test_j2534_stream), Elm327SessionTest
+//          (test_elm327), SocketCanRequestTest (test_vcan)
 
 #ifndef ECUIO_LINK_HEALTH_H
 #define ECUIO_LINK_HEALTH_H
@@ -77,6 +78,8 @@ struct link_health {
                                   * only by a sent one */
     uint32_t backoff_ms = 0;     /* 0 = the normal cadence */
     uint32_t quiet_runs = 0;
+    bool unanswered = false;     /* a request's wait ran out since the
+                                  * last matched reply */
     bool recovered = false;      /* back to OK since the worker last
                                   * looked: the probe resumes */
     /* The last change's session time and host time since epoch, with a
@@ -201,6 +204,9 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
         return;
     }
 
+    if (matched) {
+        h.unanswered = false; /* whatever the writes' latch says below */
+    }
     if (h.write_failed) {
         if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
             link_set_state(h, ECUIO_ERR_REQUEST_FAILED);
@@ -224,12 +230,34 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
     }
 }
 
+/* An idle pass of a session that asks only its picks, with nothing
+ * picked (ecuio_engine_unpicked): a clean read that counts no quiet,
+ * since nothing is asked. A timeout stays while a request went
+ * unanswered since the last reply, and ends otherwise (quiet reads
+ * alone made it). A hard failure steps down the same way after a quiet
+ * run's clean passes. Never OK while requests went unanswered: the
+ * worker would ask them all again and the link would flap. */
+inline void link_on_unpicked(link_health& h)
+{
+    link_on_read(h, false, false, false);
+    if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE &&
+        ++h.quiet_runs < LINK_HEALTH_QUIET_RUN) {
+        return; /* the adapter's clean reads, counted in the run's place */
+    }
+    h.quiet_runs = 0;
+    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT ||
+        h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+        link_set_state(h, h.unanswered ? ECUIO_ERR_VEHICLE_TIMEOUT : ECUIO_OK);
+    }
+}
+
 /* A request's wait ran out with no answer, the request modes' quiet
  * unit. While the write latch is set the state is the writes', so it
  * doesn't count. */
 inline void link_on_request_timeout(link_health& h)
 {
     if (!h.write_failed) {
+        h.unanswered = true;
         link_count_quiet(h);
     }
 }

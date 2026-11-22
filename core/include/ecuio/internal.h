@@ -79,6 +79,9 @@ extern const char* const ecuio_j2534_query_keys[];
 extern const char* const ecuio_replay_query_keys[];
 extern const char* const ecuio_elm327_query_keys[];
 extern const char* const ecuio_socketcan_query_keys[];
+/* The room create's refusal joins a list into ("a, b and c", its NUL
+ * too); QueryKeysTest holds every list to it */
+#define ECUIO_QUERY_KEYS_TEXT_MAX 256
 
 /* SocketCAN builds on Linux alone (ADR-0032): Android's kernels ship
  * without CAN */
@@ -188,6 +191,59 @@ void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
                                   uint32_t monitor_check_ms);
 void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
                                   uint32_t* monitor_check_ms);
+
+/* TEST-ONLY: adds to the slept count the ELM327 worker reads, as a sleep
+ * of the machine would; for the process, never taken back (the count
+ * never decreases). The public clock's own count is untouched. */
+void ecuio_elm327_test_add_slept(uint64_t us);
+
+/* TEST-ONLY: how often a session that asks only its picks, with nothing
+ * picked and its link down, asks one request to see whether an ECU
+ * answers (ms; request_setup.h's ecuio_unpicked_pass); 0 restores 5 s.
+ * A worker reads it on every such pass, so a running session takes it
+ * at once. */
+void ecuio_set_unpicked_check_ms(uint32_t ms);
+
+/* TEST-ONLY: how far a J2534 vendor clock may fall behind the host's
+ * before core stops trusting it (us; j2534_clock.h's J2534_CLOCK_LAG_US);
+ * 0 restores 10 s. A worker reads it on every frame. */
+void ecuio_set_j2534_clock_lag_us(uint64_t us);
+
+/* TEST-ONLY, for the transports' own cases (ADR-0066 section 2.4): hands
+ * a session that asks requests one request of 1 to 60 bytes for
+ * channel's ECU, which its worker sends as a talk at its next pass
+ * (core/src/request_talk.h, talk_seam.h; handed over before start, a
+ * socketcan:// session's first request): the reply is matched on the
+ * request's first echo bytes (1 to 3). kind is what the request is to
+ * the key's window: 0 plain (any service but 27), 1 a seed (27 with an
+ * odd sub-function; sent, it opens the channel's window, and its key may
+ * take window_ms, 50 to 4000, after its reply), 2 a key (27 with an even
+ * sub-function: taken only while the window is open, and sent ahead of
+ * everything). Nothing outside tier 2's ceiling is sent, nor a 27 that
+ * is no seed or key: the result says refused. NULL_ARGUMENT for a NULL;
+ * INVALID_ARGUMENT for a session that asks nothing, a channel it lacks,
+ * no bytes or more than 60, a kind outside 0 to 2, or while the one
+ * before is unread. */
+ecuio_status_t ecuio_session_test_talk(ecuio_session_t* session,
+                                       uint32_t channel, const uint8_t* pdu,
+                                       uint32_t len, uint8_t echo, int kind,
+                                       uint32_t window_ms);
+
+/* TEST-ONLY: the request above, once it has ended: 1, with *offer (0
+ * taken, 1 busy, 2 too long for the transport, 3 refused) and, when
+ * taken, *end (1 answered, 2 refused with its code in *nrc, 3
+ * unanswered, 4 unsent: its write failed, 5 lapsed: a key's window
+ * ended before its turn, so it never touched the bus); read once. 0
+ * while it is on its way, or there is none. */
+int ecuio_session_test_talk_result(ecuio_session_t* session, int* offer,
+                                   int* end, uint8_t* nrc);
+
+/* TEST-ONLY: a simulated ECU (ecuio/sim.h) whose security access is
+ * strict while on is non-zero: any request but a 27 between a seed and
+ * its key spends the seed, so the key answers 7F 27 24
+ * (core/src/sim_security.h). Off by default; a NULL changes nothing. */
+struct ecuio_sim;
+void ecuio_sim_test_set_strict(struct ecuio_sim* sim, int on);
 
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
@@ -398,6 +454,13 @@ uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
  * makes it read now_us, as set by each call, so a case puts every frame
  * at a time of its choosing; 0 gives it back to ecuio_clock_us. */
 void ecuio_recorder_test_set_clock(int on, uint64_t now_us);
+
+/* Test-only (ADR-0064 Q1): the version a plugin's requires.core is
+ * compared with and a wrap's or a put's least core is cut to, for the
+ * whole process: major.minor.patch (each 0 to 65535) while on is
+ * nonzero, core's own when 0. A case plays a later core with it. */
+void ecuio_plugin_test_set_core_version(int on, uint32_t major, uint32_t minor,
+                                        uint32_t patch);
 
 /* Test-only, never in queue.h: the reads waiting on a queue for an
  * entry, so a test closes it only once a read on another thread waits

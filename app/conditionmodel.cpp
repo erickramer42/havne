@@ -201,6 +201,7 @@ void ConditionModel::setConditions(const ecuio_condition_set_t* set,
                                    const ecuio_signal_file_t* file)
 {
     const int before = count();
+    ++m_setGeneration;
     beginResetModel();
     m_rows.clear();
     const uint32_t n = ecuio_condition_set_count(set);
@@ -251,9 +252,14 @@ void ConditionModel::setConditions(const ecuio_condition_set_t* set,
 void ConditionModel::applyStates(const ecuio_condition_state_t* states,
                                  uint32_t n)
 {
-    for (size_t i = 0; i < m_rows.size() && i < n; ++i) {
+    // A handler of dataChanged may attach another set (a save), which
+    // replaces the rows and the caller's buffer: walk a copy and stop once
+    // the set has changed
+    const std::vector<ecuio_condition_state_t> own(states, states + n);
+    const uint64_t generation = m_setGeneration;
+    for (size_t i = 0; i < m_rows.size() && i < own.size(); ++i) {
         Row& r = m_rows[i];
-        const ecuio_condition_state_t& s = states[i];
+        const ecuio_condition_state_t& s = own[i];
         if (r.live && sameState(r.state, s)) {
             continue;
         }
@@ -264,6 +270,9 @@ void ConditionModel::applyStates(const ecuio_condition_state_t* states,
         emit dataChanged(at, at,
                          {LiveRole, StateRole, StaleRole, UnavailableRole,
                           WhyRole, FiredRole, ValueRole, SinceMsRole});
+        if (m_setGeneration != generation) {
+            return;
+        }
     }
 }
 
@@ -376,12 +385,32 @@ QString ConditionModel::prefix(const Row& r) const
                : QStringLiteral("Condition");
 }
 
-QString ConditionModel::firingText(int row, double value, uint32_t term) const
+void ConditionModel::keepRowsBefore()
 {
-    if (row < 0 || static_cast<size_t>(row) >= m_rows.size()) {
+    m_rowsBefore = m_rows;
+}
+
+void ConditionModel::dropRowsBefore()
+{
+    std::vector<Row>().swap(m_rowsBefore);
+}
+
+const ConditionModel::Row* ConditionModel::rowOf(int row, Rows rows) const
+{
+    const std::vector<Row>& list = rows == Rows::Before ? m_rowsBefore : m_rows;
+    return row < 0 || static_cast<size_t>(row) >= list.size()
+               ? nullptr
+               : &list[static_cast<size_t>(row)];
+}
+
+QString ConditionModel::firingText(int row, double value, uint32_t term,
+                                   Rows rows) const
+{
+    const Row* at = rowOf(row, rows);
+    if (at == nullptr) {
         return {};
     }
-    const Row& r = m_rows[static_cast<size_t>(row)];
+    const Row& r = *at;
     const bool signal =
         term < r.terms.size() && r.terms[term].defId != UINT32_MAX;
     if (!signal || !std::isfinite(value)) {
@@ -395,22 +424,21 @@ QString ConditionModel::firingText(int row, double value, uint32_t term) const
                      .arg(prefix(r), r.name, number, QString::fromUtf8(v.unit));
 }
 
-QString ConditionModel::firingsText(int row, uint64_t firings) const
+QString ConditionModel::firingsText(int row, uint64_t firings, Rows rows) const
 {
-    if (row < 0 || static_cast<size_t>(row) >= m_rows.size()) {
+    const Row* at = rowOf(row, rows);
+    if (at == nullptr) {
         return {};
     }
-    const Row& r = m_rows[static_cast<size_t>(row)];
     return QStringLiteral("%1: %2 fired %3 times")
-        .arg(prefix(r), r.name)
+        .arg(prefix(*at), at->name)
         .arg(firings);
 }
 
-QString ConditionModel::key(int row) const
+QString ConditionModel::key(int row, Rows rows) const
 {
-    return row < 0 || static_cast<size_t>(row) >= m_rows.size()
-               ? QString()
-               : m_rows[static_cast<size_t>(row)].key;
+    const Row* at = rowOf(row, rows);
+    return at == nullptr ? QString() : at->key;
 }
 
 int ConditionModel::rowOfKey(const QString& key) const
@@ -423,15 +451,19 @@ int ConditionModel::rowOfKey(const QString& key) const
     return -1;
 }
 
-uint32_t ConditionModel::toneLevel(int row) const
+uint32_t ConditionModel::toneLevel(int row, Rows rows) const
 {
-    if (row < 0 || static_cast<size_t>(row) >= m_rows.size()) {
+    const Row* at = rowOf(row, rows);
+    if (at == nullptr) {
         return ECUIO_ALERT_NONE;
     }
-    const Row& r = m_rows[static_cast<size_t>(row)];
+    // A condition turned off keeps its alert block in the set: it is silent
+    if ((at->flags & ECUIO_CONDITION_INFO_DISABLED) != 0) {
+        return ECUIO_ALERT_NONE;
+    }
     constexpr uint32_t kSounds =
         ECUIO_CONDITION_USE_ALERT | ECUIO_CONDITION_ALERT_SOUND;
-    return (r.uses & kSounds) == kSounds ? r.level : ECUIO_ALERT_NONE;
+    return (at->uses & kSounds) == kSounds ? at->level : ECUIO_ALERT_NONE;
 }
 
 bool ConditionModel::sounds() const

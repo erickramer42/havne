@@ -9,41 +9,55 @@
 # exactly those keys plus "notes", with "^x-" free and nothing else
 # (additionalProperties false), as only_keys allows. A call the table
 # doesn't map, an entry no call matches, and a schema object no call maps
-# all fail, so a key added on either side alone fails. The loaders' word
+# all fail, so a key added on either side alone fails, but for an OPEN
+# object, whose loader checks no keys on purpose. The loaders' word
 # lists that a schema spells as an enum (kinds, groups, services, byte
-# orders, extends, tiers) are compared too, and a schema's request count
-# with profile.h's ECUIO_PROFILE_MAX_REQUESTS.
+# orders, extends, tiers) are compared too, a schema's request count
+# with profile.h's ECUIO_MODULE_MAX_REQUESTS, and its ECU count with
+# signals.h's ECUIO_MAX_CHANNELS.
 
 import json
 import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin.cpp", "core/src/condition_file.cpp")
+LOADERS = ("core/src/signal_file.cpp", "core/src/signal_file_parts.cpp",
+           "core/src/signal_file_source.cpp", "core/src/plugin_manifest.cpp",
+           "core/src/plugin_conversation.cpp", "core/src/plugin.cpp",
+           "core/src/condition_file.cpp")
+# Where only_keys itself is defined
+RULES = "core/src/signal_file_rules.cpp"
 SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
 # (loader, the call's context argument as written, its place among the
 # calls with that context in that file, from 1) -> (schema, JSON pointer)
 CALLS = {
-    ("signal_file.cpp", '"an ECU"', 1): ("signal-file", "/$defs/ecu"),
-    ("signal_file.cpp", "what + \"'s read\"", 1): ("signal-file", "/$defs/read"),
+    ("signal_file_parts.cpp", '"an ECU"', 1): ("signal-file", "/$defs/ecu"),
+    ("signal_file_parts.cpp", "what + \"'s read\"", 1): ("signal-file", "/$defs/read"),
     # read_field: text and hex, then enum, then number
-    ("signal_file.cpp", "what + \"'s field\"", 1): ("signal-file", "/$defs/textField"),
-    ("signal_file.cpp", "what + \"'s field\"", 2): ("signal-file", "/$defs/enumField"),
-    ("signal_file.cpp", "what + \"'s field\"", 3): ("signal-file", "/$defs/numberField"),
-    ("signal_file.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
-    ("signal_file.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 1): ("signal-file", "/$defs/textField"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 2): ("signal-file", "/$defs/enumField"),
+    ("signal_file_parts.cpp", "what + \"'s field\"", 3): ("signal-file", "/$defs/numberField"),
+    ("signal_file_parts.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
+    ("signal_file_source.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
     ("signal_file.cpp", '"the file"', 1): ("signal-file", ""),
     # build: computed, then text and hex, then enum, then number
     ("signal_file.cpp", "what", 1): ("signal-file", "/$defs/computedSignal"),
     ("signal_file.cpp", "what", 2): ("signal-file", "/$defs/textSignal"),
     ("signal_file.cpp", "what", 3): ("signal-file", "/$defs/enumSignal"),
     ("signal_file.cpp", "what", 4): ("signal-file", "/$defs/numberSignal"),
-    ("plugin.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
-    ("plugin.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
-    ("plugin.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
-    ("plugin.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
-    ("plugin.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
+    ("plugin_manifest.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
+    ("plugin_manifest.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
+    ("plugin_manifest.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
+    ("plugin_manifest.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
+    ("plugin_manifest.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
+    ("plugin_conversation.cpp", '"\\"conversation\\""', 1):
+        ("plugin-manifest", "/$defs/conversation"),
+    ("plugin_conversation.cpp", '"the conversation\'s code"', 1): ("plugin-manifest", "/$defs/code"),
+    ("plugin_conversation.cpp", '"a service"', 1): ("plugin-manifest", "/$defs/service"),
+    ("plugin_conversation.cpp", '"a security level"', 1):
+        ("plugin-manifest", "/$defs/securityLevel"),
+    ("plugin_conversation.cpp", '"a binary file"', 1): ("plugin-manifest", "/$defs/binaryFile"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
@@ -58,19 +72,27 @@ CALLS = {
     ("condition_file.cpp", "r", 1): ("condition-file", "/$defs/record"),
 }
 
+# Objects whose loader takes keys it doesn't know, on purpose -> why
+OPEN = {
+    ("plugin-manifest", "/$defs/pageFile"):
+        "a page is a layout file, which keeps keys it doesn't know (ADR-0057)",
+}
+
 # (source, a pattern whose group 1 is one word of the list) -> (schema,
 # pointer to the enum or const that spells it)
 WORDS = [
     ("core/src/signal_file.cpp", r'e\.kind != "([a-z]+)"',
      ("signal-file", "/$defs/signal/allOf/0/properties/kind/enum")),
-    ("core/src/signal_file.cpp", r'service->text == "([0-9A-F]+)"',
+    ("core/src/signal_file_parts.cpp", r'service->text == "([0-9A-F]+)"',
      ("signal-file", "/$defs/read/properties/service/enum")),
-    ("core/src/signal_file.cpp", r'order->text [!=]= "([a-z]+)"',
+    ("core/src/signal_file_parts.cpp", r'order->text [!=]= "([a-z]+)"',
      ("signal-file", "/$defs/order/enum")),
     ("core/src/signal_file.cpp", r'extends->text != "([a-z0-9]+)"',
      ("signal-file", "/$defs/extends/enum")),
-    ("core/src/plugin.cpp", r't\.text != "([a-z]+)"',
-     ("plugin-manifest", "/properties/tiers/items/const")),
+    ("core/src/plugin_manifest.cpp", r't\.text != "([a-z]+)"',
+     ("plugin-manifest", "/properties/tiers/items/enum")),
+    ("core/src/plugin_conversation.cpp", r'kind\.text != "([a-z]+)"',
+     ("plugin-manifest", "/$defs/binaryFile/properties/kind/const")),
 ]
 
 # (source, a pattern whose group 1 is a list's whole body, its words the
@@ -236,7 +258,7 @@ def main():
             failures.append(f"CALLS maps {key} to {schema}.schema.json#{ptr}, "
                             f"but no only_keys call has that context and place")
 
-    mapped = {(s, p) for s, p in CALLS.values()}
+    mapped = {(s, p) for s, p in CALLS.values()} | set(OPEN)
     for s in SCHEMAS:
         for ptr in object_schemas(schemas[s]):
             if (s, ptr) not in mapped:
@@ -244,7 +266,7 @@ def main():
                                 f"properties that no only_keys call maps to")
 
     # only_keys's own rule: "notes" a string, "x-" keys skipped
-    with open(os.path.join(root, LOADERS[0]), encoding="utf-8") as f:
+    with open(os.path.join(root, RULES), encoding="utf-8") as f:
         sf = f.read()
     body = re.search(r"void only_keys\(.*?\n\}", sf, re.S)
     if body is None or 'm.key == "notes"' not in body.group(0) \
@@ -284,32 +306,59 @@ def main():
                         f"signal-file.schema.json#/$defs/group/enum's {sorted(spelled)}")
 
     # A schema's request bound ("at most N requests", N alone or after the
-    # define's name) is profile.h's; the signal-file schema states one
+    # define's name) is profile.h's for one module; the signal-file schema
+    # states one
     with open(os.path.join(root, "core/include/ecuio/profile.h"), encoding="utf-8") as f:
-        bound = re.search(r"#define ECUIO_PROFILE_MAX_REQUESTS (\d+)", f.read())
+        bound = re.search(r"#define ECUIO_MODULE_MAX_REQUESTS (\d+)", f.read())
     if bound is None:
-        failures.append("profile.h defines no ECUIO_PROFILE_MAX_REQUESTS: find it again")
+        failures.append("profile.h defines no ECUIO_MODULE_MAX_REQUESTS: find it again")
     else:
         stated = False
         for s in SCHEMAS:
             for text in strings_of(schemas[s]):
-                for n in re.findall(r"at most (?:ECUIO_PROFILE_MAX_REQUESTS "
+                for n in re.findall(r"at most (?:ECUIO_MODULE_MAX_REQUESTS "
                                     r"\(profile\.h, )?(\d+)\)? requests\b", text):
                     stated = stated or s == "signal-file"
                     if n != bound.group(1):
                         failures.append(f"{s}.schema.json says {n} requests, "
-                                        f"profile.h's ECUIO_PROFILE_MAX_REQUESTS "
+                                        f"profile.h's ECUIO_MODULE_MAX_REQUESTS "
                                         f"is {bound.group(1)}")
         if not stated:
             failures.append("signal-file.schema.json states no request bound "
                             "(\"at most N requests\"): find it again")
+
+    # A schema's ECU bound ("at most N ECUs" in words, the ecus list's
+    # maxItems) is signals.h's for a set, the base set's counted
+    with open(os.path.join(root, "core/include/ecuio/signals.h"), encoding="utf-8") as f:
+        channels = re.search(r"#define ECUIO_MAX_CHANNELS (\d+)", f.read())
+    if channels is None:
+        failures.append("signals.h defines no ECUIO_MAX_CHANNELS: find it again")
+    else:
+        want = channels.group(1)
+        stated = False
+        for s in SCHEMAS:
+            for text in strings_of(schemas[s]):
+                for n in re.findall(r"at most (?:ECUIO_MAX_CHANNELS "
+                                    r"\(signals\.h, )?(\d+)\)? ECUs\b", text):
+                    stated = stated or s == "signal-file"
+                    if n != want:
+                        failures.append(f"{s}.schema.json says {n} ECUs, "
+                                        f"signals.h's ECUIO_MAX_CHANNELS is {want}")
+        if not stated:
+            failures.append("signal-file.schema.json states no ECU bound "
+                            "(\"at most N ECUs\"): find it again")
+        most = pointer(schemas["signal-file"], "/$defs/ecus").get("maxItems")
+        if str(most) != want:
+            failures.append(f"signal-file.schema.json#/$defs/ecus takes {most} "
+                            f"ECUs, signals.h's ECUIO_MAX_CHANNELS is {want}")
 
     for f in failures:
         print("FAIL  " + f)
     if failures:
         return 1
     print(f"ok  {len(calls)} only_keys calls, each its schema object's keys; "
-          f"{len(words) + len(LISTS) + 1} word lists")
+          f"{len(words) + len(LISTS) + 1} word lists; the request and ECU "
+          f"bounds")
     return 0
 
 

@@ -1,5 +1,5 @@
 // File/layer: app/qml/NightSwitch.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.phone_* (test_qml)
 
 import QtQuick
 
@@ -46,6 +46,7 @@ ThemedButton {
             border.color: control.shown ? Theme.text : Theme.textDim
         }
         Text {
+            textFormat: Text.PlainText
             id: words
             anchors.verticalCenter: parent.verticalCenter
             text: control.text

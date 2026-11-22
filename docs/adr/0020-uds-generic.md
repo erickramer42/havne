@@ -59,6 +59,9 @@ entry := [<ecu>:]<DID>[-<DID>][:<type>]
   `ECUIO_PROFILE_MAX_REQUESTS` DIDs to poll,
   `ECUIO_ENGINE_SCAN_MAX` (1024) to scan, `ECUIO_MAX_CHANNELS` (4) ECUs.
   A DID listed twice is kept once.
+  *Note of 2026-11-16:* [ADR-0065](0065-car-sized-profile.md): a set may
+  declare up to 32 modules, so the ECU limit is `ECUIO_MAX_CHANNELS`
+  (32).
 
 ### 2. A set of the session's own
 
@@ -215,3 +218,30 @@ on each reply; its request times out each lap.
 change: each completed about 30 s in and ended `scanned`, DA9E and DE00
 found, 46 and 4 DIDs in all
 ([2026-11-02-vehicle](../bench-sessions/2026-11-02-vehicle.md)).
+
+## Appendix: a scan asks the unanswered once more (2026-11-19)
+
+A scanned DID whose reply was lost stayed unanswered until the link
+recovered, so on a healthy link a scan could stay short of complete (511
+of 512 on the test car, through the VX).
+
+- **The round:** once a channel's scan has asked every entry, its
+  unanswered entries go once more, if the channel answered any entry at
+  all; a module silent to every entry isn't asked again.
+- **Its bound:** one round for each entry in each link episode, and only
+  while the unanswered are at most an eighth of the channel's entries (16
+  at least); past that they are the module's silence, and a module that
+  answers a few DIDs of a block and stays silent on the rest draws no
+  second round over the whole block. After the round an unanswered entry
+  stands until a recovery's rescan, which starts a round of its own.
+- **A late reply** to the first ask settles an entry waiting to be asked
+  again, except the entry the one-shot holds after a failed send, which its
+  own ask settles.
+- **`SCAN_COMPLETE` is unchanged.** A scan line's `left` counts the
+  unanswered with the unasked, so it falls as the round settles them, and
+  `complete` turns true once they answer.
+- **The cost under Known Issue #42:** the round's asks can be lost too,
+  and with the hold's wait between modules it takes longer on a car with
+  two modules through the VX.
+
+`ScanRetryTest` (test_obd2).

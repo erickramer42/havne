@@ -1,0 +1,26 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its audio",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up audio at 530",
+  "signals": [
+    {
+      "key": "audio_name",
+      "name": "Audio Module Name",
+      "kind": "text",
+      "ecu": "audio",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "audio_volume",
+      "name": "Audio Volume",
+      "ecu": "audio",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "decimals": 0,
+      "group": "vehicle",
+      "gauge": {"min": 0, "max": 40, "warn_high": 35}
+    }
+  ]
+}

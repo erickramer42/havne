@@ -48,6 +48,9 @@ constexpr const char* kFormat2 = "ecuio session recording, format 2 (ADR-0049)";
 /* Format 2's shape, its signal lines' kind also "enum" and each enum
  * signal's labels on label lines (ADR-0049's appendix of 2026-11-05) */
 constexpr const char* kFormat3 = "ecuio session recording, format 3 (ADR-0049)";
+/* Format 4 keeps a signal's values, labels and picks under its key, and
+ * a signal line gives the key before the name (ADR-0065 section 9) */
+constexpr const char* kFormat4 = "ecuio session recording, format 4 (ADR-0049)";
 constexpr size_t kLabelMax = 27; /* ECUIO_ENUM_LABEL_MAX */
 constexpr const char* kFormat1End = "session recording (ADR-0017)";
 /* Format 3's "signal file  signals.json,<SHA-256>" (ADR-0051 section

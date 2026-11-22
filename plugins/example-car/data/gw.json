@@ -1,0 +1,27 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its gw",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up gw at 527",
+  "signals": [
+    {
+      "key": "gw_name",
+      "name": "Gateway Module Name",
+      "kind": "text",
+      "ecu": "gw",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "gw_bus_load",
+      "name": "Body Bus Load",
+      "ecu": "gw",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "unit": "%",
+      "decimals": 0,
+      "group": "diagnostics",
+      "gauge": {"min": 0, "max": 100, "warn_high": 80}
+    }
+  ]
+}

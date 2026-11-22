@@ -22,6 +22,21 @@ void widenRows(int row, int& first, int& last)
     if (row > last) last = row;
 }
 
+// Each def's key, with the file's own for the defs it keys itself; a
+// refusal (no memory) leaves every def without one
+std::vector<ecuio_signal_key_t> keysOf(const ecuio_signal_set_t* set,
+                                       const ecuio_signal_file_t* file)
+{
+    std::vector<ecuio_signal_key_t> keys(set->count);
+    uint32_t keyed = 0;
+    if (ecuio_signal_set_keys(set, file, keys.data(), set->count, &keyed) !=
+            ECUIO_OK ||
+        keyed != set->count) {
+        keys.assign(set->count, ecuio_signal_key_t{});
+    }
+    return keys;
+}
+
 } // namespace
 
 // A value, its unit and its decimals in a unit system (ADR-0022)
@@ -96,6 +111,7 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case WindowLowRole: return shown(e, e.windowLow).value;
         case RowRole: return index.row();
         case HiddenRole: return e.hidden;
+        case HiddenWhyRole: return QString::fromLatin1(whyWords(e.why));
         case GroupRole:
             return static_cast<int>(e.group);
         case LabelRole:
@@ -114,6 +130,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.facts.isEnum;
         case UnaskedRole:
             return e.unasked;
+        case KeyRole:
+            return QString::fromUtf8(e.key);
         default: return QVariant();
     }
 }
@@ -142,7 +160,38 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RangeLowRole, "rangeLow"},
             {RangeHighRole, "rangeHigh"},
             {IsEnumRole, "isEnum"},
-            {UnaskedRole, "unasked"}};
+            {UnaskedRole, "unasked"},
+            {HiddenWhyRole, "hiddenWhy"},
+            {KeyRole, "key"}};
+}
+
+const char* SignalListModel::whyWords(Entry::Why why)
+{
+    return why == Entry::Why::Unsupported ? "unsupported"
+         : why == Entry::Why::Absent      ? "absent"
+                                          : "";
+}
+
+QVariantList SignalListModel::hiddenSignals() const
+{
+    QVariantList rows;
+    for (const Entry& e : m_entries) {
+        if (e.hidden) {
+            rows.append(QVariantMap{{QStringLiteral("name"), QString::fromUtf8(e.name)},
+                                    {QStringLiteral("why"), QString::fromLatin1(whyWords(e.why))}});
+        }
+    }
+    return rows;
+}
+
+bool SignalListModel::anyValue() const
+{
+    for (const Entry& e : m_entries) {
+        if (e.histCount > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
@@ -184,8 +233,13 @@ SignalListModel::factsOf(const ecuio_signal_file_t* file, bool builtIn,
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
-                                   const ecuio_signal_file_t* file)
+                                   const ecuio_signal_file_t* file,
+                                   bool pickOnly)
 {
+    m_pickOnly = pickOnly;
+    // What the last set's choices left unanswered was that set's to carry
+    m_carriedPlotted.clear();
+    m_carriedUnplotted.clear();
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
     const bool hadHidden = m_hiddenCount != 0;
@@ -221,6 +275,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
     // never on the stack or moved by a reallocation
     m_entries.reserve(set->count);
     const bool builtIn = isBuiltIn(set);
+    const std::vector<ecuio_signal_key_t> keys = keysOf(set, file);
 
     for (uint32_t i = 0; i < set->count; ++i) {
         // value-init zeroes the history ring, head, and count
@@ -228,6 +283,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         Entry& e = m_entries.emplace_back();
         e.id = set->defs[i].id;
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
+        qstrncpy(e.key, keys[i].text, sizeof(e.key));
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||
@@ -621,135 +677,6 @@ QList<double> SignalListModel::trace(int id, qint64 windowMs, int columns) const
     return out;
 }
 
-void SignalListModel::toggleSubscribed(int row)
-{
-    if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
-    Entry& e = m_entries[static_cast<size_t>(row)];
-    // A text row's default is unticked, so its tick is Plotted or Default
-    const bool plot = !e.subscribed;
-    e.choice = plot == e.plotDefault ? PlotChoice::Default
-             : plot                  ? PlotChoice::Plotted
-                                     : PlotChoice::Unplotted;
-    judgePlotted();
-    emit ticksChanged();
-}
-
-QStringList SignalListModel::plottedNames() const
-{
-    QStringList names;
-    for (const Entry& e : m_entries) {
-        if (e.choice == PlotChoice::Plotted) {
-            names << QString::fromUtf8(e.name);
-        }
-    }
-    return names;
-}
-
-std::vector<uint16_t> SignalListModel::tickedIds() const
-{
-    std::vector<uint16_t> ids;
-    for (const Entry& e : m_entries) {
-        if (e.choice == PlotChoice::Plotted) {
-            ids.push_back(e.id);
-        }
-    }
-    return ids;
-}
-
-std::vector<uint16_t> SignalListModel::plottedIds() const
-{
-    std::vector<uint16_t> ids;
-    for (const Entry& e : m_entries) {
-        if (e.subscribed && !e.hidden) {
-            ids.push_back(e.id);
-        }
-    }
-    return ids;
-}
-
-QStringList SignalListModel::unplottedNames() const
-{
-    QStringList names;
-    for (const Entry& e : m_entries) {
-        if (!e.isText && e.choice == PlotChoice::Unplotted) {
-            names << QString::fromUtf8(e.name);
-        }
-    }
-    return names;
-}
-
-void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
-{
-    for (Entry& e : m_entries) {
-        const QString name = QString::fromUtf8(e.name);
-        e.choice = (!e.isText && unplotted.contains(name))
-                       ? PlotChoice::Unplotted
-                   : plotted.contains(name) ? PlotChoice::Plotted
-                                            : PlotChoice::Default;
-    }
-    judgePlotted();
-    emit ticksChanged();
-}
-
-void SignalListModel::judgePlotted()
-{
-    // The default: every numeric row, or in a ranked set the
-    // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
-    // set's order), so a row Live hides gives its place to the next. A
-    // refused row never has a value to draw, so it is no default either;
-    // a tick still plots it
-    std::vector<int> ranked;
-    for (size_t row = 0; row < m_entries.size(); ++row) {
-        const Entry& e = m_entries[row];
-        if (e.plotRank != 0 && !e.isText && !e.hidden && e.refused.isEmpty()) {
-            ranked.push_back(static_cast<int>(row));
-        }
-    }
-    std::stable_sort(ranked.begin(), ranked.end(), [this](int a, int b) {
-        return m_entries[static_cast<size_t>(a)].plotRank
-             < m_entries[static_cast<size_t>(b)].plotRank;
-    });
-    if (ranked.size() > static_cast<size_t>(DefaultPlotted)) {
-        ranked.resize(static_cast<size_t>(DefaultPlotted));
-    }
-    for (Entry& e : m_entries) {
-        e.plotDefault = !m_ranked && !e.isText && e.refused.isEmpty();
-    }
-    for (int row : ranked) {
-        m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;
-    }
-
-    int first = -1;
-    int last = -1;
-    int subscribed = 0;
-    int ticked = 0;
-    for (size_t row = 0; row < m_entries.size(); ++row) {
-        Entry& e = m_entries[row];
-        // A text row's tick asks it and never plots: subscribed shows the
-        // tick, and the count and chartData leave the row out
-        const bool plot = e.choice == PlotChoice::Plotted ||
-                          (e.choice == PlotChoice::Default && e.plotDefault);
-        if (plot != e.subscribed) {
-            e.subscribed = plot;
-            if (first < 0) first = static_cast<int>(row);
-            last = static_cast<int>(row);
-        }
-        subscribed += (e.subscribed && !e.isText && !e.hidden) ? 1 : 0;
-        ticked += (e.subscribed && !e.hidden) ? 1 : 0;
-    }
-    if (first >= 0) {
-        emit dataChanged(index(first), index(last), {SubscribedRole});
-    }
-    if (subscribed != m_subscribedCount) {
-        m_subscribedCount = subscribed;
-        emit subscribedCountChanged();
-    }
-    if (ticked != m_tickedCount) {
-        m_tickedCount = ticked;
-        emit tickedCountChanged();
-    }
-}
-
 void SignalListModel::applyUnsupported(const std::vector<uint16_t>& ids)
 {
     for (Entry& e : m_entries) {
@@ -844,8 +771,11 @@ void SignalListModel::rejudgeHidden()
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
         const bool hide = e.unsupported || e.absent;
-        if (hide != e.hidden) {
+        const Entry::Why why = e.unsupported ? Entry::Why::Unsupported
+                               : e.absent ? Entry::Why::Absent : Entry::Why::None;
+        if (hide != e.hidden || why != e.why) {
             e.hidden = hide;
+            e.why = why;
             if (first < 0) first = static_cast<int>(row);
             last = static_cast<int>(row);
         }
@@ -855,7 +785,7 @@ void SignalListModel::rejudgeHidden()
         return;
     }
     // Live's filtered view re-judges the rows HiddenRole changed in
-    emit dataChanged(index(first), index(last), {HiddenRole});
+    emit dataChanged(index(first), index(last), {HiddenRole, HiddenWhyRole});
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
     recountUnasked();

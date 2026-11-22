@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingFramesView.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The frames of the part in view, read from frames.csv: the table's tools, the
 // Frames | By ID switch and the two lists; one part of RecordingsPage, which
 // holds the state
@@ -10,7 +10,7 @@ import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
 
-// ---- The frames of the part in view, read from frames.csv ----
+// The frames of the part in view, read from frames.csv
 ColumnLayout {
     id: root
     objectName: "viewerFrames"
@@ -79,6 +79,7 @@ ColumnLayout {
             // How many rows the part in view has, and when it has more than
             // the table holds, where the table begins
             Label {
+                textFormat: Text.PlainText
                 objectName: "framesWords"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
@@ -115,7 +116,7 @@ ColumnLayout {
                  : qsTr("No frame in view")
         // A tap puts the chart's cursor at the frame's time, whether
         // or not a signal has a sample there
-        onRowClicked: (index, modifiers, timestampUs) => root.host.setCursor(timestampUs / 1000)
+        onRowClicked: (index, modifiers, timestampUs) => root.host.cursorsPart.setCursor(timestampUs / 1000)
     }
     FrameIdList {
         id: viewerFrameIds

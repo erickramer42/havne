@@ -9,5 +9,7 @@
 #
 # For example:
 # ECUIO_PROFILE_MAX_REQUESTS  vX.Y.0 raises the cap (CHANGELOG.md)
-ECUIO_PROFILE_MAX_REQUESTS  v0.8.0 raises the cap to 1024 (ADR-0051, CHANGELOG.md)
-ECUIO_SIGNAL_FILE_FORMAT  v0.8.0 raises the newest format this core reads to 2, the computed grammar (ADR-0062, CHANGELOG.md)
+ECUIO_MAX_CHANNELS  v0.9.0 raises a set's modules to 32 (ADR-0065, CHANGELOG.md)
+ECUIO_SIGNAL_SET_LAYOUT  v0.9.0 is layout 5: ecuio_channel_decl_t grows to 16 bytes (ADR-0065, CHANGELOG.md)
+ecuio_channel_decl  v0.9.0 adds flags and a reserved word, 8 to 16 bytes (ADR-0065, CHANGELOG.md)
+ECUIO_SIM_MAX_REPLIES  v0.9.0 raises it to 66 with the modules: a caller that sized 10 replies and reads to *count runs past its array, and 66 replies are 273 KB (ADR-0065, CHANGELOG.md)

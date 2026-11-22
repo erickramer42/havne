@@ -1,13 +1,13 @@
 // File/layer: app/qml/DashCell.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit{,_panel}, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
 import QtQuick.Controls
 
 pragma ComponentBehavior: Bound
 
-// ---- A cell: its gauge's inputs, from the cell and its entry
+// A cell: its gauge's inputs, from the cell and its entry
 
 GaugeCard {
     id: card
@@ -24,10 +24,15 @@ GaugeCard {
     property bool shown: true
     property int pageNo: -1
     property int cellIndex: -1
-    readonly property bool editable: card.host.editing && pageNo === card.host.pageIndex
-    readonly property bool lifted: card.host.held === cellIndex && pageNo === card.host.pageIndex
+    // A cell its Repeater released lives on, bindings running, until its deferred
+    // delete: it takes no part in the page and builds nothing
+    property bool released: false
+    Component.onDestruction: card.released = true
+    readonly property bool current: !released && pageNo === card.host.pageIndex
+    readonly property bool editable: current && card.host.editing
+    readonly property bool lifted: current && card.host.held === cellIndex
     // The panel names this cell, in edit mode or out of it
-    readonly property bool chosen: pageNo === card.host.pageIndex && card.host.selected === cellIndex
+    readonly property bool chosen: current && card.host.selected === cellIndex
                                    && (card.host.editing || card.host.panel !== "")
 
     // What the panel's Digits and Lights show with the option unset: what
@@ -105,7 +110,9 @@ GaugeCard {
         else if (entry.hidden) words = qsTr("not sent by this ECU")
         else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
         else if (entry.unasked) words = qsTr("not asked")
-        else if (!entry.hasValue) words = qsTr("waiting for data")
+        // A replay that has played its last frame will send nothing more
+        else if (!entry.hasValue) words = Bridge.replayFinished ? qsTr("not in this recording")
+                                                                : qsTr("waiting for data")
         return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
                                         : words
     }
@@ -126,7 +133,7 @@ GaugeCard {
     readonly property var axis: {
         let a = 0, b = 100
         let snap = false
-        const d = DashboardBook.defaultRange(cellUnit)
+        const d = DashboardEdit.defaultRange(cellUnit)
         const f = opt("from", d.from), t = opt("to", d.to)
         if (mismatch) {
             const lo = entry.rangeLow, hi = entry.rangeHigh
@@ -188,7 +195,7 @@ GaugeCard {
     // and its ticks
     readonly property int cells: opt("cells", 24)
     readonly property real rise: opt("rise", 1.6)
-    readonly property int digits: opt("digits", DashboardBook.digitsFor(from, to, decimals))
+    readonly property int digits: opt("digits", DashboardEdit.digitsFor(from, to, decimals))
     readonly property int windowS: opt("window", 30)
     readonly property bool vertical: opt("vertical", false)
     readonly property bool marks: opt("marks", true)
@@ -232,6 +239,7 @@ GaugeCard {
         // Editable, the gauge leaves Remove's corner free, so the
         // button covers no title
         anchors.rightMargin: card.editable ? Theme.touchTarget - card.padding + 2 : 0
+        active: !card.released
         asynchronous: card.later
         sourceComponent: card.host.kindComponent(card.kind)
         onLoaded: {
@@ -269,8 +277,8 @@ GaugeCard {
         onClicked: {
             if (strayed)
                 return
-            if (card.host.driving) {
-                card.host.driveTap()
+            if (card.host.drivePart.driving) {
+                card.host.drivePart.driveTap()
                 return
             }
             if (card.kind === "analog" && card.showPeak && gauge.item)
@@ -279,7 +287,7 @@ GaugeCard {
                 card.host.select(card.cellIndex)
         }
         onPressAndHold: (mouse) => {
-            if (card.host.driving)
+            if (card.host.drivePart.driving)
                 return
             if (strayed)
                 mouse.accepted = false
@@ -311,6 +319,7 @@ GaugeCard {
         }
     }
     Loader {
+        objectName: "cellRemoveSlot"
         z: 3
         active: card.editable
         anchors.right: parent.right
@@ -325,7 +334,7 @@ GaugeCard {
             text: "\u00D7"
             Accessible.name: card.kind === "blank" ? qsTr("Remove blank cell")
                                                  : qsTr("Remove %1").arg(card.host.cellName(card.cell))
-            onClicked: card.host.removeCell(card.cellIndex)
+            onClicked: card.host.editsPart.removeCell(card.cellIndex)
             // A touch's size drawn as a smaller raised square with an edge:
             // a button, not an empty tile, and inside a short cell
             background: Item {
@@ -343,6 +352,7 @@ GaugeCard {
                 }
             }
             contentItem: Text {
+                textFormat: Text.PlainText
                 text: removeBox.text
                 font.pixelSize: Theme.fontBody + 6
                 font.weight: Font.DemiBold
@@ -355,6 +365,7 @@ GaugeCard {
 
     // A kind this version doesn't draw, kept so it can be removed
     Label {
+        textFormat: Text.PlainText
         objectName: "unknownKind"
         visible: !card.drawn
         anchors.centerIn: parent

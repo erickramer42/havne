@@ -1,6 +1,6 @@
 # User guide
 
-How to do each task in the Havne app, on the desktop and on a phone. Each
+How to do each task in the Havne app, on a desktop or laptop and on a phone. Each
 section is the steps for one task. The address you connect with, and
 every option it takes, is in [addresses.md](addresses.md).
 
@@ -41,6 +41,16 @@ options go after `?` in the address ([addresses.md](addresses.md)). A WiFi
 adapter isn't listed: **WiFi and other addresses: show** offers the two
 common WiFi addresses, and the computer or phone must be on the adapter's
 WiFi network first.
+
+Settings composes the address from a preset or a device (a J2534
+interface or a serial port), a profile row (default, `raw`,
+`uds-generic`, the picked vehicle's signal files and plugin variant) and
+a DID field, and leaves the address field editable: a typed address sets
+the row and the field from its `profile=` and `did=`, and the next click
+recomposes it with every other key kept. Core judges the result at
+connect, and Settings shows its words. The header opens Settings, and
+the connect lists on Home and Dash hand it the address of the row
+chosen.
 
 **Without a car:** Home's and Dash's lists end with a **Demo data** row,
 and **WiFi and other addresses: show** on Connection has a `mock://demo`
@@ -84,7 +94,9 @@ open, and SocketCAN interfaces.
 1. Connect, then open **Live**.
 2. Each signal the session reads has a row with its value, updated ten
    times a second. A signal the ECU doesn't send is hidden, and a line
-   under the list counts them.
+   under the list counts them. On a profile too large to ask whole,
+   no row is ticked at first and nothing is asked until you tick
+   signals or place gauges.
 3. Tick a row to plot it on the chart below; untick it to take it off.
    **Find a signal** narrows the list by name or unit, and **Filter**
    by the part of the car a signal reads, or to the plotted rows
@@ -94,6 +106,10 @@ open, and SocketCAN interfaces.
 5. Drag the chart to pause it and look back through the last two minutes
    while the values keep updating; a tap reads each trace's value at that
    moment. **Live** (or Space on a desktop) follows now again.
+
+A value never received shows "—", never a made-up 0. A value older than
+3 s dims, and ages refresh every tick, so a signal that stops arriving
+dims even when nothing else changes.
 
 Units follow **Settings, Display, Units** (metric or imperial).
 
@@ -110,7 +126,9 @@ Units follow **Settings, Display, Units** (metric or imperial).
    a long press on a gauge opens the same panel. It holds the label,
    the signal (**Change signal**), its kind (**Change kind**: the signal,
    range, zones and size stay, and settings only the old kind used come
-   back if you change back), the range (**From** and **To**), the zones
+   back if you change back), the range (**From** and **To**; a new gauge
+   for a signal with no range of its own says "Range guessed: set From and
+   To." until you set one), the zones
    (**Cold below**, **Warning below**, **Danger below**, **Warning from**,
    **Danger from**), decimals, **Color**, its size (**Columns** and
    **Rows**; on a phone, **Columns** and **Height**, both counted in
@@ -132,9 +150,17 @@ Units follow **Settings, Display, Units** (metric or imperial).
 4. **Move a gauge:** hold it and drag it to its new place.
 5. **Remove a gauge:** press the **x** in its corner, or **Remove** in
    its panel.
-6. **Pages:** the tabs above the gauges are the pages; **+** adds one.
-   **Page** holds the shown page's name and **Remove page**, and
-   **Reset**, which replaces every page with the built-in layout.
+6. **Pages:** the tabs above the gauges are the pages. **+** (on a
+   phone, **Add page** in the **Page** row) opens a list: a blank page,
+   one of the presets (Standard, Temperatures, Showcase) or the pages of
+   a layout file. The page is added after the one shown, and Undo takes
+   it back. **Page** holds the shown page's name, **Replace this page
+   with...**, **Remove page** and **Reset all pages**. **Replace this
+   page with...** puts a preset's gauges on the shown page and keeps its
+   name; it asks first when the page's gauges are none of the presets',
+   since they are not kept. **Reset all pages** replaces every page with
+   the built-in layout. The presets read obd2's signals: a car that does
+   not send one shows "not sent by this ECU" in that gauge.
 
    **Export layout** writes this form's layout to a `.json` file, and
    **Load layout** reads one back. A file names the form it came from
@@ -148,6 +174,17 @@ Units follow **Settings, Display, Units** (metric or imperial).
    or pages in a file that cannot be read are left out and counted.
    `havne-cli layout check <file>` reads a layout file as Load layout
    would, with no app.
+
+   **Phone layout** (a computer only, beside Undo and Redo in edit mode):
+   shows the phone's layout in a frame as wide as a phone (384 px) and
+   edits it there. **Export layout** then writes a file for the phone, and
+   **Load layout** reads a phone's file; a desktop file is refused in the
+   frame, as it is on a phone. The frame is a picture of the phone's
+   six-column grid, not a touch simulation: its buttons keep the mouse's
+   size, and a phone narrower or wider than the frame keeps the columns.
+   Switching drops the undo history, and **Done** returns to the
+   computer's own layout. The switch shows only where the frame fits the
+   window (432 px or more).
 7. **Undo** and **Redo** step back and forth through the changes made
    since **Edit**; on the desktop, Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y)
    do the same, in edit mode or out of it. A change made from a panel
@@ -274,6 +311,12 @@ off. **Stretches...** opens the levels the finder uses; an empty field, or
 numbers in Compare follow these levels; `havne-cli`'s `--align-on` counts
 by core's defaults unless it is given levels.
 
+**A pull ends** chooses where: **At the throttle's lift** (the default)
+keeps a pull run onto the limiter whole, its fuel cut included; **At top
+speed** ends it where speed stops rising, which leaves the fuel cut out of
+its statistics. `havne-cli view --stretches --pull-end top-speed` and
+Python's `pull_end="top-speed"` read it the same way.
+
 A recording that holds conditions draws each time one was ON as a bar
 along the chart's foot (an alert's in its level's color, under the
 others), and each stretch where nothing fresh was read dashed.
@@ -344,7 +387,33 @@ Signals beyond the built-in profiles come as **plugins**: a package someone made
 
 **Add a signal**, under **Your own signals**, writes one signal at a time into the vehicle's own plugin ("Daily driver signals"). **Edit** changes a saved one; a new name keeps every gauge that shows the signal bound to it.
 
+**A computed signal** is a number worked out from other signals, such as boost as manifold pressure less barometric pressure. In Add a signal, set the type to computed.
+
+1. Give it a name. Its key is made from the name once and kept when you rename it, so a gauge or an alert that reads it stays bound. A name whose key would start with a digit is refused: an expression reads a leading digit as a number.
+2. Type the expression: `+ - * /`, brackets, numbers, and the functions `min`, `max`, `abs`, `clamp`, `round` and `if`. **Insert signal** lists what the expression can read, with a filter; a tap puts the signal's name at the cursor (`obd2.map` for one of obd2's signals, the key for one of your own), and the chips put a function's start there. A signal an expression can't read by name (obd2's computed Boost: read its inputs, `obd2.map` and `obd2.baro`, instead) is listed dimmed, with the reason.
+3. The form checks the expression as you type with the rules the loader uses, and says what is wrong, with the character marked under the field. Under it, "Reads" lists each signal the expression uses with its unit.
+4. To try it, type a value for each signal it reads, in the units signals are decoded in, as a gauge's levels are, to see the value it gives or why there is none: a signal with no value, one too old, or a division by zero. While connected, **Use the session's values** fills them from the session ("Filled N of M from the session"; a signal with no value yet is left empty).
+5. Unit and decimals are optional. Save writes the signal into the vehicle's own signals.
+
+Save may add a note. "This file now needs Havne 0.8.0 or newer" means the expression uses a function, a comparison or another computed signal, which a file of the older format can't hold; an older Havne can't read the file. "Your signals now read with obd2's" means the expression is the first to read one of obd2's signals, so the vehicle's signals extend obd2: the profile row shows "obd2 + <name>", and the car is asked obd2's PIDs as well as your DIDs. A name that is one of obd2's signals (Boost, for one) replaces it: the form says "Replaces obd2's Boost" before you save, and a gauge or layout that showed obd2's then shows yours.
+
+To see a computed signal move without a car, save it and connect `mock://demo`: the demo car answers obd2's PIDs. The form's last line, "Or connect the demo", names this when the expression reads an obd2 signal or the vehicle's signals extend obd2.
+
 **Look up a VIN** on the Vehicle page decodes a VIN's model year and make on the device, and marks the variants that VIN matches; the VIN isn't saved.
+
+## The Activity page, Settings and developer mode
+
+**Activity** has the activity log and, in its **Frames** view, the raw
+frames, filtered by ID, data bytes, length, time, direction and flag,
+and exported as CSV with the car's identity left out. It opens from the status in the top bar, on
+a phone from the Activity row at the end of Settings' list, and from a
+failed connect's **Show activity**.
+
+**Settings** is a list of pages: Connection, Vehicle, Signals,
+Recording, Display (with the theme) and Advanced. Advanced has
+**developer mode**, which adds extra readouts and tools: a frame-rate
+badge, the Recordings viewer's frame test, Export's raw frames and the
+adapter relay.
 
 ## The drive view
 

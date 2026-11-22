@@ -1,6 +1,6 @@
 // File/layer: app/qml/DashCellPanel.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
-//          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit, QmlTest.phone_*,
+//          QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform} (test_qml); BENCH, Manual smoke
 
 import QtQuick
 import QtQuick.Controls
@@ -19,10 +19,35 @@ GaugeCard {
     readonly property var cell: panelCard.host.selectedCell
     readonly property string kind: cell ? cell.kind : ""
     readonly property string unitShown: cell ? panelCard.host.shownUnit(cell.unit ?? "") : ""
-    readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
+    readonly property var range: DashboardEdit.defaultRange(cell ? cell.unit ?? "" : "")
     // The row the cell shows, whose decimals it uses until it has its own
     readonly property SignalHub.Entry entry: panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell && cell.refs ? cell.refs : []))
+    // With no session the hub has no row: the listed profile's row gives the decimals
+    readonly property int listedDecimals: {
+        const refs = cell && Array.isArray(cell.refs) ? cell.refs : []
+        for (const r of panelCard.host.addFlowPart.profileRows) {
+            if (refs.indexOf(r.ref) >= 0)
+                return r.decimals
+        }
+        return 0
+    }
+    readonly property int decimalsNow: cell && cell.options && cell.options.decimals !== undefined
+                                       ? cell.options.decimals
+                                       : entry ? entry.decimals : listedDecimals
     readonly property bool phone: panelCard.host.form === "phone"
+    // Two columns of fields on a phone and in the page's side column
+    readonly property bool narrow: phone || width < 480
+    // Any of the zone levels is set
+    readonly property bool hasZoneLevel: {
+        const o = cell && cell.options ? cell.options : null
+        if (o === null)
+            return false
+        for (const k of ["coldBelow", "warnBelow", "dangerBelow", "warnFrom", "dangerFrom"]) {
+            if (typeof o[k] === "number" && isFinite(o[k]))
+                return true
+        }
+        return false
+    }
     readonly property bool hasSignal: kind !== "blank"
     // Every kind but the shift lights draws the value's text and tone, which
     // the zones, the decimals and the color shape; the lights read only the range
@@ -41,6 +66,7 @@ GaugeCard {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 font.pixelSize: Theme.fontBody
@@ -108,6 +134,7 @@ GaugeCard {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "dashAlertNote"
             visible: panelCard.host.alertNote !== ""
             text: panelCard.host.alertNote
@@ -118,7 +145,7 @@ GaugeCard {
 
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
 
@@ -132,7 +159,7 @@ GaugeCard {
                 maximumLength: DashboardBook.maxLabel
                 text: panelCard.cell && panelCard.cell.label ? panelCard.cell.label : ""
                 onEditingFinished: {
-                    panelCard.host.setLabel(text)
+                    panelCard.host.editsPart.setLabel(text)
                     text = Qt.binding(() => panelCard.cell && panelCard.cell.label
                                             ? panelCard.cell.label : "")
                 }
@@ -146,13 +173,13 @@ GaugeCard {
                     objectName: "panelSignal"
                     Layout.fillWidth: true
                     text: qsTr("Change signal")
-                    onClicked: panelCard.host.changeSignal()
+                    onClicked: panelCard.host.addFlowPart.changeSignal()
                 }
                 ThemedButton {
                     objectName: "panelKind"
                     Layout.fillWidth: true
                     text: qsTr("Change kind")
-                    onClicked: panelCard.host.changeKind()
+                    onClicked: panelCard.host.addFlowPart.changeKind()
                 }
             }
 
@@ -160,7 +187,7 @@ GaugeCard {
                 objectName: "panelSignalName"
                 visible: panelCard.hasSignal && panelCard.entry !== null
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 elide: Text.ElideRight
                 text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
@@ -194,10 +221,24 @@ GaugeCard {
                 fallback: panelCard.range.to
             }
             Caption {
+                objectName: "panelRangeGuess"
+                readonly property var g: panelCard.host.addFlowPart.guessed
+                visible: panelCard.hasSignal && g !== null && panelCard.cell !== null
+                         && g.page === panelCard.host.pageIndex && g.index === panelCard.host.selected
+                         && g.ref === (panelCard.cell.refs ?? [])[0]
+                         && panelCard.cell.options !== undefined
+                         && panelCard.cell.options.from === g.from && panelCard.cell.options.to === g.to
+                Layout.fillWidth: true
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
+                Layout.preferredWidth: 0
+                wrapMode: Text.WordWrap
+                text: qsTr("Range guessed: set From and To.")
+            }
+            Caption {
                 objectName: "panelShiftHint"
                 visible: panelCard.kind === "shift-light"
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 wrapMode: Text.WordWrap
                 text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
@@ -222,11 +263,8 @@ GaugeCard {
                 Layout.preferredHeight: Theme.touchTarget
                 from: 0
                 to: 6
-                value: panelCard.cell && panelCard.cell.options
-                       && panelCard.cell.options.decimals !== undefined
-                       ? panelCard.cell.options.decimals
-                       : panelCard.entry ? panelCard.entry.decimals : 0
-                onValueModified: panelCard.host.setOptions({ decimals: value })
+                value: panelCard.decimalsNow
+                onValueModified: panelCard.host.editsPart.setOptions({ decimals: value })
             }
 
             // The span, in the grid's units, which the words name
@@ -238,14 +276,14 @@ GaugeCard {
                 from: 1
                 to: DashboardBook.maxColumns
                 value: panelCard.cell ? panelCard.cell.w : 1
-                onValueModified: panelCard.host.resize(value, panelCard.cell.h)
+                onValueModified: panelCard.host.editsPart.resize(value, panelCard.cell.h)
             }
             Caption { text: panelCard.host.phoneForm ? qsTr("Height") : qsTr("Rows") }
             SpinBox {
                 objectName: "panelH"
                 Accessible.name: panelCard.host.phoneForm ? qsTr("Height") : qsTr("Rows")
                 // The phone reads it in columns, the unit Columns uses
-                textFromValue: v => panelCard.host.phoneForm ? DashboardBook.heightInColumns(v) : String(v)
+                textFromValue: v => panelCard.host.phoneForm ? DashboardEdit.heightInColumns(v) : String(v)
                 Layout.preferredHeight: Theme.touchTarget
                 // A stored h under the phone's step stays reachable
                 from: panelCard.host.phoneForm && panelCard.cell
@@ -255,15 +293,15 @@ GaugeCard {
                     : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
                 stepSize: panelCard.host.spanScale
                 value: panelCard.cell ? panelCard.cell.h : 1
-                onValueModified: panelCard.host.resize(panelCard.cell.w, panelCard.host.phoneForm
-                    ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
+                onValueModified: panelCard.host.editsPart.resize(panelCard.cell.w, panelCard.host.phoneForm
+                    ? DashboardEdit.stepRows(panelCard.cell.h, value > panelCard.cell.h)
                     : value)
             }
 
             // A checkbox, as every other yes-or-no in the app
             ThemedCheckBox {
                 objectName: "panelPeak"
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 text: qsTr("Peak hold")
                 Accessible.name: qsTr("Peak hold")
                 visible: panelCard.host.peakKinds.indexOf(panelCard.kind) >= 0
@@ -271,7 +309,7 @@ GaugeCard {
                                          Theme.touchTarget)
                 checked: panelCard.cell && panelCard.cell.options
                          ? panelCard.cell.options.peak === true : false
-                onToggled: panelCard.host.setOptions({ peak: checked })
+                onToggled: panelCard.host.editsPart.setOptions({ peak: checked })
             }
 
             // The kind's own
@@ -294,7 +332,7 @@ GaugeCard {
                                                   ? panelCard.cell.options.caption : ""
                 text: current
                 onEditingFinished: {
-                    panelCard.host.setOptions({ caption: text === "" ? null : text })
+                    panelCard.host.editsPart.setOptions({ caption: text === "" ? null : text })
                     text = Qt.binding(() => current)
                 }
             }
@@ -310,7 +348,7 @@ GaugeCard {
                                                   ? panelCard.cell.options.description : ""
                 text: current
                 onEditingFinished: {
-                    panelCard.host.setOptions({ description: text === "" ? null : text })
+                    panelCard.host.editsPart.setOptions({ description: text === "" ? null : text })
                     text = Qt.binding(() => current)
                 }
             }
@@ -325,7 +363,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.cells !== undefined
                        ? panelCard.cell.options.cells : 24
-                onValueModified: panelCard.host.setOptions({ cells: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ cells: value })
             }
             Caption { visible: panelCard.kind === "segments"; text: qsTr("Curve") }
             OptionField {
@@ -347,7 +385,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.digits !== undefined
                        ? panelCard.cell.options.digits : panelCard.host.selectedDigits
-                onValueModified: panelCard.host.setOptions({ digits: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ digits: value })
             }
             Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
             SpinBox {
@@ -361,7 +399,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.window !== undefined
                        ? panelCard.cell.options.window : 30
-                onValueModified: panelCard.host.setOptions({ window: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ window: value })
             }
             Caption { visible: panelCard.kind === "bar"; text: qsTr("Standing up") }
             Switch {
@@ -382,10 +420,10 @@ GaugeCard {
                     const s = panelCard.host.spanScale
                     let base = panelCard.host.doc
                     if (c && on && c.w === 2 * s && c.h === 2 * s)
-                        base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, s, 4 * s)
+                        base = DashboardEdit.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, s, 4 * s)
                     else if (c && !on && c.w === s && c.h === 4 * s)
-                        base = DashboardBook.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, 2 * s, 2 * s)
-                    panelCard.host.setOptions({ vertical: on }, base)
+                        base = DashboardEdit.resizeCell(base, panelCard.host.pageIndex, panelCard.host.selected, 2 * s, 2 * s)
+                    panelCard.host.editsPart.setOptions({ vertical: on }, base)
                 }
             }
             Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
@@ -397,7 +435,7 @@ GaugeCard {
                                          Theme.touchTarget)
                 checked: panelCard.cell && panelCard.cell.options
                          ? panelCard.cell.options.marks !== false : true
-                onToggled: panelCard.host.setOptions({ marks: checked })
+                onToggled: panelCard.host.editsPart.setOptions({ marks: checked })
             }
             Caption { visible: panelCard.kind === "shift-light"; text: qsTr("Lights") }
             SpinBox {
@@ -410,7 +448,7 @@ GaugeCard {
                 value: panelCard.cell && panelCard.cell.options
                        && panelCard.cell.options.count !== undefined
                        ? panelCard.cell.options.count : panelCard.host.selectedCount
-                onValueModified: panelCard.host.setOptions({ count: value })
+                onValueModified: panelCard.host.editsPart.setOptions({ count: value })
             }
         }
 
@@ -454,7 +492,7 @@ GaugeCard {
                     Accessible.name: qsTr("Default color")
                     checkable: true
                     checked: colorRow.current === "" && colorRow.custom === ""
-                    onClicked: { colorRow.customOpen = false; panelCard.host.setOptions({ color: null }) }
+                    onClicked: { colorRow.customOpen = false; panelCard.host.editsPart.setOptions({ color: null }) }
                 }
                 Repeater {
                     model: Theme.gaugeColorNames
@@ -467,7 +505,7 @@ GaugeCard {
                         checkable: true
                         checked: colorRow.current === modelData
                         Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
-                        onToggled: { toggle(); colorRow.customOpen = false; panelCard.host.setOptions({ color: modelData }) }
+                        onToggled: { toggle(); colorRow.customOpen = false; panelCard.host.editsPart.setOptions({ color: modelData }) }
                         contentItem: Item {}
                         background: Rectangle {
                             anchors.centerIn: parent
@@ -532,7 +570,7 @@ GaugeCard {
                     return
                 // A focus pass-through sends editingFinished with nothing typed: nothing to store
                 if (edited || !Qt.colorEqual(hex, base))
-                    panelCard.host.setOptions({ color: hex })
+                    panelCard.host.editsPart.setOptions({ color: hex })
                 rebind()
             }
             // Another gauge, or the row hidden: what was left typed doesn't follow
@@ -595,10 +633,21 @@ GaugeCard {
             text: qsTr("Night draws every gauge in its own tint")
         }
 
+        // A zone's own color wins over the pick while its level is reached
+        Caption {
+            objectName: "panelColorZones"
+            Layout.fillWidth: true
+            visible: panelCard.drawsValue && !Theme.nightActive
+                     && (colorRow.current !== "" || colorRow.custom !== "")
+                     && panelCard.hasZoneLevel
+            wrapMode: Text.Wrap
+            text: qsTr("A zone's color replaces this one while its level is reached")
+        }
+
         // The order: both forms' grids follow it
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
             ThemedButton {
@@ -606,28 +655,28 @@ GaugeCard {
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected > 0
                 text: qsTr("Move earlier")
-                onClicked: panelCard.host.moveTo(panelCard.host.selected - 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.selected - 1)
             }
             ThemedButton {
                 objectName: "panelLater"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected < panelCard.host.shownCells.length - 1
                 text: qsTr("Move later")
-                onClicked: panelCard.host.moveTo(panelCard.host.selected + 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.selected + 1)
             }
             ThemedButton {
                 objectName: "panelStart"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected > 0
                 text: qsTr("To the start")
-                onClicked: panelCard.host.moveTo(0)
+                onClicked: panelCard.host.editsPart.moveTo(0)
             }
             ThemedButton {
                 objectName: "panelEnd"
                 Layout.fillWidth: true
                 enabled: panelCard.host.selected < panelCard.host.shownCells.length - 1
                 text: qsTr("To the end")
-                onClicked: panelCard.host.moveTo(panelCard.host.shownCells.length - 1)
+                onClicked: panelCard.host.editsPart.moveTo(panelCard.host.shownCells.length - 1)
             }
         }
 
@@ -638,7 +687,7 @@ GaugeCard {
             flat: true
             text: qsTr("Remove")
             Accessible.name: qsTr("Remove %1").arg(panelCard.name)
-            onClicked: panelCard.host.removeCell(panelCard.host.selected)
+            onClicked: panelCard.host.editsPart.removeCell(panelCard.host.selected)
         }
     }
 
@@ -658,8 +707,7 @@ GaugeCard {
         // A converted end shows to the signal's decimals plus one (161.5565
         // mph at 1 decimal reads 161.56), 1 place with no row to take them from
         readonly property var entry: cell ? panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell.refs ?? [])) : null
-        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
-                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
+        readonly property int places: panelCard.decimalsNow + 1
         readonly property string shownText: cell === null ? ""
             : converted ? panelCard.host.fieldText(panelCard.host.shown(cell.unit ?? "", value), places)
                         : panelCard.host.fieldText(value)
@@ -670,11 +718,11 @@ GaugeCard {
         onEditingFinished: {
             const t = text.trim()
             if (t === "" && clearable) {
-                panelCard.host.setOptions({ [option]: null })
+                panelCard.host.editsPart.setOptions({ [option]: null })
             } else {
                 const v = Number(t)
                 if (t !== "" && isFinite(v))
-                    panelCard.host.setOptions({ [option]: converted ? panelCard.host.stored(cell.unit ?? "", v) : v })
+                    panelCard.host.editsPart.setOptions({ [option]: converted ? panelCard.host.stored(cell.unit ?? "", v) : v })
             }
             text = Qt.binding(() => field.shownText)
         }
@@ -698,6 +746,7 @@ GaugeCard {
     }
 
     component Caption: Label {
+        textFormat: Text.PlainText
         color: Theme.textDim
         font.pixelSize: Theme.fontCaption
     }

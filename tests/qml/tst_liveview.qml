@@ -6,79 +6,10 @@ import QtQuick
 import QtTest
 import App
 import AppTest
-TestCase {
+
+LiveViewKit {
     id: testCase
     name: "LiveView"
-
-    // A palette by its name: Dark is Night off, the others Night on in a style
-    function usePalette(name) {
-        const night = Theme.nightPalettes.indexOf(name) >= 0
-        Theme.night = night ? "on" : "off"
-        if (night)
-            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
-        else
-            Theme.look = name
-    }
-    when: windowShown
-
-    Component {
-        id: pageComponent
-        // Tall enough that every mock row has a delegate
-        LiveViewPage { width: 900; height: 1000 }
-    }
-
-    // A binding error in the app's QML fails the test
-    function init() {
-        failOnWarning(/^qrc:\/qt\/qml\/App\//)
-    }
-
-    // Live's store, for the first pause's hint
-    Settings {
-        id: liveStore
-        category: "live"
-    }
-    // The test window's size before a case grew it, or null
-    property var grownFrom: null
-
-    function cleanup() {
-        if (grownFrom) {
-            testCase.parent.Window.window.width = grownFrom[0]
-            testCase.parent.Window.window.height = grownFrom[1]
-            grownFrom = null
-        }
-        Bridge.unitSystem = 0
-        Bridge.liveSignalModel.filter.clear()
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-        Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
-        Harness.clearFakeKnobs()
-        Bridge.deleteUnusedSignalFiles([])
-        Theme.night = "off"
-        Theme.nightStyle = "amber"
-        Theme.look = "dark"
-    }
-
-    function sameColor(actual, expected, what) {
-        verify(Qt.colorEqual(actual, expected), what + ": " + actual + ", expected " + expected)
-    }
-
-    // A danger alert on the demo's RPM, saved as the app's conditions
-    // (cleanup() empties them)
-    function saveRpmDanger() {
-        const saved = Bridge.saveConditions(
-            '{"havne_conditions":1,"conditions":[{"key":"rpm","name":"Engine on",' +
-            '"when":{"signal":["id:1001"],"unit":"RPM","above":-1},' +
-            '"alert":{"level":"danger"}}]}')
-        verify(saved.ok, saved.words)
-    }
-
-    function connectMock(page) {
-        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
-        const list = findChild(page, "signalList")
-        verify(list.count > 0, "the mock set decodes signals")
-        tryVerify(() => list.itemAtIndex(list.count - 1) !== null, 2000, "every row has a delegate")
-        return list
-    }
 
     function swatch(list, row) {
         const s = findChild(list.itemAtIndex(row), "swatch")
@@ -474,8 +405,8 @@ TestCase {
         compare(Bridge.signalModel.subscribedCount, plotted, "a text row plots nothing")
         compare(Bridge.signalModel.tickedCount, ticked + 1, "a log counts it")
         compare(findChild(textRow, "swatch").color, Qt.rgba(0, 0, 0, 0), "no trace to fill")
-        verify(Bridge.signalModel.plottedNames().indexOf(textRow.name) >= 0,
-               "the vehicle keeps the text row's tick")
+        compare(Bridge.signalModel.plottedKeys().length, 1,
+                "the vehicle keeps the text row's tick")
         const filter = Bridge.liveSignalModel.filter
         filter.plottedOnly = true
         tryCompare(list, "count", 1, 1000, "Plotted only leaves the text row out")
@@ -562,10 +493,9 @@ TestCase {
             signals: [{ key: "mode", name: "Mode", read: { service: "22", number: "1E1C" },
                         field: { byte: 0, bits: 8 }, kind: "enum", values: values }]
         }
-        const r = Bridge.importSignalText(JSON.stringify(file))
+        const r = Bridge.keepSignalText(JSON.stringify(file), "", "", "")
         verify(r.ok, "the file loads: " + r.words)
-        verify(Bridge.useSignalFiles([r.sha256])[0].ok, "its profile registers")
-        compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "",
+        compare(Bridge.connectSession("mock://demo?profile=" + r.profiles[0]), "",
                 "the file's profile connects")
         const list = findChild(page, "signalList")
         compare(list.count, 1, "the file's one signal")
@@ -608,6 +538,72 @@ TestCase {
             verify(row.name !== "Engine Oil Temp" && row.name !== "Fuel Pressure",
                    "row " + r + " is " + row.name)
         }
+    }
+
+    // The note counts what Live leaves out; its Show opens the rows inline,
+    // each with the reason, and Hide closes them. The mock under obd2
+    // sends the demo car's PIDs and the bitmaps rule out the rest.
+    function test_theHiddenNoteOpensTheRowsWithTheirReasons() {
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const note = findChild(page, "hiddenNote")
+        const toggle = findChild(page, "hiddenToggle")
+        const list = findChild(page, "hiddenList")
+        const part = findChild(page, "hiddenSignals")
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "connects")
+        tryVerify(() => note.visible && Bridge.signalModel.hiddenCount > 1, 5000, "the note shows")
+        verify(!list.visible, "closed to start with")
+        compare(toggle.text, "Show")
+        mouseClick(toggle)
+        tryVerify(() => list.visible, 2000, "the list opens")
+        compare(toggle.text, "Hide")
+        // One row for each hidden signal, and no other
+        tryVerify(() => list.count === Bridge.signalModel.hiddenCount, 2000,
+                  "the list holds the hidden rows: " + list.count + " of " + Bridge.signalModel.hiddenCount)
+        list.positionViewAtBeginning()
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the first row is drawn: " + list.height)
+        const first = list.itemAtIndex(0)
+        verify(findChild(first, "hiddenName").text !== "")
+        compare(findChild(first, "hiddenWhy").text, "the ECU's supported-PID list leaves it out",
+                "the demo car's missing PIDs are the bitmaps' doing")
+        // The reason's words follow the model's: only "absent" reads as absent
+        compare(part.reasonText("unsupported"), "the ECU's supported-PID list leaves it out")
+        compare(part.reasonText("absent"), "its replies come without this field")
+        compare(part.reasonText(""), "")
+        compare(part.reasonText("other"), "")
+        mouseClick(toggle)
+        tryVerify(() => !list.visible, 2000, "the list closes")
+        compare(toggle.text, "Show")
+        Bridge.disconnectSession()
+    }
+
+    // A row the recording never holds keeps its dash while the replay plays
+    // and reads "Not in this recording" once the last frame has played
+    function test_aRowTheRecordingNeverHoldsSaysSoAtTheReplaysEnd() {
+        const r = Bridge.keepSignalText(JSON.stringify({
+            havne_signals: 1, name: "Never recorded", source: { name: "t" }, extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "never", name: "Never", read: { service: "22", number: "F1FE" },
+                        field: { byte: 0, bits: 8 } }]
+        }), "", "", "")
+        verify(r.ok, r.words)
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const list = findChild(page, "signalList")
+        const valueOf = name => {
+            for (let i = 0; i < list.count; ++i) {
+                list.positionViewAtIndex(i, ListView.Contain)
+                const row = list.itemAtIndex(i)
+                if (row && row.name === name)
+                    return findChild(row, "valueLabel").text
+            }
+            return "no row " + name
+        }
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=" + r.profiles[0]
+                                      + "&speed=max"), "", "the replay connects")
+        tryCompare(Bridge, "replayFinished", true, 10000)
+        tryCompare({ get v() { return valueOf("Never") } }, "v", "Not in this recording", 5000)
+        Bridge.disconnectSession()
+        tryCompare(Bridge, "replayFinished", false, 5000)
     }
 
     // ADR-0051 section 3: a DID the ECU refuses says so on its row, the
@@ -662,7 +658,7 @@ TestCase {
             { tag: "requests", state: "requests", episodes: 1, code: 10,
               text: "Requests failing: check the vehicle connection and ignition" },
             { tag: "fault", state: "fault", episodes: 3, code: 0,
-              text: "Adapter fault: 3 episode(s), retrying with backoff" },
+              text: "Adapter fault: 3 episodes, retrying with backoff" },
             { tag: "stopped", state: "stopped", episodes: 1, code: 16,
               text: "Replay stopped: the recording changed after it was opened" },
             { tag: "degraded", state: "degraded", episodes: 0, code: 42,
@@ -671,373 +667,9 @@ TestCase {
               text: "Link degraded (error 43)" },
         ]
     }
+
     function test_bannerText(data) {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(page.bannerText(data.state, data.episodes, data.code), data.text)
-    }
-
-    // A page in the test window, grown to the page's size so a pointer
-    // lands on the chart; cleanup() puts the size back
-    function pageInGrownWindow() {
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        const win = page.Window.window
-        grownFrom = [win.width, win.height]
-        win.width = page.width
-        win.height = page.height
-        tryVerify(() => win.width >= page.width && win.height >= page.height, 5000, "the window grown")
-        verify(waitForPolish(win), "the grown window laid out")
-        return page
-    }
-
-    // The plotted history spans at least ms
-    function waitForHistory(ms) {
-        tryVerify(() => {
-            const s = Bridge.signalModel.chartData(0, 0)
-            return s.length > 0 && s[0].samples.length >= 6
-                   && s[0].samples[s[0].samples.length - 2] - s[0].samples[0] >= ms
-        }, 20000, "a history of " + ms + " ms to pause on")
-    }
-
-    // A drag in steps, as a pointer moves (mouseDrag's two moves don't carry
-    // a DragHandler past its threshold)
-    function dragAcross(frame, dx) {
-        const x = frame.width / 2, y = frame.height / 2
-        mousePress(frame, x, y)
-        const step = dx > 0 ? 10 : -10
-        for (let d = step; Math.abs(d) <= Math.abs(dx); d += step)
-            mouseMove(frame, x + d, y, 10)
-        mouseRelease(frame, x + dx, y)
-    }
-
-    // The pause keeps each plotted signal's history as it stood, times
-    // counted back from its newest sample; the session goes on and the
-    // chart holds still, until Live follows now again
-    function test_thePauseKeepsTheHistoryAsItStood() {
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        connectMock(page)
-        const chart = findChild(page, "chart")
-        const live = findChild(page, "liveButton")
-        verify(!live.visible, "no Live button while the chart follows")
-        waitForHistory(500)
-        const before = Bridge.signalModel.chartData(0, 0)
-        page.pause()
-        verify(page.paused, "paused")
-        compare(page.snapshot.length, before.length, "a series for each plotted signal")
-        let newest = -Infinity
-        for (let i = 0; i < before.length; ++i) {
-            const sp = before[i].samples, kept = page.snapshot[i].samples
-            compare(kept.length, sp.length, "every sample of row " + before[i].row)
-            if (sp.length < 2)
-                continue
-            compare(kept[0] + page.snapshotEndMs, sp[0], "the first sample's time")
-            compare(kept[kept.length - 2] + page.snapshotEndMs, sp[sp.length - 2], "the last's")
-            newest = Math.max(newest, sp[sp.length - 2])
-        }
-        compare(page.snapshotEndMs, newest, "the pause is at the newest sample")
-        verify(live.visible && live.highlighted, "Live shows, primary")
-        verify(page.statusText().indexOf("Paused · ") === 0, page.statusText())
-
-        tryVerify(() => {
-            const s = Bridge.signalModel.chartData(0, 0)
-            return s[0].samples[s[0].samples.length - 2] > page.snapshotEndMs + 300
-        }, 5000, "the session goes on")
-        for (const s of chart.fetch(400)) {
-            verify(s.samples.length === 0 || s.samples[s.samples.length - 2] <= 0,
-                   "the chart holds at the pause: row " + s.row)
-        }
-        live.clicked()
-        verify(!page.paused, "Live follows now again")
-        compare(page.snapshot, null, "the snapshot dropped")
-        verify(!live.visible, "and goes")
-        verify(page.statusText().indexOf("Paused") < 0, page.statusText())
-    }
-
-    // A leftward drag on a following chart pauses nothing and doesn't spend
-    // the first pause's hint, which the next pause shows
-    function test_aLeftwardDragSpendsNoHint() {
-        liveStore.setValue("pauseHintSeen", false)
-        liveStore.sync()
-        const page = pageInGrownWindow()
-        connectMock(page)
-        waitForHistory(500)
-        dragAcross(findChild(page, "chartFrame"), -200)
-        verify(!page.paused, "a leftward drag on a following chart pauses nothing")
-        liveStore.sync()
-        compare(liveStore.value("pauseHintSeen", false), false, "and spends no hint")
-        page.pause()
-        verify(findChild(page, "pauseHint").visible, "the first pause shows it")
-    }
-
-    // Under a replay Start log isn't offered, so neither the hint nor its flag
-    function test_aReplaysPauseHasNoHint() {
-        liveStore.setValue("pauseHintSeen", false)
-        liveStore.sync()
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
-                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
-                "the replay connects")
-        waitForHistory(500)
-        page.pause()
-        verify(page.paused)
-        verify(!findChild(page, "pauseHint").visible, "no hint where Start log isn't offered")
-        page.resume()
-        liveStore.sync()
-        compare(liveStore.value("pauseHintSeen", false), false, "the flag is kept for a session that records")
-    }
-
-    // A drag pauses and pans back through the snapshot; a drag pushed past
-    // its right edge follows now again
-    function test_aDragPausesPansAndResumesAtTheEdge() {
-        const page = pageInGrownWindow()
-        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
-                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
-                "the replay connects")
-        const kept = page.chartWindowS
-        // Live's stored window is put back whatever the checks find
-        try {
-            findChild(page, "chartWindow_10").clicked()
-            waitForHistory(25000)
-            const frame = findChild(page, "chartFrame")
-            dragAcross(frame, 200)
-            verify(page.paused, "a drag pauses")
-            verify(page.viewEndMs < -1000, "and pans back: " + page.viewEndMs)
-            const panned = page.viewEndMs
-            dragAcross(frame, 80)
-            verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
-            dragAcross(frame, -600)
-            verify(!page.paused, "a drag past the right edge follows now again")
-        } finally {
-            findChild(page, "chartWindow_" + kept).clicked()
-        }
-    }
-
-    // A resume leaves no pan behind: the next drag starts from the live edge,
-    // so a leftward one pauses nothing
-    function test_aDragAfterAResumeStartsFromNow() {
-        const page = pageInGrownWindow()
-        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
-                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
-                "the replay connects")
-        const kept = page.chartWindowS
-        try {
-            findChild(page, "chartWindow_10").clicked()
-            waitForHistory(25000)
-            const frame = findChild(page, "chartFrame")
-            dragAcross(frame, 200)
-            verify(page.paused && page.viewEndMs < -1000, "panned back: " + page.viewEndMs)
-            page.resume()
-            compare(page.viewEndMs, 0, "a resume forgets the pan")
-            dragAcross(frame, -100)
-            verify(!page.paused, "a leftward drag on the following chart pauses nothing")
-        } finally {
-            findChild(page, "chartWindow_" + kept).clicked()
-        }
-    }
-
-    // Space on a focused check box toggles it and leaves the chart following
-    function test_spaceOnAFocusedCheckBoxIsTheBoxsNotThePauses() {
-        if (Theme.mobile)
-            skip("Space is a desktop's key")
-        const page = pageInGrownWindow()
-        const list = connectMock(page)
-        waitForHistory(1500)
-        const box = findChild(list.itemAtIndex(0), "plotCheck")
-        verify(box.enabled, "the first mock row can be plotted")
-        const before = box.checked
-        findChild(page, "filterText").focus = false
-        box.forceActiveFocus()
-        verify(box.activeFocus, "the box has the focus")
-        keyClick(Qt.Key_Space)
-        tryCompare(box, "checked", !before, 2000, "Space toggles the box")
-        verify(!page.paused, "and the chart is not paused")
-        // the page's own focus still pauses
-        box.focus = false
-        page.forceActiveFocus()
-        keyClick(Qt.Key_Space)
-        verify(page.paused, "Space off a button pauses as before")
-    }
-
-    // Space pauses and resumes on a desktop, but types a space into Find a
-    // signal; a tap on the paused chart reads each trace's value at the
-    // cursor into its label
-    function test_spaceAndTheCursor() {
-        if (Theme.mobile)
-            skip("Space is a desktop's key")
-        const page = pageInGrownWindow()
-        connectMock(page)
-        waitForHistory(1500)
-        const field = findChild(page, "filterText")
-        field.focus = false
-        page.forceActiveFocus()
-        keyClick(Qt.Key_Space)
-        verify(page.paused, "Space pauses")
-        keyClick(Qt.Key_Space)
-        verify(!page.paused, "and resumes")
-        field.forceActiveFocus()
-        keyClick(" ")
-        compare(field.text, " ", "a space goes into the filter")
-        verify(!page.paused, "and leaves the chart following")
-        Bridge.liveSignalModel.filter.clear()
-        field.focus = false
-        page.forceActiveFocus()
-        keyClick(Qt.Key_Space)
-        verify(page.paused, "paused again")
-
-        const frame = findChild(page, "chartFrame")
-        const chart = findChild(page, "chart")
-        tryVerify(() => chart.drawn !== null, 2000, "the paused chart drawn")
-        // Halfway into the snapshot, where every trace has samples
-        const w = page.chartWindowS * 1000
-        const x = Math.round(chart.x + (page.snapshotStartMs / 2 + w) / w * (chart.drawn.plotW - 1))
-        // Taken before the tap: the labels it fills change the plot's width
-        const tapped = page.timeAt(x)
-        mouseClick(frame, x, frame.height / 2)
-        verify(!isNaN(page.cursorMs), "a tap places the cursor")
-        compare(page.cursorMs, tapped, "where the tap was")
-        verify(page.statusText().indexOf("cursor at −") > 0, page.statusText())
-        let read = 0
-        for (const s of page.snapshot) {
-            const sp = s.samples
-            let best = 0
-            for (let i = 0; i + 1 < sp.length; i += 2) {
-                if (Math.abs(sp[i] - page.cursorMs) < Math.abs(sp[best] - page.cursorMs))
-                    best = i
-            }
-            if (sp.length < 2 || Math.abs(sp[best] - page.cursorMs) > page.staleMs)
-                continue
-            tryVerify(() => chart.drawn && chart.drawn.traces.some(tr => tr.row === s.row
-                                                                    && tr.labelMs !== undefined),
-                      2000, "row " + s.row + " read at the cursor")
-            const tr = chart.drawn.traces.find(t => t.row === s.row)
-            compare(tr.labelMs, sp[best], "row " + s.row + "'s label reads the nearest sample")
-            compare(tr.label, page.valueText(sp[best + 1], s.decimals, s.unit),
-                    "row " + s.row + "'s value")
-            ++read
-        }
-        verify(read > 0, "some trace has a sample at the cursor")
-    }
-
-    // The snapshot goes with what it was taken of: a unit change, leaving
-    // the page, a disconnect
-    function test_thePauseDropsWithItsSession() {
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        connectMock(page)
-        waitForHistory(300)
-        page.pause()
-        verify(page.paused)
-        Bridge.unitSystem = 1
-        verify(!page.paused, "a unit change drops it")
-        Bridge.unitSystem = 0
-        page.pause()
-        verify(page.paused)
-        page.visible = false
-        verify(!page.paused, "leaving the page drops it")
-        page.visible = true
-        page.pause()
-        verify(page.paused)
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.connected, 5000, "disconnected")
-        verify(!page.paused, "a disconnect drops it")
-        compare(page.snapshot, null)
-    }
-
-    // The first pause of all names Start log, once: not at the next pause,
-    // nor on a page made later
-    function test_theFirstPauseHintShowsOnce() {
-        liveStore.setValue("pauseHintSeen", false)
-        liveStore.sync()
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        connectMock(page)
-        waitForHistory(300)
-        const hint = findChild(page, "pauseHint")
-        verify(!hint.visible, "no hint while live")
-        page.pause()
-        verify(hint.visible, "the first pause shows it")
-        compare(hint.text, "Start log records the session for the viewer")
-        page.resume()
-        verify(!hint.visible, "gone at resume")
-        page.pause()
-        verify(!hint.visible, "not at the second pause")
-        page.resume()
-        const later = createTemporaryObject(pageComponent, testCase.parent)
-        later.pause()
-        verify(later.paused)
-        verify(!findChild(later, "pauseHint").visible, "nor on a page made later")
-    }
-
-    // The empty state: plain words, and a Connect that isn't a second
-    // primary beside the header's
-    function test_theEmptyStateOffersAConnectInPlainWords() {
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        compare(page.statusText(), "Connect a session to read live values")
-        const button = findChild(page, "liveConnect")
-        verify(button && button.visible, "Connect… is offered")
-        verify(!button.highlighted, "secondary: the header holds the primary")
-        compare(button.text, "Connect…")
-    }
-
-    // An alert ON on a signal fills its value's cell in the level's role,
-    // the mark beside a danger; the name keeps its color, other rows none
-    function test_anAlertFillsTheValueCellAlone_data() {
-        return Theme.paletteNames.map(p => ({ tag: p, palette: p }))
-    }
-    function test_anAlertFillsTheValueCellAlone(data) {
-        usePalette(data.palette)
-        // In the window: under the TestCase item every visible reads false
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        const list = connectMock(page)
-        let rpm = null, other = null
-        for (let i = 0; i < list.count; ++i) {
-            const item = list.itemAtIndex(i)
-            if (findChild(item, "nameLabel").text === "RPM")
-                rpm = item
-            else if (other === null)
-                other = item
-        }
-        verify(rpm && other, "the demo's RPM row and another")
-        tryVerify(() => rpm.hasValue, 5000, "RPM has a value")
-        const value = findChild(rpm, "valueLabel")
-        const fill = findChild(rpm, "valueAlert")
-        const mark = findChild(rpm, "valueAlertMark")
-        verify(!fill.visible, "no alert, no fill")
-
-        page.alertLevels = { "1001": 2 }
-        verify(fill.visible, "a danger fills the cell")
-        sameColor(fill.color, Theme.alertDangerFill, "the danger's fill")
-        sameColor(value.color, Theme.textOnAlertDanger, "the value's text on it")
-        verify(mark.visible, "the mark beside a danger")
-        sameColor(mark.color, Theme.textOnAlertDanger, "the mark in the text's color")
-        sameColor(findChild(rpm, "nameLabel").color, Theme.text, "the name keeps its color")
-        verify(rpm.Accessible.name.indexOf(", danger alert") > 0, rpm.Accessible.name)
-        verify(!findChild(other, "valueAlert").visible, "a row no alert reads has no fill")
-
-        page.alertLevels = { "1001": 1 }
-        sameColor(fill.color, Theme.alertWarnFill, "the warning's fill")
-        sameColor(value.color, Theme.textOnAlertWarn, "the value's text on it")
-        verify(!mark.visible, "a warning has no mark")
-
-        page.alertLevels = ({})
-        verify(!fill.visible, "the fill goes with the alert")
-        sameColor(value.color, Theme.text, "and the value's own color is back")
-    }
-
-    // The page's levels follow the bridge's: a saved alert on the demo's RPM
-    // fills its row's value through Bridge.alertLevels
-    function test_theBridgesAlertFillsTheRowItReads() {
-        saveRpmDanger()
-        const page = createTemporaryObject(pageComponent, testCase.parent)
-        const list = connectMock(page)
-        let rpm = null
-        for (let i = 0; i < list.count; ++i) {
-            const item = list.itemAtIndex(i)
-            if (findChild(item, "nameLabel").text === "RPM")
-                rpm = item
-        }
-        verify(rpm, "the demo's RPM row")
-        const fill = findChild(rpm, "valueAlert")
-        tryVerify(() => fill.visible, 10000, "the RPM's danger fills its value")
-        verify(findChild(rpm, "valueAlertMark").visible, "with the mark")
-        Bridge.disconnectSession()
-        tryVerify(() => !fill.visible, 10000, "and leaves at the disconnect")
     }
 }

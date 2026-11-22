@@ -29,7 +29,15 @@ constexpr auto kRecordingCloseWait = std::chrono::seconds(2);
 ecuio_status_t create_within(Output& out, const char* uri,
                              ecuio_session_t** session, std::string* detail,
                              bool start_first = false);
-void write_session(Output& out, const ecuio_session_info_t& info);
+void write_session(Output& out, const ecuio_session_t* session,
+                   const ecuio_session_info_t& info);
+/* The session's modules, every one: what the per-channel arrays
+ * (ECUIO_MAX_CHANNELS each) and the reports' loops run to */
+inline uint32_t module_count(const ecuio_session_info_t& info)
+{
+    return info.module_count < ECUIO_MAX_CHANNELS ? info.module_count
+                                                  : ECUIO_MAX_CHANNELS;
+}
 uint32_t latest_model_year();
 void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
                    uint32_t* generations, char (&vehicle)[ECUIO_VIN_TEXT_LEN]);
@@ -41,7 +49,7 @@ void poll_sessions(Output& out, ecuio_session_t* session, uint32_t channels,
 void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
                       uint32_t* generations);
 void poll_timing(Output& out, ecuio_session_t* session,
-                 const ecuio_session_info_t& info, cli::TimingSnapshots& snaps,
+                 cli::TimingSnapshots& snaps,
                  std::vector<ecuio_request_timing_t>& rows, bool final);
 void write_isotp(cli::Line& l, const ecuio_session_t* session);
 void poll_absent(Output& out, ecuio_session_t* session,
@@ -73,6 +81,9 @@ void close_recording(Output& out, ecuio_recorder_t** recorder, const char* why,
 void poll_health(Output& out, ecuio_session_t* session, int32_t* last_error,
                  uint32_t* episodes);
 bool session_asks(ecuio_session_t* session);
+
+// Whether a session is asked only what is picked: no focus asks nothing
+bool session_pick_only(ecuio_session_t* session);
 bool replay_done(const ecuio_session_t* session,
                  const ecuio_session_info_t& info, uint64_t covered);
 

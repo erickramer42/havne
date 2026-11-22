@@ -97,7 +97,7 @@ Dates are commit dates.
 | 2026-10-23 | The quiet banner says to check the ignition: on the first vehicle, ignition off read as quiet, and only the requests-failing banner mentioned it | `66ba702` |
 | 2026-10-23 | The strip chart's layout moves out of the Canvas paint handler into the `ChartLayout` singleton, tested on synthetic series; with it, a gap past the stale threshold breaks a trace (the first vehicle's ignition cycle drew as ramps) and each trace's range has a minimum span in displayed digits (fuel level's one-count steps filled the plot) | `0cf2870` |
 | 2026-10-23 | The discovery test demands a device where `ECUIO_EXPECT_J2534_DEVICES` says the machine has one; `scripts/verify.sh` sets it on Windows, so the dev machine's installed driver has to be found and the test can't pass vacuously there | `2639b42` |
-| 2026-10-25 | The GUI thread's decode cost per frame, measured (`bench_bridge`): about 3 ns a def a frame, so 1000 defs at a full 500 kbit/s classic CAN bus take under 2 % of it; decoding on the worker is about per-sample time on the chart, not CPU ([testing.md](testing.md#performance)) | `d063939`, `dbd672a` |
+| 2026-10-25 | The GUI thread's decode cost per frame, measured (`bench_bridge`): about 3 ns a def a frame, so 1000 defs at a full 500 kbit/s classic CAN bus take under 2 % of it; decoding on the worker is about per-sample time on the chart, not CPU ([testing.md](performance.md)) | `d063939`, `dbd672a` |
 | 2026-10-26 | The replay transport ([ADR-0023](adr/0023-replay-transport.md)): `replay://` plays a recording's `frames.csv` back on every platform, paced and stamped by the recording's own session time, at a speed or `max`, looping on request; the bridge takes frames from the moment a session starts, says what a replay is and when it ends; a recorded mock session round-trips value for value, and the second vehicle session's engine start is a scrubbed fixture whose replay decodes the sheet's values | `43c4c9e`, `4c75308`, `6c2294d` |
 | 2026-10-26 | Decoding on the worker ([ADR-0024](adr/0024-decode-on-the-worker.md)): core decodes each frame in its dispatch and hands a values callback one batch per frame with the frame's time; the bridge stages them from the worker, so a dropped frame keeps its values, and decodes nothing; the chart shows each value at its own time and keeps every window's lowest and highest (ADR-0005's appendix). The vehicle sessions' recordings replay to their own values, 24,632 of them | `ddcf095`, `92a09c3`, `0ea4126`, `e78ea57`, `6e6472a`, `8b3fa60` |
 | 2026-10-28 | Android background sessions ([ADR-0029](adr/0029-android-background-sessions.md)): Qt's GUI loop kept running in the background, a `connectedDevice` foreground service with a wake lock while an adapter session is up, one Bluetooth socket connect at a time, and no drawing while the app isn't active (Qt 6.12's Android plugin deadlocked drawing for exposes after destroying the surface as the screen went off); the MX+ on the car held through the screen off with the app in front ([2026-10-28-android-11](bench-sessions/2026-10-28-android-11.md)) | `ee1db00`, `3d5b59f`, `bea2d48` |
@@ -174,6 +174,8 @@ Dates are commit dates.
 | 2026-11-13 | A recording keeps its session's conditions (`04b07303`, `7a4dfd14`), core wraps a signal file into a plugin (`090dea32`), and the VIN is flagged as soon as it is in (`fc88f87b`) |
 | 2026-11-14 | The armed recorder writes a window for each firing (`d2429ae5`), link terms are judged where the transport publishes link health (`80e05d46`), every import is a plugin in one store ([ADR-0064](adr/0064-one-store.md); `4e1882bc`), and the vehicles' signal files move into it at the first start (`3afbe243`) |
 | 2026-11-15 | The app's alerts: the Alerts page and a gauge's Alert (`b6d97e63`), the banner and colored values (`53d5e774`, `e4031b57`), Armed (`ea626eec`), the viewer's condition bars (`180422a8`), and the one Signals list (`676fa2de`); the review's fixes merged into `dev` |
+| 2026-11-20 | The conversation tier's attempts machine and its store ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)'s appendix of 2026-11-20): a pure count of failed security-access attempts with the delay across sessions, a store file read and replaced whole, and a harness for its reader, all inert until a module binds (`e0f3acc6`) |
+| 2026-11-20 | The long-files wave: test files split by theme with each QML test file one ctest entry (`7f9d974d`, `38fc2046`, `a6a3c043`), `core.cpp` and `test_plugin.cpp` (`08a46bbd`), the longest functions of the recorder, ELM327 worker and CLI (`9a53dfb9`), and three flaky tests made steady (`c1511bd0`) |
 
 ## Lessons learned
 
@@ -1001,7 +1003,7 @@ calls, a net 367 lines of the loader, left every test's expectation
 standing (step 3). The parity suite had been the evidence for the
 change: the write cap, the SCONFIG codes and the ioctl cut each
 diverged between the backends until a test ran both. The price, 18-28
-ms a connect (docs/testing.md, "Connect cost: a surrogate per
+ms a connect (docs/performance.md, "Connect cost: a surrogate per
 session"), is one no user waits on.
 
 **2026-10-26: the Dashboard's peak hold:** **close an issue on the
@@ -1374,3 +1376,5 @@ mutants of the code it guards survived. The case waits until the task
 has taken its work (a hold the task reports), then closes.
 
 **2026-11-15: a cost cut is not a crash fix:** a change to the Dashboard's bindings cut the script wrappers that hold a container from 36,092 to 36 a second, and at a 1 ms collector time limit the crash in Qt 6.12's incremental collector came more often, not less. Counts at the default setting didn't tell the two apart; a harness that raised the collector's rate did. Havne has Qt collect in one go (`QV4_GC_TIMELIMIT=0`) and keeps that until a Qt fixes the sweep.
+
+**2026-11-20: equal turns counted turns, not bus time or rows:** the hold's first fairness gave each waiting channel a turn in rotation. A module with more rows then asked each of its signals less often than a module with few, and a long reply cost more bus time than a short one for the same turn. Ranking by the age of each channel's next row made every signal's rate about equal, and on the pacing bench the worst signal moved from the segmented modules to the biggest Single Frame module, so the figure to watch is the worst signal's median, not the totals. A rate class also makes a row's age on purpose (slow rows wait their share): a channel is ranked by its fastest class, never by the row its class turn would send.

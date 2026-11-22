@@ -1,5 +1,5 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview, QmlTest.alerts (test_qml);
+// Testing: QML: QmlTest.phone_*, QmlTest.linkhealth, QmlTest.driveview{,_sheet,_platform}, QmlTest.alerts (test_qml);
 //          BENCH, Manual smoke
 
 import QtCore
@@ -77,6 +77,11 @@ ApplicationWindow {
     // testWindowSafe stands in for it where larger (a test's window has no
     // bars), so zoomRoot's reach over them can be pinned
     property var testWindowSafe: ({ left: 0, top: 0, right: 0, bottom: 0 })
+    // The insets in the layout's units, and the Dash page, for the header
+    // and the tab bar
+    readonly property real insetTop: zoomRoot.insetTop
+    readonly property real insetBottom: zoomRoot.insetBottom
+    readonly property DashboardPage dashboardItem: dashboardView
     readonly property var windowSafe: {
         const s = SafeArea.margins
         const t = testWindowSafe
@@ -94,8 +99,8 @@ ApplicationWindow {
 
     // The drive view (ADR-0059) is the Dash page's state; the bars here
     // follow it, and in the view they slide in over the gauges
-    readonly property bool driving: dashboardView.driving
-    readonly property real barsShown: dashboardView.barsShown
+    readonly property bool driving: dashboardView.drivePart.driving
+    readonly property real barsShown: dashboardView.drivePart.barsShown
 
     // Page indices, in the order of the sidebar and the stack
     readonly property int homePage: 0
@@ -155,7 +160,7 @@ ApplicationWindow {
     // system, which goes to the launcher and keeps the session
     function goBack() {
         if (currentPage === dashboardPage)
-            return dashboardView.goBack()
+            return dashboardView.drivePart.goBack()
         if (currentPage === settingsPage) {
             if (!settingsView.backLeaves)
                 return settingsView.closeShown()
@@ -167,7 +172,7 @@ ApplicationWindow {
             return true
         }
         if (currentPage === recordingsPage && recordingsView.viewing) {
-            recordingsView.backToList()
+            recordingsView.openPart.backToList()
             return true
         }
         return false
@@ -226,7 +231,7 @@ ApplicationWindow {
     function replayRecording(uri) {
         settingsView.pickRecording(uri)
         replayPending = uri
-        settingsView.requestConnect(uri)
+        settingsView.connectFromPart.requestConnect(uri)
     }
     Connections {
         target: Bridge
@@ -262,7 +267,7 @@ ApplicationWindow {
     // 0.1 MB on (under that the size reads 0.0 and says nothing), beside
     // the time on one line or under it
     readonly property int logSizeShownBytes: 104858
-    readonly property bool logReadoutOneLine: headerRow.width >= 560
+    readonly property bool logReadoutOneLine: headerBar.row.width >= 560
     // The header's short state word: "Connected" ("Replaying" for a
     // replay) where the other pages' short label says "Live", which is a tab's name
     function shortStatusWord(state) {
@@ -273,7 +278,7 @@ ApplicationWindow {
     }
     // From 720 px of header the readout says what the time is, and Mark
     // stands beside Stop log
-    readonly property bool headerHasRoom: headerRow.width >= 720
+    readonly property bool headerHasRoom: headerBar.row.width >= 720
     function logReadoutText(ms, bytes, oneLine) {
         const time = logTimeText(ms)
         const size = logSizeText(bytes)
@@ -294,11 +299,11 @@ ApplicationWindow {
             if (!byUser || root.driving)
                 return
             root.gotoPage(root.recordingsPage)
-            recordingsView.openFolder(folder)
+            recordingsView.openPart.openFolder(folder)
         }
     }
 
-    // ---- Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
+    // Zoom (Theme.zoom), units (Bridge.unitSystem) and developer mode
     // (Theme.developerMode), kept between runs
     Settings {
         id: uiSettings
@@ -347,7 +352,7 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.ZoomOut]; onActivated: Theme.stepZoom(-1) }
     Shortcut { sequence: "Ctrl+0"; onActivated: Theme.zoom = 1 }
 
-    // ---- A phone in developer mode logs its display's form and
+    // A phone in developer mode logs its display's form and
     // orientation when either changes; sizes, scale and insets stay out
     // (a shared log or report would narrow the device)
     function orientationName(o) {
@@ -365,21 +370,12 @@ ApplicationWindow {
         onTriggered: Bridge.logEvent(root.displayLine)
     }
 
-    // On a phone a header button is a touch's size each way (headerRow's
-    // touchMin) and draws smaller, so the bar's rule shows under it
-    component HeaderButton: ThemedButton {
-        compact: Theme.compact
-        Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
-        topInset: Theme.compact ? 6 : 0
-        bottomInset: Theme.compact ? 6 : 0
-    }
-
     // Over a bar in the drive view: a press restarts its hide delay and goes on
     // to what's under it
     component BarTouch: MouseArea {
         enabled: root.driving
         onPressed: mouse => {
-            dashboardView.barTouched()
+            dashboardView.drivePart.barTouched()
             mouse.accepted = false
         }
     }
@@ -428,290 +424,9 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.driving ? 0 : headerBar.height
                 z: 1
-                ToolBar {
+                MainHeader {
                     id: headerBar
-                    objectName: "headerBar"
-                    width: parent.width
-                    height: Theme.toolBarHeight + zoomRoot.insetTop
-                    visible: !root.driving
-                    // The row below pads the inset itself; the style would pad it too
-                    topPadding: 0
-                    background: Rectangle {
-                        color: Theme.surface
-                        // The bar's rule: a hairline, as every other divider
-                        Rectangle {
-                            objectName: "headerRule"
-                            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                            height: 1; color: Theme.hairline
-                        }
-                    }
-                    RowLayout {
-                        id: headerRow
-                        objectName: "headerRow"
-                        readonly property real touchMin: root.isCompact ? Theme.touchTarget : 0
-                        anchors.fill: parent
-                        anchors.topMargin: zoomRoot.insetTop
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        spacing: 12
-
-                        // The name gives way to Mark or the log's controls on a
-                        // phone's width
-                        Label {
-                            id: headerTitle
-                            objectName: "headerTitle"
-                            visible: !(markButton.visible || startLogButton.visible
-                                       || armedHost.visible || Bridge.logActive)
-                                     || headerRow.width >= 420
-                            text: qsTr("Havne")
-                            font.pixelSize: Theme.fontEmphasis
-                            font.weight: Font.DemiBold
-                            color: Theme.text
-                        }
-
-                        // The link state and address: the address elides first, the
-                        // word only at a narrow phone's top zoom. With the tab bar a
-                        // tap opens the Log it omits
-                        AbstractButton {
-                            id: pill
-                            objectName: "linkPill"
-                            readonly property color tone: (Bridge.connecting || Bridge.disconnecting)
-                                                        ? Theme.textDim
-                                                        : Theme.linkColor(Bridge.linkState)
-                            readonly property string stateWord:
-                                Bridge.connecting ? qsTr("Connecting…")
-                              : Bridge.disconnecting ? qsTr("Disconnecting…")
-                              : root.isCompact || !headerTitle.visible
-                                ? root.shortStatusWord(Bridge.linkState)
-                                : Theme.linkLabel(Bridge.linkState)
-                            readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.preferredWidth: implicitWidth
-                            Layout.maximumWidth: implicitWidth
-                            Layout.minimumWidth: 32
-                            implicitWidth: implicitContentWidth + leftPadding + rightPadding
-                            implicitHeight: implicitContentHeight
-                            leftPadding: root.isCompact ? 0 : 12
-                            rightPadding: root.isCompact ? 0 : 12
-                            topPadding: 0
-                            bottomPadding: 0
-                            enabled: root.isCompact
-                            text: address !== "" ? qsTr("%1 · %2").arg(stateWord).arg(address) : stateWord
-                            // What the pill shows, the recording note included
-                            readonly property string spoken: recordingNote.visible
-                                                             ? text + " " + recordingNote.text : text
-                            Accessible.name: enabled ? qsTr("%1: show the activity").arg(spoken) : spoken
-                            onClicked: root.gotoPage(root.logPage)
-                            // A dot and a word at rest, no capsule
-                            background: Rectangle {
-                                color: pill.down ? Theme.elevated : "transparent"
-                                radius: Theme.radius
-                                border.width: pill.visualFocus ? 2 : 0
-                                border.color: Theme.text
-                            }
-                            contentItem: RowLayout {
-                                spacing: 8
-
-                                Rectangle {
-                                    implicitWidth: 8; implicitHeight: 8   // layout-managed
-                                    radius: 4
-                                    color: pill.tone
-                                }
-                                // The address gives way first; the word only alone in a
-                                // row under 240 units (a narrow phone at the top zoom)
-                                Label {
-                                    objectName: "linkPillText"
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: pill.address !== "" || headerRow.width >= 240
-                                                         ? implicitWidth : 0
-                                    Layout.maximumWidth: implicitWidth
-                                    elide: Text.ElideRight
-                                    font.pixelSize: Theme.fontCaption
-                                    color: Theme.text
-                                    text: pill.stateWord
-                                }
-                                Label {
-                                    objectName: "linkPillAddress"
-                                    visible: pill.address !== ""
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: 0
-                                    elide: Text.ElideRight
-                                    font.pixelSize: Theme.fontCaption
-                                    color: Theme.textDim
-                                    text: qsTr("· %1").arg(pill.address)
-                                }
-                                // Record sessions on: the session is being recorded
-                                // already, which is why Mark stands where Start log
-                                // would; the address gives way to the word
-                                Label {
-                                    id: recordingNote
-                                    objectName: "linkPillRecording"
-                                    visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
-                                             && !Bridge.armedActive
-                                    font.pixelSize: Theme.fontCaption
-                                    color: Theme.textDim
-                                    text: qsTr("· recording")
-                                }
-                                // Marks the status as a button where it opens the Log
-                                Label {
-                                    objectName: "linkPillChevron"
-                                    // Not where it would squeeze a connected phone's address
-                                    visible: pill.enabled && (pill.address === "" || headerRow.width >= 420)
-                                    Accessible.ignored: true
-                                    font.pixelSize: Theme.fontCaption
-                                    color: Theme.textDim
-                                    text: "›"   // a right angle quotation mark
-                                }
-                            }
-                        }
-
-                        // Developer mode: the window's frames drawn a second, in
-                        // the bar so it covers no page (root.framesPerSecond); not
-                        // in a row too narrow to hold it beside the pill's word
-                        Label {
-                            id: frameRate
-                            objectName: "frameRate"
-                            visible: Theme.developerMode && headerRow.width >= 340
-                            font.pixelSize: Theme.fontCaption
-                            font.features: Theme.valueFeatures
-                            color: Theme.textDim
-                            text: qsTr("%1 frames/s").arg(root.framesPerSecond)
-                        }
-
-                        Item { Layout.fillWidth: true }  // Spacer
-
-                        // A marker in the recording under way (a log is one: beside
-                        // Stop log from 720 px of header), from any page
-                        // (ADR-0049 section 4): "Mark N" at the tap, which the
-                        // Recordings page aligns two runs on
-                        HeaderButton {
-                            id: markButton
-                            objectName: "markButton"
-                            visible: Bridge.recordingActive && (!Bridge.logActive || root.headerHasRoom)
-                                     && (!Bridge.armedActive || Bridge.armedRecording)
-                            text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
-                                                       : qsTr("Mark")
-                            Accessible.name: qsTr("Mark the recording")
-                            onClicked: Bridge.mark()
-                        }
-
-                        // The analysis log (ADR-0056 section 1): Live's ticked rows,
-                        // recorded from now on and asked alone until Stop log. A
-                        // replay plays a recording already; Record sessions' own
-                        // recorder is the session's one
-                        HeaderButton {
-                            id: startLogButton
-                            objectName: "startLogButton"
-                            highlighted: true
-                            visible: Bridge.connected && !Bridge.recordingActive
-                                     && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                            enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
-                            text: qsTr("Start log")
-                            Accessible.name: qsTr("Start a log of the ticked signals")
-                            onClicked: Bridge.startLog()
-                        }
-                        // The armed recorder (ADR-0063 section 7): writes nothing until
-                        // a condition that records fires, then a window of its own per
-                        // firing. Mark stands beside it only inside a window. Stands
-                        // where Start log would, the session's one recorder; disabled
-                        // with its reason (armedWhy) while no condition records. A
-                        // disabled control sees no pointer, so an enabled item around
-                        // it gives the reason: a tooltip on hover, and a tap says it
-                        // in the Dashboard's notice (what a refused press says)
-                        Item {
-                            id: armedHost
-                            objectName: "armedHost"
-                            visible: Bridge.connected && !Bridge.logActive
-                                     && (Bridge.armedActive || !Bridge.recordingActive)
-                                     && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                            implicitWidth: armedButton.implicitWidth
-                            implicitHeight: armedButton.implicitHeight
-                            Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
-                            readonly property bool explaining: !armedButton.enabled && Bridge.armedWhy !== ""
-                            ToolTip.visible: armedHover.hovered && explaining
-                            ToolTip.text: Bridge.armedWhy
-                            HoverHandler { id: armedHover }
-                            TapHandler {
-                                objectName: "armedExplain"
-                                enabled: armedHost.explaining
-                                onTapped: Bridge.startArmed()
-                            }
-                        HeaderButton {
-                            id: armedButton
-                            objectName: "armedButton"
-                            anchors.fill: parent
-                            enabled: !Bridge.disconnecting
-                                     && (Bridge.armedActive || Bridge.armedWhy === "")
-                            checkable: true
-                            checked: Bridge.armedActive
-                            // "Recording (window N)" leaves Mark and Disconnect no room
-                            // under 420 px of header row, and "Armed" beside Start log leaves
-                            // the status its address: the words shorten ("Window N", "Arm"
-                            // until it is on), the name doesn't
-                            text: Bridge.armedRecording
-                                  ? (headerRow.width < 420 ? qsTr("Window %1")
-                                                           : qsTr("Recording (window %1)")).arg(Bridge.armedWindows)
-                                  : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
-                            Accessible.name: Bridge.armedRecording
-                                             ? qsTr("Stop the armed recorder, recording window %1").arg(Bridge.armedWindows)
-                                             : Bridge.armedActive ? qsTr("Stop the armed recorder")
-                                                                  : qsTr("Arm a recorder for the conditions that record")
-                            Accessible.description: Bridge.armedActive ? "" : Bridge.armedWhy
-                            onToggled: toggle()
-                            onClicked: Bridge.armedActive ? Bridge.stopArmed() : Bridge.startArmed()
-                        }
-                        }
-                        // While a log runs: its time, and its folder's size once
-                        // there is one to read; one line where the row has room,
-                        // else the size under the time, so a ten-hour log's
-                        // readout fits beside the name at 420 px
-                        Label {
-                            objectName: "logReadout"
-                            visible: Bridge.logActive
-                            text: root.headerHasRoom
-                                  ? qsTr("Logging %1").arg(root.logReadoutText(
-                                        Bridge.logElapsedMs, Bridge.logBytes, true))
-                                  : root.logReadoutText(Bridge.logElapsedMs, Bridge.logBytes,
-                                                        root.logReadoutOneLine)
-                            horizontalAlignment: Text.AlignRight
-                            font.pixelSize: Theme.fontBody
-                            color: Theme.text
-                        }
-                        HeaderButton {
-                            objectName: "stopLogButton"
-                            highlighted: true
-                            visible: Bridge.logActive
-                            enabled: !Bridge.disconnecting
-                            text: qsTr("Stop log")
-                            onClicked: Bridge.stopLog()
-                        }
-
-                        // Settings owns connecting: this button opens it, or ends the
-                        // session from any page. On Settings itself, its Connect
-                        // button is the one to use.
-                        // A log's Stop log takes its place while the log runs
-                        HeaderButton {
-                            objectName: "disconnectButton"
-                            // Ending a session is quiet; Connect... is primary, unless
-                            // Dash or Home shows its connect list, whose Connect is the primary
-                            flat: Bridge.connected || Bridge.disconnecting
-                            highlighted: !flat && !(root.currentPage === root.dashboardPage
-                                                    && dashboardView.connectShown)
-                                         && !(root.currentPage === root.homePage
-                                              && !Bridge.connected)
-                            visible: !Bridge.logActive
-                                     && (Bridge.connected || root.currentPage !== root.settingsPage)
-                            // A teardown can take seconds with a wedged adapter; no
-                            // connect starts until it ends
-                            enabled: !Bridge.connecting && !Bridge.disconnecting
-                            text: Bridge.connected ? qsTr("Disconnect")
-                                : Bridge.disconnecting ? qsTr("Disconnecting…")
-                                : qsTr("Connect…")
-                            onClicked: Bridge.connected ? Bridge.disconnectSession()
-                                                        : root.openConnect()
-                        }
-                    }
+                    host: root
                 }
             }
 
@@ -732,7 +447,7 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 spacing: 0
 
-                // ---- Sidebar (>= 720px): one full-height panel ----
+                // Sidebar (>= 720px): one full-height panel
                 Rectangle {
                     visible: !root.isCompact && !root.driving
                     Layout.fillHeight: true
@@ -781,46 +496,66 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        recents: settingsView.connectUris
-                        vehicleUri: settingsView.vehicleUri
-                        adapters: settingsView.connectAdapters
-                        profileWords: settingsView.connectProfileWords
-                        profileNames: settingsView.profileNames
-                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        recents: settingsView.connectFromPart.connectUris
+                        vehicleUri: settingsView.connectFromPart.vehicleUri
+                        adapters: settingsView.connectFromPart.connectAdapters
+                        profileWords: settingsView.connectFromPart.connectProfileWords
+                        profileNames: settingsView.uriPart.profileNames
+                        onConnectToUri: uri => settingsView.connectFromPart.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
                         onListShown: root.listAdapters()
                         onDashboardRequested: root.gotoPage(root.dashboardPage)
                     }
+                    Item {
+                    id: dashFrame
+                    objectName: "dashFrame"
+                    // The desktop's edit mode in the phone form (B1): the page
+                    // is the phone's width, centered, with its edge drawn
+                    Rectangle {
+                        objectName: "dashFrameEdge"
+                        visible: dashboardView.phoneEdit
+                        x: dashboardView.x - 1
+                        width: dashboardView.width + 2
+                        height: parent.height
+                        color: "transparent"
+                        border.color: Theme.outline
+                        border.width: 1
+                        radius: Theme.radiusCard
+                    }
                     DashboardPage {
                         id: dashboardView
                         objectName: "dashboardPage"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: phoneEdit ? phoneFrameWidth : dashFrame.width
+                        height: dashFrame.height
                         // The gauges join the session's default pick
                         Binding {
                             target: Bridge
                             property: "pickGauges"
                             value: dashboardView.pickRefs
                         }
-                        offlineUri: settingsView.offlineUri
-                        pickedSets: settingsView.pickedSets
-                        profileNames: settingsView.profileNames
+                        offlineUri: settingsView.uriPart.offlineUri
+                        pickedSets: settingsView.uriPart.pickedSets
+                        profileNames: settingsView.uriPart.profileNames
                         vehicles: settingsView.vehicles
-                        connectUris: settingsView.connectUris
-                        connectVehicleUri: settingsView.vehicleUri
-                        connectAdapters: settingsView.connectAdapters
-                        connectProfileWords: settingsView.connectProfileWords
+                        connectUris: settingsView.connectFromPart.connectUris
+                        connectVehicleUri: settingsView.connectFromPart.vehicleUri
+                        connectAdapters: settingsView.connectFromPart.connectAdapters
+                        connectProfileWords: settingsView.connectFromPart.connectProfileWords
                         onConnectListShown: root.listAdapters()
-                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onConnectToUri: uri => settingsView.connectFromPart.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
                         onAlertRequested: condition => root.openAlertDraft(condition)
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
-                        driveTabBarHeight: tabBar.height
+                        driveTabBarHeight: tabSlot.bar.height
                         driveInsetTop: zoomRoot.insetTop
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)
                         driveLogSize: root.logSizeText(Bridge.logBytes)
+                    }
                     }
                     LiveViewPage {
                         objectName: "livePage"
@@ -860,89 +595,9 @@ ApplicationWindow {
             // keeps its own height), then a gap and the system's bottom
             // inset, all in the bar's color, so a tap low on a tab never
             // reaches Back or Home beside it
-            Item {
-                visible: root.isCompact
-                Layout.fillWidth: true
-                Layout.preferredHeight: root.driving ? 0 : tabBar.height
-                z: 1
-                TabBar {
-                    id: tabBar
-                    objectName: "tabBar"
-                    visible: !root.driving || root.barsShown > 0
-                    width: parent.width
-                    height: Theme.touchTarget + Theme.barGap + zoomRoot.insetBottom
-                    y: root.driving ? -height * root.barsShown : 0
-                    spacing: 0
-                    // The bar's height already holds the bottom inset, painted in
-                    // its color: the style pads none of it again
-                    topPadding: 0
-                    bottomPadding: 0
-                    leftPadding: 0
-                    rightPadding: 0
-
-                    background: Rectangle {
-                        objectName: "tabBarBackground"
-                        color: Theme.surface
-                        Rectangle {
-                            objectName: "tabBarHairline"
-                            anchors { left: parent.left; right: parent.right; top: parent.top }
-                            height: 1
-                            color: Theme.hairline
-                        }
-                    }
-
-                    // The page decides the mark: on the Log no tab is marked, and
-                    // TabBar's index at -1 leaves the last checked and deaf to a tap
-                    Repeater {
-                        model: root.tabs
-                        delegate: TabButton {
-                            id: btn
-                            required property var modelData
-                            objectName: "tab_" + modelData.page
-                            text: modelData.label
-                            implicitHeight: Theme.touchTarget
-                            checked: stack.currentIndex === modelData.page
-                            onClicked: {
-                                // A tab in the drive view's revealed bar is Exit drive
-                                if (root.driving)
-                                    dashboardView.leaveDrive(true)
-                                root.gotoPage(modelData.page)
-                            }
-                            // A narrow bar (a small window, or a phone zoomed far
-                            // in) gets smaller labels, and one that still doesn't
-                            // fit elides inside its tab: labels never run together
-                            leftPadding: 4
-                            rightPadding: 4
-                            contentItem: Label {
-                                objectName: "tabLabel_" + btn.modelData.page
-                                text: btn.text
-                                font.pixelSize: btn.width < 64 ? Theme.fontCaption : Theme.fontBody
-                                font.weight: btn.checked ? Font.DemiBold : Font.Normal
-                                color: btn.checked ? Theme.text : Theme.textDim
-                                elide: Text.ElideRight
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            // The active tab is marked, so selection doesn't rest
-                            // on color alone
-                            background: Rectangle {
-                                color: "transparent"
-                                border.width: btn.visualFocus ? 2 : 0
-                                border.color: Theme.text
-                                Rectangle {
-                                    objectName: "tabMark_" + btn.modelData.page
-                                    visible: btn.checked
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.top: parent.top
-                                    width: 32
-                                    height: 3
-                                    color: Theme.nightActive ? Theme.text : Theme.primary
-                                }
-                            }
-                        }
-                    }
-                }
-                BarTouch { y: tabBar.y; width: tabBar.width; height: tabBar.height; visible: tabBar.visible }
+            MainTabBar {
+                id: tabSlot
+                host: root
             }
             // With no tab bar (the sidebar's width), the pages keep off
             // the bottom inset
@@ -980,6 +635,7 @@ ApplicationWindow {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
         Label {
+            textFormat: Text.PlainText
             id: zoomBadgeLabel
             anchors.centerIn: parent
             text: qsTr("Zoom %1 %").arg(Math.round(Theme.zoom * 100))
@@ -988,7 +644,7 @@ ApplicationWindow {
         Timer { id: zoomBadgeTimer; interval: 1200; onTriggered: zoomBadge.opacity = 0 }
     }
 
-    // ---- Developer mode: the window's drawn frames per second, read in
+    // Developer mode: the window's drawn frames per second, read in
     // the header (frameRate). Qt draws only when something changed, so an
     // idle page reads 0 (the readout's own change is a frame at most each
     // second) and a chart being panned or pinched reads its rate: the

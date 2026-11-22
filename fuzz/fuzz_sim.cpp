@@ -12,18 +12,94 @@
 
 namespace {
 
-/* The ECU answering the requests in data: each a length byte (0-15)
- * then that many bytes, a tick of the car after each. Its replies'
- * bytes, run together, into out. */
+/* A timing the URI took: within its bounds, and every module's draw
+ * (each aim's too) from 0 to the ceiling */
+void check_one(const ecuio_sim_timing::sim_timing& t)
+{
+    using namespace ecuio_sim_timing;
+    if (t.fc_us > GAP_MAX_US || t.cf_us > GAP_MAX_US || t.p50_us < 0 ||
+        t.busy > busy_mode::nrc21 || t.p99_us > DELAY_MAX_US ||
+        (t.p50_us > 0 && t.p50_us > t.p99_us)) {
+        abort();
+    }
+    std::mt19937_64 rng = sim_timing_rng(t.seed, 0x7E8);
+    for (int i = 0; i < 4; ++i) {
+        const int64_t d = sim_timing_draw(t, rng);
+        if (d < 0 || d > static_cast<int64_t>(DRAW_MAX_US) ||
+            (t.p50_us == 0 && d != 0)) {
+            abort();
+        }
+    }
+}
+
+void check_timing(const ecuio_sim_timing::timings& t)
+{
+    using ecuio_sim_timing::AIMED_KEYS;
+    using ecuio_sim_timing::AIMED_MAX;
+    uint32_t aimed = 0;
+    for (uint32_t k = 0; k < AIMED_KEYS; ++k) {
+        if (t.aimed[k] > AIMED_MAX) {
+            abort();
+        }
+        aimed += t.aimed[k];
+    }
+    if (t.count != aimed || t.bus_kbps > ecuio_sim_timing::BUS_MAX_KBPS) {
+        abort();
+    }
+    check_one(t.all);
+    for (uint32_t i = 0; i < t.count; ++i) {
+        if (t.items[i].reply_id > 0x7FFu) {
+            abort();
+        }
+        check_one(ecuio_sim_timing::for_node(t, t.items[i].reply_id));
+    }
+}
+
+/* What the node's session and security access must hold after a reply
+ * to req: a key is accepted only when it is its level's own, in the
+ * extended session, and the gated DID answers only while unlocked */
+void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
+                    const uint8_t* reply, uint32_t n)
+{
+    if (n >= 2 && reply[0] == 0x67 && reply[1] % 2 == 0) {
+        const ecuio_sim_security_level* l =
+            ecuio_sim_security_find(static_cast<uint8_t>(reply[1] - 1));
+        uint8_t want[sizeof l->seed];
+        if (l == nullptr || !s.extended || len != 2u + l->bytes) {
+            abort();
+        }
+        ecuio_sim_security_key(l->seed, l->bytes, want);
+        if (memcmp(req + 2, want, l->bytes) != 0 ||
+            s.security.unlocked != l->level) {
+            abort();
+        }
+    }
+    if (n >= 3 && reply[0] == 0x62 && reply[1] == 0xD2 && reply[2] == 0x10 &&
+        (!s.extended || s.security.unlocked == 0)) {
+        abort();
+    }
+    if (s.security.unlocked != 0 && !s.extended) {
+        abort();
+    }
+}
+
+/* The ECU answering the requests in data as a node on a bus does: each
+ * a length byte (bits 0-3, and bit 5 for 16 more) then that many bytes,
+ * a tick of the car after each; with no recording the node has a
+ * session and its security access (sim.cpp's order: the session's
+ * services, then the ECU's). Its replies' bytes, run together, into
+ * out. */
 void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
          const uint8_t* data, size_t size, std::string* out)
 {
     ecuio_sim_ecu e;
     e.config = config;
     e.recording = rec;
+    ecuio_sim_session session;
+    ecuio_sim_counts counts;
     size_t at = 0;
     while (at < size) {
-        const size_t len = data[at] & 0x0F;
+        const size_t len = (data[at] & 0x0F) + ((data[at] & 0x20) ? 16u : 0u);
         const bool functional = (data[at] & 0x10) != 0;
         ++at;
         if (len > size - at) {
@@ -31,10 +107,22 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         }
         uint8_t reply[ECUIO_SIM_REPLY_MAX + 16];
         memset(reply, 0xEE, sizeof reply);
-        const uint32_t n = ecuio_sim_answer(
-            e, data + at, static_cast<uint32_t>(len), functional, reply);
+        uint32_t n = 0;
+        bool handled = false;
+        if (!functional && rec == nullptr) {
+            n = ecuio_sim_session_answer(session, true, e.time_us, data + at,
+                                         static_cast<uint32_t>(len), reply,
+                                         &handled);
+        }
+        if (!handled) {
+            n = ecuio_sim_answer(e, session, data + at,
+                                 static_cast<uint32_t>(len), functional, reply);
+        }
         if (n > ECUIO_SIM_REPLY_MAX || reply[ECUIO_SIM_REPLY_MAX] != 0xEE) {
             abort();
+        }
+        if (rec == nullptr) {
+            check_security(session, data + at, len, reply, n);
         }
         if (n > 0) {
             const bool negative = reply[0] == 0x7F;
@@ -42,8 +130,9 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
                          : reply[0] != (data[at] | 0x40)) {
                 abort();
             }
-            const ecuio_sim_fate fate = ecuio_sim_next_fate(
-                e, data + at, static_cast<uint32_t>(len), n);
+            const ecuio_sim_fate fate =
+                ecuio_sim_next_fate(e.config.faults, counts, data + at,
+                                    static_cast<uint32_t>(len), n);
             if (static_cast<uint8_t>(fate) >
                 static_cast<uint8_t>(ecuio_sim_fate::stalled)) {
                 abort();
@@ -83,8 +172,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
              config.faults.silent > ECUIO_SIM_FAULT_MAX ||
              config.faults.late > ECUIO_SIM_FAULT_MAX ||
              config.faults.bad_sequence > ECUIO_SIM_FAULT_MAX ||
-             config.faults.stalled > ECUIO_SIM_FAULT_MAX)) {
+             config.faults.stalled > ECUIO_SIM_FAULT_MAX ||
+             config.aimed.count > ECUIO_SIM_AIMED_MAX)) {
             abort();
+        }
+        if (r == ecuio_sim_uri_result::ok) {
+            check_timing(config.timing);
+        }
+        /* Each aim one 11-bit module's, its period as a fault's */
+        for (uint32_t i = 0;
+             r == ecuio_sim_uri_result::ok && i < config.aimed.count; ++i) {
+            const ecuio_sim_aim& a = config.aimed.items[i];
+            if (a.reply_id > 0x7FFu || a.every == 0 ||
+                a.every > ECUIO_SIM_FAULT_MAX) {
+                abort();
+            }
         }
         return 0;
     }

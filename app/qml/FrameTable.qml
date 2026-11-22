@@ -1,5 +1,5 @@
 // File/layer: app/qml/FrameTable.qml | Qt Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 pragma ComponentBehavior: Bound
 
@@ -81,6 +81,7 @@ Rectangle {
                 Accessible.name: table.frames.newestFirst
                                  ? qsTr("Time, newest first") : qsTr("Time, oldest first")
                 contentItem: Label {
+                    textFormat: Text.PlainText
                     text: (table.frames.newestFirst ? qsTr("Time ↓") : qsTr("Time ↑"))
                           + (table.narrowTable ? "" : qsTr(" (s)"))
                     color: Theme.text
@@ -98,17 +99,17 @@ Rectangle {
                     Qt.callLater(table.live ? frameList.jumpToLatest : frameList.positionViewAtBeginning)
                 }
             }
-            Label { text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("DLC"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: 36 }
-            Label { text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Ext"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 20 : 36 }
             // Fits a 29-bit ID ("0x18FF0C00") in the mono face
-            Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.preferredWidth: table.narrowTable ? 80 : 96 }
-            Label { text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Payload"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     Layout.fillWidth: true }
-            Label { text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
+            Label { textFormat: Text.PlainText; text: qsTr("Flags"); color: Theme.textDim; font.pixelSize: Theme.fontCaption;
                     visible: !table.narrowTable
                     Layout.preferredWidth: table.flagsWidth }
         }
@@ -255,6 +256,7 @@ Rectangle {
                 // Android each row's coming and going rebuilds a node
                 // on the main thread
                 Label {
+                    textFormat: Text.PlainText
                     // Session-relative us, shown as s.mmm
                     text: (frameRow.model.timestampUs / 1e6).toFixed(3)
                     Accessible.ignored: true
@@ -264,6 +266,7 @@ Rectangle {
                     elide: Text.ElideRight
                 }
                 Label {
+                    textFormat: Text.PlainText
                     text: frameRow.model.dlc
                     Accessible.ignored: true
                     visible: !frameRow.narrow
@@ -272,6 +275,7 @@ Rectangle {
                     Layout.preferredWidth: 36
                 }
                 Label {
+                    textFormat: Text.PlainText
                     text: frameRow.model.extended ? "E" : "-"
                     Accessible.ignored: true
                     color: frameRow.model.extended ? Theme.success : Theme.textDim
@@ -279,6 +283,7 @@ Rectangle {
                     Layout.preferredWidth: frameRow.narrow ? 20 : 36
                 }
                 Label {
+                    textFormat: Text.PlainText
                     // Role name is "arbId" (a quint32): hex-format
                     // it for display.
                     text: "0x" + frameRow.model.arbId.toString(16).toUpperCase()
@@ -292,6 +297,7 @@ Rectangle {
                     id: payloadColumn
                     Layout.fillWidth: true
                     Label {
+                        textFormat: Text.PlainText
                         id: payloadLabel
                         width: parent.width
                         text: frameRow.model.payloadHex   // spaced uppercase bytes, from the bridge
@@ -303,6 +309,7 @@ Rectangle {
                     }
                     // A phone's flags, under the payload
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "rowFlagsNarrow"
                         width: parent.width
                         visible: frameRow.narrow && text !== ""
@@ -314,6 +321,7 @@ Rectangle {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "rowFlags"
                     visible: !frameRow.narrow
                     text: frameRow.model.flagsText
@@ -326,8 +334,9 @@ Rectangle {
             }
         }
 
-        // ---- Empty state ----
+        // Empty state
         Label {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             width: Math.min(implicitWidth, parent.width - 16)
             wrapMode: Text.Wrap

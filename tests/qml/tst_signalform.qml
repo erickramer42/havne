@@ -191,4 +191,31 @@ TestCase {
         compare(SignalForm.trimEcus(SignalForm.copy(file)).ecus.map(e => e.id), ["pcm", "tcm"],
                 "its ECU is one the file uses")
     }
+
+    // A computed signal has no read and no field: Edit and the list take it
+    function test_aComputedSignalReadsBackWithoutAReadOrAField() {
+        const file = SignalForm.parseFile(JSON.stringify({
+            havne_signals: 2, name: "By hand", source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [
+                { key: "a", name: "A", read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } },
+                { key: "c", name: "C", kind: "computed", expr: "a * 2", unit: "kPa" }] }))
+        const f = SignalForm.fieldsOf(file, file.signals[1])
+        compare(f.name, "C")
+        compare(f.kind, "computed")
+        compare(f.unit, "kPa")
+        compare(f.number, "")
+        compare(SignalForm.describe(file, file.signals[1]), "computed from a * 2")
+    }
+
+    // A renamed computed signal takes the place of the one it was, under the
+    // key it had; a new one goes at the end
+    function test_aComputedSaveReplacesTheKeyItWasEditedUnder() {
+        const file = { signals: [{ key: "user.a", name: "A", kind: "computed", expr: "1" },
+                                 { key: "user.b", name: "B", kind: "computed", expr: "2" }], ecus: [] }
+        const renamed = SignalForm.withComputed(file, { key: "user.c", name: "C", kind: "computed", expr: "3" }, "user.a")
+        compare(renamed.signals.map(s => s.key).join(), "user.c,user.b")
+        const added = SignalForm.withComputed(file, { key: "user.c", name: "C", kind: "computed", expr: "3" }, "")
+        compare(added.signals.map(s => s.key).join(), "user.a,user.b,user.c")
+    }
 }

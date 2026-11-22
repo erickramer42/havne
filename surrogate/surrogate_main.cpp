@@ -59,14 +59,15 @@ static fn_pt_read_version g_read_version;       /* optional: may be null */
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 
-/* Read buffer: a call asks for one message; the room for 16 takes a
+/* Read buffer: a call asks for one message; the room for more takes a
  * vendor that returns more than it asked (counted lost).
  * Static rather than on the stack, because 16 PASSTHRU_MSGs are about
  * 67 KB. Safe because the child is single-threaded. */
-static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];
+constexpr unsigned long kReadCallRoom = 16;
+static PASSTHRU_MSG s_read_batch[kReadCallRoom];
 
 /* The messages a READ's reply carries after the response, as the wire
- * sends them (surrogate_protocol.h). Static for the same reason. */
+ * sends them (surrogate_protocol.h): a read ends at its first frame. */
 static ecuio_pt_rx_t s_read_frames[ECUIO_SUR_MAX_FRAMES_PER_READ];
 /* A loss seen after a read's last frame: the next frame carries it */
 static bool s_lost_carry = false;

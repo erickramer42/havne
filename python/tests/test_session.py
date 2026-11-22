@@ -12,6 +12,7 @@
 # a script keeps keeps its session).
 
 import contextlib
+import ctypes
 import gc
 import json
 import logging
@@ -27,7 +28,7 @@ import havne
 from havne import c
 from havne._core import lib
 
-from conftest import REPLAY
+from conftest import REPLAY, nothing_made, replay_uri
 
 
 def take(stream, n, seconds=10):
@@ -233,6 +234,33 @@ def test_the_info_says_the_mock():
         assert s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE
 
 
+def test_a_session_lists_every_module_past_the_infos_four(monkeypatch):
+    dids = ",".join("%03X:D1%02X:u8" % (0x7E8 + i, i) for i in range(6))
+    with havne.Session("mock://py?profile=uds-generic&diagnose=0&did=" + dids) as s:
+        assert s.info.module_count == 6
+        assert s.info.channel_count == c.ECUIO_SESSION_INFO_MAX_CHANNELS
+        assert s.modules == [(0x7E8 + i, 0x7E0 + i) for i in range(6)]
+        assert s.support(5).rx_id == 0x7ED
+        with pytest.raises(havne.Error) as e:
+            s.support(6)
+        assert e.value.name == "INVALID_ARGUMENT"
+        # reports_settled reads every module's reports, the sixth's too
+        assert s.reports_settled() is True
+        real = s.diagnostics
+        asked = []
+
+        def sixth_asking(channel=0):
+            asked.append(channel)
+            d = real(channel)
+            if channel == 5:
+                d.flags = (d.flags | c.ECUIO_DIAG_ASKED) & ~c.ECUIO_DIAG_COMPLETE
+            return d
+
+        monkeypatch.setattr(s, "diagnostics", sixth_asking)
+        assert s.reports_settled() is False
+        assert asked == [0, 1, 2, 3, 4, 5]
+
+
 def test_the_vin_waits_for_core_to_have_it_in(monkeypatch):
     # The report stood in for (the mock identifies nothing): F190's VIN
     # beside a 09 02 still out is core's pick but not in yet
@@ -349,6 +377,56 @@ def test_a_focus_takes_ids_or_names_and_refuses_a_stranger():
         s.set_focus([sid])
 
 
+
+@contextlib.contextmanager
+def two_rpm_profile(name):
+    """obd2's RPM on 7E8 and 7E9 under one name, a set registered through
+    the C API (only there may a name repeat, ADR-0065 section 9); kept
+    alive while registered, since the registry keeps the pointer"""
+    obd2 = ctypes.POINTER(c.ecuio_signal_set_t)()
+    assert lib.ecuio_profile_lookup(b"obd2", ctypes.byref(obd2)) == 0
+    rpm = next(obd2.contents.defs[i] for i in range(obd2.contents.count)
+               if obd2.contents.defs[i].name == b"RPM")
+    defs = (c.ecuio_signal_def_t * 2)(rpm, rpm)
+    defs[1].id = rpm.id + 1
+    defs[1].message_id = 0x7E9
+    channels = (c.ecuio_channel_decl_t * 2)()
+    channels[0].rx_id, channels[0].tx_id = 0x7E8, 0x7E0
+    channels[1].rx_id, channels[1].tx_id = 0x7E9, 0x7E1
+    sset = c.ecuio_signal_set_t(layout_version=c.ECUIO_SIGNAL_SET_LAYOUT, count=2, defs=defs,
+                                channel_count=2, channels=channels)
+    v = c.ecuio_validation_t()
+    assert lib.ecuio_profile_register(name.encode(), ctypes.byref(sset), ctypes.byref(v)) == 0,         v.code
+    try:
+        yield rpm.id
+    finally:
+        assert lib.ecuio_profile_unregister(name.encode()) == 0
+
+
+def test_a_name_two_signals_have_is_refused_with_their_keys(tmp_path):
+    """A focus, a default pick or a health value by a name two signals
+    have names neither, never the last of them; each key names its own"""
+    keys = ["7E8:410C:2.0:16", "7E9:410C:2.0:16"]
+    with two_rpm_profile("pytest-two-rpm"),             havne.Session(replay_uri("?profile=pytest-two-rpm")) as s:
+        for ask in (lambda: s.set_focus(["RPM"]), lambda: s.ranked_signals(["RPM"]),
+                    lambda: s.health_report(tmp_path / "x.json", "json",
+                                            values=[("RPM", 800.0, 0)])):
+            with pytest.raises(KeyError) as refused:
+                ask()
+            words = str(refused.value)
+            assert "2 signals are named 'RPM'" in words, words
+            assert keys[0] in words and keys[1] in words, words
+        assert nothing_made(tmp_path, "x.json")
+        s.set_focus(keys)
+        report = s.health_report(tmp_path / "two.json", "json", utc_us=1,
+                                 values=[(keys[0], 800.0, 0), (keys[1], 2000.0, 0)])
+        assert report.values == 2
+        body = json.loads((tmp_path / "two.json").read_text(encoding="utf-8"))
+        assert sorted(k["value"] for k in body["key_values"]) == [800, 2000]
+        with pytest.raises(KeyError):
+            s.set_focus(["7EA:410C:2.0:16"])
+
+
 def test_a_focus_takes_a_minimum_time_between_sweeps():
     with havne.Session("mock://py") as s:
         sid = next(iter(s.signals))
@@ -383,7 +461,11 @@ def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
     assert ended(folder)
     with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
         events = f.read()
-    assert f"\npick  {name}\n" in events
+    # The pick names the signal by its key, which the reader gives by name
+    with havne.Recording(folder) as r:
+        key = r.signal(name).key
+    assert key
+    assert f"\npick  {key}\n" in events
     assert "\nfocus  " not in events
 
 

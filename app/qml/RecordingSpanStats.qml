@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingSpanStats.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // Each plotted signal's statistics over the span between the cursors, a table
 // on the desktop and a grid of cards on a phone: one part of RecordingsPage,
 // which holds the state
@@ -23,6 +23,7 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: 0
     component StatCell: Label {
+        textFormat: Text.PlainText
         // Shares, not widths: a width read from the page would
         // make the column lay itself out again as it sizes
         Layout.fillWidth: true
@@ -38,7 +39,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.leftMargin: 8
         Layout.rightMargin: 12
-        Label { text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
+        Label { textFormat: Text.PlainText; text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
         StatCell { text: qsTr("Change"); color: Theme.textDim }
         StatCell { text: qsTr("Low"); color: Theme.textDim }
         StatCell { text: qsTr("High"); color: Theme.textDim }
@@ -56,26 +57,27 @@ ColumnLayout {
             Layout.leftMargin: 8
             Layout.rightMargin: 12
             Label {
+                textFormat: Text.PlainText
                 text: statRow.modelData.name
                 color: Theme.text
                 elide: Text.ElideRight
                 Layout.fillWidth: true
                 Layout.preferredWidth: 30
             }
-            StatCell { objectName: "statChange"; text: root.host.statChange(statRow.stat) }
+            StatCell { objectName: "statChange"; text: root.host.textsPart.statChange(statRow.stat) }
             StatCell {
                 objectName: "statLow"
-                text: statRow.stat ? root.host.statText(statRow.stat.lowest, statRow.stat) : qsTr("—")
+                text: statRow.stat ? root.host.textsPart.statText(statRow.stat.lowest, statRow.stat) : qsTr("—")
             }
             StatCell {
                 objectName: "statHigh"
-                text: statRow.stat ? root.host.statText(statRow.stat.highest, statRow.stat) : qsTr("—")
+                text: statRow.stat ? root.host.textsPart.statText(statRow.stat.highest, statRow.stat) : qsTr("—")
             }
             StatCell {
                 objectName: "statMean"
-                text: statRow.stat ? root.host.statText(statRow.stat.mean, statRow.stat) : qsTr("—")
+                text: statRow.stat ? root.host.textsPart.statText(statRow.stat.mean, statRow.stat) : qsTr("—")
             }
-            StatCell { objectName: "statRate"; text: root.host.statRate(statRow.stat) }
+            StatCell { objectName: "statRate"; text: root.host.textsPart.statRate(statRow.stat) }
         }
     }
     GridLayout {
@@ -110,6 +112,7 @@ ColumnLayout {
                     RowLayout {
                         Layout.fillWidth: true
                         Label {
+                            textFormat: Text.PlainText
                             text: statCard.modelData.name
                             color: Theme.textDim
                             elide: Text.ElideRight
@@ -117,8 +120,9 @@ ColumnLayout {
                             Layout.fillWidth: true
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "statChange"
-                            text: root.host.statChange(statCard.stat)
+                            text: root.host.textsPart.statChange(statCard.stat)
                             color: Theme.text
                             font.pixelSize: Theme.fontCaption
                             font.family: Theme.valueFamily
@@ -126,6 +130,7 @@ ColumnLayout {
                         }
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "statLine"
                         Layout.fillWidth: true
                         // At most a value to a line: a narrow card cuts none

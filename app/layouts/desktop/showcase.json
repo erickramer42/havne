@@ -1,0 +1,149 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "files": [],
+ "pages": [
+  {
+   "name": "Showcase",
+   "cells": [
+    {
+     "kind": "shift-light",
+     "w": 12,
+     "h": 1,
+     "label": "Shift lights",
+     "refs": [
+      "id:1001",
+      "id:7003"
+     ],
+     "unit": "RPM",
+     "options": {
+      "count": 15,
+      "from": 4500,
+      "to": 6500
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 8,
+     "label": "Engine speed",
+     "refs": [
+      "id:1001",
+      "id:7003"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000,
+      "majorStep": 1000,
+      "minorStep": 250,
+      "labelDivisor": 1000,
+      "caption": "×1000 r/min",
+      "peak": true,
+      "progress": true,
+      "dangerFrom": 6800
+     }
+    },
+    {
+     "kind": "ring",
+     "w": 1,
+     "h": 4,
+     "label": "Coolant",
+     "refs": [
+      "id:2001",
+      "id:7002"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 130,
+      "peak": true,
+      "coldBelow": 60,
+      "warnFrom": 105,
+      "dangerFrom": 115
+     }
+    },
+    {
+     "kind": "bar",
+     "w": 3,
+     "h": 2,
+     "label": "Load",
+     "refs": [
+      "id:6001",
+      "id:7001"
+     ],
+     "unit": "%",
+     "options": {
+      "from": 0,
+      "to": 100,
+      "warnFrom": 85
+     }
+    },
+    {
+     "kind": "segments",
+     "w": 3,
+     "h": 2,
+     "label": "Throttle",
+     "refs": [
+      "id:4001",
+      "id:7006"
+     ],
+     "unit": "%",
+     "options": {
+      "from": 0,
+      "to": 100,
+      "cells": 20
+     }
+    },
+    {
+     "kind": "sparkline",
+     "w": 3,
+     "h": 4,
+     "label": "MAF",
+     "refs": [
+      "id:8001",
+      "id:7009"
+     ],
+     "unit": "g/s",
+     "options": {
+      "from": 0,
+      "to": 500,
+      "window": 60
+     }
+    },
+    {
+     "kind": "seven-segment",
+     "w": 3,
+     "h": 3,
+     "label": "Speed",
+     "refs": [
+      "id:3001",
+      "id:7004"
+     ],
+     "unit": "km/h",
+     "options": {
+      "from": 0,
+      "to": 260,
+      "digits": 3
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 1,
+     "h": 4,
+     "label": "Lambda",
+     "refs": [
+      "id:10001",
+      "id:11544"
+     ],
+     "unit": "λ",
+     "options": {
+      "from": 0.5,
+      "to": 2,
+      "description": "Commanded equivalence ratio"
+     }
+    }
+   ]
+  }
+ ]
+}

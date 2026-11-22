@@ -1,5 +1,5 @@
 // File/layer: app/qml/BarGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard{,_pages,_panel},
 //          QmlTest.dashedit
 
 import QtQuick
@@ -30,6 +30,7 @@ GaugeBase {
     implicitHeight: vertical ? 180 : 72
 
     Text {
+        textFormat: Text.PlainText
         id: title
         objectName: "gaugeTitle"
         Accessible.ignored: true
@@ -44,6 +45,7 @@ GaugeBase {
     }
     readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: gauge.noteAlone ? parent.left : title.right
@@ -64,6 +66,7 @@ GaugeBase {
         spacing: 3
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             id: valueLabel
             objectName: "readout"
             Accessible.ignored: true
@@ -84,6 +87,7 @@ GaugeBase {
             anchors.verticalCenter: valueLabel.verticalCenter
         }
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             visible: gauge.hasValue
@@ -158,6 +162,29 @@ GaugeBase {
         height: gauge.vertical ? 3 : bar.height + 6
     }
 
+    // A flat bar's marks keep every stride-th label (the ends always) when
+    // the bar is too short for them all; each label is measured, as fonts
+    // differ in width by platform and the longest string isn't always the
+    // widest drawn
+    FontMetrics {
+        id: markMetrics
+        font.pixelSize: 10
+        font.features: Theme.valueFeatures
+    }
+    readonly property real widestMarkWidth: {
+        let w = 0
+        for (const m of scaleMarks)
+            w = Math.max(w, markMetrics.advanceWidth(formatScale(m)))
+        return w
+    }
+    readonly property int markStride: {
+        const n = scaleMarks.length
+        if (vertical || n < 3)
+            return 1
+        const pitch = bar.width / (n - 1)
+        return Math.max(1, Math.ceil((widestMarkWidth + 8) / Math.max(1, pitch)))
+    }
+
     Item {
         objectName: "scaleMarks"
         x: gauge.vertical ? bar.x + bar.width + 6 : bar.x
@@ -168,8 +195,13 @@ GaugeBase {
         Repeater {
             model: gauge.scaleMarks
             delegate: Text {
+                textFormat: Text.PlainText
                 required property real modelData
+                required property int index
                 Accessible.ignored: true
+                visible: index === 0 || index === gauge.scaleMarks.length - 1
+                         || (index % gauge.markStride === 0
+                             && gauge.scaleMarks.length - 1 - index >= gauge.markStride)
                 readonly property real f: gauge.fractionOf(modelData)
                 // End labels align to the bar's edges, the rest center; standing
                 // up the low end is at the bottom

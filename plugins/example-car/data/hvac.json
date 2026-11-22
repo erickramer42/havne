@@ -1,0 +1,29 @@
+{
+  "havne_signals": 1,
+  "name": "Example: the whole simulated car, its hvac",
+  "notes": "Made-up DIDs that the simulated ECU answers on the made-up hvac at 525",
+  "signals": [
+    {
+      "key": "hvac_name",
+      "name": "Climate Module Name",
+      "kind": "text",
+      "ecu": "hvac",
+      "read": {"service": "22", "number": "4A00"},
+      "field": {"byte": 0},
+      "group": "diagnostics"
+    },
+    {
+      "key": "hvac_cabin_temp",
+      "name": "Cabin Temp",
+      "ecu": "hvac",
+      "read": {"service": "22", "number": "4A10"},
+      "field": {"byte": 0, "bits": 8},
+      "scale": 0.5,
+      "offset": -40,
+      "unit": "°C",
+      "decimals": 1,
+      "group": "vehicle",
+      "gauge": {"min": -10, "max": 50}
+    }
+  ]
+}

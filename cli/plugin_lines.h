@@ -1,10 +1,12 @@
 // File/layer: cli/plugin_lines.h | havne-cli, a plugin's lines (ADR-0052)
-// Testing: UNIT (tests/test_cli.cpp, CliPluginTest); the commands in the
-//          golden runs (tests/golden/cli/plugins-*.jsonl, on
-//          plugins/example-sim), CliPluginMakeTest
+// Testing: UNIT (tests/test_cli_files.cpp and test_cli_signals.cpp,
+//          CliPluginTest); the commands in the golden runs (tests/golden/cli/plugins-*.jsonl, on
+//          plugins/example-sim), CliPluginMakeTest,
+//          CliPluginConversationTest
 //
 // What `havne-cli plugins list`, `check` and `match` write about a loaded
-// package (plugin.h): the package, each variant and its source, each
+// package (plugin.h): the package, its conversation tier's declaration
+// (ADR-0066), each variant and its source, each
 // value fixture's outcome, the check's summary and the variants a VIN
 // proposes, and the rule a fixture passes by; what `plugins wrap`, `put`,
 // `drop` and `signals import obdb --plugin` (ADR-0064 Q9) wrote, and the
@@ -13,6 +15,7 @@
 #define HAVNE_CLI_PLUGIN_LINES_H
 
 #include "jsonl.h"
+#include "key_field.h"
 #include "signal_file_lines.h"
 
 #include "ecuio/plugin.h"
@@ -56,8 +59,9 @@ inline uint32_t own_signals(const ecuio_signal_file_t* file,
 }
 
 // {"type":"plugin", package (its place among the command's packages),
-// id, version, name, tiers ["data"], variants [{id, profile}], fixtures
-// (a folder's fixture files)}
+// id, version, name, tiers (["data"], and "conversation" after it for a
+// plugin with a module), variants [{id, profile}], fixtures (a folder's
+// fixture files)}
 inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
                         const ecuio_plugin_info_t& info)
 {
@@ -71,7 +75,15 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.key("name");
     l.string(info.name, std::strlen(info.name));
     l.key("tiers");
-    l.raw((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0 ? "[\"data\"]" : "[]");
+    l.ch('[');
+    if ((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0) {
+        l.raw("\"data\"");
+    }
+    if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
+        l.raw((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0 ? ",\"conversation\""
+                                                         : "\"conversation\"");
+    }
+    l.ch(']');
     l.key("variants");
     l.ch('[');
     for (uint32_t v = 0; v < info.variant_count; ++v) {
@@ -91,6 +103,145 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.key("fixtures");
     l.u64(info.fixture_count);
     l.ch('}');
+}
+
+// Room for a conversation line at every bound of plugin.h's
+constexpr size_t kConversationLineBytes = 16384;
+
+// One of a conversation's ECUs: {"id", "rx", "tx"}
+inline void conversation_ecu(Line& l, const ecuio_plugin_t* p, uint32_t index)
+{
+    ecuio_plugin_conversation_ecu_t e{};
+    e.struct_size = sizeof e;
+    ecuio_plugin_conversation_ecu(p, index, &e);
+    if (index > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"id\":");
+    l.string(e.id, std::strlen(e.id));
+    l.key("rx");
+    l.hex_id(e.rx_id);
+    l.key("tx");
+    l.hex_id(e.tx_id);
+    l.ch('}');
+}
+
+// One of a conversation's services: {"sid", "sub"}
+inline void conversation_service(Line& l, const ecuio_plugin_t* p, uint32_t i)
+{
+    ecuio_plugin_service_t s{};
+    s.struct_size = sizeof s;
+    ecuio_plugin_service(p, i, &s);
+    if (i > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"sid\":");
+    l.hex_bytes(&s.sid, 1);
+    l.key("sub");
+    if (s.sub_count == 0) {
+        l.raw("null");
+    } else {
+        l.ch('[');
+        for (uint8_t k = 0; k < s.sub_count && k < sizeof s.subs; ++k) {
+            if (k > 0) {
+                l.ch(',');
+            }
+            l.hex_bytes(&s.subs[k], 1);
+        }
+        l.ch(']');
+    }
+    l.ch('}');
+}
+
+// The conversation's ECU that answers at rx (a manifest holds one at an
+// rx); its id is "" when none does
+inline ecuio_plugin_conversation_ecu_t
+conversation_ecu_at(const ecuio_plugin_t* p, uint32_t ecus, uint32_t rx)
+{
+    for (uint32_t i = 0; i < ecus; ++i) {
+        ecuio_plugin_conversation_ecu_t e{};
+        e.struct_size = sizeof e;
+        if (ecuio_plugin_conversation_ecu(p, i, &e) == ECUIO_OK &&
+            e.rx_id == rx) {
+            return e;
+        }
+    }
+    return {};
+}
+
+// One of a conversation's security levels; "ecu" is its ECU's id in "ecus"
+inline void conversation_level(Line& l, const ecuio_plugin_t* p, uint32_t i,
+                               uint32_t ecus)
+{
+    ecuio_plugin_security_level_t s{};
+    s.struct_size = sizeof s;
+    ecuio_plugin_security_level(p, i, &s);
+    const ecuio_plugin_conversation_ecu_t e =
+        conversation_ecu_at(p, ecus, s.rx_id);
+    if (i > 0) {
+        l.ch(',');
+    }
+    l.raw("{\"ecu\":");
+    l.string(e.id, std::strlen(e.id));
+    l.key("level");
+    l.hex_bytes(&s.level, 1);
+    l.key("seed_bytes");
+    l.u64(s.seed_bytes);
+    l.key("key_bytes");
+    l.u64(s.key_bytes);
+    l.key("delay_ms");
+    l.u64(s.delay_ms);
+    l.key("key_window_ms");
+    l.u64(s.key_window_ms);
+    l.ch('}');
+}
+
+// {"type":"conversation", package, code {bytes, sha256}, budget (the most
+// instructions in one call), ecus [{id, rx, tx}], services [{sid, sub (the
+// sub-functions declared; null for a service declared without)}],
+// security [{ecu (an id of ecus), level, seed_bytes, key_bytes, delay_ms,
+// key_window_ms}]},
+// after the plugin line of a plugin with the conversation tier: what its
+// manifest lets its module cause to be sent
+inline void conversation_line(Line& l, uint32_t package,
+                              const ecuio_plugin_t* p,
+                              const ecuio_plugin_conversation_t& c)
+{
+    static const char digits[] = "0123456789abcdef";
+    char sha[2 * sizeof c.code_sha256];
+    for (size_t i = 0; i < sizeof c.code_sha256; ++i) {
+        sha[2 * i] = digits[c.code_sha256[i] >> 4];
+        sha[2 * i + 1] = digits[c.code_sha256[i] & 0x0F];
+    }
+    l.raw("{\"type\":\"conversation\"");
+    l.key("package");
+    l.u64(package);
+    l.key("code");
+    l.raw("{\"bytes\":");
+    l.u64(c.code_bytes);
+    l.key("sha256");
+    l.string(sha, sizeof sha);
+    l.ch('}');
+    l.key("budget");
+    l.u64(c.budget);
+    l.key("ecus");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.ecu_count; ++i) {
+        conversation_ecu(l, p, i);
+    }
+    l.ch(']');
+    l.key("services");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.service_count; ++i) {
+        conversation_service(l, p, i);
+    }
+    l.ch(']');
+    l.key("security");
+    l.ch('[');
+    for (uint32_t i = 0; i < c.level_count; ++i) {
+        conversation_level(l, p, i, c.ecu_count);
+    }
+    l.raw("]}");
 }
 
 // A file's source (ecuio_signal_file_source); every text "" when it
@@ -184,6 +335,54 @@ inline void share_alike_line(Line& l, const char* variant, const char* license)
     l.key("words");
     const std::string words = share_alike_words(variant, license);
     l.string(words.c_str(), words.size());
+    l.ch('}');
+}
+
+// Whether a def takes a gauge: a number or a computed signal
+inline bool takes_gauge(const ecuio_signal_def_t& d)
+{
+    const char* kind = kind_word(d);
+    return std::strcmp(kind, "number") == 0 ||
+           std::strcmp(kind, "computed") == 0;
+}
+
+// Whether the Dashboard would guess this def's range: a signal of the
+// variant's own that takes a gauge and has none
+inline bool lacks_gauge(const ecuio_signal_file_t* file,
+                        const ecuio_signal_def_t& d,
+                        const ecuio_signal_gauge_t* gauge)
+{
+    return own_signal(file, d) && gauge == nullptr && takes_gauge(d);
+}
+
+inline size_t no_gauge_line_bytes()
+{
+    return 1024 + 2 * sizeof(ecuio_signal_def_t{}.name) + kKeyFieldBytes;
+}
+
+// {"type":"no_gauge", variant, id, name, key, kind, words}, after a variant's
+// lines for each number or computed signal of its own with no gauge: a
+// note, never a failure
+inline void no_gauge_line(Line& l, const char* variant,
+                          const ecuio_signal_def_t& d,
+                          const char* key = nullptr)
+{
+    const char* kind = kind_word(d);
+    l.raw("{\"type\":\"no_gauge\"");
+    l.key("variant");
+    l.string(variant, std::strlen(variant));
+    l.key("id");
+    l.u64(d.id);
+    l.key("name");
+    l.string(d.name, sizeof d.name);
+    key_field(l, key, ECUIO_SIGNAL_KEY_LEN);
+    l.key("kind");
+    l.string(kind, std::strlen(kind));
+    l.key("words");
+    static const char words[] =
+        "no gauge block: the Dashboard guesses this signal's range from its "
+        "unit, so set min and max in the signal file";
+    l.string(words, sizeof words - 1);
     l.ch('}');
 }
 

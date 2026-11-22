@@ -82,6 +82,12 @@ thread, the last update after close). `ecuio_identity_request_name`
 gives an item's display name ("VIN", "CALID", ...) so the list and its
 words live in one place.
 
+> **Amended 2026-11-21:** `generation` moves as each item settles, but not
+> when an item asked again goes unanswered again (a quiet module's step,
+> [ADR-0065](0065-car-sized-profile.md)'s appendix of 2026-11-21): every
+> write that settle makes is the outcome and code already there, so no
+> report and no line changes.
+
 ### 4. One line in the activity log, once complete
 
 The bridge polls the report on its coalesce tick and logs one line per

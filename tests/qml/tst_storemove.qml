@@ -126,13 +126,13 @@ TestCase {
         const page = createTemporaryObject(dashComponent, testCase.Window.window.contentItem)
         page.vehicles = VehicleBook.pick(book, "v1")
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("doesn't pick") < 0, page.layoutFilePart.layoutNote)
 
         page.vehicles = VehicleBook.setPicks(VehicleBook.pick(book, "v1"), [own])
-        page.loadLayoutFrom(url)   // the layout already shown: only the note is new
-        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Shared PIDs") >= 0,
-               page.layoutNote)
+        page.layoutFilePart.loadLayoutFrom(url)   // the layout already shown: only the note is new
+        verify(page.layoutFilePart.layoutNote.indexOf("plugins this vehicle doesn't pick: Shared PIDs") >= 0,
+               page.layoutFilePart.layoutNote)
     }
 
     // The Signals page shows what the move made: every moved file a
@@ -144,31 +144,31 @@ TestCase {
         verify(page, "Settings loads")
         page.open("signals")
         compare(page.pickedVehicle.label, "Weekend car")
-        compare(page.picks, [shared])
-        compare(page.unmigratedRows, [], "every file moved")
-        compare(page.pluginList.filter(p => p.mine).map(p => p.id).sort(),
+        compare(page.picksPart.picks, [shared])
+        compare(page.rowActionsPart.unmigratedRows, [], "every file moved")
+        compare(page.picksPart.pluginList.filter(p => p.mine).map(p => p.id).sort(),
                 ["daily-driver-obdb", "daily-driver-own", "shared-pids"])
-        verify(!page.pluginList.find(p => p.id === "example-sim").mine, "the example is as it was")
-        compare(page.variantRows.filter(r => r.picked).map(r => r.profile), [shared])
+        verify(!page.picksPart.pluginList.find(p => p.id === "example-sim").mine, "the example is as it was")
+        compare(page.picksPart.variantRows.filter(r => r.picked).map(r => r.profile), [shared])
         compare(page.ownSignals, [], "this vehicle wrote none")
 
-        page.pickVehicle("v1")
-        compare(page.picks, [shared, obdb, own, example])
+        page.ownPart.pickVehicle("v1")
+        compare(page.picksPart.picks, [shared, obdb, own, example])
         compare(page.pickedVehicle.own, own)
         compare(page.ownSignals.map(s => s.key), ["own_pressure"], "the form edits its file's variant")
         compare(find(find(page, "ownSignal_0"), "ownSignalText").text, "Own pressure: 22 D110 on 7E8")
-        compare(page.uriField.text, "elm327://COM5?profile=" + shared, "the vehicle's saved address")
-        compare(page.profileChoice, shared)
+        compare(page.connectPart.uriField.text, "elm327://COM5?profile=" + shared, "the vehicle's saved address")
+        compare(page.uriPart.profileChoice, shared)
         // On the adapter the first pick that reads obd2 stands where
         // Default does, the rest in their order after the built-ins
-        compare(page.standIn.profile, shared)
-        compare(page.profiles.map(p => p.name), [shared, "raw", "uds-generic", obdb, own, example])
+        compare(page.uriPart.standIn.profile, shared)
+        compare(page.uriPart.profiles.map(p => p.name), [shared, "raw", "uds-generic", obdb, own, example])
         compare(find(page, "profile_" + shared).text, "obd2 + Shared PIDs")
-        const row = page.variantRows.find(r => r.profile === own)
-        compare(page.rowTitle(row), "Daily driver own 1.0.0")
-        compare(page.rowReads(row), "obd2 + 1 signal · yours")
+        const row = page.picksPart.variantRows.find(r => r.profile === own)
+        compare(page.picksPart.rowTitle(row), "Daily driver own 1.0.0")
+        compare(page.picksPart.rowReads(row), "obd2 + 1 signal · yours")
         verify(row.forCar)
-        compare(page.pluginList.find(p => p.id === "daily-driver-own").importedFor, "v1",
+        compare(page.picksPart.pluginList.find(p => p.id === "daily-driver-own").importedFor, "v1",
                 "moved for this vehicle")
     }
 }

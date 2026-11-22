@@ -1,5 +1,5 @@
 // File/layer: app/qml/PageHeader.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone (test_qml); manual smoke: the titles
+// Testing: QML: QmlTest.phone_* (test_qml); manual smoke: the titles
 //          aligned at Theme.pageMargin
 
 import QtQuick
@@ -20,6 +20,7 @@ RowLayout {
     spacing: 10
 
     Label {
+        textFormat: Text.PlainText
         visible: header.title !== ""
         Layout.fillWidth: header.titleShrinks
         // A whole pixel: the layout rounds a fractional maximum down, which

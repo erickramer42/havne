@@ -6,10 +6,11 @@ tester installs it with a sideloading tool that signs it with their own
 Apple ID. The file holds no signature and no device's ID, so anyone can
 use the same one.
 
-The iOS app hasn't been checked on an iPhone yet
-([Known Issue #2](../STATUS.md#known-issues-and-technical-debt)): the
-Simulator is all it has run on. A first install is a test of its own,
-and what it shows is worth reporting, whatever it is.
+The iOS app is unvalidated
+([Known Issue #2](../STATUS.md#known-issues-and-technical-debt)): it
+has run on the Simulator and has launched on one iPhone (sideloaded,
+with no adapter, so no session was tried). An install is a test of its
+own, and what it shows is worth reporting, whatever it is.
 
 ## What you need
 

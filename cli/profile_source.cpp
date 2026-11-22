@@ -28,20 +28,25 @@ namespace cmd {
 // (an interrupt while it hangs), so it is never freed
 ecuio_signal_file_t* g_signal_file = nullptr;
 
-// Reads and loads a signal file. On failure, the status and why for an
-// error line, never the path: the reason it can't be read, or core's
-// words, which name the line and column
+// Reads and loads a signal file: a data file, or with recorded a
+// recording's signals.json, a session's whole set, read to a set's
+// bounds. On failure, the status and why for an error line, never the
+// path: the reason it can't be read, or core's words, which name the line
+// and column
 ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
-                                std::string* why)
+                                std::string* why, bool recorded)
 {
     *file = nullptr;
     std::string bytes;
-    if (!read_whole(path, ECUIO_SIGNAL_FILE_MAX_BYTES, "signal file", &bytes,
-                    why)) {
+    if (!read_whole(path,
+                    recorded ? ECUIO_SIGNAL_SET_MAX_BYTES
+                             : ECUIO_SIGNAL_FILE_MAX_BYTES,
+                    "signal file", &bytes, why)) {
         return ECUIO_ERR_LOAD_FAILED;
     }
-    const ecuio_status_t st =
-        ecuio_signal_file_load(bytes.data(), bytes.size(), file);
+    const ecuio_status_t st = ecuio_signal_file_load_with(
+        bytes.data(), bytes.size(), recorded ? ECUIO_SIGNAL_FILE_LOAD_SET : 0u,
+        file);
     if (st != ECUIO_OK) {
         *why = ecuio_last_error_detail();
     }
@@ -80,8 +85,7 @@ int use_signal_file(const char* path, const char* uri, std::string* opened)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream replay:// with neither --signals nor --plugin (ADR-0051
@@ -163,7 +167,7 @@ int use_recording_signals(const char* uri, std::string* opened)
     }
     ecuio_signal_file_t* file = nullptr;
     ecuio_status_t st =
-        load_signal_file((folder + "/signals.json").c_str(), &file, &why);
+        load_signal_file((folder + "/signals.json").c_str(), &file, &why, true);
     if (st == ECUIO_OK) {
         st = ecuio_profile_register(profile.c_str(),
                                     ecuio_signal_file_set(file), nullptr);
@@ -179,8 +183,7 @@ int use_recording_signals(const char* uri, std::string* opened)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream replay:// with no --conditions (ADR-0063 section 8): the
@@ -494,8 +497,7 @@ int use_plugin(const char* path, const char* uri)
     Output out;
     write_start(out);
     write_error(out, st, why.c_str());
-    out.flush();
-    return kExitConnect;
+    return ended(out, kExitConnect);
 }
 
 // stream's and log's profile source: a plugin's variants registered, a

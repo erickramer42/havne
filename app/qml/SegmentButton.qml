@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.segments, QmlTest.log, QmlTest.recordings, QmlTest.phone, QmlTest.settings (test_qml)
+// Testing: QML: QmlTest.segments, QmlTest.log, QmlTest.recordings*, QmlTest.phone_*, QmlTest.settings (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -38,6 +38,7 @@ AbstractButton {
         border.color: seg.visualFocus ? Theme.text : Theme.outline
     }
     contentItem: Text {
+        textFormat: Text.PlainText
         id: segLabel
         text: seg.text
         font.pixelSize: seg.labelSize

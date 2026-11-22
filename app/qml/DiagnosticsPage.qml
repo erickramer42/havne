@@ -1,6 +1,6 @@
 // File/layer: app/qml/DiagnosticsPage.qml | Qt6 Quick, UI layer
 // Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.diagnostics,
-//          QmlTest.phone (test_qml)
+//          QmlTest.phone_* (test_qml)
 
 import QtCore
 import QtQuick
@@ -326,6 +326,7 @@ Page {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "diagnosticsStatus"
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
@@ -342,6 +343,7 @@ Page {
         }
 
         Label {
+            textFormat: Text.PlainText
             objectName: "reportNote"
             visible: root.reportNote !== ""
             Layout.fillWidth: true
@@ -389,6 +391,7 @@ Page {
                         spacing: 10
 
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "clearConfirmTitle"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -398,6 +401,7 @@ Page {
                             color: Theme.text
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "clearConfirmText"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -454,6 +458,7 @@ Page {
                         spacing: 10
 
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "clearMovingTitle"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -467,6 +472,7 @@ Page {
                             color: Theme.text
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "clearMovingText"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -516,6 +522,7 @@ Page {
 
                         SectionLabel { text: qsTr("Inspection readiness") }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "inspectionText"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -525,6 +532,7 @@ Page {
                                  : Theme.warning
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "inspectionRule"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -565,6 +573,7 @@ Page {
                             inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText
                         }
                         Label {
+                            textFormat: Text.PlainText
                             readonly property string summary: Bridge.describeDtc(dtcLookupField.text)
                             objectName: "dtcLookupResult"
                             visible: summary !== ""
@@ -601,12 +610,14 @@ Page {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 Label {
+                    textFormat: Text.PlainText
                     text: qsTr("ECU %1").arg(card.ecu.ecu)
                     font.pixelSize: Theme.fontEmphasis
                     font.weight: Font.DemiBold
                     color: Theme.text
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "ecuState"
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
@@ -617,6 +628,7 @@ Page {
 
             // The last clear's outcome, above the read that followed it
             Label {
+                textFormat: Text.PlainText
                 objectName: "clearState"
                 visible: text !== ""
                 Layout.fillWidth: true
@@ -641,6 +653,7 @@ Page {
                         color: root.milColor(card.ecu)
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "milLabel"
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
@@ -658,6 +671,7 @@ Page {
                         Layout.fillWidth: true
                         spacing: 2
                         Label {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: root.listTitle(listRow.modelData.key) + "  ·  " +
@@ -666,6 +680,7 @@ Page {
                             font.pixelSize: Theme.fontCaption
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "codes_" + listRow.modelData.key
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
@@ -677,6 +692,7 @@ Page {
                             color: listRow.modelData.codes.length > 0 ? Theme.text : Theme.textDim
                         }
                         Label {
+                            textFormat: Text.PlainText
                             objectName: "titles_" + listRow.modelData.key
                             visible: text !== ""
                             Layout.fillWidth: true
@@ -694,6 +710,7 @@ Page {
                           : qsTr("Readiness monitors")
                 }
                 Label {
+                    textFormat: Text.PlainText
                     visible: card.ecu.readiness === "answered" && card.ecu.monitors.length === 0
                     text: qsTr("The ECU reports none")
                     color: Theme.textDim
@@ -718,12 +735,14 @@ Page {
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         visible: monitorGrid.cycleShown
                         text: qsTr("This drive")
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
                     }
                     Label {
+                        textFormat: Text.PlainText
                         visible: monitorGrid.cycleShown
                         text: qsTr("Since clear")
                         color: Theme.textDim
@@ -733,6 +752,7 @@ Page {
                         // three cells a monitor: name, this drive, since the clear
                         model: card.ecu.monitors.length * 3
                         delegate: Label {
+                            textFormat: Text.PlainText
                             id: monitorCell
                             required property int index
                             readonly property var monitor: card.ecu.monitors[Math.floor(index / 3)]
@@ -756,6 +776,7 @@ Page {
 
                 SectionLabel { text: qsTr("Freeze frame") }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "freezeLabel"
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
@@ -775,12 +796,14 @@ Page {
                             Layout.fillWidth: true
                             spacing: Theme.spacing
                             Label {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                                 text: valueRow.modelData.name
                                 color: Theme.text
                             }
                             Label {
+                                textFormat: Text.PlainText
                                 objectName: "freezeValue"
                                 text: root.valueText(valueRow.modelData.value,
                                                      valueRow.modelData.decimals,
@@ -796,6 +819,7 @@ Page {
     }
 
     component SectionLabel: Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         Layout.topMargin: 4
         font.pixelSize: Theme.fontCaption

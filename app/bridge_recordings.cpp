@@ -88,6 +88,46 @@ bool readRecordedHeader(const QString& folder, cli::RecordedSignals* recorded)
 
 } // namespace
 
+void SessionBridge::logReplayMadeUnder(const QString& uri)
+{
+    std::string folder8;
+    if (!cli::replay_folder(uri.toStdString(), &folder8)) {
+        return;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    if (!readRecordedHeader(folder, &recorded)) {
+        return;
+    }
+    // A signals.csv is a header row and one row for each value
+    QFile values(folder + QStringLiteral("/signals.csv"));
+    // Each line is read in bounded pieces, as the header's is, and the rest
+    // of a long one skipped: a file of one long line costs 64 KiB, not its
+    // size, and its second line is still the next one
+    const auto nextLine = [&values]() {
+        QByteArray line = values.readLine(64 * 1024);
+        // An empty read is a read error, and atEnd() stays false after one
+        for (QByteArray rest = line;
+             !rest.isEmpty() && !rest.endsWith('\n') && !values.atEnd();) {
+            rest = values.readLine(64 * 1024);
+        }
+        return line;
+    };
+    const bool hasValues = values.open(QIODevice::ReadOnly) &&
+                           nextLine().size() > 0 &&
+                           !nextLine().trimmed().isEmpty();
+    const QString profile = QString::fromStdString(recorded.profile);
+    emit logMessage(
+        (profile.isEmpty()
+             ? QStringLiteral("Replay: the recording names no profile")
+             : QStringLiteral("Replay: recorded under profile %1")
+                   .arg(profile)) +
+        (hasValues ? QString()
+                   : QStringLiteral("; it holds no signal values, so rows "
+                                    "stay empty unless the frames decode "
+                                    "under the profile played")));
+}
+
 QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 {
     const std::string uri8 = uri.toStdString();
@@ -126,7 +166,7 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     if (!copy.open(QIODevice::ReadOnly)) {
         return as_loaded(QStringLiteral("is missing"));
     }
-    const QByteArray bytes = copy.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+    const QByteArray bytes = copy.read(ECUIO_SIGNAL_SET_MAX_BYTES + 1);
     const QString sha = QString::fromLatin1(
         QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
     if (sha.toStdString() != recorded.sha256) {
@@ -137,16 +177,12 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
                            : QString::fromStdString(
                                  cli::with_profile(uri8, p.toStdString()));
     };
-    // The same bytes in the store: the vehicle's own file, under its name
-    if (m_signalStore.profileOf(sha) == profile) {
-        return selecting(profile);
-    }
     auto held = m_replayFiles.find(sha);
     if (held == m_replayFiles.end()) {
         ecuio_signal_file_t* file = nullptr;
-        if (ecuio_signal_file_load(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()),
-                                   &file) != ECUIO_OK) {
+        if (ecuio_signal_file_load_with(
+                bytes.constData(), static_cast<size_t>(bytes.size()),
+                ECUIO_SIGNAL_FILE_LOAD_SET, &file) != ECUIO_OK) {
             return as_loaded(
                 QStringLiteral("doesn't load (%1)")
                     .arg(QString::fromUtf8(ecuio_last_error_detail())));
@@ -207,7 +243,7 @@ QVariantMap recordingRowOf(const QFileInfo& info)
         // "columns" line is read no further than that many lines at 150
         constexpr qint64 kHeaderBytes =
             static_cast<qint64>(ECUIO_SET_MAX_TABLE +
-                                ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
+                                ECUIO_SIGNAL_SET_MAX_SIGNALS) *
             150;
         // A line longer than a read (a "focus" line names every pick) comes in
         // parts, and only the part that starts it is judged

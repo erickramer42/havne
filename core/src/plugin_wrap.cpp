@@ -12,6 +12,7 @@
 #include "ecuio/signal_sets.h"
 #include "error_detail.h"
 #include "json.h"
+#include "least_core.h"
 #include "plugin_rules.h"
 #include "sha256.h"
 #include "signal_file_build.h"
@@ -136,7 +137,15 @@ void check_packed(const char* packed, size_t length, const char* prefix)
         ecuio_detail_set("%s%s", prefix, words.c_str());
         throw passed{s};
     }
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    (void)ecuio_plugin_info(p, &info);
     ecuio_plugin_free(p);
+    if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
+        throw refusal{"the plugin has the conversation tier, which a put or "
+                      "a drop doesn't carry over: change the variant in the "
+                      "plugin's folder, which Havne loads as it stands"};
+    }
 }
 
 /* Whether ecuio_plugin_load takes text; when not, *why is its reason
@@ -159,6 +168,20 @@ bool loads(const std::string& text, std::string* why)
                ? words.substr(colon + 2)
                : words;
     return false;
+}
+
+/* data/<variant>.json, numbered from -2 while files holds it or it names
+ * a Windows device: the package laid out as a folder, the form a plugin
+ * is edited in, would open the device */
+std::string data_path(const std::string& variant, const Value* files)
+{
+    std::string path = "data/" + variant + ".json";
+    for (unsigned n = 2; ecuio_plugin_rules::names_a_device(path) ||
+                         (files != nullptr && files->find(path) != nullptr);
+         ++n) {
+        path = "data/" + variant + "-" + std::to_string(n) + ".json";
+    }
+    return path;
 }
 
 /* name as user.<slug>'s slug, cut to cap bytes with no '-' at its end */
@@ -184,13 +207,38 @@ void check_id(const std::string& id, size_t most, const char* what)
     }
 }
 
-/* This core's X.Y.Z, what a manifest's requires.core is compared with */
-std::string core_text()
+/* doc's requires.core made the least core that reads doc and at least
+ * floor (least_core.h): the plugin loader works it out from doc as
+ * written. A doc it refuses keeps its value: the check after says why. */
+void set_least_core(Value& doc, ecuio_least::version floor)
 {
-    uint32_t v[3] = {0, 0, 0};
-    ecuio_plugin_rules::core_version(v);
-    return std::to_string(v[0]) + "." + std::to_string(v[1]) + "." +
-           std::to_string(v[2]);
+    const std::string text = ecuio_json::write(doc);
+    ecuio_plugin_t* p = nullptr;
+    const ecuio_status_t s =
+        ecuio_plugin_load(text.data(), text.size(), nullptr, nullptr, &p);
+    if (s == ECUIO_ERR_OUT_OF_MEMORY) {
+        throw std::bad_alloc();
+    }
+    if (s != ECUIO_OK) {
+        return;
+    }
+    ecuio_least::raise(floor, ecuio_least::of_plugin(p));
+    ecuio_plugin_free(p);
+    at(*at(doc, "requires"), "core")->text =
+        ecuio_least::text(ecuio_least::within_core(floor));
+}
+
+/* A changed doc's requires.core: the least core that reads it, or the
+ * value it had when that is higher, which is the author's word and
+ * keeps the output a function of the inputs */
+void keep_or_raise_core(Value& doc)
+{
+    ecuio_least::version stored = {{0, 0, 0}};
+    if (!ecuio_plugin_rules::parse_version(
+            at(*at(doc, "requires"), "core")->text, stored.v)) {
+        stored = ecuio_least::version{{0, 0, 0}};
+    }
+    set_least_core(doc, stored);
 }
 
 std::string wrapped(const char* file, size_t length,
@@ -239,7 +287,7 @@ std::string wrapped(const char* file, size_t length,
     add(doc, "name", text_value(name));
     add(doc, "version", text_value("1.0.0"));
     Value needs = empty_of(Type::object);
-    add(needs, "core", text_value(core_text()));
+    add(needs, "core", text_value("0.0.0")); /* set_least_core's */
     add(doc, "requires", std::move(needs));
     add(doc, "lineage",
         text_value(ecuio_sha256::hex_of(file, length)
@@ -274,7 +322,7 @@ std::string wrapped(const char* file, size_t length,
     if (in.find("ecus") != nullptr) {
         add(doc, "ecus", take(in, "ecus"));
     }
-    const std::string path = "data/" + variant + ".json";
+    const std::string path = data_path(variant, nullptr);
     Value entry = empty_of(Type::object);
     add(entry, "id", text_value(variant));
     Value listed = empty_of(Type::array);
@@ -286,6 +334,7 @@ std::string wrapped(const char* file, size_t length,
     Value files = empty_of(Type::object);
     add(files, path, std::move(in));
     add(doc, "files", std::move(files));
+    set_least_core(doc, ecuio_least::version{{0, 0, 0}});
     return ecuio_json::write(doc);
 }
 
@@ -388,6 +437,19 @@ struct package {
         return i;
     }
 
+    /* Whether path is one of the manifest's "pages", which no variant reads */
+    bool is_page(const std::string& path)
+    {
+        if (const Value* list = at(doc, "pages")) {
+            for (const Value& f : list->items) {
+                if (f.text == path) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     bool listed_elsewhere(const std::string& path, size_t but)
     {
         Value& list = variants();
@@ -405,7 +467,7 @@ struct package {
     }
 
     /* Takes out the data files only variant index lists, and the ECUs
-     * only those files read */
+     * only those files read; the pages stay */
     void detach(size_t index)
     {
         const Value* list = at(doc, "ecus");
@@ -416,6 +478,10 @@ struct package {
         std::set<std::string> kept;
         std::vector<Member> staying;
         for (Member& m : files().members) {
+            if (is_page(m.key)) {
+                staying.push_back(std::move(m));
+                continue;
+            }
             bool own = false;
             for (const Value& f :
                  variants().items[index].find("files")->items) {
@@ -505,6 +571,9 @@ public:
         }
         if (!(before == after)) {
             for (Member& m : p_.files().members) {
+                if (p_.is_page(m.key)) {
+                    continue;
+                }
                 for (Value& s : at(m.value, "signals")->items) {
                     if (unnamed(s)) {
                         add(s, "ecu", text_value(id_at(before)));
@@ -632,10 +701,7 @@ std::string put(const char* packed, size_t length, const char* variant_given,
     merge.run();
     *notes = merge.notes();
 
-    std::string path = "data/" + variant + ".json";
-    for (unsigned n = 2; p.files().find(path) != nullptr; ++n) {
-        path = "data/" + variant + "-" + std::to_string(n) + ".json";
-    }
+    const std::string path = data_path(variant, &p.files());
     add(p.files(), path, std::move(in));
     Value listed = empty_of(Type::array);
     listed.items.push_back(text_value(path));
@@ -648,7 +714,7 @@ std::string put(const char* packed, size_t length, const char* variant_given,
         p.variants().items.push_back(std::move(entry));
     }
     p.raise_version();
-    at(*at(p.doc, "requires"), "core")->text = core_text();
+    keep_or_raise_core(p.doc);
     return ecuio_json::write(p.doc);
 }
 
@@ -669,6 +735,9 @@ std::string dropped(const char* packed, size_t length, const char* variant)
     p.variants().items.erase(p.variants().items.begin() +
                              static_cast<std::ptrdiff_t>(index));
     p.raise_version();
+    /* The version is in each variant's written copy, so a longer one
+     * can carry a copy past a file's bytes */
+    keep_or_raise_core(p.doc);
     return ecuio_json::write(p.doc);
 }
 

@@ -1,5 +1,5 @@
 // File/layer: app/recordingimport.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest.Import* (test_bridge); QML: QmlTest.recordings
+// Testing: BRIDGE: BridgeTest.Import* (test_bridge); QML: QmlTest.recordings*
 //
 // Another logger's file made a recording (ADR-0054 sections 4 and 5): a
 // candump log, or a CSV through its column map, imported by core's

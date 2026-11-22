@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard{,_pages,_panel},
 //          QmlTest.dashedit
 
 import QtQuick
@@ -42,6 +42,7 @@ GaugeBase {
     implicitHeight: 96
 
     Text {
+        textFormat: Text.PlainText
         id: title
         objectName: "gaugeTitle"
         Accessible.ignored: true
@@ -56,6 +57,7 @@ GaugeBase {
     }
     readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: gauge.noteAlone ? parent.left : title.right
@@ -76,6 +78,7 @@ GaugeBase {
         spacing: 3
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             id: valueLabel
             objectName: "readout"
             Accessible.ignored: true
@@ -95,6 +98,7 @@ GaugeBase {
             anchors.verticalCenter: valueLabel.verticalCenter
         }
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             visible: gauge.hasValue
@@ -162,6 +166,7 @@ GaugeBase {
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: scaleFrom.implicitHeight
         Text {
+            textFormat: Text.PlainText
             id: scaleFrom
             Accessible.ignored: true
             anchors.left: parent.left
@@ -171,6 +176,7 @@ GaugeBase {
             color: Qt.alpha(Theme.textDim, 0.8)
         }
         Text {
+            textFormat: Text.PlainText
             Accessible.ignored: true
             anchors.right: parent.right
             text: gauge.formatScale(gauge.to)

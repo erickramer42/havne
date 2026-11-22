@@ -1,6 +1,6 @@
 // File/layer: cli/cmd_health.cpp | havne-cli, health (ADR-0054's appendix "the health
 //             report as built")
-// Testing: UNIT: CliHealthRunTest, CliTransferRunTest (ctest);
+// Testing: UNIT: CliHealthRunTest, CliTransferRunTest, CliUsageTest (ctest);
 //          CliHealthTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
@@ -9,6 +9,7 @@
 #include "jsonl.h"
 
 #include "commands.h"
+#include "profile_source.h"
 #include "session_lines.h"
 #include "common.h"
 
@@ -131,7 +132,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    write_session(out, info);
+    write_session(out, session, info);
     out.flush();
     ecuio_register_values_callback(session, on_health_values, values.get());
     install_handlers();
@@ -142,10 +143,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
         ecuio_session_destroy(session);
         return ended(out, kExitConnect);
     }
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const uint32_t channels = module_count(info);
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     const auto settled_now = [&]() {
         bool all = true;
@@ -171,7 +169,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     };
     // The shown defs still owed a first value: PIDs the bitmaps list
     const auto owed_now = [&]() {
-        ecuio_channel_support_t supports[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+        ecuio_channel_support_t supports[ECUIO_MAX_CHANNELS]{};
         for (uint32_t c = 0; c < channels; ++c) {
             (void)ecuio_session_get_channel_support(session, c, &supports[c]);
         }
@@ -226,6 +224,44 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
     ecuio_session_destroy(session);
     return write_health_result(out, a, rc, r, settled);
+}
+
+// health's arguments, then the recording's report or the session's
+int cmd_health(int argc, char** argv)
+{
+    cli::HealthArgs h;
+    std::string why;
+    if (!cli::parse_health(argc, argv, h, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (!h.live) {
+        return run_health_recording(h);
+    }
+    const char* uri = h.source;
+    std::string opened;
+    if (h.plugin != nullptr) {
+        const int rc = use_plugin(h.plugin, uri);
+        if (rc >= 0) {
+            return rc;
+        }
+    } else if (h.signals != nullptr) {
+        const int rc = use_signal_file(h.signals, uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        uri = opened.c_str();
+    } else {
+        const int rc = use_recording_signals(uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        if (!opened.empty()) {
+            uri = opened.c_str();
+        }
+    }
+    return run_health_session(h, uri);
 }
 
 } // namespace cmd

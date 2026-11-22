@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsList.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The list of Settings' pages, each row with its summary on the right
 
 import QtQuick
@@ -42,6 +42,7 @@ ColumnLayout {
                 columnSpacing: 10
                 rowSpacing: 2
                 Label {
+                    textFormat: Text.PlainText
                     text: row.modelData.title
                     color: Theme.text
                     font.pixelSize: Theme.fontEmphasis
@@ -50,6 +51,7 @@ ColumnLayout {
                 // The value gives way whole in a narrow row (a phone zoomed
                 // far in): a few letters of it say nothing
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "settingsRowSummary"
                     visible: row.width >= 200
                     text: row.modelData.key === "log" ? list.logSummary : row.modelData.summary

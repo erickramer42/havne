@@ -1,8 +1,8 @@
 # ADR-0064: One store: every import becomes a plugin
 
-- **Status:** Accepted. Built: "Build steps" 1 to 5 and the phone run
-  (the appendices of 2026-11-13 to 2026-11-15). Not built: step 6,
-  `SignalStore` out of the app (v0.9.0).
+- **Status:** Accepted. Built: "Build steps" 1 to 6, the phone run
+  and the removal of the earlier version's data (the appendices of
+  2026-11-13 to 2026-11-18).
 - **Date:** 2026-11-13.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI, never inferred, section 3);
@@ -155,9 +155,11 @@ void ecuio_plugin_text_free(char* text);
   today): a variant added from a file with its own `source` keeps that
   file's attribution in every recording, so an OBDb file's CC BY-SA
   block can't be lost by sharing a plugin with a hand-written one.
-- **`requires.core`** is the running core's version: what the wrap
-  writes is what this core reads, and an older core refuses it with
-  words rather than half-reading it (Q6).
+- **`requires.core`** is the least core version that reads the
+  plugin's format and what its file uses, 0.8.0 at least (the
+  `lineage` the wrap writes): the same input wraps to the same bytes
+  under any core, so the store finds its copy again, and an older core
+  refuses the plugin with words rather than half-reading it (Q6).
 - **`lineage`**, a new optional manifest key (ADR-0052 section 2): 32
   hex digits, the start of the SHA-256 of the bytes the plugin was
   first made from (the wrapped signal file). The wrap writes it;
@@ -444,6 +446,10 @@ sees an empty store.
    form's code keeps its document; only where the text goes changes.
 4. An unmigrated file (Q6) saves its kept bytes, as now.
 
+Amended 2026-11-17: the form's kinds gain `computed`
+([ADR-0062](0062-computed-grammar.md)'s appendix of 2026-11-17); it saves
+through the same `put_variant`.
+
 ### Q8. A plugin extending another plugin's variant
 
 **Options:** (a) now: a data file's `extends` names
@@ -523,7 +529,7 @@ format.
 | Python | `python/tests` | The three calls |
 | Export and update | Bridge (`BridgeTest.OneStore*`) | The export's bytes equal the store's copy for a plugin of the user's own and for anyone else's; with a vehicle that has a VIN, `vinMatches` and an OBDb import at a decoded year, the bytes hold no VIN, its hash, a `match`, a `my<year>` variant or any `store.json` fact; the share-alike note for a plugin with an OBDb variant and none without; the round trip over two settings folders (export, import, mark Mine, a newer export updates in place with the index facts kept and a dropped variant's pick shown missing); the same bytes change nothing; the same `lineage` at an equal or lower version refused; a third party's package reusing a Mine id, with no `lineage` or another, refused |
 | Store and migration | Bridge (`test_bridge`, `BridgeTest.Plugin*`, `BridgeTest.OneStore*`) | Each import kind; Mine and the package refusal; the index; the migration end to end on a settings folder of today's shape, stopped after each step and run again, giving one result; a file that doesn't wrap kept as unmigrated; the URIs rewritten and every other key kept |
-| The page | QML (`QmlTest.settings`, `.vehiclebook`, `.signalform`, `.phone`) | One Import's three kinds; picks and the stand-in with one and two obd2 variants; the form saving into the own variant; Save as a signal file; Copy to my plugin; Export plugin on a plugin of the user's own and on anyone else's, its share-alike note, Mine's line and the update notice; the book's format 2 and the old key untouched; every page at 384 and 320 px |
+| The page | QML (`QmlTest.settings_*`, `.vehiclebook`, `.signalform`, `.phone`) | One Import's three kinds; picks and the stand-in with one and two obd2 variants; the form saving into the own variant; Save as a signal file; Copy to my plugin; Export plugin on a plugin of the user's own and on anyone else's, its share-alike note, Mine's line and the update notice; the book's format 2 and the old key untouched; every page at 384 and 320 px |
 | A dashboard across the move | QML (`QmlTest.dashboard`) | A layout bound to `key:` refs of a file before the migration binds the same rows after; an old layout file's `files` are found |
 | The app on screen | `run-havne` smoke | Import each kind, pick, export a plugin and import the file again, connect `mock://` |
 | An older Havne | Desk run sheet | v0.7.4 on a migrated settings folder: its vehicles and files as before, the plugins refused with words |
@@ -936,6 +942,35 @@ what Q1, Q2 and Q4 left to the build:
   variant named, the id is the file's name as a slug cut to 24 bytes.
   The data file is `data/<variant>.json`, or `data/<variant>-2.json`
   and on while a file that stays has that path.
+
+  *Note (2026-11-16): `requires.core` is not the running core's
+  version. The wrap writes the least core that reads the plugin it made;
+  a put writes the higher of the plugin's own and the least core that
+  reads it with the file put in, so a value its author set above that is
+  kept; a drop leaves it. The loaders work the least out at the gates
+  that read each feature (`core/src/least_core.h`: one row for each
+  format and each feature an older core refuses or reads to another
+  meaning, with its release), and a row of a release still to come is
+  cut to the running core's version, so a build before that release
+  takes what it wrote. A put brings a data file with a source of its
+  own, which raises it to 0.8.0 unless that source is the manifest's;
+  so a put into a hand-written package with no `lineage` writes less
+  than 0.8.0 only when the file's source is the manifest's, and a wrap
+  always writes 0.8.0 or more. `PluginWrapTest.EachRowsInputNeedsItsCore`,
+  `.AWrapRequiresTheLeastCoreThatReadsIt`,
+  `.APutKeepsAHigherRequiresAndRaisesALowerOne`.*
+
+  *Note (2026-11-17): a drop judges its result as a put does. The line
+  above has a drop leave `requires.core`, "since it adds nothing to
+  read". It does add something: the raised version is in each variant's
+  written copy (its notes), so a version one digit longer ("1.9.0" to
+  "1.10.0") can carry a copy at one file's 1 MiB past it, which a core
+  before 0.9.0 refuses (ADR-0065, `least_core.h`'s `kSetBytes`). And a
+  stated value below what the plugin needs stayed below it through a
+  drop, which is what Q1's least core exists to prevent.
+  `ecuio_plugin_drop_variant` ends as `_put_variant` does: `requires.core`
+  is the higher of the stated value and the least core that reads the
+  result, never past this core's own version.*
 - **A data file's own `source`:** the wrap moves the file's to the
   manifest; a put keeps the file's in its data file, and the loader
   writes a variant's signal file with the source of the first of its
@@ -1002,3 +1037,82 @@ Build step 5: the page's choices the questions above left to the build.
 - **A layout file's `files`** are the picks its `key:` references need, each by the plugin's name (with its variant where the plugin has several) and the SHA-256 of the variant's written file. A load finds a pick by that hash or by the hash of a signal file the variant was made from (`wrappedFrom`), so a layout saved before the move, which names the signal file itself, is told of nothing missing once the plugin made from that file is picked. The key and its shape are unchanged, so `havne-cli layout check` reads both. A name past the file's 80 code points is cut before its variant, which stays whole. A layout names a pick's file by its content, so a variant replaced or edited since the save is another file: the load says the layout was saved with another version of that plugin, and only a plugin the vehicle doesn't pick is called missing.
 - **The one list's saves go through the save picker** (as every save in the app does): Save as a signal file..., Export plugin... and a not-moved file's Save... offer the page's own name, and a save that is refused or fails removes only the empty document its own pick made.
 - **A press keeps its focus** in the one list, as it did in the earlier Signals page: the rows are not remade by a pick, and the focus follows the row a first pick moves.
+
+## Appendix: the old data's removal as built (2026-11-17)
+
+Q6 left the old data, `vehicles/document` and `signals/`, for an older
+Havne through v0.8.x. It is removed at the start after the one that
+migrated: `SessionBridge::migrateStores` calls `StoreMigration::removeOld`
+before the move, so only a mark an earlier start set removes anything,
+and the start that moves the files keeps them where an older Havne reads
+them.
+
+- **When:** the store's mark is set, and `vehicles/book` holds a format 2
+  object. A later format, a `format` that isn't a number, text that isn't
+  JSON or no book removes nothing, since the records that spare a copy
+  can't be read from it.
+- **What stays:** every copy whose bytes are nowhere else: one a record
+  names, in a vehicle's `unmigrated` or the book's own (where Forget,
+  Forget all and an unreadable old book put them), with `"kept": false`
+  or with no file of its hash in `plugins/unmigrated/`. It is judged by
+  its name alone: a copy edited since is still its record's. It stays in
+  `signals/`, where the record's Save reads it (`oldCopy`): such a copy
+  is past what `plugins/unmigrated/` holds, that folder refused it, or it
+  was there but wouldn't open at the move (held open elsewhere), which
+  the move records as `"kept": false`. A file in `signals/` not named
+  `<sha256>.json` stays too.
+- **Files added after the move:** an older Havne run after the move adds
+  its files to `signals/` and `vehicles/document`, which this release no
+  longer reads; they go with the rest (Q6: a downgrade past v0.8.0 sees
+  an empty store).
+- **The order,** each step safe to stop after: `vehicles/document` first
+  (a failed write stops it with nothing deleted, said in one line, tried
+  again at the next start; so does the key still read after the write, as
+  Windows' registry leaves it when its delete fails, which sets no error,
+  and as a fallback file of a scoped `QSettings` does), so an older
+  Havne in between shows no vehicles rather than vehicles whose files
+  went missing; then each other copy; then the folder, when it ends
+  empty. A restart finds the mark and the book again and finishes.
+- **A record's Remove** still deletes the kept bytes alone; its copy in
+  `signals/` goes at the next start, spared by nothing.
+- **The log:** one line for each part that went, the spared copies
+  counted only beside a removal; nothing when there was nothing to
+  remove. Seam: `stopAfterForTesting(Step::OldBook)` and
+  `(Step::OldCopy, n)`.
+
+Amended 2026-11-20: the removal deletes a copy only when its bytes are somewhere else whatever the book says: a plugin was made from it (`wrappedFrom`) or `plugins/unmigrated/` holds them, and the copy still hashes to its name (one edited since stays, reported once as left). The book's records only add to what is spared, so no book state takes the only copy: a v0.8.0 move recorded no copy that no vehicle named, and a start after it would otherwise have deleted those. A copy in `signals/` that no vehicle of a readable book names gets a record under the book's own `unmigrated`, `"kept": false`, so Save and Remove reach it as they reach a file that didn't move. A copy whose `kept: false` record the user removes stays in `signals/` for good, and the folder with it: accepted, since its bytes are nowhere else. This amends "A record's Remove" above, whose copy no longer goes at the next start.
+
+**Note (2026-11-21):** the removal as it stands in v0.9.0 differs from the appendix above in these ways.
+
+- **Added files:** an older Havne run after the move adds its files to `signals/` and `vehicles/document`. The removal takes only what it can show is held elsewhere: a copy goes when a plugin was made from it or `plugins/unmigrated/` holds the very bytes it has (compared, not just the name), and it still hashes to its name. An older Havne's new copies are left in `signals/`, counted in the "left" line. The bullet "they go with the rest" is true of the `vehicles/document` key only, and only when the move read the book.
+- **A record's Remove:** it deletes the kept bytes and the record. The copy in `signals/` is then left for good: no record spares it and no plugin or kept file holds its bytes, so the removal never takes it. The bullet "its copy goes at the next start, spared by nothing" is wrong.
+- **What stays, judged by bytes:** a copy is no longer judged by its name alone. A kept file cut short or damaged, or a copy edited since the wrap or the keep, keeps the copy.
+- **A v0.8.0 move recorded no copy that no vehicle names.** At the first removal after the move, each such copy that is nowhere else gets a record under the book's own `unmigrated` (kept false, "No vehicle lists it"), once: the preference `vehicles/unnamedRecorded` says it is done (the move of this version sets it). A record the user removes afterwards is not made again.
+- **An old book the move couldn't read:** `vehicles/document` stays where it is, whole, at every start; it is removed only when the move could read and carry it. One line says so in the activity log.
+- **Device names:** a plugin folder's path part ending in a space (`nul `) is refused like one ending in a dot.
+- **Downgrade:** running v0.7.x after the move is unsupported. A vehicle list it writes under `vehicles/document` is not read again by a later version (the store is marked, so the move doesn't run), and the copies it leaves in `signals/` stay, unlisted. Use v0.8.0 to go back; it keeps its own book.
+
+## Appendix: step 6 as built (2026-11-18)
+
+`SignalStore` and the bridge calls only it served are gone:
+`importSignalFile`, `importSignalText`, `signalFileText`,
+`saveSignalFile`, `useSignalFiles`, `deleteUnusedSignalFiles`, `keepObdb`
+and `isObdbImport`. No page called them after step 5, so nothing a user
+sees changed. `previewObdb(url, ...)` and `dropObdb` stay: the plugin
+store's OBDb keep (`keepObdbPlugin`) takes a set either preview holds.
+
+- **A replay of a recording whose copy matches** decodes with the copy
+  under its own name (`rec.<16 hex>`), whether or not the store still
+  holds the variant: the bridge asked only the old store whether it held
+  the same bytes.
+- **`fileOfSet`** asks the plugin store, then the replay's own files.
+- **The plugin store's entries** carry, per variant, `extends`, `counts`,
+  `owns` and `replacedNames` (the names of the base's signals the variant
+  replaces, in the file's order; the entry's `replaced` key is the
+  version replaced).
+- **The earlier version's folder** is read by the migration and by
+  `oldCopy` (a not-moved file's Save), and only the removal at the start
+  after the move deletes from it (the appendix "the old data's removal as
+  built"). Nothing else writes there or deletes from it, so a copy a
+  `"kept": false` record names stays where Save finds it
+  (`BridgeTest.OneStoreRemovalAloneDeletesFromTheOldFolder`).

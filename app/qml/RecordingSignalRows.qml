@@ -1,5 +1,5 @@
 // File/layer: app/qml/RecordingSignalRows.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.recordings*, QmlTest.phone_* (test_qml)
 // The recording's signals, a row each with its swatch, tick and readouts:
 // one part of RecordingsPage, which holds the state
 
@@ -69,7 +69,7 @@ ListView {
                 objectName: "plotCheck"
                 checked: root.host.plotted[signalRow.signalIndex] === true
                 enabled: !signalRow.modelData.isText
-                onToggled: root.host.togglePlotted(signalRow.signalIndex)
+                onToggled: root.host.cursorsPart.togglePlotted(signalRow.signalIndex)
                 Accessible.name: qsTr("Plot %1").arg(signalRow.modelData.name)
             }
             Rectangle {
@@ -77,9 +77,9 @@ ListView {
                 readonly property bool shown: root.host.plotted[signalRow.signalIndex] === true
                 implicitWidth: 10; implicitHeight: 10
                 radius: 2
-                color: shown ? Theme.seriesColor(root.host.slotOf(signalRow.signalIndex)) : "transparent"
+                color: shown ? Theme.seriesColor(root.host.panesPart.slotOf(signalRow.signalIndex)) : "transparent"
                 border.width: 1
-                border.color: shown ? Theme.seriesColor(root.host.slotOf(signalRow.signalIndex))
+                border.color: shown ? Theme.seriesColor(root.host.panesPart.slotOf(signalRow.signalIndex))
                                     : Theme.textDim
                 opacity: shown ? 1.0 : 0.5
             }
@@ -89,14 +89,16 @@ ListView {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
+                        textFormat: Text.PlainText
                         text: signalRow.modelData.name
                         color: Theme.text
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "cursorValue"
-                        text: root.host.atText(signalRow.at, signalRow.modelData)
+                        text: root.host.textsPart.atText(signalRow.at, signalRow.modelData)
                         Layout.maximumWidth: Math.round(signalRow.width * (root.host.compareAligned ? 0.3 : 0.5))
                         elide: Text.ElideRight
                         color: Theme.text
@@ -106,9 +108,10 @@ ListView {
                 }
                 // On a phone B and the change have a line of their own
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "cursorSpanLine"
                     visible: root.host.phoneShape && root.host.hasSpan
-                    text: visible ? root.host.spanCaption(signalRow.modelData) : ""
+                    text: visible ? root.host.textsPart.spanCaption(signalRow.modelData) : ""
                     Layout.fillWidth: true
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideLeft
@@ -120,9 +123,10 @@ ListView {
             }
             // On the desktop, two more columns
             Label {
+                textFormat: Text.PlainText
                 objectName: "cursorBValue"
                 visible: !root.host.phoneShape && root.host.hasSpan
-                text: visible ? root.host.atText(root.host.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
+                text: visible ? root.host.textsPart.atText(root.host.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
                 Layout.preferredWidth: Math.round(signalRow.width * 0.18)
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
@@ -131,10 +135,11 @@ ListView {
                 font.features: Theme.valueFeatures
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "cursorDelta"
                 visible: !root.host.phoneShape && root.host.hasSpan
                 text: visible && !signalRow.modelData.isText
-                      ? root.host.statChange(root.host.spanStats[signalRow.signalIndex]) : ""
+                      ? root.host.textsPart.statChange(root.host.spanStats[signalRow.signalIndex]) : ""
                 Layout.preferredWidth: Math.round(signalRow.width * 0.18)
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
@@ -142,15 +147,30 @@ ListView {
                 font.family: Theme.valueFamily
                 font.features: Theme.valueFeatures
             }
+            // Which pane the signal is drawn in
+            ThemedButton {
+                id: paneButton
+                objectName: "paneButton"
+                visible: root.host.plotted[signalRow.signalIndex] === true && !signalRow.modelData.isText
+                flat: true
+                compact: true
+                text: qsTr("Pane")
+                Layout.preferredHeight: Theme.touchTarget
+                Layout.alignment: Qt.AlignVCenter
+                Accessible.name: qsTr("Pane of %1: %2").arg(signalRow.modelData.name)
+                                     .arg(root.host.panesPart.paneLabelOf(signalRow.signalIndex))
+                onClicked: root.host.panesPart.openPaneMenu(signalRow.signalIndex, paneButton)
+            }
             // The compared recording's, at the cursor
             Label {
+                textFormat: Text.PlainText
                 objectName: "compareValue"
                 readonly property var at: root.host.compareReadout[signalRow.signalIndex]
                 visible: root.host.compareAligned
                 text: !at || at.atMs < 0 ? qsTr("—")
                       : signalRow.modelData.isText ? at.text
                       : at.label ? at.label
-                      : root.host.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
+                      : root.host.formatPart.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
                 Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                 elide: Text.ElideRight
                 color: Theme.textDim

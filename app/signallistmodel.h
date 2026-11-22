@@ -1,5 +1,5 @@
 // File/layer: app/signallistmodel.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview
+// Testing: BRIDGE: BridgeTest (test_bridge); QML: QmlTest.liveview{,_pause}
 
 #pragma once
 
@@ -128,10 +128,20 @@ public:
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
         IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
-        UnaskedRole /* the session's focus leaves it unasked
-                     * (applyUnasked, ecuio_session_get_unasked_signals):
-                     * Live and the Dashboard say "not asked" in place of
-                     * a value */
+        UnaskedRole, /* the session's focus leaves it unasked
+                      * (applyUnasked, ecuio_session_get_unasked_signals):
+                      * Live and the Dashboard say "not asked" in place of
+                      * a value */
+        HiddenWhyRole, /* why a hidden row is hidden: "unsupported" (its
+                        * ECU's supported-PID list leaves it out) or
+                        * "absent" (its replies come without the field),
+                        * unsupported first when both hold; "" for a shown
+                        * row. Notified with HiddenRole, including when the
+                        * reason changes under a row that stays hidden. */
+        KeyRole        /* the key the signal is kept under (ADR-0065
+                        * section 9, ecuio_signal_set_keys with the set's
+                        * file): what a vehicle's ticks and a recording
+                        * name it by. Fixed per signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -139,8 +149,11 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     // file: the signal file whose set it is (SessionBridge::fileOfSet),
     // for the rows' refs; nullptr for a built-in set or none
+    // pickOnly: the session asks only its picks, so no row is plotted
+    // until ticked (a set that ranks none otherwise plots every row)
     void setSignalSet(const ecuio_signal_set_t* set,
-                      const ecuio_signal_file_t* file = nullptr);
+                      const ecuio_signal_file_t* file = nullptr,
+                      bool pickOnly = false);
     // A def's fixed facts beyond the def itself, the same for a row and
     // for SessionBridge::profileSignals: its ref (RefRole), whether it
     // is an enum, and its decoded range in the def's unit, NaN for none
@@ -174,6 +187,8 @@ public:
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int tickedCount() const { return m_tickedCount; }
     int hiddenCount() const { return m_hiddenCount; }
+    // Whether any row has taken a value since the set loaded
+    bool anyValue() const;
     // The ids of the ticked rows Live shows, in the model's order: the
     // rows the chart plots (subscribedCount of them) and the ticked text
     // rows, the focus Start log asks
@@ -239,14 +254,27 @@ public:
     // clears the row's choice, so the row follows its default again. A
     // text row's tick asks it (the default pick takes it) and never plots.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's ticked signals (ADR-0027 section 1): the names of the
-    // rows the user ticked past the default and of the numeric rows
-    // unticked from it, and setting both, which leaves every other row to
-    // its default. A name in both lists is unplotted; a text row is never
-    // unplotted, its default being unticked.
-    Q_INVOKABLE QStringList plottedNames() const;
-    Q_INVOKABLE QStringList unplottedNames() const;
+    // The hidden rows as { name, why } in set order, for Live's list of
+    // them; a binding that reads hiddenCount re-runs it on every judgment
+    Q_INVOKABLE QVariantList hiddenSignals() const;
+    // A vehicle's ticked signals (ADR-0027 section 1), by key (ADR-0065
+    // section 9): the rows the user ticked past the default and the
+    // numeric rows unticked from it, and setting both, which leaves every
+    // other row to its default. A row in both lists is unplotted; a text
+    // row is never unplotted, its default being unticked.
+    // setPlotChoices takes each text as a key, else as a name one row has
+    // (ChoiceRows), so lists kept by name tick the same rows. A text no
+    // row answers, or one whose row has no key (core refused the keys),
+    // is carried: both lists give it back after the rows'
+    // keys, at most CarriedMax in each (the newest), so a tick outlives
+    // a session under a set without its signal. A new set carries none.
+    static constexpr int CarriedMax = 1024;
+    Q_INVOKABLE QStringList plottedKeys() const;
+    Q_INVOKABLE QStringList unplottedKeys() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
+    // Forgets the carried texts, which were another vehicle's: the rows'
+    // own choices stay. No signal.
+    Q_INVOKABLE void dropCarriedChoices();
 
     // Strip-chart pull API: one map per subscribed signal with history,
     // { id, row, name, unit, decimals, value, samples: [ts, val, ...] },
@@ -299,6 +327,7 @@ private:
     struct Entry {
         uint16_t id;
         char name[32];
+        char key[ECUIO_SIGNAL_KEY_MAX + 1]; // "" when core gave none
         char unit[16];
         uint8_t decimals = 0;
         double value = 0.0;
@@ -313,6 +342,8 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        enum class Why : unsigned char { None, Unsupported, Absent };
+        Why why = Why::None;      // the reason it's hidden, unsupported first
         bool unasked = false;     // core: the focus leaves it unasked
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
@@ -349,6 +380,7 @@ private:
     // rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
+    static const char* whyWords(Entry::Why why);
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
@@ -372,6 +404,10 @@ private:
     int m_hiddenCount = 0;
     int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
+    bool m_pickOnly = false;    // the session is asked only its picks
+    // The texts of the last setPlotChoices that no keyed row answered
+    QStringList m_carriedPlotted;
+    QStringList m_carriedUnplotted;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };

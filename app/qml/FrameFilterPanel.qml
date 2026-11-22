@@ -1,5 +1,5 @@
 // File/layer: app/qml/FrameFilterPanel.qml | Qt Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.log, QmlTest.recordings*, QmlTest.phone_* (test_qml)
 
 pragma ComponentBehavior: Bound
 
@@ -64,7 +64,7 @@ GridLayout {
         apply()
     }
 
-    Label { text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+    Label { textFormat: Text.PlainText; text: qsTr("ID"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     ThemedTextField {
         id: filterIds
         objectName: "filterIds"
@@ -77,6 +77,7 @@ GridLayout {
     }
     Item { visible: filterIdsProblem.visible }  // the label column, empty
     Label {
+        textFormat: Text.PlainText
         id: filterIdsProblem
         objectName: "filterIdsProblem"
         visible: text !== ""
@@ -87,7 +88,7 @@ GridLayout {
         Layout.preferredWidth: 0   // the panel's width, not its text's
     }
 
-    Label { text: qsTr("Data"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+    Label { textFormat: Text.PlainText; text: qsTr("Data"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     ThemedTextField {
         id: filterData
         objectName: "filterData"
@@ -100,6 +101,7 @@ GridLayout {
     }
     Item { visible: filterDataProblem.visible }  // the label column, empty
     Label {
+        textFormat: Text.PlainText
         id: filterDataProblem
         objectName: "filterDataProblem"
         visible: text !== ""
@@ -111,7 +113,7 @@ GridLayout {
     }
 
     // The data length in bytes, and a span of the table's seconds
-    Label { text: qsTr("Length"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+    Label { textFormat: Text.PlainText; text: qsTr("Length"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
     RowLayout {
         Layout.fillWidth: true
         Layout.preferredWidth: 0   // the panel's width, not its text's
@@ -126,7 +128,7 @@ GridLayout {
             inputMethodHints: Qt.ImhPreferNumbers | Qt.ImhNoPredictiveText
             onTextEdited: panel.apply()
         }
-        Label { text: qsTr("Time"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+        Label { textFormat: Text.PlainText; text: qsTr("Time"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
         ThemedTextField {
             id: filterTimes
             objectName: "filterTimes"
@@ -140,6 +142,7 @@ GridLayout {
     }
     Item { visible: filterLengthsProblem.visible }  // the label column, empty
     Label {
+        textFormat: Text.PlainText
         id: filterLengthsProblem
         objectName: "filterLengthsProblem"
         visible: text !== ""
@@ -151,6 +154,7 @@ GridLayout {
     }
     Item { visible: filterTimesProblem.visible }  // the label column, empty
     Label {
+        textFormat: Text.PlainText
         id: filterTimesProblem
         objectName: "filterTimesProblem"
         visible: text !== ""
@@ -207,6 +211,7 @@ GridLayout {
     // No transport reports the frames it sends yet, so Sent
     // shows none: said, so an empty table doesn't read as lost
     Label {
+        textFormat: Text.PlainText
         objectName: "sentNote"
         visible: panel.direction === 2
         Layout.columnSpan: 2

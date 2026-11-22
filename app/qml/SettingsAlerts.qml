@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsAlerts.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.alerts, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.alerts, QmlTest.phone_* (test_qml)
 // The app's one set of conditions (ADR-0063 sections 5 and 9): its list with each one's state, Add, Add from a signal, Import and Export; one part of SettingsPage
 
 import QtCore
@@ -38,7 +38,7 @@ ColumnLayout {
 
     // Bridge.gaugeSignals as plain arrays, made once (it is CONSTANT):
     // each read of a bridge map makes a new JS wrapper
-    readonly property var gaugeSets: DashboardBook.copySets(Bridge.gaugeSignals)
+    readonly property var gaugeSets: DashboardEdit.copySets(Bridge.gaugeSignals)
 
     // The rows a term can bind: numbers and named states with references,
     // copied once into plain objects (a bridge map read per delegate
@@ -53,7 +53,7 @@ ColumnLayout {
         return o
     }
     function refreshRows() {
-        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.offlineUri),
+        rows = Array.from(Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : root.host.uriPart.offlineUri),
                           r => root.plainRow(r))
                    .filter(r => r.ref !== "" && !r.isText)
     }
@@ -90,7 +90,7 @@ ColumnLayout {
         saveDoc(ConditionBook.withEnabled(doc, i, on))
     }
 
-    // ---- The editor's way in
+    // The editor's way in
     signal editRequested()
     function openEditor(i, c) {
         editIndex = i
@@ -125,11 +125,11 @@ ColumnLayout {
         return ""
     }
 
-    // ---- Levels: a signal file's gauge, else the zone table's
+    // Levels: a signal file's gauge, else the zone table's
     function levelsOf(row) {
         const g = ConditionBook.gaugeLevels(row.gauge)
         const levels = Object.keys(g).length > 0
-                       ? g : DashboardBook.zonesFor(DashboardBook.keyOfRef(row.ref, gaugeSets))
+                       ? g : DashboardBook.zonesFor(DashboardEdit.keyOfRef(row.ref, gaugeSets))
         delete levels.coldBelow
         return Object.keys(levels).length > 0 ? levels : null
     }
@@ -137,30 +137,35 @@ ColumnLayout {
         const g = row.gauge ?? ({})
         if (typeof g.min === "number" && typeof g.max === "number")
             return { from: g.min, to: g.max }
-        return DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        return DashboardEdit.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
     }
     function addFromSignal(row) {
         const levels = levelsOf(row)
         if (levels === null)
             return
         const range = rangeOf(row)
-        const c = ConditionBook.alertFromLevels(row.name, DashboardBook.counterparts(row.ref, gaugeSets),
+        const c = ConditionBook.alertFromLevels(row.name, DashboardEdit.counterparts(row.ref, gaugeSets),
                                                 row.decodedUnit, levels, range.from, range.to,
                                                 ConditionBook.keysOf(doc))
         pickingSignal = false
         openDraft(c)
     }
 
-    // ---- Words
-    // A number as shown: up to three decimals (or decimals), the locale's
-    // point. The editor's fields keep three, so a saved level reads back as
-    // it was; the list says a level in its signal's own decimals
+    // Words
+    // A number as shown: up to three decimals, the locale's point. The
+    // editor's fields keep three, so a saved level reads back as it was; the
+    // list says a level in its signal's own decimals or as many as the level
+    // needs (up to three), whichever is more
     function shownNumber(v, decimals) {
-        return typeof v === "number" && isFinite(v)
-               ? String(Number(v.toFixed(decimals ?? 3))).replace(".", Qt.locale().decimalPoint) : ""
+        if (typeof v !== "number" || !isFinite(v))
+            return ""
+        let d = decimals ?? 3
+        while (d < 3 && Math.abs(v - Number(v.toFixed(d))) > 1e-9)
+            ++d
+        return String(Number(v.toFixed(d))).replace(".", Qt.locale().decimalPoint)
     }
     function rowOfRefs(refs) {
-        const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
+        const all = DashboardEdit.lookupRefs(refs ?? [], gaugeSets)
         return rows.find(r => all.indexOf(r.ref) >= 0) ?? null
     }
     function nameOfRefs(refs) {
@@ -250,8 +255,9 @@ ColumnLayout {
         }
     }
 
-    // ---- The page
+    // The page
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsNote"
         text: qsTr("An alert watches the session's signals and says when one passes its level. "
                    + "Havne ships none: a level that suits one engine is a false alarm on another.")
@@ -261,6 +267,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsSavedProblem"
         visible: Bridge.conditionsProblem !== ""
         text: Bridge.conditionsProblem
@@ -269,6 +276,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsPending"
         visible: Bridge.conditionsPending !== ""
         text: qsTr("Your last change %1.").arg(Bridge.conditionsPending)
@@ -330,13 +338,14 @@ ColumnLayout {
         }
     }
 
-    // ---- A question that waits for its answer
+    // A question that waits for its answer
     ColumnLayout {
         objectName: "alertConfirm"
         visible: root.confirming !== ""
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             objectName: "alertConfirmText"
             text: root.confirming !== "import"
                   ? qsTr("Start again with no alerts? The saved file is replaced; one that couldn't be read is kept beside it.")
@@ -374,6 +383,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "alertProblem"
         visible: text !== ""
         text: root.problem
@@ -382,6 +392,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "alertSaveNote"
         visible: text !== ""
         text: root.note
@@ -390,13 +401,14 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // ---- Add from a signal's levels
+    // Add from a signal's levels
     ColumnLayout {
         objectName: "alertSignalPanel"
         visible: root.pickingSignal
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             text: qsTr("A signal with a gauge's levels: the alert starts at its danger level, "
                        + "else its warning, and clears a little inside it.")
             color: Theme.textDim
@@ -414,8 +426,9 @@ ColumnLayout {
         }
     }
 
-    // ---- The list
+    // The list
     Label {
+        textFormat: Text.PlainText
         objectName: "alertsNone"
         visible: root.conditions.length === 0 && !root.unreadable
         text: qsTr("No alerts yet.")
@@ -456,6 +469,7 @@ ColumnLayout {
                     spacing: 2
                     Layout.fillWidth: true
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertName"
                         text: alertRow.condition.name ?? ""
                         color: Theme.text
@@ -465,6 +479,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "alertSummary"
                         text: root.summaryOf(alertRow.condition)
                         color: Theme.textDim
@@ -476,6 +491,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertLevel"
                     readonly property string level: alertRow.condition.alert?.level ?? ""
                     visible: level !== ""
@@ -484,6 +500,7 @@ ColumnLayout {
                     font.pixelSize: Theme.fontCaption
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "alertState"
                     visible: text !== ""
                     text: alertRow.stateText

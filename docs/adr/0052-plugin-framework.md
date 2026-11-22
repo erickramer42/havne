@@ -82,6 +82,14 @@ Writes go only through tier 3, which needs its own manifest tier, a
 signature and the user's opt-in. The more a tier can do, the more of
 it core runs itself.
 
+> **Note of 2026-11-18.** The table's Built column is superseded for
+> tiers 2 and 3 by the appendix of 2026-11-18 below: v0.9.0 builds
+> tier 2 and takes the write path's first steps, decided in
+> [ADR-0066](0066-conversation-tier-and-write-gates.md). The rule that
+> tier 2 never sends a write stands, now pinned at the sub-function
+> level (ADR-0066 section 1). The signature the last paragraph requires
+> of a writes plugin is dropped (ADR-0066 section 2.4).
+
 ### 2. The package
 
 ```
@@ -271,6 +279,14 @@ inferred from the car. The VIN narrows the choice:
   logic runs in CI with no car.
 - **Signing** is decided with the tier.
 
+> **Note of 2026-11-18.** The runtime is WAMR's classic interpreter with
+> instruction metering, the guest ABI sits over the ops table, and
+> "signing is decided with the tier" is decided: no signature is
+> required to run a plugin (ADR-0066 sections 2.1, 2.2 and 2.4). The
+> ceiling gains the sub-function split (`10 03` but never `10 02`;
+> `2C 01` and `2C 03` but never `2C 02`), and `23` joins the services it
+> never allows (ADR-0066 section 1).
+
 ### 7. The writes tier (bounded here, designed in its own ADR)
 
 What this ADR fixes, so the earlier tiers don't paint it into a
@@ -295,6 +311,11 @@ corner:
 Tier 1 is not signed: it is data, validated whole at load, and its
 `source` block says where it came from.
 
+> **Note of 2026-11-18.** The writes tier no longer waits whole for 2.0:
+> v0.9.0 takes its first steps behind gates 1 to 3, and the signature
+> bullet above is reversed (ADR-0066 sections 2.4 and 3.4). The
+> appendix of 2026-11-18 below lists what moves and what stays 2.0's.
+
 ### 8. Fixtures and `plugins check`
 
 `havne-cli plugins check <pkg>` (and CI for every plugin in the
@@ -318,6 +339,11 @@ Plugins describe signals, enumerations and, later, operations (name,
 parameters, preconditions, confirmation text). The app and `havne-cli`
 render them the same generic way; a plugin ships no QML and no
 strings outside its data.
+
+> **Note of 2026-11-18.** A plugin may carry Dashboard pages, each a
+> layout file of ADR-0057's format drawn by the app's own gauges (the
+> appendix "pages a plugin carries"). That is data, as its signals are:
+> the rule above holds.
 
 ### 10. What stays out of plugins
 
@@ -642,3 +668,132 @@ covers, and `stream` reads the variant its URI names.
 > only when none has. So a variant made from a file with its own
 > attribution keeps it in every recording, whatever else the plugin
 > holds.
+
+## Appendix: what v0.9.0 takes of tiers 2 and 3 (2026-11-18)
+
+[ADR-0066](0066-conversation-tier-and-write-gates.md) decides everything
+below; this appendix says which of this record's open points it closes
+and which stay open. Sections 1, 6 and 7 above keep their text, each
+with a dated note.
+
+**Tier 2, built in v0.9.0** (ADR-0066 section 2; section 9's step 1):
+
+- **The runtime:** WAMR, classic interpreter, instruction metering on
+  (section 2.1; "Step 1 as built" there records why classic).
+- **The guest ABI** over section 6's ops table (section 2.2), and
+  security access (`27`) as the first conversation, core owning the
+  key's attempts and lockout (section 2.3).
+- **The trust model:** no signature is required to run any plugin, code
+  included. The sandbox, the declared services under core's ceiling, the
+  preview of a plugin's services and the gates are the protection
+  (section 2.4). Ed25519 is not adopted. Section 6's "signing is decided
+  with the tier" is closed by this, and section 6's native-module rule
+  stands: a release build runs WASM only.
+- **Manifest format 2:** `tiers` gains `"conversation"` and `"write"`,
+  a binary file is carried with a `kind` and its SHA-256, and a format-1
+  reader refuses a format-2 package whole (section 2.8). Section 2's
+  `["data"]` and size bounds are the format-1 rules.
+- **What stays v0.10.0's:** gateway routing, dynamically defined DIDs
+  and periodic reads, the rest of section 1's tier-2 row, designed
+  against the discovery capture. Nothing enrols `2A` before then.
+
+**The write path's first steps, in v0.9.0** (ADR-0066 sections 3 to 9):
+
+- **Where it lives:** core runs the transfer and the plan, the plugin
+  carries data and, later, a sandboxed sequence (section 3.4). Section 7
+  here said a write plan is core-run and plugin code only computes a
+  value or a key; the first steps keep that.
+- **Gates 1 to 3 before any flash:** the original copy and its dump
+  (section 4), the write flow's envelope (section 5) and the per-feature
+  legal record (section 6). The standalone dump needs no write.
+- **The flash** as a declarative plan over a write-qualified transport,
+  J2534 first, proven on the simulated ECU in CI before any car
+  (section 7; section 9's step 4).
+- **The multi-step plan,** after the single-download flash: an ordered,
+  bounded list of download, upload, routine and reset steps with each
+  blob pinned by its SHA-256, a kernel-assisted read treated as a write
+  (ADR-0066's appendix of 2026-11-18, items 1 to 3).
+- **The functional steps,** accepted: a functional suppressed `10 82`,
+  `3E 80` and `11 81`, each declared and previewed, with core owning the
+  end (the same appendix, item 4). Section 6's ceiling for tier 2 is
+  unchanged by them: only a tier-3 plan sends one.
+
+**What stays 2.0's:** the public write product, as ADR-0048 and the
+roadmap set it: map definitions, table editors, diff and undo, tune
+management, actuator tests (`2F`), manufacturers' plugins, and gateway
+research. A signing or trust-store feature may return in a later ADR for
+provenance, never as a precondition to run a plugin. Whether a public
+build carries the write services at all stays open (ADR-0066 "What stays
+open").
+
+## Appendix: pages a plugin carries (2026-11-18)
+
+A plugin may carry Dashboard pages ([ADR-0057](0057-dashboards.md)): a
+manufacturer's signals arrive with a page that shows them, ready to
+add, so a user doesn't build it one gauge at a time.
+
+- **The key:** the manifest's optional `pages` lists 1 to 16 paths in
+  the package, each once. Each is a layout file (ADR-0057's appendix
+  "the layout file") of one page for one form: `format` 2, `form`
+  `"phone"` or `"desktop"` (required here, where a user's own file may
+  leave it out), `pages` holding exactly one page, and `files` absent
+  or empty, since the plugin is the file its `key:` references need. A
+  page for both forms is two files.
+- **Where they live:** a folder holds them as files beside the data; a
+  packed plugin inlines each under `files` as it does a data file. A
+  file `pages` names is never a data file: a variant naming one is
+  refused, and a packed page no entry names is a file in no variant. A
+  packed `files` holds 64 data and binary files and the pages beside
+  them.
+- **Bounds:** each page at most 82,400 bytes, a layout file's bound,
+  both as read and as core writes it, two spaces a level with each item
+  on its own line: a compact page that fits as written by hand can
+  still be refused once indented, so an author keeps a page well inside
+  the bound. Core counts the writing's size before it writes, so a large
+  page costs no copy. Every page counts toward the package's 16 MiB.
+- **Core reads the envelope and nothing inside.** A page that isn't an
+  object, has another `format`, names no form or another one, holds
+  other than one page or lists `files` refuses the plugin whole, as a
+  bad data file does (section 4); core's JSON reader is stricter than
+  the app's (a repeated key, a byte order mark), and a page is refused
+  for those too. The page's name, cells and references are the
+  dashboard's rules, judged where every layout file is: the app's
+  reader and `havne-cli layout check`'s port of it. So a later
+  version's new gauge kind needs no core, and a page with a bad cell
+  still loads; section 8's check is the author's gate.
+- **The C ABI:** `ecuio_plugin_info_t.page_count` takes a reserved
+  word; `ecuio_plugin_page` gives a page's form, path and length,
+  `ecuio_plugin_page_text` its text as core writes it, the same bytes
+  for a folder and its packed form, valid until the plugin is freed.
+  Python's `Plugin.pages()` gives them as `(path, form, text)`.
+- **No new manifest format:** a core before 0.9.0 refuses the unknown
+  key, and a plugin with pages requires 0.9.0. A put and a drop keep
+  the pages as they are.
+- **`plugins check`** writes a `page` line for each page, after the
+  variants' lines: its file, form and name, the layout check's verdict
+  (`problem`, `cells`, `dropped_cells`), the variants that hold all of
+  its `key:` references, the keys no variant has, and `reads_plugin`,
+  false for a page of built-in signals alone. A page fails the check
+  (exit 1, as a failed fixture does) when it doesn't read whole, when a
+  `key:` reference is in no variant, or when another page of its form
+  has its name, since the list of pages would show two the same. A
+  plugin with pages whose `requires.core` is older than 0.9.0 gets a
+  `requires_core` line.
+- **The store** lists each loaded plugin's pages in its entry (`index`,
+  `form`, `path`, in the manifest's order) and gives a page's text by
+  plugin id and index; it judges nothing of a page.
+- **The Dashboard's offer:** Add page lists each loaded plugin's pages for
+  the window's form, the picked vehicle's plugins first. A page is added
+  whole as the user's own copy after the shown page, whether or not the
+  vehicle picks a variant that has its signals: those gauges read "not in
+  profile" and the layout note counts them. A put, drop or removal of the
+  plugin leaves a copy as it is.
+
+> **Note of 2026-11-19, what v0.9.0 takes of tier 2.** The appendix "what
+> v0.9.0 takes of tiers 2 and 3" read as v0.9.0's; the cut of 2026-11-19
+> moves the conversation tier's running part to v0.9.1. v0.9.0 reads and
+> checks a conversation part and binds no module, so such a plugin is data
+> only there ([ADR-0066](0066-conversation-tier-and-write-gates.md)'s note
+> of the same date).
+
+Amended 2026-11-20: a path naming a Windows device (`CON`, `NUL`, `COM1` and the rest, in any case, with any extension, or a part ending in a dot) is refused only where a folder's file is read from disk. A packed plugin's paths are names inside its text and load whatever they are, and the wrap and the put never write one: a data file whose name would be a device is numbered (`data/aux-2.json`).

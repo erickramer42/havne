@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsRecording.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The recording switch and where recordings go: one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -14,13 +14,14 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
-    // ---- Recording (ADR-0017) ----
+    // Recording (ADR-0017)
     // Off until switched on, and kept between runs. It takes effect
     // at the next connect, so it's fixed while a session is up and
     // each recording covers a whole session.
     Label {
+        textFormat: Text.PlainText
         objectName: "recordLockedNote"
-        visible: !root.host.idle
+        visible: !root.host.ownPart.idle
         text: qsTr("Disconnect to turn recording on or off.")
         color: Theme.textDim
         wrapMode: Text.Wrap
@@ -35,13 +36,14 @@ ColumnLayout {
             objectName: "recordBox"
             text: qsTr("Record sessions")
             checked: Bridge.recording
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             // The bridge decides; the binding comes back either way
             onToggled: {
                 Bridge.recording = checked
                 checked = Qt.binding(() => Bridge.recording)
             }
             contentItem: Label {
+                textFormat: Text.PlainText
                 text: recordBox.text
                 color: recordBox.enabled ? Theme.text : Theme.textDim
                 leftPadding: recordBox.indicator.width + recordBox.spacing
@@ -49,6 +51,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "recordStatus"
             Layout.fillWidth: true
             elide: Text.ElideMiddle
@@ -74,6 +77,7 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "recordNote"
         text: qsTr("Keeps every session whole (frames, values, events), from the next connect. "
                    + "Start log isn't offered while it is on: the recording already holds every "

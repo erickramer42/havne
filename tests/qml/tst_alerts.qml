@@ -92,7 +92,7 @@ TestCase {
                   { enabled: false }),
               rpm("missing", "Not in the mock", { signal: ["id:7005"], unit: "kPa", above: 300 })])
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         alerts.refreshRows()
         compare(wordsOf(rowOf(page, 0), "alertName"), "Always on")
@@ -121,7 +121,7 @@ TestCase {
         save([rpm("missing", "Not in the mock", { signal: ["key:not_here"], unit: "kPa", above: 300 }),
               rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(page, "settingsAlertsPart").refreshRows()
         const row = rowOf(page, 0)
         compare(wordsOf(row, "alertSummary"), "a signal not in this profile above 300 kPa")
@@ -156,21 +156,21 @@ TestCase {
         compare(find(alerts, "alertSaveNote").text, "Imported 2 alerts.")
     }
 
-    // In imperial the list says a level in its signal's own decimals, and
-    // the editor keeps three, so a metric level left as it showed is saved
-    // back as it was
+    // In imperial the list says a level in its signal's own decimals or as
+    // many as the level needs, and the editor keeps three, so a metric level
+    // left as it showed is saved back as it was
     function test_anImperialLevelReadsInItsSignalsDecimals() {
         save([rpm("fast", "Fast", { signal: ["id:3001"], unit: "km/h", above: 20 })])
         Bridge.unitSystem = 1
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         alerts.refreshRows()
         const speed = alerts.rows.find(r => r.ref === "id:3001")
         verify(speed !== undefined, "the mock lists its speed")
         compare(speed.decimals, 0, "the speed's own decimals")
         const summary = wordsOf(rowOf(page, 0), "alertSummary")
-        verify(summary.endsWith(" above 12 mph"), summary)
+        verify(summary.endsWith(" above 12" + Qt.locale().decimalPoint + "427 mph"), summary)
         rowOf(page, 0).clicked()
         const term = termOf(editorOf(page), 0)
         compare(term.levelField.text, "12" + Qt.locale().decimalPoint + "427", "the field keeps three")
@@ -180,6 +180,20 @@ TestCase {
         const c = stored().conditions[0]
         verify(c.when.above === 20, String(c.when.above))
         compare(c.when.unit, "km/h")
+    }
+
+    // The list says a level in its signal's decimals or as many as the level
+    // needs: a stored 0.4 on a signal with none is not "above 0"
+    function test_aLevelNeedingMoreDecimalsThanTheSignalKeepsThem() {
+        save([rpm("slow", "Slow", { signal: ["id:3001"], unit: "km/h", above: 0.4 })])
+        Bridge.unitSystem = 0
+        const page = settingsOf()
+        page.connectPart.uriField.text = "mock://demo"
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.refreshRows()
+        compare(alerts.rows.find(r => r.ref === "id:3001").decimals, 0, "the speed keeps none")
+        const summary = wordsOf(rowOf(page, 0), "alertSummary")
+        verify(summary.endsWith(" above 0" + Qt.locale().decimalPoint + "4 km/h"), summary)
     }
 
     // ---- The editor
@@ -280,6 +294,22 @@ TestCase {
         compare(w.any.length, 2)
     }
 
+    // A group of one term stays a group: the editor reads it unchanged as
+    // it opened and a Save writes it back as the group
+    function test_aGroupOfOneTermStaysAGroup() {
+        save([rpm("one", "One in a group", { all: [
+                  { signal: ["id:1001"], unit: "RPM", above: 6000 }] })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        const w = stored().conditions[0].when
+        compare(Object.keys(w), ["all"], "still a group")
+        compare(w.all.length, 1)
+    }
+
     // The sound switch is live and says where it plays
     function test_theSoundSaysItPlaysOnAndroid() {
         save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
@@ -309,7 +339,7 @@ TestCase {
         compare(c.when.unit, "kPa", "the file keeps the def's unit")
         // Exactly: compare() passes numbers within 1e-5
         verify(c.when.above === 206.842719, "30 psi in kPa, six decimals: " + c.when.above)
-        compare(c.when.above, DashboardBook.roundStored(Bridge.decodedValue("kPa", 30)),
+        compare(c.when.above, DashboardEdit.roundStored(Bridge.decodedValue("kPa", 30)),
                 "the Dashboard's rounding")
         compare(c.when.clear, 190, "the clear left as it was")
         rowOf(page, 0).clicked()
@@ -366,7 +396,7 @@ TestCase {
         compare(editor.nameField.text, "Alert 1")
         verify(editor.isNew)
         const signalTerm = termOf(editor, 0)
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(signalTerm, "alertTermSignal").clicked()
         find(signalTerm, "alertPick_id:1001").clicked()
         type(signalTerm.levelField, "6000")
@@ -474,7 +504,7 @@ TestCase {
         find(page, "alertAdd").clicked()
         const editor = editorOf(page)
         compare(editor.nameField.text, "Alert 1", "the first free number")
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         find(termOf(editor, 0), "alertTermSignal").clicked()
         find(termOf(editor, 0), "alertPick_id:1001").clicked()
         type(termOf(editor, 0).levelField, "7000")
@@ -528,7 +558,7 @@ TestCase {
     // danger level as above, at danger, clearing inside it
     function test_addFromAGaugeKeysLevels() {
         const page = settingsOf()
-        page.uriField.text = "mock://demo"
+        page.connectPart.uriField.text = "mock://demo"
         const alerts = find(page, "settingsAlertsPart")
         find(alerts, "alertAddFromSignal").clicked()
         verify(find(alerts, "alertSignalPanel").visible)
@@ -775,7 +805,7 @@ TestCase {
         page.startEditing()
         page.select(0)
         find(page, "panelAlert").clicked()
-        const range = DashboardBook.defaultRange("°C")
+        const range = DashboardEdit.defaultRange("°C")
         fuzzyCompare(asked[0].when.clear, 115 - ConditionBook.clearShare * (range.to - range.from), 1e-9)
         verify(asked[0].when.clear < 115, "it clears inside the level")
     }

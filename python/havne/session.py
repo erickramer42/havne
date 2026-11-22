@@ -28,6 +28,7 @@ from collections import namedtuple
 from . import _ecuio as e
 from ._core import check, lib, text, utf8, with_profile
 from .conditions import _WHYS, ConditionEvent, ConditionState
+from .errors import Error
 from .export import _whole, checked
 from .health import _report, options_for
 
@@ -339,6 +340,7 @@ class Session:
         self._finalizer = weakref.finalize(self, _close_session, self._s, self._queues,
                                            self._recorders)
         self._names = self._read_names()
+        self._keys = None
 
     def _decoding_file(self):
         """The signal file whose set the session decodes with: its own
@@ -353,6 +355,20 @@ class Session:
         if self._s is None:
             raise ValueError("the session is closed")
         return self._s
+
+    def _set_keys(self, sset):
+        """The key each def of the session's set is kept under, read once
+        with its decoding file (ecuio_signal_set_keys)"""
+        if self._keys is None:
+            file = self._decoding_file()
+            count = ctypes.c_uint32()
+            check(lib.ecuio_signal_set_keys(sset, file, None, 0, ctypes.byref(count)),
+                  "ecuio_signal_set_keys")
+            keys = (e.ecuio_signal_key_t * count.value)()
+            check(lib.ecuio_signal_set_keys(sset, file, keys, count.value, ctypes.byref(count)),
+                  "ecuio_signal_set_keys")
+            self._keys = keys
+        return self._keys
 
     def _read_names(self):
         names = {}
@@ -472,14 +488,25 @@ class Session:
         return r
 
     def _signal_id(self, s, where):
-        """A signal's id from its name or id: a name the set lacks is a
-        KeyError, an id that isn't an int (a bool isn't) or is outside
-        0-65535 a ValueError"""
+        """A signal's id from its key, a name one signal has
+        (ecuio_signal_set_find) or its id: text no signal has, or a name
+        several have (core's words list their keys), is a KeyError; an id
+        that isn't an int (a bool isn't) or is outside 0-65535 a
+        ValueError"""
         if isinstance(s, str):
-            found = [sid for sid, (name, _) in self._names.items() if name == s]
-            if not found:
+            sset = lib.ecuio_session_signal_set(self._handle())
+            if not sset:
                 raise KeyError(f"no signal named {s!r} in {where}")
-            return found[-1]
+            keys = self._set_keys(sset)
+            index = ctypes.c_uint32()
+            try:
+                check(lib.ecuio_signal_set_find(sset, keys, len(keys), utf8(s),
+                                                ctypes.byref(index)), "ecuio_signal_set_find")
+            except Error as refused:
+                if refused.name != "INVALID_ARGUMENT":
+                    raise
+                raise KeyError(f"{where}: {refused.detail}") from None
+            return sset.contents.defs[index.value].id
         if isinstance(s, bool) or not isinstance(s, int):
             raise ValueError(f"a signal id is an int, not {s!r}")
         if not 0 <= s <= 0xFFFF:
@@ -488,11 +515,12 @@ class Session:
 
     def set_focus(self, signals, min_sweep_ms=0, default_pick=False):
         """Asks only the requests that carry these signals, until called
-        again (ADR-0056 section 2): ids or names of the session's set, in
-        any order; an empty list asks the whole set again. The picks run
-        in the fast class, the rest wait, parked. Before or after
-        start(); on mock:// and replay:// it changes nothing. A name the
-        set lacks is a KeyError; an id that isn't an int (a bool isn't) or
+        again (ADR-0056 section 2): ids, keys or names one signal has of
+        the session's set, in any order; an empty list asks the whole set
+        again. The picks run in the fast class, the rest wait, parked.
+        Before or after start(); on mock:// and replay:// it changes
+        nothing. Text no signal has, or a name several have, is a KeyError
+        with core's words (they list the keys); an id that isn't an int (a bool isn't) or
         is outside 0-65535 a ValueError; an id the set lacks, or a focus
         that leaves a requesting session nothing to ask, core's
         INVALID_ARGUMENT. min_sweep_ms: at least this long from one
@@ -518,11 +546,11 @@ class Session:
         """The session's default pick as the app and havne-cli's --pick
         ranked make it (cli/default_pick.h): the set's ranked signals
         (plot_rank nonzero; a text or hex signal's rank isn't counted) and
-        the ids or names added, in the set's order, each once. Empty when
+        the ids, keys or names added, in the set's order, each once. Empty when
         the set ranks none (an empty pick sets no focus, and the whole set
         is asked) and on a session that asks nothing (the mock, a replay, a
-        listening session), where neither front end sets a pick. A name
-        the set lacks is a KeyError, as in set_focus. Pass a list that
+        listening session), where neither front end sets a pick. Text the
+        set lacks is a KeyError, as in set_focus. Pass a list that
         isn't empty to set_focus(..., default_pick=True)."""
         extra = {self._signal_id(s, "the session's set") for s in added}
         if not self.info.flags & e.ECUIO_SESSION_INFO_REQUESTS:
@@ -598,6 +626,20 @@ class Session:
               "ecuio_session_get_info")
         return out
 
+    @property
+    def modules(self):
+        """The session's modules, every one, as (rx, tx) CAN ID pairs in
+        the set's order: the index the channel reports take. The info's
+        own rx_ids and tx_ids hold only the first
+        ECUIO_SESSION_INFO_MAX_CHANNELS."""
+        pairs = []
+        for i in range(self.info.module_count):
+            m = e.ecuio_channel_decl_t()
+            check(lib.ecuio_session_get_module(self._handle(), i, ctypes.byref(m)),
+                  "ecuio_session_get_module")
+            pairs.append((m.rx_id, m.tx_id))
+        return pairs
+
     def support(self, channel=0):
         out = e.ecuio_channel_support_t()
         check(lib.ecuio_session_get_channel_support(self._handle(), channel, ctypes.byref(out)),
@@ -672,7 +714,7 @@ class Session:
         first half of what havne-cli health waits for, enough for a
         script's own loop. True for a session with no channels."""
         info = self.info
-        for c in range(min(info.channel_count, e.ECUIO_SESSION_INFO_MAX_CHANNELS)):
+        for c in range(info.module_count):
             d, ident = self.diagnostics(c), self.identity(c)
             diag = bool(d.flags & e.ECUIO_DIAG_COMPLETE) or not d.flags & e.ECUIO_DIAG_ASKED
             if not diag or not (ident.flags & e.ECUIO_IDENTITY_COMPLETE or ident.items == 0):
@@ -719,8 +761,8 @@ class Session:
         has returned from read() (or been iterated), each aged from that
         read; a session with no values stream, or one never read, has none
         and the report says so. values replaces them: an iterable of
-        (signal, value, age_us), the signal an id or a name of the
-        session's set. baseline, utc_us, latest_model_year and units are
+        (signal, value, age_us), the signal an id, a key or a name one
+        signal has of the session's set (as in set_focus). baseline, utc_us, latest_model_year and units are
         health_report's. A session has no range and nothing to cancel:
         core never asks during its report. Returns a HealthReport; a
         failed scrub check raises CheckFailed, writing nothing."""

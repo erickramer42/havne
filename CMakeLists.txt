@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Havne
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )
@@ -96,6 +96,18 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/DEBUG>"
                      "$<$<CONFIG:Release>:/OPT:REF>"
                      "$<$<CONFIG:Release>:/OPT:ICF>")
+    # Reproducible binaries (ADR-0035): /Brepro replaces the PE timestamp and
+    # the debug GUID with a content hash; /d1trimfile drops the source
+    # folder from __FILE__ and the debug info, so a build elsewhere matches.
+    # The compile options take the dash spelling: sccache reads an unknown
+    # "/" option as a second input file and caches nothing.
+    option(HAVNE_REPRODUCIBLE "MSVC Release: /Brepro and trimmed source paths" ON)
+    if(HAVNE_REPRODUCIBLE)
+        file(TO_NATIVE_PATH "${CMAKE_SOURCE_DIR}" _src_native)
+        add_compile_options("$<$<CONFIG:Release>:-Brepro>"
+                            "$<$<CONFIG:Release>:-d1trimfile:${_src_native}\>")
+        add_link_options("$<$<CONFIG:Release>:/Brepro>")
+    endif()
     # The Visual Studio generator hands MSBuild one project at a time and
     # cl one file at a time; /MP compiles a project's files in parallel
     # (it implies /FS, so the shared PDB stays consistent). Ninja trees
@@ -165,6 +177,10 @@ function(app_add_version_resource target name description)
     target_sources(${target} PRIVATE "${rc}")
 endfunction()
 
+# WAMR, the sandbox a conversation plugin's code runs in (ADR-0066
+# section 2.1): app_wamr_objects and WAMR_INCLUDE_DIR, for core and the tests
+include(third_party/wamr.cmake)
+
 add_subdirectory(core)
 add_subdirectory(surrogate)
 
@@ -188,13 +204,28 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 endif()
 
 # Core never links Qt (ADR-0001). This runs after every subdirectory, so
-# it sees links added from anywhere. It reads core's link lists, because
-# Qt's imported targets are scoped to the directory that found them and a
+# it sees links added from anywhere. It reads the link lists of the Qt-free
+# targets and, following them, of every target they link, because Qt's
+# imported targets are scoped to the directory that found them and a
 # TARGET Qt6::Core test can't see them from here.
-foreach(_app_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
-    get_target_property(_app_libs ecuio-core ${_app_prop})
-    if(_app_libs AND _app_libs MATCHES "Qt[0-9]*::")
-        message(FATAL_ERROR
-            "ecuio-core must not link Qt (${_app_prop}: ${_app_libs})")
+set(_app_qtfree_todo ecuio-core ecuio ecuio-core-mt ecuio-wamr ecuio-wamr-mt
+    ecuio-j2534-surrogate havne-cli)
+set(_app_qtfree_seen)
+while(_app_qtfree_todo)
+    list(POP_FRONT _app_qtfree_todo _app_target)
+    if(NOT TARGET ${_app_target} OR _app_target IN_LIST _app_qtfree_seen)
+        continue()
     endif()
-endforeach()
+    list(APPEND _app_qtfree_seen ${_app_target})
+    foreach(_app_prop LINK_LIBRARIES INTERFACE_LINK_LIBRARIES)
+        get_target_property(_app_libs ${_app_target} ${_app_prop})
+        if(NOT _app_libs)
+            continue()
+        endif()
+        if(_app_libs MATCHES "Qt[0-9]*::")
+            message(FATAL_ERROR
+                "${_app_target} must not link Qt (${_app_prop}: ${_app_libs})")
+        endif()
+        list(APPEND _app_qtfree_todo ${_app_libs})
+    endforeach()
+endwhile()

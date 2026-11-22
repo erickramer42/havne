@@ -14,6 +14,7 @@ Flow {
     spacing: Theme.spacing
 
     Label {
+        textFormat: Text.PlainText
         id: caption
         visible: text !== ""
         color: Theme.textDim

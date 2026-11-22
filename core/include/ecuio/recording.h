@@ -157,8 +157,11 @@ _Static_assert(offsetof(ecuio_recorder_state_t, frames_passed) == 184,
  * NULL on every failure. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
  * options, root or out; ECUIO_ERR_INVALID_ARGUMENT for a flag other than
  * ECUIO_RECORD_ARMED or nonzero reserved; ECUIO_ERR_RECORDING_FAILED
- * when the folder can't be created, with ecuio_last_error_detail naming
- * the cause, never the path.
+ * when the folder or its files can't be created or the writer thread
+ * can't start, with ecuio_last_error_detail naming the cause, never the
+ * path; ECUIO_ERR_OUT_OF_MEMORY when an allocation fails. A failure
+ * after the folder was made removes the files the open made and then
+ * the folder, when that leaves it empty.
  */
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
                                    ecuio_recorder_t** out);
@@ -167,8 +170,8 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
  * The signal file that will decode the session (ADR-0051 section 4),
  * given before ecuio_session_record: attach checks that its set is the
  * session's, and the recording holds a copy of the file's bytes as
- * signals.json, its SHA-256 on events.log's header (format 3's
- * "signal file" line), so a replay loading that copy decodes the same
+ * signals.json, its SHA-256 on events.log's header (the "signal file"
+ * line of format 3 or later), so a replay loading that copy decodes the same
  * values. file must outlive the call only. ECUIO_ERR_NULL_ARGUMENT for a
  * NULL recorder or file; ECUIO_ERR_INVALID_ARGUMENT once a session has
  * attached or on a second call; ECUIO_ERR_OUT_OF_MEMORY.
@@ -296,6 +299,10 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
 #define ECUIO_RECORDING_FORMAT_CORE    2u /* ADR-0049's */
 #define ECUIO_RECORDING_FORMAT_ENUMS   3u /* ADR-0049's with enum signals'
                                              labels (ADR-0051) */
+#define ECUIO_RECORDING_FORMAT_KEYS    4u /* format 3 with each signal's
+                                             values, labels and picks
+                                             under its key (ADR-0065
+                                             section 9) */
 
 typedef struct ecuio_recording_info {
     uint32_t flags;           /* ECUIO_RECORDING_INFO_* */
@@ -310,8 +317,8 @@ typedef struct ecuio_recording_info {
     uint64_t records_dropped; /* the writer's, from the summary */
     uint64_t notes_dropped;
     uint64_t condition_events; /* events.log's cond lines that parse
-                                  (ADR-0063 section 8; format 3), every
-                                  one counted;
+                                  (ADR-0063 section 8; format 3 or
+                                  later), every one counted;
                                   ecuio_recording_get_condition_event */
     uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_recording_info_t;
@@ -330,13 +337,14 @@ _Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
 
 /* ecuio_recording_signal_t.flags */
 #define ECUIO_RECORDING_SIGNAL_TEXT 0x1u /* a text kind: counts, no range */
-#define ECUIO_RECORDING_SIGNAL_ENUM 0x2u /* a number shown as a word
-                                            (format 3): read as a number,
-                                            its labels from
-                                            ecuio_recording_get_labels */
+/* A number shown as a word (format 3 or later): read as a number, its
+ * labels from ecuio_recording_get_labels */
+#define ECUIO_RECORDING_SIGNAL_ENUM 0x2u
 
 typedef struct ecuio_recording_signal {
-    char name[32];          /* as ecuio_signal_def_t holds them */
+    char name[32];          /* as ecuio_signal_def_t holds them; in a
+                               format 4 recording a signal no signal
+                               line declares shows its key here */
     char unit[16];
     uint32_t flags;         /* ECUIO_RECORDING_SIGNAL_* */
     uint8_t decimal_places; /* an older recording's: the most its values
@@ -350,7 +358,12 @@ typedef struct ecuio_recording_signal {
     double highest;
     uint64_t first_us;      /* host_us; ECUIO_RECORDING_NONE with none */
     uint64_t last_us;
-    uint64_t reserved[4];   /* zero; ABI growth space */
+    char key[32];           /* what its values are kept under: its key
+                               (ecuio_signal_key_t's text, ADR-0065
+                               section 9) in a format 4 recording and in
+                               one opened through its frames; "" in an
+                               older recording, whose signals go by
+                               name. Zero from its NUL on. */
 } ecuio_recording_signal_t;
 
 #if defined(__cplusplus)
@@ -360,6 +373,8 @@ static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
               "recording signal samples offset is ABI");
 static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
               "recording signal group offset is ABI");
+static_assert(offsetof(ecuio_recording_signal_t, key) == 96,
+              "recording signal key offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_signal_t) == 128,
                "ecuio_recording_signal_t size is ABI");
@@ -367,6 +382,8 @@ _Static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
                "recording signal samples offset is ABI");
 _Static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
                "recording signal group offset is ABI");
+_Static_assert(offsetof(ecuio_recording_signal_t, key) == 96,
+               "recording signal key offset is ABI");
 #endif
 
 /* A marker. Pointer last, as ecuio_value_t's: the label lives in the
@@ -488,7 +505,7 @@ typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
 typedef int (*ecuio_cancel_t)(void* user_data);
 
 /* ecuio_recording_signals_t.flags: NAMED, events.log's header names
- * signals.json and its SHA-256 (format 3); PRESENT, signals.json is in
+ * signals.json and its SHA-256 (format 3 or later); PRESENT, signals.json is in
  * the folder; MATCH, named and present, and its SHA-256 the header's */
 #define ECUIO_RECORDING_SIGNALS_NAMED   0x1u
 #define ECUIO_RECORDING_SIGNALS_PRESENT 0x2u
@@ -519,7 +536,8 @@ _Static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
 #endif
 
 /* ecuio_recording_conditions_t.flags, as the signal file's: NAMED,
- * events.log's header names conditions.json and its SHA-256 (format 3);
+ * events.log's header names conditions.json and its SHA-256 (format 3
+ * or later);
  * PRESENT, conditions.json is in the folder; MATCH, named and present,
  * and its SHA-256 the header's */
 #define ECUIO_RECORDING_CONDITIONS_NAMED   0x1u
@@ -537,7 +555,7 @@ typedef struct ecuio_recording_conditions {
                                when it names none */
     uint64_t events_lost;   /* condition events the recorder lost: the sum
                                of its drop lines that count them (format
-                               3), which stops at UINT64_MAX */
+                               3 or later), which stops at UINT64_MAX */
     uint64_t reserved[4];   /* zero; ABI growth space */
 } ecuio_recording_conditions_t;
 
@@ -636,6 +654,28 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
                                            void* user_data,
                                            ecuio_recording_t** out);
 
+/* ecuio_recording_open_frames with the signal file the set is of (NULL
+ * for none), so each signal's key is the one a recording of that file
+ * is written under: a computed signal's is its author's key, where the
+ * set alone gives "id:<n>" (ecuio_signal_set_keys). The plain call is
+ * this with a NULL file. ECUIO_ERR_INVALID_ARGUMENT too for a file of
+ * another set. */
+ecuio_status_t ecuio_recording_open_frames_with(
+    const char* folder_utf8, const ecuio_signal_set_t* signal_set,
+    const ecuio_signal_file_t* file, ecuio_open_progress_t progress,
+    void* user_data, ecuio_recording_t** out);
+
+/* The signal text names, by ecuio_signal_set_find's rule over the
+ * recording's signals: the signal with that key, else the one signal
+ * with that name (a recording older than format 4 has names alone).
+ * *index is its place among the signals. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL argument; ECUIO_ERR_INVALID_ARGUMENT, *index untouched and the
+ * detail saying why, for text no signal has and for a name several
+ * have, which lists their keys. */
+ecuio_status_t ecuio_recording_find_signal(const ecuio_recording_t* r,
+                                           const char* text_utf8,
+                                           uint32_t* index);
+
 /*
  * The getters. Every reader call returns ECUIO_ERR_NULL_ARGUMENT for a
  * NULL handle or out pointer and ECUIO_ERR_INVALID_ARGUMENT for a signal
@@ -649,8 +689,10 @@ ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
  * is hashed then, so MATCH says the bytes there now are the ones that
  * decoded it (a caller reads them from <folder>/signals.json, and a
  * caller that finds them changed since sees the hash differ). A
- * signals.json past ECUIO_SIGNAL_FILE_MAX_BYTES, which
- * ecuio_signal_file_load refuses, is present but never MATCH. */
+ * signals.json past ECUIO_SIGNAL_SET_MAX_BYTES, which
+ * ecuio_signal_file_load_with refuses, is present but never MATCH. The
+ * copy is the session's whole set: load it with
+ * ECUIO_SIGNAL_FILE_LOAD_SET. */
 ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
                                            ecuio_recording_signals_t* out);
 /* The set of conditions it was judged by, as the open found it, and as
@@ -665,13 +707,13 @@ ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);
 /* The index-th cond line in events.log's order, which the recorder writes
- * in time order. A cond line is a format 3 activity line whose kind is
- * cond; one that doesn't parse (a torn last line or one past the longest
- * row among them), or names a key past the ECUIO_CONDITION_MAX_CONDITIONS
- * a set holds, is left out and counted in lines_skipped; an eighth field
- * and after are passed by, and a flag word the reader doesn't know is
- * left out of flags. A line whose time doesn't read is no activity line,
- * of any kind. index runs below
+ * in time order. A cond line is an activity line of format 3 or later
+ * whose kind is cond; one that doesn't parse (a torn last line or one
+ * past the longest row among them), or names a key past the
+ * ECUIO_CONDITION_MAX_CONDITIONS a set holds, is left out and counted in
+ * lines_skipped; an eighth field and after are passed by, and a flag
+ * word the reader doesn't know is left out of flags. A line whose time
+ * doesn't read is no activity line, of any kind. index runs below
  * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
  * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */
 ecuio_status_t
@@ -830,6 +872,14 @@ ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
 #define ECUIO_STRETCH_PULLS   0x1u
 #define ECUIO_STRETCH_CRUISES 0x2u
 
+/* ecuio_stretch_rules_t.flags: where a pull ends. Clear, it ends at the
+ * lift: the run's last sample at the level (throttle, or engine load with
+ * no throttle signal), so a pull run onto the limiter includes the fuel
+ * cut; set, at vehicle speed's first sample at its highest in the run,
+ * which leaves the fuel cut out. No effect with no vehicle-speed signal,
+ * where the lift ends it either way. */
+#define ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED 0x1u
+
 /* The defaults a zero field of ecuio_stretch_rules_t takes, from road
  * logs sampled at 3 to 4 Hz (ADR-0056's appendix of 2026-11-12). The gap
  * outlasts the lift between two gears, 925 ms at the longest, and stays
@@ -857,7 +907,8 @@ ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
 typedef struct ecuio_stretch_rules {
     uint32_t kinds;              /* ECUIO_STRETCH_*: which to find, one or
                                     both */
-    uint32_t flags;              /* zero */
+    uint32_t flags;              /* ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED or
+                                    zero */
     double pull_level;           /* throttle, % */
     double pull_load_level;      /* engine load, %, with no throttle */
     uint64_t pull_hold_us;       /* the shortest pull */
@@ -943,9 +994,11 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  * A pull: a run of throttle samples at or above pull_level (engine load
  * at pull_load_level with no throttle signal, BY_LOAD) lasting
  * pull_hold_us, a dip under the level shorter than pull_gap_us, from the
- * dip's first sample to the next at the level, kept inside it; it ends
- * at vehicle speed's first sample at its highest in the run, so the
- * limiter's flat speed ends it, and speed must have risen over it. With
+ * dip's first sample to the next at the level, kept inside it; it ends at
+ * the run's last sample at the level, the lift, or with
+ * ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED at vehicle speed's first sample at
+ * its highest in the run, so the limiter's flat speed ends it; with a
+ * vehicle-speed signal speed must have risen over it either way. With
  * no speed signal the whole run is the pull (BY_ENGINE_SPEED), since an
  * upshift drops engine speed. Engine speed must climb pull_min_rise
  * inside the pull: the most a sample stands above an earlier one, the
@@ -968,9 +1021,9 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  *
  * ECUIO_ERR_NULL_ARGUMENT for NULL rules or count, or NULL out with a
  * capacity; ECUIO_ERR_INVALID_ARGUMENT for kinds of 0 or one this core
- * doesn't know, nonzero flags or reserved, a negative or NaN level,
- * band, rise or gain, a role index past the signals or on a text signal, or
- * from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
+ * doesn't know, a flag this core doesn't know or nonzero reserved, a
+ * negative or NaN level, band, rise or gain, a role index past the signals
+ * or on a text signal, or from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
  */
 ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
                                          const ecuio_stretch_rules_t* rules,
@@ -1179,7 +1232,8 @@ typedef struct ecuio_export_options {
     uint32_t column_count;           /* wide: the columns named below; 0 takes
                                   the header's focus line, else every
                                   number signal in the recording's order */
-    const char* const* columns_utf8; /* the columns by name, in order */
+    const char* const* columns_utf8; /* the columns in order, each by its
+                                  key or its name */
     uint64_t reserved[1];            /* zero; ABI growth space */
 } ecuio_export_options_t;
 
@@ -1267,17 +1321,22 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * the rule and its cells stay empty until its next sample; with
  * row_ms, a grid of that many ms from the zero instead, each row the
  * newest values at its time, a row with no new cell skipped. The
- * columns are columns_utf8's names in order (one the recording lacks
- * is an empty column), else the header's focus line's, else every
+ * columns are columns_utf8's signals in order, each named by its key
+ * or by a name one signal has (ecuio_recording_find_signal's rule
+ * over the header's signals; a text no signal has is an empty column,
+ * headed as given), else the header's focus line's, else every
  * number signal in the recording's order that has a sample in range;
  * more than 16384 columns, named or found, fail the export (the
  * survey refuses at the first one past, before any row is costed).
  * Each cell carries its signal's decimal places (the header's; an
  * older recording's the most its values show) in units
  * (ecuio_display_convert), the head cell "Name (unit)" in the unit
- * shown; CRLF, no comment line, RFC 4180 quotes only where needed.
+ * shown, with " [key]" after it where two columns of a format 4
+ * recording share that head cell; CRLF, no comment line, RFC 4180
+ * quotes only where needed.
  * ECUIO_CSV_LONG writes a row a value, a comment line of counts first
- * (pandas: skiprows=1), then time_s,signal,unit,value. In both, a text
+ * (pandas: skiprows=1), then time_s,signal,unit,value, and for a
+ * format 4 recording a last column, key, the signal's. In both, a text
  * or hex signal's values and a signal keyed as an identification reply
  * are left out unless RAW (never columns); a name, unit or raw text
  * value that starts as a spreadsheet formula does (=, +, -, @, a tab,
@@ -1306,8 +1365,10 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, layout or units, a
  * flag or reserved field this core doesn't know, a to_us other than 0
  * before from_us, a layout field set for another format or for
- * ECUIO_CSV_LONG, an empty column name, a column named twice, or a
- * column that names a text or identification signal;
+ * ECUIO_CSV_LONG, an empty column name, a column named twice (by its
+ * key and its name too), a column name several signals have (the
+ * detail lists their keys), or a column that names a text or
+ * identification signal;
  * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
  * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
  * 12: ...", never a path; for CSV, a folder with no signals.csv), a

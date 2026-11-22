@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsProfile.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
 // The profile buttons (what to read): one part of SettingsPage, which holds the state
 
 import QtQuick
@@ -16,7 +16,7 @@ ColumnLayout {
 
     property alias didField: didField
 
-    // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
+    // Profile: the URI's query (ADR-0013, ADR-0020)
     // The chosen button is drawn as the primary color
     // On the tab-bar form the three common profiles are one segmented row
     // (a closed set, a tap takes effect), the others buttons under it
@@ -24,11 +24,12 @@ ColumnLayout {
     readonly property var segmentWords: ({ "default": qsTr("Default"), "raw": qsTr("Raw"),
                                            "uds-generic": qsTr("UDS DIDs") })
     readonly property var segmented: Theme.compact
-        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) >= 0) : []
+        ? root.host.uriPart.profiles.filter(p => segmentNames.indexOf(p.name) >= 0) : []
     readonly property var loose: Theme.compact
-        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.profiles
+        ? root.host.uriPart.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.uriPart.profiles
 
     Label {
+        textFormat: Text.PlainText
         visible: root.segmented.length > 0
         text: qsTr("Profile:")
         color: Theme.textDim
@@ -47,10 +48,10 @@ ColumnLayout {
                 labelSize: Theme.fontBody
                 text: root.segmentWords[modelData.name]
                 Accessible.name: modelData.label
-                selected: root.host.profileChoice === modelData.name
+                selected: root.host.uriPart.profileChoice === modelData.name
                 checked: selected
-                enabled: root.host.idle
-                onClicked: root.host.chooseProfile(modelData.name)
+                enabled: root.host.ownPart.idle
+                onClicked: root.host.uriPart.chooseProfile(modelData.name)
             }
         }
     }
@@ -64,27 +65,28 @@ ColumnLayout {
                 objectName: "profile_" + modelData.name
                 text: modelData.label
                 checkable: true
-                checked: root.host.profileChoice === modelData.name
-                enabled: root.host.idle
-                onClicked: root.host.chooseProfile(modelData.name)
+                checked: root.host.uriPart.profileChoice === modelData.name
+                enabled: root.host.ownPart.idle
+                onClicked: root.host.uriPart.chooseProfile(modelData.name)
             }
         }
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "profileHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        text: root.host.profileHint()
+        text: root.host.uriPart.profileHint()
     }
 
     RowLayout {
         objectName: "didRow"
         Layout.fillWidth: true
         spacing: Theme.spacing
-        visible: root.host.profileChoice === "uds-generic"
-        Label { text: qsTr("DIDs:"); color: Theme.textDim }
+        visible: root.host.uriPart.profileChoice === "uds-generic"
+        Label { textFormat: Text.PlainText; text: qsTr("DIDs:"); color: Theme.textDim }
         ThemedTextField {
             id: didField
             objectName: "didField"
@@ -98,13 +100,13 @@ ColumnLayout {
                                   + "[ecu:]DID[-DID][:hex|text|u8…u32|i8…i32]")
             validator: RegularExpressionValidator { regularExpression: /[0-9A-Za-z:,\-\s]*/ }
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
-            enabled: root.host.idle
+            enabled: root.host.ownPart.idle
             color: Theme.text
             onTextChanged: {
-                if (!root.host.syncing && root.host.profileChoice === "uds-generic")
-                    root.host.recompose()
+                if (!root.host.uriPart.syncing && root.host.uriPart.profileChoice === "uds-generic")
+                    root.host.uriPart.recompose()
             }
-            onAccepted: root.host.requestConnect(root.host.uriField.text)
+            onAccepted: root.host.connectFromPart.requestConnect(root.host.connectPart.uriField.text)
         }
     }
 
@@ -112,16 +114,17 @@ ColumnLayout {
         id: extBox
         objectName: "extSessionBox"
         Layout.fillWidth: true
-        visible: root.host.profileChoice === "uds-generic" && root.host.sessionOffered(root.host.uriBase())
+        visible: root.host.uriPart.profileChoice === "uds-generic" && root.host.uriPart.sessionOffered(root.host.uriPart.uriBase())
         text: qsTr("Extended session (10 03)")
-        checked: root.host.extSession
-        enabled: root.host.idle
+        checked: root.host.uriPart.extSession
+        enabled: root.host.ownPart.idle
         onToggled: {
-            root.host.extSession = checked
-            checked = Qt.binding(() => root.host.extSession)
-            root.host.recompose()
+            root.host.uriPart.extSession = checked
+            checked = Qt.binding(() => root.host.uriPart.extSession)
+            root.host.uriPart.recompose()
         }
         contentItem: Label {
+            textFormat: Text.PlainText
             text: extBox.text
             color: extBox.enabled ? Theme.text : Theme.textDim
             leftPadding: extBox.indicator.width + extBox.spacing
@@ -130,9 +133,10 @@ ColumnLayout {
         }
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "optionsNote"
         Layout.fillWidth: true
-        visible: root.host.profileChoice === "uds-generic"
+        visible: root.host.uriPart.profileChoice === "uds-generic"
         wrapMode: Text.WordWrap
         color: Theme.textDim
         text: qsTr("More options go after ?: see the address reference")

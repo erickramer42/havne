@@ -1,6 +1,7 @@
 // File/layer: fuzz/fuzz_plugin_manifest.cpp | C++17, Qt-free, libFuzzer
-// Testing: FUZZ: the plugin loader (ADR-0052, ecuio_plugin_load) and its
-//          value fixtures (ecuio_plugin_values)
+// Testing: FUZZ: the plugin loader (ADR-0052, ADR-0066's format 2,
+//          ecuio_plugin_load), its pages (ecuio_plugin_page) and its value
+//          fixtures (ecuio_plugin_values)
 //
 // The first byte picks the form: even, a packed package (the rest up to
 // its first 0x1E byte is the file); odd, a folder, the rest cut at 0x1E
@@ -14,7 +15,10 @@
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 
+#include "json.h"              /* core/src: a page's text read back */
 #include "signal_file_build.h" /* core/src: a variant's merged text */
+#include "tier2_ceiling.h"     /* core/src: what a conversation may declare */
+#include "wasm_check.h"        /* core/src: a module's most bytes */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -127,6 +131,198 @@ void check_values(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     }
 }
 
+/* Each declared service once, inside tier 2's ceiling, by sub-function
+ * exactly where the ceiling splits; sub_27 gets security access's */
+void check_services(const ecuio_plugin_t* a, uint32_t count, bool* sub_27)
+{
+    ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
+    bool sid_seen[256] = {};
+    for (uint32_t i = 0; i < count; ++i) {
+        check(ecuio_plugin_service(a, i, &sv) == ECUIO_OK);
+        check(sv.struct_size == sizeof sv && sv.flags == 0);
+        check(!sid_seen[sv.sid]);
+        sid_seen[sv.sid] = true;
+        check(sv.sub_count <= ECUIO_PLUGIN_MAX_SUBS);
+        check((sv.sub_count > 0) == ecuio_tier2_splits(sv.sid));
+        check(sv.sub_count > 0 || ecuio_tier2_allowed(sv.sid, 0));
+        for (uint32_t k = 0; k < sizeof sv.subs; ++k) {
+            if (k >= sv.sub_count) {
+                check(sv.subs[k] == 0);
+                continue;
+            }
+            check(ecuio_tier2_allowed(sv.sid, sv.subs[k]));
+            for (uint32_t j = 0; j < k; ++j) {
+                check(sv.subs[j] != sv.subs[k]);
+            }
+            if (sv.sid == 0x27) {
+                sub_27[sv.subs[k]] = true;
+            }
+        }
+        check(sv.reserved[0] == 0 && sv.reserved[1] == 0);
+    }
+    check(ecuio_plugin_service(a, count, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        sv.struct_size = sizeof sv - 1;
+        const ecuio_plugin_service_t untouched = sv;
+        check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&sv, &untouched, sizeof sv) == 0);
+    }
+}
+
+/* Each security level on one of the group's ECUs, once, inside its
+ * bounds, its seed and key requests declared */
+void check_levels(const ecuio_plugin_t* a, uint32_t count,
+                  const std::vector<uint32_t>& ecus, const bool* sub_27)
+{
+    ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
+    std::vector<ecuio_plugin_security_level_t> levels;
+    for (uint32_t i = 0; i < count; ++i) {
+        check(ecuio_plugin_security_level(a, i, &lv) == ECUIO_OK);
+        check(lv.struct_size == sizeof lv && lv.flags == 0);
+        bool listed = false;
+        for (const uint32_t known : ecus) {
+            listed = listed || known == lv.rx_id;
+        }
+        check(listed);
+        check((lv.level & 1) == 1 && lv.level < 0x7F);
+        check(sub_27[lv.level] && sub_27[lv.level + 1]);
+        check(lv.seed_bytes >= 1);
+        check(lv.key_bytes >= 1 && lv.key_bytes <= ECUIO_PLUGIN_KEY_MAX);
+        check(lv.reserved0 == 0);
+        check(lv.delay_ms >= 1000 && lv.delay_ms <= 3600000);
+        check(lv.key_window_ms >= 50 && lv.key_window_ms <= 4000);
+        for (const uint32_t r : lv.reserved) {
+            check(r == 0);
+        }
+        for (const ecuio_plugin_security_level_t& known : levels) {
+            check(known.rx_id != lv.rx_id || known.level != lv.level);
+        }
+        levels.push_back(lv);
+    }
+    check(ecuio_plugin_security_level(a, count, &lv) ==
+          ECUIO_ERR_INVALID_ARGUMENT);
+    if (count > 0) { /* else the index refuses first */
+        lv.struct_size = sizeof lv - 1;
+        const ecuio_plugin_security_level_t untouched = lv;
+        check(ecuio_plugin_security_level(a, 0, &lv) ==
+              ECUIO_ERR_INVALID_ARGUMENT);
+        check(memcmp(&lv, &untouched, sizeof lv) == 0);
+    }
+}
+
+/* Each ECU the module talks to, once: one of the plugin's, so a channel
+ * of every variant's set, with that channel's request ID. Their
+ * response IDs, in order */
+std::vector<uint32_t> check_ecus(const ecuio_plugin_t* a, uint32_t count,
+                                 uint32_t variants)
+{
+    std::vector<ecuio_plugin_conversation_ecu_t> seen;
+    std::vector<uint32_t> ecus;
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_conversation_ecu_t e{};
+        e.struct_size = sizeof e;
+        check(ecuio_plugin_conversation_ecu(a, i, &e) == ECUIO_OK);
+        check(e.struct_size == sizeof e && e.rx_id != 0 && e.flags == 0);
+        const size_t id = strnlen(e.id, sizeof e.id);
+        check(id >= 1 && id < sizeof e.id);
+        for (const uint32_t r : e.reserved) {
+            check(r == 0);
+        }
+        for (const ecuio_plugin_conversation_ecu_t& known : seen) {
+            check(known.rx_id != e.rx_id && strcmp(known.id, e.id) != 0);
+        }
+        for (uint32_t v = 0; v < variants; ++v) {
+            const ecuio_signal_set_t* set =
+                ecuio_signal_file_set(ecuio_plugin_variant_file(a, v));
+            bool found = false;
+            for (uint32_t k = 0; set != nullptr && k < set->channel_count;
+                 ++k) {
+                found = found || (set->channels[k].rx_id == e.rx_id &&
+                                  set->channels[k].tx_id == e.tx_id);
+            }
+            check(found);
+        }
+        seen.push_back(e);
+        ecus.push_back(e.rx_id);
+    }
+    ecuio_plugin_conversation_ecu_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_conversation_ecu(a, count, &past) ==
+          ECUIO_ERR_INVALID_ARGUMENT);
+    return ecus;
+}
+
+/* Each page: its form, its text within the bound, the same for both
+ * loads, and written again by core to the same bytes */
+void check_pages(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
+                 uint32_t count)
+{
+    check(count <= ECUIO_PLUGIN_MAX_PAGES);
+    ecuio_plugin_page_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_page(a, count, &past) == ECUIO_ERR_INVALID_ARGUMENT);
+    check(ecuio_plugin_page_text(a, count) == nullptr);
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_page_t page{};
+        page.struct_size = sizeof page;
+        check(ecuio_plugin_page(a, i, &page) == ECUIO_OK);
+        check(page.form == ECUIO_PLUGIN_PAGE_PHONE ||
+              page.form == ECUIO_PLUGIN_PAGE_DESKTOP);
+        check(page.text_bytes <= ECUIO_PLUGIN_PAGE_MAX_BYTES);
+        const char* text = ecuio_plugin_page_text(a, i);
+        check(text != nullptr && strlen(text) == page.text_bytes);
+        check(std::string(text) == ecuio_plugin_page_text(b, i));
+        ecuio_json::Value v;
+        ecuio_json::Error error;
+        check(ecuio_json::parse(text, page.text_bytes, &v, &error));
+        check(ecuio_json::write(v) == text);
+    }
+}
+
+/* The conversation tier's part, read from both plugins alike: none
+ * without the tier; with it, everything inside plugin.h's bounds and
+ * tier 2's ceiling, each ECU, service and level once, each level's pair
+ * declared, and every getter refusing past its count */
+void check_conversation(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
+                        uint32_t tiers, uint32_t variants)
+{
+    ecuio_plugin_conversation_t c{};
+    c.struct_size = sizeof c;
+    ecuio_plugin_conversation_t d = c;
+    const ecuio_status_t s = ecuio_plugin_conversation(a, &c);
+    check(ecuio_plugin_conversation(b, &d) == s);
+    ecuio_plugin_conversation_ecu_t ecu{};
+    ecu.struct_size = sizeof ecu;
+    ecuio_plugin_service_t sv{};
+    sv.struct_size = sizeof sv;
+    ecuio_plugin_security_level_t lv{};
+    lv.struct_size = sizeof lv;
+    if ((tiers & ECUIO_PLUGIN_TIER_CONVERSATION) == 0) {
+        check(s == ECUIO_ERR_INVALID_ARGUMENT);
+        check(ecuio_plugin_conversation_ecu(a, 0, &ecu) ==
+              ECUIO_ERR_INVALID_ARGUMENT);
+        check(ecuio_plugin_service(a, 0, &sv) == ECUIO_ERR_INVALID_ARGUMENT);
+        check(ecuio_plugin_security_level(a, 0, &lv) ==
+              ECUIO_ERR_INVALID_ARGUMENT);
+        return;
+    }
+    check(s == ECUIO_OK && memcmp(&c, &d, sizeof c) == 0);
+    check(c.struct_size == sizeof c && c.reserved[0] == 0 &&
+          c.reserved[1] == 0);
+    check(c.code_bytes >= 8 && c.code_bytes <= ecuio_wasm::MODULE_MAX_BYTES);
+    check(c.budget >= 1 && c.budget <= ECUIO_PLUGIN_BUDGET_MAX);
+    check(c.ecu_count >= 1 && c.ecu_count <= ECUIO_MAX_CHANNELS);
+    check(c.service_count >= 1 && c.service_count <= ECUIO_PLUGIN_MAX_SERVICES);
+    check(c.level_count <= ECUIO_PLUGIN_MAX_LEVELS);
+
+    const std::vector<uint32_t> ecus = check_ecus(a, c.ecu_count, variants);
+    bool sub_27[256] = {}; /* security access's sub-functions declared */
+    check_services(a, c.service_count, sub_27);
+    check_levels(a, c.level_count, ecus, sub_27);
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -189,7 +385,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     ecuio_plugin_info_t info{};
     info.struct_size = sizeof info;
     check(ecuio_plugin_info(a, &info) == ECUIO_OK);
-    check(info.tiers == ECUIO_PLUGIN_TIER_DATA);
+    check(info.tiers == ECUIO_PLUGIN_TIER_DATA ||
+          info.tiers ==
+              (ECUIO_PLUGIN_TIER_DATA | ECUIO_PLUGIN_TIER_CONVERSATION));
+    check_conversation(a, b, info.tiers, info.variant_count);
+    check_pages(a, b, info.page_count);
     check(info.variant_count >= 1 &&
           info.variant_count <= ECUIO_PLUGIN_MAX_VARIANTS);
     check(!folder ? info.fixture_count == 0

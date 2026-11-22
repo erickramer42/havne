@@ -6,24 +6,33 @@
 #   python tests/cli_log.py fails <havne-cli>
 #   python tests/cli_log.py replay <havne-cli> <fixture folder>
 #   python tests/cli_log.py armed <havne-cli> <fixture folder>
+#   python tests/cli_log.py summary <havne-cli> <fixture folder>
 #   python tests/cli_log.py interrupt <havne-cli>
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_log.py pace <havne-cli>
 #   python tests/cli_log.py pick <havne-cli>
+#   python tests/cli_log.py pick-only <havne-cli>
 #   python tests/cli_log.py session <havne-cli> <fake_j2534.dll> <golden> [--update]   (Windows)
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
 # period shortened through HAVNE_CLI_LOG_EVERY_MS (set here): the lines
 # are start, session, focus (the two picks in order), recording started,
 # log lines (seconds climbing, bytes and values growing), recording closed
-# whole and end (reason seconds, the folder); events.log carries the picks on its
+# whole, an interval line for each pick and the summary, and end (reason
+# seconds, the folder); events.log carries the picks on its
 # focus line; an export of the folder with no --signal picks exactly
 # those two columns, in order, through that line; --layout long still
 # writes every number signal.
 # fails: a folder that can't be made ends the log before any frame, with
 # the reason (never the path) and exit 1. replay: a replay at max ends at
-# its last frame, reason replay-end, the recording whole. armed: --armed
+# its last frame, reason replay-end, the recording whole. summary: the
+# same replay's closing lines, an interval line for each signal then the
+# summary before the end, checked against the recording it wrote: the
+# interval lines' values add to the summary's, its rate is them over the
+# window, and RPM's line agrees with RPM's replies in frames.csv inside
+# the window (the count, the exact minimum and maximum, the P50 at its
+# bucket's top, at most an eighth above the true one). armed: --armed
 # over the replay at max with a condition on engine speed: an armed line,
 # window lines whose count climbs to two with each folder there, the
 # closed and end lines saying two windows, the end naming the newest
@@ -53,6 +62,7 @@
 
 import csv
 import json
+import math
 import os
 import signal
 import subprocess
@@ -65,6 +75,8 @@ sys.dont_write_bytecode = True  # no __pycache__ beside the tests
 import golden  # noqa: E402
 
 PICKS = ["Vehicle Speed", "RPM"]
+# The keys a recording keeps PICKS under: the mock's 0x0C0 bytes 3 and 0-1
+PICK_KEYS = ["0C0::3.0:8", "0C0::0.0:16"]
 HEAD = "Time (ms),Vehicle Speed (km/h),RPM (RPM)"
 
 
@@ -149,6 +161,12 @@ def pace(cli):
     return 0
 
 
+def without_summary(rows):
+    """The lines but the interval and summary lines a log writes between
+    its recording's closed line and the end"""
+    return [r for r in rows if r.get("type") not in ("interval", "summary")]
+
+
 def the_folder(root):
     found = [p for p in Path(root).iterdir() if p.is_dir()]
     if len(found) != 1:
@@ -167,6 +185,11 @@ def demo(cli):
         if code != 0:
             print(f"FAIL  exit {code}\n{err}")
             return 1
+        said = [r.get("signal") for r in rows if r.get("type") == "interval"]
+        if sorted(said) != sorted(PICKS) or rows[-2].get("type") != "summary":
+            print(f"FAIL  interval lines for {said!r} and a summary, want {PICKS!r}")
+            return 1
+        rows = without_summary(rows)
         types = [r.get("type") for r in rows]
         head, tail = types[:4], types[4:]
         if head != ["start", "session", "focus", "recording"]:
@@ -219,7 +242,7 @@ def demo(cli):
             print(f"FAIL  the end line's readout {json.dumps(end)}")
             return 1
         events = (folder / "events.log").read_bytes().decode("utf-8")
-        want = "focus  " + ",".join(PICKS)
+        want = "focus  " + ",".join(PICK_KEYS)
         if want not in events.splitlines():
             print(f"FAIL  events.log has no line {want!r}")
             return 1
@@ -241,7 +264,7 @@ def demo(cli):
         if code != 0:
             print(f"FAIL  export exit {code}\n{err}")
             return 1
-        text = out.read_bytes().decode("utf-8")
+        text = out.read_bytes().decode("utf-8-sig")
         lines = text.split("\r\n")
         if lines[0] != HEAD:
             print(f"FAIL  the wide header {lines[0]!r}, want {HEAD!r}")
@@ -330,6 +353,64 @@ def replay(cli, fixture):
         if not whole(the_folder(root), "havne-cli: replay-end"):
             return 1
     print("ok    a replay ends the log at its last frame")
+    return 0
+
+
+def rpm_stamps(folder, start, stop):
+    """frames.csv's timestamp_us of each RPM reply (41 0C on 0x7E8) from
+    start to stop, the recording's own"""
+    with open(folder / "frames.csv", newline="", encoding="utf-8") as f:
+        return [int(r["timestamp_us"]) for r in csv.DictReader(f)
+                if r["id"] == "0x7E8" and r["data"].startswith("41 0C")
+                and start <= int(r["timestamp_us"]) <= stop]
+
+
+def summary_agrees(summary, intervals, folder):
+    """None when the lines agree with each other and with frames.csv, else
+    why not"""
+    if len(intervals) != summary["signals"] or not intervals:
+        return f"{len(intervals)} interval lines for {summary['signals']} signals"
+    if sum(i["values"] for i in intervals) != summary["values"]:
+        return "the interval lines' values don't add to the summary's"
+    span = (summary["to_us"] - summary["from_us"]) / 1e6
+    if abs(summary["values"] / span - summary["values_per_s"]) > 0.0015:
+        return f"values_per_s {summary['values_per_s']}, want {summary['values'] / span}"
+    rpm = [i for i in intervals if i["signal"] == "RPM"]
+    if len(rpm) != 1:
+        return "no RPM interval line"
+    rpm = rpm[0]
+    stamps = rpm_stamps(folder, summary["from_us"], summary["to_us"])
+    gaps = sorted(b - a for a, b in zip(stamps, stamps[1:]))
+    if rpm["values"] != len(stamps) or not gaps:
+        return f"RPM's {rpm['values']} values, frames.csv's {len(stamps)}"
+    if rpm["min_ms"] != gaps[0] / 1000 or rpm["max_ms"] != gaps[-1] / 1000:
+        return f"RPM's min and max {rpm['min_ms']}, {rpm['max_ms']} ms, want {gaps[0]}, {gaps[-1]} us"
+    true_p50 = gaps[math.ceil(len(gaps) / 2) - 1]
+    p50 = rpm["p50_ms"] * 1000
+    if not true_p50 <= p50 <= min(true_p50 * 1.125, gaps[-1]):
+        return f"RPM's P50 {rpm['p50_ms']} ms against a true {true_p50} us"
+    return None
+
+
+def summary(cli, fixture):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-log-summary-") as root:
+        uri = f"replay://{Path(fixture).as_posix()}?profile=obd2&speed=max"
+        code, rows, err = run(cli, ["log", uri, root, "--seconds", "20"])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        closed = [n for n, r in enumerate(rows)
+                  if r.get("type") == "recording" and r.get("state") == "closed"]
+        tail = [r.get("type") for r in rows[closed[-1] + 1:]] if closed else []
+        k = len(tail) - 2
+        if k < 1 or tail != ["interval"] * k + ["summary", "end"]:
+            print(f"FAIL  the lines after closed {tail!r}")
+            return 1
+        why = summary_agrees(rows[-2], rows[-2 - k:-2], the_folder(root))
+        if why is not None:
+            print(f"FAIL  {why}\n{json.dumps(rows[-2])}")
+            return 1
+    print(f"ok    {k} interval lines and a summary agree with the recording")
     return 0
 
 
@@ -437,7 +518,7 @@ def interrupt(cli):
             p.communicate()
             print("FAIL  still running 15 s after the interrupt")
             return 1
-        rows = lines_of(out)
+        rows = without_summary(lines_of(out))
         if p.returncode != 0 or not rows or rows[-1].get("type") != "end" or \
                 rows[-1].get("reason") != "interrupted":
             print(f"FAIL  exit {p.returncode}, last line {rows[-1:] !r}\n"
@@ -567,6 +648,11 @@ def session_line(cli, dll, golden_file, update):
 OBD2_PICK = ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
              "Intake Air Temp", "Fuel Level", "Battery Voltage", "MAF",
              "Engine Oil Temp"]
+# Their keys, which a recording's pick line lists: each PID's reply from
+# 0x7E8, its value from byte 2
+OBD2_PICK_KEYS = ["7E8:4104:2.0:8", "7E8:4105:2.0:8", "7E8:410C:2.0:16",
+                  "7E8:410D:2.0:8", "7E8:410F:2.0:8", "7E8:412F:2.0:8",
+                  "7E8:4142:2.0:16", "7E8:4110:2.0:16", "7E8:415C:2.0:8"]
 
 
 def header_lines(folder, word):
@@ -611,7 +697,7 @@ def pick_cases(cli, elm):
         print(f"FAIL  the pick's focus line {focus}, exit {code}\n{err}")
         return 1
     if len(header["pick"]) != 1 or header["focus"] or \
-            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK)):
+            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK_KEYS)):
         print(f"FAIL  the header's pick {header!r}")
         return 1
 
@@ -671,8 +757,22 @@ def pick_cases(cli, elm):
         print(f"FAIL  stream's lines {types!r}, exit {code}\n{err}")
         return 1
     if len(header["pick"]) != 1 or \
-            not header["pick"][0].startswith("pick  Engine Load,"):
+            not header["pick"][0].startswith("pick  " + OBD2_PICK_KEYS[0] + ","):
         print(f"FAIL  stream's recording names {header!r}")
+        return 1
+
+    # Through a signal file a signal the file keys itself (the later of two
+    # at one address) has that key on the line, the others their address
+    extras = Path(__file__).resolve().parent / "fixtures" / "signals" / "extras.json"
+    code, rows, err, header = pick_run(cli, [
+        "stream", elm + "?identify=0&diagnose=0&probe=0", "--signals",
+        str(extras), "--seconds", "1", "--pick", "ranked"])
+    keys = {s["name"]: s["key"]
+            for s in (focus_of(rows) or {}).get("signals", [])}
+    if code != 0 or keys.get("Road Speed") != "road_speed" or \
+            keys.get("RPM") != OBD2_PICK_KEYS[2]:
+        print(f"FAIL  stream's keys through a signal file {keys!r}, "
+              f"exit {code}\n{err}")
         return 1
 
     # A pick core refuses (?poll= asks none of the ranked ones) leaves the
@@ -688,15 +788,159 @@ def pick_cases(cli, elm):
     return 0
 
 
+def car_plugin(folder, plugin_id, plot):
+    """A plugin folder whose one variant holds two data files of
+    ECUIO_SIGNAL_FILE_MAX_SIGNALS signals, each read by 22 <DID> on its own
+    ECU: a set past a rotation, so a session on it is asked only its picks
+    (ADR-0065). plot gives every signal that rank, 0 none."""
+    most = 1024
+    folder = Path(folder)
+    (folder / "data").mkdir(parents=True)
+    for n, (ecu, name) in enumerate((("a", "A"), ("b", "B"))):
+        sigs = []
+        for i in range(most):
+            s = {"key": f"{ecu}{i}", "name": f"Sig {name} {i}", "ecu": ecu,
+                 "read": {"service": "22", "number": f"{0x1000 + i:04X}"},
+                 "field": {"byte": 0}}
+            if plot:
+                s["plot"] = plot
+            sigs.append(s)
+        (folder / "data" / f"{ecu}.json").write_text(
+            json.dumps({"havne_signals": 1, "signals": sigs}), "utf-8")
+    (folder / "manifest.json").write_text(json.dumps({
+        "havne_plugin": 1, "id": plugin_id, "name": "Car sized",
+        "version": "1.0.0", "requires": {"core": "0.4.1"},
+        "source": {"name": "test"}, "tiers": ["data"],
+        "ecus": [{"id": "a", "rx": "7E8", "tx": "7E0"},
+                 {"id": "b", "rx": "7E9", "tx": "7E1"}],
+        "variants": [{"id": "base", "files": ["data/a.json", "data/b.json"]}],
+    }), "utf-8")
+
+
+def pick_only_cases(cli, elm):
+    """A set past a rotation is asked only its picks: the words say so"""
+    with tempfile.TemporaryDirectory(prefix="havne-cli-car-") as plugins:
+        car_plugin(Path(plugins) / "plain", "carplain", 0)
+        car_plugin(Path(plugins) / "ranked", "carranked", 1)
+        plain = ["--plugin", str(Path(plugins) / "plain")]
+        ranked = ["--plugin", str(Path(plugins) / "ranked")]
+        tail = "&identify=0&diagnose=0"
+        uri_plain = elm + "?profile=plugin.carplain.base" + tail
+        uri_ranked = elm + "?profile=plugin.carranked.base" + tail
+
+        info = [r for r in run(cli, ["stream", uri_plain, "--seconds", "1"]
+                               + plain)[1] if r.get("type") == "session"]
+        if len(info) != 1 or info[0].get("pick_only") is not True:
+            print(f"FAIL  the session line names no pick_only: {info}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_plain, "--seconds", "1", "--pick", "ranked"] + plain)
+        if code != 0 or focus_of(rows) is not None or \
+                "the profile ranks no signal and is asked only what is " \
+                "picked: --pick ranked asks none" not in err or \
+                "every" in err:
+            print(f"FAIL  an unranked pick-only stream: exit {code}, {err!r}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_ranked, "--seconds", "1", "--pick", "ranked"]
+            + ranked)
+        if code != 0 or focus_of(rows) is not None or \
+                "asking no signal: " not in err or \
+                "a session asks 1024 at a time" not in err or \
+                "every" in err:
+            print(f"FAIL  a refused pick-only pick: exit {code}, {err!r}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_plain, "--seconds", "1"] + plain)
+        if code != 0 or focus_of(rows) is not None or \
+                "nothing is asked (--pick ranked, or log --signal)" not in err:
+            print(f"FAIL  a pick-only stream with no pick: exit {code}, "
+                  f"{err!r}")
+            return 1
+
+        with tempfile.TemporaryDirectory(prefix="havne-cli-car-log-") as root:
+            code, rows, err = run(cli, [
+                "log", uri_plain, root, "--seconds", "1"] + plain)
+            made = [p for p in Path(root).iterdir()]
+            errors = [r for r in rows if r.get("type") == "error"]
+            if code != 3 or made or len(errors) != 1 or \
+                    "name signals with --signal or attach conditions with " \
+                    "--conditions" not in err:
+                print(f"FAIL  a pick-only log with no names: exit {code}, "
+                      f"{err!r}, made {made}, {errors}")
+                return 1
+
+            # Attached conditions are asked by core: a log with no names
+            # but a condition file isn't refused
+            conds = Path(root) / "conditions.json"
+            conds.write_text(json.dumps({
+                "havne_conditions": 1, "name": "Car",
+                "conditions": [{"key": "hot", "name": "Hot",
+                                "when": {"signal": ["key:a7"], "unit": "",
+                                         "above": 1}}],
+            }), "utf-8")
+            code, rows, err = run(cli, [
+                "log", uri_plain, str(Path(root) / "out"), "--seconds", "1",
+                "--conditions", str(conds)] + plain)
+            ends = [r for r in rows if r.get("type") == "end"]
+            if code != 0 or "asked only what is picked" in err or \
+                    len(ends) != 1:
+                print(f"FAIL  a pick-only log with conditions: exit {code}, "
+                      f"{err!r}, {rows[-3:]}")
+                return 1
+
+        code, rows, err, header = pick_run(cli, [
+            "log", uri_plain, "<root>", "--seconds", "1", "--signal",
+            "Sig A 7"] + plain)
+        focus = focus_of(rows)
+        if code != 0 or focus is None or \
+                [s["name"] for s in focus["signals"]] != ["Sig A 7"] or \
+                "pick" in focus or len(header["focus"]) != 1:
+            print(f"FAIL  a pick-only log of one name: {focus}, exit {code}, "
+                  f"{err!r}, {header!r}")
+            return 1
+
+        code, rows, err, header = pick_run(cli, [
+            "log", uri_plain, "<root>", "--seconds", "1", "--pick",
+            "ranked", "--signal", "Sig A 7"] + plain)
+        focus = focus_of(rows)
+        if code != 0 or focus is None or focus.get("pick") != "ranked" or \
+                [s["name"] for s in focus["signals"]] != ["Sig A 7"] or \
+                "--pick ranked adds none" not in err or \
+                len(header["pick"]) != 1 or \
+                not header["pick"][0].startswith("pick  7E8:621007:3.0:8"):
+            print(f"FAIL  a pick-only log with --pick ranked: {focus}, "
+                  f"exit {code}, {err!r}, {header!r}")
+            return 1
+    print("ok    a pick-only session says nothing is asked and is asked "
+          "only its picks")
+    return 0
+
+
+def pick_only(cli):
+    emulator = Emulator(cli)
+    try:
+        return pick_only_cases(cli, f"elm327://127.0.0.1:{emulator.port}")
+    finally:
+        emulator.end()
+
+
 def main(argv):
     if len(argv) >= 3 and argv[1] == "demo":
         return demo(argv[2])
     if len(argv) >= 3 and argv[1] == "pick":
         return pick(argv[2])
+    if len(argv) >= 3 and argv[1] == "pick-only":
+        return pick_only(argv[2])
     if len(argv) >= 3 and argv[1] == "fails":
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":
         return replay(argv[2], argv[3])
+    if len(argv) >= 4 and argv[1] == "summary":
+        return summary(argv[2], argv[3])
     if len(argv) >= 4 and argv[1] == "armed":
         return armed(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == "interrupt":

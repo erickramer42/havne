@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # File/layer: scripts/abi-check.sh | Linux, bash (CI's abi job; WSL)
 # Testing: run by .github/workflows/ci.yml's abi job on every push, and
-#          by hand in WSL (docs/development.md, "The C ABI check")
+#          by hand in WSL (docs/ci.md, "The C ABI check")
 #
 # Holds the C ABI to its promises (ADR-0001): the core at HEAD against
 # a release's, with libabigail. Each tree's core-only build (debug info,

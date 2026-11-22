@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/performance.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).
@@ -31,7 +31,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
-- **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to four modules, written in Settings or imported from an OBDb set, all kept as plugins in one list ([signal-files.md](docs/signal-files.md)).
+- **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to 32 modules, written in Settings or imported from an OBDb set, all kept as plugins in one list ([signal-files.md](docs/signal-files.md)).
 - **Alerts and armed recording:** a condition file names a test of a signal or the link; the app shows an alert as a band, and an armed recorder records around each firing ([condition-files.md](docs/condition-files.md), [ADR-0063](docs/adr/0063-conditions.md)).
 - **Record and review:** every frame and value of a session; the Recordings page pans, zooms, overlays a second run and shows the frames; `replay://` plays one back ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **Analysis log:** Start log records the picked signals at the bus's own rate, and `havne-cli export` writes them as a wide CSV, a row a sweep ([ADR-0056](docs/adr/0056-analysis-log.md)).
@@ -61,7 +61,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 *A pull in the Recordings viewer: each unit in its own pane on one time axis, the cursor's values beside them, lambda going lean on the limiter's fuel cut.*
 
-Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
+Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -96,18 +96,18 @@ it, a frame's path from transport to screen included.
 
 | File | What it shows |
 |---|---|
-| [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine: pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
+| [`core/src/request_engine.h`](core/src/request_engine.h) | The request engine (its parts are the `request_engine_*.h` beside it): pacing, the probe, the DID scan and identification, with no I/O and no clock, so every rule is a unit test |
 | [`core/src/isotp.h`](core/src/isotp.h) | ISO-TP on classic CAN, shared by ELM327 and SocketCAN: reassembly, Flow Control, the timers, with no I/O and no clock; fuzzed |
 | [`core/src/elm327_protocol.h`](core/src/elm327_protocol.h) | A pure protocol layer: line reading and frame parsing; fuzzed |
-| [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
-| [`core/src/recorder_writer.cpp`](core/src/recorder_writer.cpp), [`core/src/recording_reader.cpp`](core/src/recording_reader.cpp) | Recordings in core: the worker's single-producer ring to a writer thread that never holds the session, and a reader that answers the viewer from one pass's index; the reader fuzzed |
-| [`core/src/signal_file.cpp`](core/src/signal_file.cpp), [`core/src/plugin.cpp`](core/src/plugin.cpp) | A user's signals and a manufacturer's plugins read as data: a strict JSON reader over bytes, each refusal with its line and column, one build of a signal set for both; fuzzed |
-| [`core/src/scrub.cpp`](core/src/scrub.cpp), [`core/src/export.cpp`](core/src/export.cpp) | The scrubbed exports: the plan from the frames' reassembly, then the check of every message and the file, which fails the export rather than write the car's identity |
+| [`core/src/j2534_surrogate_client.cpp`](core/src/j2534_surrogate_client.cpp), [`_ops.cpp`](core/src/j2534_surrogate_ops.cpp), [`_io.cpp`](core/src/j2534_surrogate_io.cpp), [`surrogate/surrogate_main.cpp`](surrogate/surrogate_main.cpp) | Both ends of the out-of-process driver host: the pipe's protections, late replies, a child that dies |
+| [`core/src/recorder_writer.cpp`](core/src/recorder_writer.cpp), [`core/src/recording_reader.cpp`](core/src/recording_reader.cpp) and its five parts beside it (`recording_reader_*.cpp`) | Recordings in core: the worker's single-producer ring to a writer thread that never holds the session, and a reader that answers the viewer from one pass's index; the reader fuzzed |
+| [`core/src/signal_file.cpp`](core/src/signal_file.cpp), [`core/src/plugin_manifest.cpp`](core/src/plugin_manifest.cpp) | A user's signals and a manufacturer's plugins read as data: a strict JSON reader over bytes, each refusal with its line and column, one build of a signal set for both; fuzzed |
+| [`core/src/scrub.cpp`](core/src/scrub.cpp), [`core/src/export*.cpp`](core/src/) | The scrubbed exports: the plan from the frames' reassembly, then the check of every message and the file, which fails the export rather than write the car's identity |
 | [`core/src/queue.cpp`](core/src/queue.cpp), [`python/havne/session.py`](python/havne/session.py) | The pull queue: the worker copies into a ring and never waits, the caller's thread reads in batches; Python's iterators over it |
 | [`core/src/link_health.h`](core/src/link_health.h) | The link's state machine, shared by both adapter transports |
 | [`app/sessionbridge.cpp`](app/sessionbridge.cpp), [`app/bridge_recorder.cpp`](app/bridge_recorder.cpp) | The worker-to-GUI boundary: backpressure, coalescing, recording |
 | [`cli/cmd_stream.cpp`](cli/cmd_stream.cpp), [`cli/line_ring.h`](cli/line_ring.h) | A second front end over the public headers alone: lines formatted on the worker with no allocation, a ring that drops for a live bus and waits for a replay |
-| [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h) | The simulated vehicle and its physics |
+| [`core/src/mock_drive_cycle.h`](core/src/mock_drive_cycle.h), [`core/src/mock_drive_model.h`](core/src/mock_drive_model.h) | The simulated vehicle: the physics and the phases in the model, the drive cycle's stepping and encoding beside it |
 | [`core/src/sim_ecu.h`](core/src/sim_ecu.h) | The simulated ECU behind `havne-cli sim`: what it answers, as the simulated car or a recording of the test car, with faults on request; pure, so every answer is a unit test |
 
 ## Try it
@@ -133,11 +133,11 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.8.0, conditions and alerts, is the latest release. Next:
+v0.9.0, the whole car's groundwork, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.9.0-v0.11.0 | The whole car through plugins; discovery of the whole bus; the scan tool |
+| v0.9.1-v0.11.0 | v0.9.1, a vehicle's plugins read together and the conversation tier behind safety gates; writes over more transports (v0.9.2); discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.
@@ -150,15 +150,18 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/addresses.md](docs/addresses.md) | Every address form and option, with its default and an example |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
-| [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
+| [docs/testing.md](docs/testing.md) | Test tiers, which areas each reaches, and what isn't verified |
+| [docs/testing-inventory.md](docs/testing-inventory.md) | What each test pins, by area, with the evidence |
+| [docs/performance.md](docs/performance.md) | Measured costs: per frame, a recording, reply timing, a connect |
 | [docs/signal-files.md](docs/signal-files.md) | Writing your own signals: the format, what's refused at load, using a file, importing an OBDb set |
 | [docs/condition-files.md](docs/condition-files.md) | Writing conditions: tests of a signal or the link, alerts, armed recording |
 | [plugins/README.md](plugins/README.md) | Plugins: the package, its variants, the example for the simulated car |
-| [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
+| [docs/j2534.md](docs/j2534.md), [docs/surrogate.md](docs/surrogate.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
-| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |
-| [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red |
+| [docs/development.md](docs/development.md) | Builds, tests, troubleshooting |
+| [docs/ci.md](docs/ci.md), [docs/mobile-build.md](docs/mobile-build.md), [docs/packaging.md](docs/packaging.md) | CI and the C ABI check; the Android and iOS builds; the Linux packages, the SBOM and releases |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | Where to start, the rules a change follows, reporting a vulnerability |

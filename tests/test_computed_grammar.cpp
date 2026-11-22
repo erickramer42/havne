@@ -458,6 +458,25 @@ TEST(SignalFileTest, EveryGrammarRefusalSaysWhereAndWhy)
         << ecuio_last_error_detail();
 }
 
+TEST(SignalFileTest, ARefusalAtACharacterOutsideAsciiQuotesItWhole)
+{
+    struct Case {
+        std::string expr;
+        std::string words;
+    };
+    const Case cases[] = {
+        {"a + \xC3\xA9", "has '\xC3\xA9' where a value should be"},
+        {"a \xC3\xA9", "has '\xC3\xA9' where an operator or the end"},
+        {"max(a \xC3\xA9)", "has '\xC3\xA9' where ',' or ')' should be"},
+        {"a + \xF0\x9F\x98\x80", "has '\xF0\x9F\x98\x80' where a value"},
+    };
+    for (const Case& c : cases) {
+        const std::string got = words_of(2, c.expr);
+        EXPECT_NE(got.find(c.words), std::string::npos)
+            << c.expr << "\n  got: " << got << "\n  want: " << c.words;
+    }
+}
+
 TEST(SignalFileTest, TheFormatAndEachExpressionReadBack)
 {
     for (const int format : {1, 2}) {

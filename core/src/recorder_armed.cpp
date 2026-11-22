@@ -217,7 +217,7 @@ uint64_t ecuio_recorder::first_frame_t_us(uint64_t at) const
 /* A window's header: a recording begun mid-session's, at its start */
 std::string ecuio_recorder::window_header(const window& w)
 {
-    std::string h = std::string(ecuio_recording_rows::kFormat3) + "\n";
+    std::string h = std::string(ecuio_recording_rows::kFormat4) + "\n";
     h += started_lines(wall_base);
     h += armed_core;
     const ecuio_condition_record::entry& c =
@@ -225,16 +225,8 @@ std::string ecuio_recorder::window_header(const window& w)
     h += "trigger  " + c.key + "," +
          std::to_string((uint64_t{c.before_us} + 500) / 1000) + " ms\n";
     size_t named = 0;
-    const std::vector<std::string> parts = focus_parts_with(
-        win_focus.ids,
-        [this](uint16_t id, std::string* name) {
-            const def_entry* d = def(id);
-            if (d != nullptr) {
-                *name = d->name;
-            }
-            return d != nullptr;
-        },
-        &named);
+    const std::vector<std::string> parts =
+        focus_parts(defs, win_focus.ids, &named);
     h += focus_header(parts, named, win_focus);
     h += header_link(win_link_state, win_link_episodes);
     h += armed_signals;

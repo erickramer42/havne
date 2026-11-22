@@ -1,22 +1,98 @@
 # Development guide
 
-Building, testing and CI for contributors. For the short build
-instructions, see the [README](../README.md#try-it).
+Building, testing and CI for contributors.
+
+## Start here
+
+**What you need**
+
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Qt | 6.12+, kit `msvc2022_64` | 6.12+, kit `linux_gcc_64` | 6.12+, kit `clang_64` |
+| Compiler | MSVC 2022+ (Visual Studio) | GCC 10+ | Xcode 16+ |
+| CMake | 3.21+ | 3.21+ | 3.21+ |
+| Also | Git Bash, for `scripts/verify.sh` | `libgl1-mesa-dev`, `libxkbcommon-dev` (Debian, Ubuntu) | |
+
+GoogleTest is fetched on the first configure. Python 3 is optional (the
+pinned clang-tidy wheel, aqtinstall, the Python tests); Qt isn't needed
+for a core-only build. Android and iOS: [mobile-build.md](mobile-build.md).
+Installing Qt with aqtinstall: [its section](#installing-qt-with-aqtinstall).
+
+**Quickest first build, no Qt:** the core, `havne-cli` and their tests.
+
+```sh
+cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON
+cmake --build build-core --config Release
+ctest --test-dir build-core -C Release --output-on-failure
+```
+
+**Windows, the app and the tests.** Build the Win32 tree first, so the
+x86 J2534 surrogate exists when the app tree is configured and copies it
+next to `havne.exe`:
+
+```sh
+cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
+cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
+cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
+cmake --build build --config Release
+build/app/Release/havne.exe
+ctest --test-dir build -C Release --output-on-failure
+```
+
+Once both trees are configured, `scripts/verify.sh` (Git Bash) is the
+everyday rebuild-and-test: it builds `build-win32`, then `build`, runs
+the suite and the cross-arch subset, and prints one line per step
+([Recommended verification sequence](#recommended-verification-sequence)).
+
+**Linux and macOS, the app and the tests.**
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
+cmake --build build
+ctest --test-dir build -C Release --output-on-failure
+build/app/havne                              # Linux
+build/app/Havne.app/Contents/MacOS/Havne    # macOS
+```
+
+Showing the window under X11 also needs `libxkbcommon-x11-0` and
+`libxcb-cursor0`. A source build on Windows needs a current Microsoft
+Visual C++ Redistributable (x64). Linux users who only want to run
+Havne: [linux.md](linux.md).
+
+**The rest of this guide**
+
+- Builds: [Build configurations](#build-configurations) (the desktop
+  platforms and the surrogate's two trees), [Test fixtures](#test-fixtures-the-two-fake-vendors)
+  and [mobile-build.md](mobile-build.md) (Android, iOS, the app icon).
+- Tests: [Recommended verification sequence](#recommended-verification-sequence),
+  [Running tests](#running-tests) (ctest, QML, cross-arch, fuzzing,
+  coverage) and [testing.md](testing.md) for what each suite pins.
+- Tools: [The command-line client](#the-command-line-client),
+  [Everyday tools](#everyday-tools) (preferences, qmllint, warnings,
+  formatting, clang-tidy) and [linux.md](linux.md) (SocketCAN, USDT
+  tracing).
+- When it breaks: [Troubleshooting](#troubleshooting) (with a crash
+  dump on Windows) and [Portability traps](#portability-traps).
+- CI and releases: [ci.md](ci.md) (the jobs, the workarounds, the C ABI
+  check) and [packaging.md](packaging.md) (the Linux packages, the SBOM,
+  releases, the Android release key).
 
 ## Toolchain
 
+The table in Start here has Qt, the compiler and CMake. CMake 3.21+ is
+required for `qt_standard_project_setup()`; the compiler minimums are
+Qt 6.12's (a core-only build needs just C++17 and no Qt); the app needs
+Qt's Core, Gui and Quick, under the LGPL. The rest:
+
 | Component | Version | Notes |
 |---|---|---|
-| CMake | 3.21+ | Required for `qt_standard_project_setup()` |
-| Qt | 6.12+ (LGPL) | Core, Gui and Quick. Not needed for core-only builds. |
-| C++ compiler | C++17 | MSVC 2022+, GCC 10+, Xcode 16+: Qt 6.12's minimums. A core-only build needs just C++17. |
 | GoogleTest | 1.14.0 | Fetched automatically on the first configure if it isn't installed |
 | Android NDK, JDK | NDK r27, JDK 21 | Android builds only. Qt 6.12's Android kit expects these versions. |
 | Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
 | Python (optional) | 3.x, 64-bit | Installs the pinned clang-tidy wheel for `scripts/tidy.sh`, and aqtinstall if you install Qt that way |
 | OpenCppCoverage (optional) | any | Windows line coverage, `scripts/coverage.sh` |
 
-## Installing Qt with aqtinstall
+### Installing Qt with aqtinstall
 
 Released aqtinstall (3.3.x) can't install Qt 6.11+: download.qt.io
 changed its repository layout, and aqt requests a stale
@@ -33,7 +109,7 @@ is not in a release yet, so install aqtinstall from git:
 The Qt online installer isn't affected.
 
 Once a release carries the fix, pin it from PyPI instead, here and in
-CI (see "Temporary workarounds" under CI below), and drop this
+CI (see "Temporary workarounds" in [ci.md](ci.md)), and drop this
 section.
 
 ## Build configurations
@@ -43,24 +119,19 @@ vendor DLL loads in a surrogate process of its own architecture
 ([ADR-0025](adr/0025-one-j2534-backend.md)). Most, the VX's among
 them, are 32-bit, and their surrogate comes from a core-only Win32
 tree, because Qt ships no 32-bit kits; the app tree copies it next to
-`havne.exe`, beside its own x64 surrogate, which is why the Win32
-tree is built first. The Visual Studio generator is multi-config, so
-`--config` and `-C` are required:
+`havne.exe`, beside its own x64 surrogate. The recipe is in
+[Start here](#start-here): its first tree also builds the x86 fakes the
+cross-arch tests load, and the app tree's build prints "Deploying x64
+J2534 surrogate" and "Deploying Win32 J2534 surrogate" (windeployqt has
+run post-build). The Visual Studio generator is multi-config, so
+`--config` and `-C` are required. `scripts/verify.sh` (Git Bash) runs
+both builds in this order, then the whole suite and the cross-arch
+subset ([Running tests](#running-tests)).
 
-```sh
-# 1. The Win32 tree: the x86 surrogate, and the x86 fakes the cross-arch tests load
-cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
-
-# 2. The app tree, configured after step 1 so it finds the surrogate
-cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
-cmake --build build --config Release   # prints "Deploying x64 J2534 surrogate" and "Deploying Win32 J2534 surrogate"
-build/app/Release/havne.exe           # windeployqt has run post-build
-```
-
-`scripts/verify.sh` (Git Bash) runs both builds in this order, then
-the whole suite and the cross-arch subset
-([Running tests](#running-tests)).
+**Reproducible Release builds.** `HAVNE_REPRODUCIBLE` (on by default, MSVC
+Release) adds `-Brepro` and `-d1trimfile:` (the dash spelling, which sccache accepts; spell any new MSVC compile option so), and the link option `/Brepro`, so two builds of one commit
+match byte for byte ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)).
+Turn it off only to compare against a build made without it.
 
 **How the app tree finds the surrogates (automatic).** The x64 one
 is the app tree's own `ecuio-j2534-surrogate` target
@@ -86,18 +157,15 @@ Resolution order:
    surrogate through `ECUIO_SURROGATE_EXE` at runtime: see the
    cross-arch run below.
 
-Build order matters: build the Win32 tree **first**, then configure
-or reconfigure the x64 tree so auto-detection finds the exe.
-Detection runs only at configure time, so an x64 tree configured
-before the Win32 surrogate existed has no copy step at all, and
-building it again doesn't add one. Check the configure output for
-`Deploying Win32 J2534 surrogate: <path>`. If it isn't there, re-run
-`cmake -B build` after building the Win32 tree.
-
-Once the copy step exists, the Visual Studio generator runs it on
-every app build (`copy_if_different`). Keep the order on every
-rebuild too: Win32 tree, then app. Building the app first deploys the
-previous surrogate.
+Build order matters, on every build: the Win32 tree **first**, then
+configure or reconfigure the x64 tree so auto-detection finds the exe.
+Detection runs only at configure time, so an x64 tree configured before
+the Win32 surrogate existed has no copy step at all, and building it
+again doesn't add one. Check the configure output for `Deploying Win32
+J2534 surrogate: <path>`; if it isn't there, re-run `cmake -B build`
+after building the Win32 tree. Once the copy step exists, the Visual
+Studio generator runs it on every app build (`copy_if_different`), so
+building the app before the Win32 tree deploys the previous surrogate.
 
 **Cache caveat.** The cache variable
 persists across reconfigures. A tree previously configured with an
@@ -111,15 +179,9 @@ cmake -B build -U HAVNE_SURROGATE_SOURCE
 Blowing away `CMakeCache.txt` is the blunt equivalent and equally
 safe: regeneration is cheap.
 
-**Full app, Linux and macOS.** Single-config generators drop the
-`Release/` path segment. On macOS the app is a bundle:
-
-```sh
-cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
-cmake --build build
-build/app/havne                              # Linux
-build/app/Havne.app/Contents/MacOS/Havne    # macOS
-```
+**Full app, Linux and macOS.** The recipe is in [Start here](#start-here).
+Single-config generators drop the `Release/` path segment, and on macOS
+the app is a bundle.
 
 On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
 `libxkbcommon-dev` to build (the `linux-build` CI job installs both).
@@ -133,15 +195,11 @@ doesn't copy it (the release zip carries its own). Linux and macOS
 need the Qt runtime libraries. A J2534 vendor driver is needed only
 for a real adapter; the tests use the in-tree fake.
 
-**Core only, no Qt.** This mirrors the Ubuntu CI job:
-
-```sh
-cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON
-cmake --build build-core --config Release
-```
+**Core only, no Qt.** The first recipe in [Start here](#start-here); it
+mirrors the Ubuntu CI job.
 
 **The cross-arch tree** is the Win32 tree of the Windows recipe
-above: besides the surrogate it builds the x86 fake DLLs that test
+in Start here: besides the surrogate it builds the x86 fake DLLs that test
 the x64 to x86 path. Only the surrogate and vendor DLLs are ever x86.
 
 > **Note:** **Rebuild both trees** after any change to `j2534_ptypes.h` or
@@ -154,115 +212,8 @@ the x64 to x86 path. Only the surrogate and vendor DLLs are ever x86.
 > fakes', carry no fingerprint, and the cross-arch run loads them
 > from `build-win32` directly, so rebuild both after those too.
 
-**Mobile (both build in CI; Android runs on a phone, iOS only on
-the Simulator).** The QML, bridge and core are shared, and only the
-kit differs. Use `qt-cmake` from
-the mobile kit, which applies Qt's toolchain file and finds the host
-desktop Qt. Mobile builds set `BUILD_TESTING=OFF`:
-`gtest_discover_tests` runs each test binary at build time, and the
-build host can't execute an Android or iOS binary. On a phone the
-transports are `mock://`, `replay://` and `elm327://`, to a WiFi
-adapter's address or, on Android, a Bluetooth adapter through the
-phone ([ADR-0028](adr/0028-app-fed-streams.md); Known Issue #2 says
-what has run where). Qt Creator with an Android or iOS kit is the
-interactive alternative.
-
-*Android* (this mirrors the `android-build` CI job). On Windows, add
-`-G Ninja`, because the Visual Studio generator can't target Android:
-
-```sh
-<qt-install>/android_arm64_v8a/bin/qt-cmake -B build-android \
-    -DBUILD_TESTING=OFF \
-    -DANDROID_SDK_ROOT=<sdk> -DANDROID_NDK_ROOT=<sdk>/ndk/<27.x>
-cmake --build build-android
-cmake --build build-android --target apk
-```
-
-Leave `CMAKE_BUILD_TYPE` unset, as CI does: the build is then Debug,
-and Gradle signs the APK with the machine's debug key. A Release build
-makes an unsigned APK that a phone won't install until
-`packaging/android/sign-apk.sh` signs it, as the release job does
-([Releases](#releases)); it isn't debuggable, so `run-as` can't read
-its wire logs, and phone runs use a Debug build. For an emulator on
-an x86-64 PC, use the `android_x86_64` kit. Since
-Qt 6.7, Qt publishes Android kits under the `all_os` host (the name
-aqtinstall and install-qt-action use). They need the build host's
-desktop Qt, and `--autodesktop` installs it; when the kit names a host
-Qt that isn't installed, pass `-DQT_HOST_PATH=<qt-install>/<desktop kit>`.
-
-`app/android/` is the package source (`QT_ANDROID_PACKAGE_SOURCE_DIR`):
-the icons in `res/`, the Java in `src/`, and the app's own
-`AndroidManifest.xml`. That manifest is Qt 6.12's template with its
-`%%INSERT_…%%` placeholders kept, plus what
-[ADR-0029](adr/0029-android-background-sessions.md) adds: the
-`android.app.background_running` meta-data and the session's
-foreground service. On a Qt upgrade, diff it against the new kit's
-`src/android/templates/AndroidManifest.xml`. The permissions come from
-`qt_add_android_permission` in `app/CMakeLists.txt`, not the manifest,
-rather than from the ones Qt adds by default: `INTERNET` for core's
-TCP socket, then the Bluetooth and the foreground service ones.
-`android-build` fails if the generated manifest lacks any of them.
-
-To install on a phone without an Android kit, take the
-`havne-android-arm64-v8a` artifact from a CI run (kept 14 days): the
-debug-signed APK. Each run signs with a new debug key, so uninstall
-the previous build before installing the next (Android refuses an
-update signed by another key). Local builds share one key, so each
-updates the last in place and the app keeps its recordings. A
-release's APK carries a third key, the release key, so moving a phone
-between it and a development build is an uninstall too.
-
-*iOS, device* (macOS host; this mirrors `ios-build`). `qt-cmake` also
-applies Qt's minimum deployment target, iOS 18 for Qt 6.12:
-
-```sh
-<qt-install>/ios/bin/qt-cmake -B build-ios -G Xcode \
-    -DBUILD_TESTING=OFF -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build-ios --config Release -- CODE_SIGNING_ALLOWED=NO
-```
-
-That build is unsigned and can't be installed. Running it on a phone
-needs a development team for signing, and nobody has done that here
-yet.
-
-*iOS, Simulator* (this mirrors `ios-simulator-smoke`). Qt's iOS
-simulator libraries are x86_64 only. On Apple silicon the simulator
-therefore runs under Rosetta. With Xcode 26 and later, first delete
-the default iOS platform component in Xcode's settings, then install
-the universal one
-(`xcodebuild -downloadPlatform iOS -architectureVariant universal`).
-Boot a simulator before installing:
-
-```sh
-<qt-install>/ios/bin/qt-cmake -B build-iossim -G Xcode \
-    -DBUILD_TESTING=OFF \
-    -DCMAKE_OSX_SYSROOT=iphonesimulator -DCMAKE_OSX_ARCHITECTURES=x86_64
-cmake --build build-iossim --config Release -- CODE_SIGNING_ALLOWED=NO
-xcrun simctl install booted build-iossim/app/Release-iphonesimulator/Havne.app
-```
-
-Then launch it from the simulator's home screen. The CI job's launch
-step shows how to read the bundle ID from `Info.plist`, launch the
-app, and send its Qt log output to a file.
-
-*The app icon.* `packaging/icons/make_icons.py` draws it from one
-geometry (the Home page's tachometer on the accent color's tile) and
-writes every copy: the SVG masters in `packaging/icons/`, Android's
-adaptive launcher icon as vector drawables in `app/android/res/`
-(named in the manifest through `QT_ANDROID_APP_ICON`, which
-`android-build` checks), iOS's asset catalog in
-`app/ios/Assets.xcassets/`, and Windows' `app/windows/app.ico`, which
-`app_add_version_resource` puts in `havne.exe`'s resource (Qt's
-Windows plugin takes it for the window too). The iOS 1024 px PNG and
-the `.ico`'s images (16 to 64 px as 32-bit bitmaps, 256 px as PNG,
-the corners transparent) are rendered by a desktop Qt kit's `qml`
-runtime, offscreen:
-
-```sh
-python packaging/icons/make_icons.py --qt C:/Qt/6.12.0/msvc2022_64
-```
-
-Change the script, not its output, and commit both.
+**Mobile builds and the app icon:** Android, iOS (device and Simulator) and
+`make_icons.py` are in [mobile-build.md](mobile-build.md).
 
 ## Test fixtures: the two fake vendors
 
@@ -284,9 +235,10 @@ negative assertion will catch it, but best not to trigger it).
 
 ## Recommended verification sequence
 
-`scripts/verify.sh` (Git Bash on Windows; any shell elsewhere) runs
-steps 1-3 below and prints one line per step (a run on the dev
-machine, 2026-10-26; the times vary with the machine's load):
+`scripts/verify.sh` (Git Bash on Windows; off Windows it builds `build`
+and runs ctest alone) rebuilds, runs the tests and prints one line per
+step. The trees must already be configured (Start here has the first
+configure):
 
 ```sh
 scripts/verify.sh                         # both trees, full suite, cross-arch
@@ -295,14 +247,22 @@ scripts/verify.sh --build-only            # both trees, no tests
 scripts/verify.sh --suite Bridge,Qml      # named suites, after the build
 scripts/verify.sh --changed               # the steps this branch's changes need
 scripts/verify.sh --changed --dry-run     # the plan, nothing run
+scripts/verify.sh --cross-only            # win32, build and cross-arch alone
+scripts/verify.sh --no-cross              # without the cross-arch step
 ```
 
 ```
-win32       ok       3 s  0 warnings
-build       ok      89 s  0 warnings
-ctest       ok     109 s  404/404 passed, 2 skipped
-cross-arch  ok      45 s  76/76 passed, 0 skipped
+win32       ok      <s>  <n> warnings
+build       ok      <s>  <n> warnings
+ctest       ok      <s>  <passed>/<total> passed, <n> skipped
+cross-arch  ok      <s>  <passed>/<total> passed, <n> skipped
 ```
+
+The times and counts vary with the tree and the machine's load.
+`--cross-only` is the half of a branch's verify that CI never runs: it
+needs Windows and a configured `build-win32`, takes only `--no-devices`
+(which changes nothing there, as no device is read) and `--dry-run`, and
+writes no stamp.
 
 Full output goes to `Testing/verify/<step>.log` (git-ignored). On a
 failure it prints the compiler errors or the failed test names and
@@ -319,7 +279,7 @@ the Win32 step also builds the x86 `ecuio.dll` and `test_c_abi_shared`,
 and the cross-arch step adds `c_abi_shared` and
 `ExportsTest.TheLibraryExportsTheDeclarations`, since CI never builds
 the x86 DLL. Its line adds `x86 core N/N`, the cases it ran in
-`build-win32`. The trees must already be configured. Off Windows, or without
+`build-win32`. Off Windows, or without
 `build-win32`, the Win32 and cross-arch steps are left out.
 
 `--suite` and `--changed` are for the edit-and-check loop; a pull request
@@ -357,7 +317,7 @@ client/transport: in this order:
    them, so a suite run pushes out older ones. It holds the child's lines
    (`[surrogate HH:MM:SS.mmm]`) and the client's (`[sur ...]`) in time
    order. A session started while another holds that file logs to
-   `ecuio-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
+   `ecuio-surrogate-<pid>-<n>.log` instead ([surrogate.md](surrogate.md)).
    - The child logs one line per vendor call with its status:
      `OP_OPEN`, `OP_CONNECT`, `OP_DISCONNECT`, `OP_WRITE`,
      `OP_IOCTL`, `OP_START_FILTER` and `OP_STOP_FILTER`. Grep for the
@@ -390,11 +350,13 @@ each one covers are listed in [testing.md](testing.md).
 **QML tests** (`test_qml`, Qt Quick Test) load the app's QML module,
 the `app_ui` library, against a real bridge. Each
 `tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
-process of its own, except the slowest (`tst_dashboard.qml`,
-`tst_dashedit.qml`, `tst_driveview.qml`, `tst_phone.qml`), which run as
-several cases each, `QmlTest.<name>-1of<n>` to `-<n>of<n>`, every nth
-case (three, five for `tst_phone.qml` and four for `tst_dashedit.qml`);
-each carries its measured seconds as a ctest `COST`, so a tree with no
+process of its own. A theme split over several files, each deriving
+from a kit file (`PhoneKit.qml` for `tst_phone_*.qml`, `RecordingsKit.qml`
+for `tst_recordings*.qml`, and the dashboard, dashboardbook, driveview,
+chartlayout, liveview, dashedit and settings kits), is one case for each
+file, such as `QmlTest.phone_fit`; the kit's name never starts with
+`tst_`. Each case
+carries its measured seconds as a ctest `COST`, so a tree with no
 cost history starts the long ones first. A new file is picked up at the
 next configure.
 
@@ -446,7 +408,7 @@ fake DLL as a device first, and `scripts/coverage.sh` demands it.
 ```sh
 export ECUIO_SURROGATE_EXE='<repo>/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe'
 export ECUIO_FAKE_DLL='<repo>/build-win32/tests/Release/fake_j2534.dll'
-ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect)Test\." --output-on-failure
+ctest --test-dir build -C Release -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car)Test\." --output-on-failure
 ```
 
 Use Windows-style paths in these variables (forward slashes are
@@ -591,109 +553,8 @@ python tests/golden.py run --golden tests/golden/cli/mock.jsonl --ignore core --
 On Windows, give `golden.py` the executable's absolute path:
 Python's `CreateProcess` doesn't resolve `build-core/cli/...`.
 
-## SocketCAN on Linux
 
-`socketcan://` ([ADR-0032](adr/0032-socketcan-listening.md)) reads an
-interface someone has brought up; Havne never configures one.
-
-```sh
-# A virtual bus, for development and the tests (lasts until reboot)
-sudo modprobe vcan can-isotp
-sudo ip link add dev vcan0 type vcan
-sudo ip link set vcan0 mtu 72        # CAN FD, if the kernel's default is 16
-sudo ip link set up vcan0
-
-# The simulated car on it, and a session listening
-havne-cli play mock://demo --to vcan0 &
-havne-cli stream "socketcan://vcan0?profile=mock" --values
-
-# The simulated ECU on it (ADR-0046), and a session asking
-havne-cli sim mock://sim --on vcan0 &
-havne-cli stream "socketcan://vcan0?profile=obd2" --values
-
-# A real adapter (gs_usb: candleLight, CANable), listen-only at the bus's rate
-sudo ip link set can0 up type can bitrate 500000 listen-only on
-havne-cli stream socketcan://can0
-```
-
-Under WSL a USB adapter reaches Linux through `usbipd-win`, run on
-Windows: `usbipd list`, `usbipd bind --busid <id>` (once, as
-administrator) and `usbipd attach --wsl --busid <id>`; the WSL kernel
-has `gs_usb`, `slcan`, `peak_usb` and `kvaser_usb`.
-
-The tests: `test_socketcan` runs everywhere; `SocketCanBusTest` (in
-`test_vcan`) needs `vcan0` up and skips without it, and its
-interface-down case needs root:
-
-```sh
-sudo --preserve-env=ECUIO_VCAN_REQUIRED build-core/tests/test_vcan \
-  --gtest_filter='SocketCanBusTest.TheInterfaceGoingDown*'
-```
-
-## Debug symbols and tracing
-
-[ADR-0034](adr/0034-debug-symbols-and-probes.md). Every MSVC Release
-build writes a PDB beside each binary (`/Zi`, `/DEBUG`, with `/OPT:REF`
-and `/OPT:ICF` kept), and each release publishes the shipped
-executables' PDBs as `havne-X.Y.Z-windows-x64-symbols.zip`.
-
-**A crash dump on Windows.** Windows keeps one when asked, per program,
-in the registry (as administrator):
-
-```bat
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\havne.exe" /v DumpType /t REG_DWORD /d 2
-```
-
-The next crash leaves a full dump in `%LOCALAPPDATA%\CrashDumps`. Open
-it in WinDbg or Visual Studio with the release's unzipped symbols on the
-symbol path (`.sympath+ <folder>`, then `!analyze -v`); the PDB must be
-the same release's, as the debugger checks.
-
-**USDT probes on Linux.** Core built where `<sys/sdt.h>` exists
-(`systemtap-sdt-dev`) carries three probes under provider `ecuio`, each
-one `nop` until a tracer attaches:
-
-| Probe | Arguments |
-|---|---|
-| `session_start` | session, backend (`ECUIO_BACKEND_*`) |
-| `session_close` | session |
-| `frame` | session, arbitration ID, flags, data length, `timestamp_us` |
-
-```sh
-readelf --notes build-core/cli/havne-cli | grep -A1 'Provider: ecuio'   # they're there
-# frames per ID while a stream runs
-sudo bpftrace -e 'usdt:build-core/cli/havne-cli:ecuio:frame { @[arg1] = count(); }' \
-  -c 'build-core/cli/havne-cli stream mock://demo --count 200'
-```
-
-`ProbeNotesTest` checks the notes in `test_core` and `havne-cli`; CI's
-`linux-build` runs `tests/probe_trace.sh` under `sudo`, which counts a
-`mock://` stream's probes (locally: `sudo sh tests/probe_trace.sh
-build-core/cli/havne-cli`).
-
-## Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
-| On Windows, every build recompiles the whole QML cache (about a minute) although nothing changed | After an AUTOMOC rerun that leaves the moc list as it was, Qt's metatype step leaves `build/app/meta_types/app_ui_json_file_list.txt` older than `app_ui_autogen/timestamp_<config>`, so the step reruns on every build. Touch the list (`touch build/app/meta_types/app_ui_json_file_list.txt`); the next build is a no-op. |
-| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
-| `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
-| Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
-| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
-| Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
-| Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
-| The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
-| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code: unset skips, wrong-value fails. |
-| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
-| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
-| Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
-| A mobile build fails during test discovery, or tries to run a test binary | `BUILD_TESTING` is on. Cross builds must pass `-DBUILD_TESTING=OFF` (see Mobile above). |
-| Re-running a skipped `ios-simulator-smoke` skips it again | A re-run replays the original event and commit, so the job's condition comes out the same. Start a manual run instead that asks for it (Actions > CI > Run workflow and tick `ios_smoke`, or `gh workflow run ci.yml --ref <branch> -f ios_smoke=true`); `smoke_only` instead skips the other platform jobs. A commit whose message contains `[ios-smoke]` also works. |
-| `ios-simulator-smoke` passes, but the app screenshots are blank | Seen once, on the first run (2026-10-20). That run launched the app straight after a cold boot, and the frame was blank at 15 s. With the boot overlapping the build, the next run drew by 15 s. If it recurs: a blank `home.png` means the runner's simulator display is at fault. No `QSG_INFO` lines in stderr means the window was never exposed. `QSG_INFO` present with blank shots means frames aren't reaching the screen, so try another `QSG_RHI_BACKEND`. A blank 15 s shot with a drawn 45 s shot means a slow first frame. |
-| `ios-simulator-smoke` fails with "Havne exited within 45 s", and the printed stderr says `Failed to initialize graphics backend` | Qt Quick couldn't get a Metal device from the runner VM. Check the boot step's `system_profiler` output. Before suspecting the app, try `SIMCTL_CHILD_QSG_RHI_BACKEND=opengl` on the launch line. |
-| `ios-simulator-smoke` fails with "No available iPhone simulator on iOS 18 or later" | The runner image dropped its iOS 18+ runtimes, or the job moved to a runner without them. The step prints the available devices. |
+## Everyday tools
 
 **Preferences:** the app keeps the zoom, the units, the last URI that
 connected and the Record sessions switch with QML `Settings`; on
@@ -702,6 +563,23 @@ the machine shares. `HAVNE_SETTINGS_DIR=<folder>` keeps one
 instance's preferences in an ini file under that folder instead, so a
 scripted run neither reads nor changes the user's; `test_qml` keeps
 its own in a scratch folder the same way.
+
+The preferences also keep the look, the last address that connected,
+the splitters' shares and each device's versions as last seen at a
+connect (shown on its row in Settings, since the list opens no
+adapter). The vehicles are one JSON document among them.
+
+**Live's chart:** each trace's color is keyed to its list row, so the
+row's swatch is the legend and a trace keeps its color when another
+signal is unsubscribed. The ticks choose what's plotted and nothing
+else. Each trace scales on its own, so its value is printed at its
+right-hand end; its range is at least a few displayed digits, so a
+one-count step stays small, and a gap longer than the stale threshold
+breaks the trace instead of drawing a ramp. The layout is arithmetic in
+the `ChartLayout` singleton, which the tests run with synthetic series;
+the Canvas only strokes what it returns. A Canvas paints an image at its
+own size, so this one is sized up by the zoom and scaled back down,
+which keeps it as sharp as the rest.
 
 **QML lint:** run qmllint over the rsp the app build writes, alone:
 `C:/Qt/6.12.0/msvc2022_64/bin/qmllint.exe @build/app/.rcc/qmllint/app_ui.rsp --json lint.json`
@@ -754,6 +632,23 @@ scripts/tidy.sh                  # one line; each file's output in Testing/tidy/
 scripts/tidy.sh --qt C:/Qt/6.12.0/msvc2022_64   # app/ too, in build-tidy-qt
 ```
 
+A function past 80 lines or cognitive complexity 40 fails the run unless
+`scripts/tidy-size-baseline.txt` lists it (one `file<TAB>function<TAB>lines<TAB>complexity`
+line, a measure the function is within written `-`). A listed function
+whose lines or complexity grew, or that passes a threshold its line lists it
+within, fails, and so does a listed line that no longer applies, so the
+list only shrinks: `scripts/tidy.sh --update-size-baseline` (unsharded)
+lowers a number, drops a measure that fell to `-` and drops a stale line,
+and a line is added by hand only. CI's three shards each judge their own
+sources.
+
+A source file past 1,000 lines (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.qml`,
+`.py`, `.sh`; not the public headers, the two data tables, `_ecuio.py` or
+`third_party/`) fails the same way against `scripts/filelength-baseline.txt`
+(`path<TAB>lines`): a new file past the limit or a listed file that grew
+fails, and `--update-size-baseline` lowers a number and drops a stale line.
+`scripts/tidy.sh` runs the check first, on shard 1 only.
+
 On Windows outside a Developer prompt, the script enters one (vswhere's
 newest VC tools), so clang-tidy and the tree see one MSVC's headers, and
 it configures `build-tidy` (Ninja: the Visual Studio generator writes no
@@ -767,554 +662,56 @@ that isn't the pin (an LLVM on PATH, say) unless `CLANG_TIDY_ANY=1`, for
 trying a new pin; `$CLANG_TIDY` names another binary. A warning that is wrong at one line
 gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
 
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
+| On Windows, every build recompiles the whole QML cache (about a minute) although nothing changed | After an AUTOMOC rerun that leaves the moc list as it was, Qt's metatype step leaves `build/app/meta_types/app_ui_json_file_list.txt` older than `app_ui_autogen/timestamp_<config>`, so the step reruns on every build. Touch the list (`touch build/app/meta_types/app_ui_json_file_list.txt`); the next build is a no-op. |
+| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
+| `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
+| Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
+| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [surrogate.md](surrogate.md). |
+| Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
+| Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
+| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code: unset skips, wrong-value fails. |
+| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
+| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
+| Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
+
+Mobile build and iOS Simulator smoke problems: [mobile-build.md](mobile-build.md#troubleshooting).
+
+### A crash dump on Windows
+
+
+[ADR-0034](adr/0034-debug-symbols-and-probes.md). Every MSVC Release
+build writes a PDB beside each binary (`/Zi`, `/DEBUG`, with `/OPT:REF`
+and `/OPT:ICF` kept), and each release publishes the shipped
+executables' PDBs as `havne-X.Y.Z-windows-x64-symbols.zip`.
+
+A crash dump: Windows keeps one when asked, per program,
+in the registry (as administrator):
+
+```bat
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\havne.exe" /v DumpType /t REG_DWORD /d 2
+```
+
+The next crash leaves a full dump in `%LOCALAPPDATA%\CrashDumps`. Open
+it in WinDbg or Visual Studio with the release's unzipped symbols on the
+symbol path (`.sympath+ <folder>`, then `!analyze -v`); the PDB must be
+the same release's, as the debugger checks.
+
+On Linux, core's USDT probes: [linux.md](linux.md#probes-in-a-build-tree).
+
 ## Portability traps
 
 CI builds core with GCC, MSVC and AppleClang, and cross-compiles it
-with the Android NDK's Clang and for iOS. Code that compiles cleanly
-on MSVC is not necessarily portable:
-
-- Designated initializers are C++20. MSVC accepts them in C++17 mode
-  and GCC rejects them. Use constructor helpers such as `mk()` in
-  `signal_sets.cpp`.
-- `strncpy_s` / Annex K is MSVC-only. Use a bounded copy such as
-  `copy_str()`.
-- An implicit int to enum conversion fails on MSVC with C2664.
-
-## CI
-
-`ci.yml` runs on every pull request to `main`, on every push to
-`main`, and on demand (Actions > CI > Run workflow, on any branch, or
-`gh workflow run ci.yml --ref <branch>`). The PR is the gate: the one
-PR per release from `dev`, or a `hotfix/*` PR, and a push to its
-branch cancels the PR's run it supersedes. The push its merge makes to
-`main` runs again, and that run is the one the release job reads.
-Pushes to `dev` and feature branches get no run: a feature branch is
-checked locally (`scripts/verify.sh`, the cross-arch subset, WSL where
-it applies) and merged into `dev`, and a manual run on `dev` checks the
-platforms only CI has (macOS, iOS, Android, the sanitizers) between
-releases. `codeql.yml` follows the same PRs and pushes. A manual run
-leaves out the iOS simulator
-smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
-`-f smoke_only=true` runs it with `core-and-tests` alone.
-`-f macos_repeat='<ctest regex>'` (and
-`-f macos_repeat_count=<n>`, 200 by default) has `macos-build` run the
-matching tests again until one fails, for a failure seen once on macOS
-(its timeout is then 60 minutes). No job waits for another but
-`android-build`, which starts when `core-and-tests` ends, whatever its
-result: a manual run has more jobs than the account's concurrent
-runners, and the short job frees its runner first. So a run takes as
-long as its longest job. The long suites are shared between runners,
-each with a build of its own: `win-build`, `macos-build` and
-`linux-build` run alternate halves of ctest (`-I k,,2`, every case once
-across the two), `clang-tidy` three shares of the files, and
-`win-coverage` three legs. The steps that aren't the suite (the caches'
-saves, the load test, the probes) run on the first shard. Every build and every ctest run
-(`coverage.sh`'s too) runs four jobs at once, the hosted runners' core
-count (`CMAKE_BUILD_PARALLEL_LEVEL` and `CTEST_PARALLEL_LEVEL` in the
-workflow's `env`); the cases that share a fixed resource are
-`RUN_SERIAL`. Every job that uses Qt uses 6.12.0, and each kit comes
-from the Actions cache under a key of the workflow's own, which names
-what decides the install's bytes (the version, the arch, any module,
-`--autodesktop`, and aqtinstall's version or, for the Windows kit, its
-commit): one copy of each, saved by `main`'s pushes only and read by
-every other ref and by `release.yml`'s tags, so the repository stays
-under the cache's 10 GB (the iOS kit alone is about 3.6 GB). A miss
-installs from the mirrors. The jobs don't use install-qt-action's own
-cache, whose key holds the runner's kernel version and which saves on
-any ref that misses (the on-request iOS simulator smoke aside, which
-caches only on `main`). The other downloads that have failed a run
-with a 504 come from the cache the same way: Gradle's distribution and
-the Android build's dependencies (keyed on the Qt version, whose
-template pins them) and linuxdeploy's pinned files (keyed on
-`make-appimage.sh`). The compiler caches (sccache in `win-build`,
-`win-coverage`, `macos-build` and `linux-build`; the two Windows jobs
-build with Ninja for it) are keyed by the ISO week and saved on `dev`
-and `main`. A
-week's first run saves its entry, and each later run that week restores
-that entry and saves nothing, so a commit's objects reach the cache the
-next week and the week's later commits compile cold from the week's
-start. That costs build time only, and keeps the entries (one for each
-job and week) inside the 10 GB; GitHub drops an entry unread for 7
-days.
-Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
-
-| Job | Runner | Does |
-|---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
-| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
-| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
-| `clang-tidy` (1/3 to 3/3) | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app, each runner a third of the files (`HAVNE_TIDY_SHARD=<k>/3`). Any warning fails it. Only the app's moc output is built. |
-| `win-build` (1/2, 2/2) | Windows, MSVC 2022 | Builds the full app with Ninja and sccache, then runs its half of ctest (the bridge, J2534 and QML suites included). The second shard also builds core, the shared library and the surrogate with the Visual Studio generator, which `release.yml` builds with. The first runs the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `macos-build` (1/2, 2/2) | macOS (arm64), AppleClang | Builds the full app, then runs its half of ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `win-coverage` (gtest, ctest-1, ctest-2) | Windows, MSVC 2022 | On pushes to `main` and manual runs, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs its leg of `scripts/coverage.sh` (`--part`: the gtest binaries, or one of two slices of ctest's other cases) and uploads the report to Codecov, which merges the three ([testing.md](testing.md#coverage)). |
-| `linux-build` (1/2, 2/2) | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs its half of ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo, then core's USDT probes under bpftrace (`tests/probe_trace.sh`), then the load test as on Windows. `can-utils` gives `CliTransferRunTest.candump` its `candump`. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
-| `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
-| `android-build` | Ubuntu to Android arm64-v8a | Starts when `core-and-tests` ends (`needs`, for a runner slot, not its result). Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
-| `ios-build` | macOS (arm64) to iOS device (arm64) | Unsigned device build with the Xcode generator. Checks the bundle's Info.plist keys (`app/ios/Info.plist.in`) and that it holds no signature or provisioning profile, then uploads it as an unsigned `.ipa`, `havne-ios-arm64-unsigned` (kept 14 days), for sideloading ([ios.md](ios.md)). Build only, no tests. |
-| `ios-simulator-smoke` | macOS 15 Intel to iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
-
-The smoke job's pass/fail proves the app starts and stays up. Only
-the screenshots show that it drew anything. It doesn't tap through
-the UI or connect a session. It runs on an Intel runner because Qt's
-simulator libraries are x86_64 only (Known Issue #29). Its first three
-runs took 19.5 to 24 min, against about 11 min for the rest of CI, so
-ordinary pushes skip it.
-
-**"Core never links Qt" has two checks.** `core-and-tests` builds core
-on a runner with no Qt installed. And every configure, local or CI,
-ends with a check in the root `CMakeLists.txt` that fails if
-`ecuio-core`'s link lists name any `Qt*::` target. That check catches
-a stray link in a full build, where Qt is present and the build would
-otherwise succeed. It runs after every subdirectory, so it sees a link
-added from anywhere, and it reads the link lists by name rather than
-testing `if(TARGET Qt6::Core)`, because Qt's imported targets are
-visible only in the directory that found them.
-
-**Kit names that moved:** since Qt 6.7 the Linux desktop arch is
-`linux_gcc_64`, and `gcc_64` no longer resolves for 6.12.0. Android
-kits live under the `all_os` host. The mobile jobs install the host's
-desktop Qt with `--autodesktop`.
-
-`scorecard.yml` runs the OpenSSF Scorecard. Actions are pinned to
-full commit SHAs with a `# vX.Y.Z` comment, and Dependabot bumps them
-weekly. `codeql.yml` runs CodeQL on pull requests to `main`, pushes to
-`main` and a weekly schedule: C++ from a Windows core-only build
-(core, the J2534 layer and the surrogate; not the app or QML) and the
-workflows. Results land in the repository's code-scanning dashboard,
-which needs CodeQL's default setup off (Settings to Code security),
-because GitHub refuses advanced-setup uploads while default setup is
-on.
-
-**Temporary workarounds**, to revert once upstream ships tagged fixes:
-
-- **Windows: Qt is installed with aqtinstall from a pinned master
-  commit.** The PyPI release (3.3.0) builds doubled
-  `qt6_xxxx/qt6_xxxx/` paths for the Qt 6.11+ Windows repository
-  layout; the fix ([aqtinstall #1000](https://github.com/miurahr/aqtinstall/pull/1000))
-  is on master only. Go back to PyPI once aqtinstall 3.4.0 ships it.
-  Dependabot doesn't track a git pin, so check for the release by
-  hand. The job extracts with the runner's 7-Zip (`--external 7z`)
-  rather than py7zr, which fails sporadically on Windows with
-  `Bad7zFile`. aqtinstall verifies each archive's SHA-256 before
-  extracting, so that error is py7zr's, not the download's. 7-Zip
-  extracts the archives in parallel, and the extracts race to create
-  the install root ([aqtinstall #1002](https://github.com/miurahr/aqtinstall/issues/1002)),
-  so the step creates the directory before installing. Drop that
-  line with the pin.
-- **macOS needs Qt 6.12.** Qt 6.8 and earlier referenced the AGL
-  framework, which Apple removed from the Xcode 26 SDK.
-- **The iOS simulator smoke runs on `macos-15-intel`.** GitHub has
-  announced the end of Intel macOS runners for Fall 2027. Before then,
-  move the job to an arm64 runner with Rosetta plus the universal iOS
-  platform, or to Qt's arm64 simulator libraries if Qt ships them
-  (Known Issue #29).
-
-**Ignorable CI noise:** `Qt6TaskTree` and `QmlAssetDownloaderPrivate`
-not-found warnings, and missing Vulkan headers. These come from
-optional Quick plugins this app never uses.
-
-### The C ABI check
-
-`scripts/abi-check.sh` holds the C ABI to its promises
-([ADR-0001](adr/0001-qt-free-core-c-abi.md)): the core at HEAD against
-the newest `vX.Y.Z` tag, or a tag, commit or source folder named as
-its argument. It runs on Linux, with libabigail (`abigail-tools` on
-Ubuntu): each tree's core-only build has its static archive linked
-into a shared object that exports what the shared core `ecuio` exports
-([ADR-0053](adr/0053-python-bindings.md)'s appendix), as an FFI
-consumer would load it: the functions the tree's public headers
-declare, listed by `scripts/ecuio_exports.py` (none that `internal.h`
-declares: core uses those across its own files and never installs
-them); `abidw`
-dumps the functions and the types the public headers declare, and
-`abidiff` compares the two. Before the builds, `scripts/api_check.py`
-compares the installed headers themselves (core/CMakeLists.txt's
-`ECUIO_PUBLIC_HEADERS`), as declarations: comments and formatting never count.
-Output goes to `build-abi/` (`report.txt`, and `api.txt` for the
-headers); either half failing fails the check.
-
-- **Fails:** a function removed or its signature changed; a struct
-  field moved, resized or retyped; a struct's size changed; an enum
-  value renumbered.
-- **Passes, reported:** a new function or variable; an enum value
-  appended; a struct growing into its reserved room, with its size the
-  same and every field outside the room where it was.
-  `scripts/abi_report.py` tells that growth from a break by reading the
-  report, since a libabigail suppression of the type would hide every
-  other change to the struct with it.
-- **Fails in the headers, keeping the layout:** a struct member renamed
-  or retyped at the same size (`uint32_t` becoming `int32_t`) or gone,
-  outside the reserved room; a `#define` or an enumerator gone or with
-  another value; a function's, a callback's or a typedef's types
-  changed, or one gone; an installed header gone. None changes the
-  binary, so libabigail sees none, but each changes what a consumer's
-  source means. A parameter renamed passes.
-
-A deliberate break (before 1.0, a minor version may make one) goes in
-`abi/suppressions.abignore` (libabigail's) or `abi/api_changes.txt`
-(the headers', one name a line) with its reason and its release, and
-comes out once that release is tagged and becomes the base. The rules
-were checked against mutants of the headers (2026-10-29; the headers'
-half 2026-11-04, `ApiCheckTest.SelfTest` pins its rules): every break
-above fails, and the passes pass.
-
-### Linux: the AppImage
-
-`packaging/linux/make-appimage.sh <version> [build dir] [out dir]`
-packs a Release tree into `dist/havne-<version>-linux-<arch>.AppImage`,
-`<arch>` the build machine's (`x86_64` or `aarch64`, from `uname -m`):
-linuxdeploy and its Qt plugin, pinned releases for each architecture
-checked against their SHA-256 and kept in `~/.cache/havne-linuxdeploy`,
-gather the app, the
-Qt libraries, plugins and QML modules it loads (the plugin scans
-`app/qml`), the xcb platform plugin and the offscreen one, and
-`packaging/linux/havne.desktop` with the icon. The AppImage starts
-with type2-runtime's runtime from a pinned release (20251108, commit
-`dd6cebe`), checked against its SHA-256 and handed to linuxdeploy as
-`LDAI_RUNTIME_FILE`: with none named, linuxdeploy's appimagetool
-downloads type2-runtime's newest `continuous` build at every pack.
-Before a second
-linuxdeploy run packs the AppDir, the script puts the notices in
-`usr/share/doc/havne/`: `LICENSE`, `packaging/notices/`'s
-`THIRD_PARTY_NOTICES.txt`, the LGPL-3.0, GPL-3.0 and ICU texts
-(LGPL-3.0 section 4 wants Qt's notice and both texts with each copy)
-and `Qt-third-party.txt` (the credits and license texts of the code
-Qt's own libraries contain, from Qt's SBOM for the modules shipped),
-the runtime's MIT text and those of what it links statically
-(libfuse's LGPL-2.1, squashfuse, musl, mimalloc, zstd, zlib),
-and under `common-licenses/` the `/usr/share/common-licenses` texts
-that the bundled Ubuntu packages' copyright files name (linuxdeploy
-puts each in `usr/share/doc/<package>/`). It then fails a package that
-holds `qmltooling` (a Debug build's QML debugger), one missing a notice
-or a bundled package's copyright file, one whose notice names another
-Qt, ICU or runtime than it packed, one whose runtime reports another
-commit (`--appimage-version`), or one that isn't still running 10 s
-after it starts on the offscreen platform.
-
-- **The runtime's sources:** it links libfuse statically, so LGPL-2.1
-  section 6 wants libfuse's source and the runtime's offered beside the
-  AppImage. `packaging/linux/runtime-sources.sh [out dir]` fetches
-  `fuse-3.15.0.tar.xz` and `type2-runtime-20251108.tar.gz` (GitHub's
-  archive of the commit), each checked against its SHA-256, and
-  `release.yml`'s `publish` attaches both to each release.
-- **A new runtime pin** changes, together: `make-appimage.sh`'s
-  release, commit and both SHA-256s (GitHub's digests of
-  `runtime-x86_64` and `runtime-aarch64`); `runtime-sources.sh`'s
-  release, commit and the runtime tarball's SHA-256, and libfuse's
-  version and SHA-256 when the runtime's
-  `scripts/common/install-dependencies.sh` names another; the notice's
-  runtime section and the component list's versions in
-  `make-appimage.sh` (libfuse and squashfuse from that script, musl,
-  mimalloc, zstd and zlib from Alpine's packages for the release its
-  `scripts/chroot/chroot_build.sh` names, as of the runtime's build
-  date); and the license texts under `packaging/notices/licenses/`.
-  Release 20251108 lacks one later change, commit `8f39b89`, which
-  makes the folder `--appimage-extract-and-run` unpacks into private
-  (0700, not 0755); the AppImage's files are public, so that discloses
-  nothing.
-
-- **The build machine** needs Qt's xcb plugin libraries for linuxdeploy
-  to bundle: `libxcb-cursor0 libxcb-icccm4 libxcb-image0
-  libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0
-  libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1
-  libxkbcommon-x11-0` on Ubuntu.
-- **The same bytes from one commit:** two builds match when both carry
-  the commit's time. Set `QT_RCC_SOURCE_DATE_OVERRIDE` to it before
-  `cmake --build`, since `rcc` otherwise records each embedded file's
-  modification time, which is when it was checked out. The script sets
-  `SOURCE_DATE_EPOCH` for the squashfs's times (default
-  `git log -1 --format=%ct`), and warns when the first variable is
-  missing. CI and the release set both:
-  `export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) QT_RCC_SOURCE_DATE_OVERRIDE=$SOURCE_DATE_EPOCH`.
-- **glibc:** an AppImage runs only where glibc is at least its build
-  machine's, so the one to hand out is CI's (`linux-appimage`, Ubuntu
-  24.04, glibc 2.39, on x86_64 and on the ARM runner). One built on a
-  newer distribution is for checking the packing.
-- **Some libraries come from the system:** linuxdeploy's exclude list
-  leaves out what every desktop has. Those are OpenGL (libGL, libGLX
-  and libEGL, which belong to the machine's graphics driver),
-  fontconfig, freetype and libgpg-error. A minimal install (WSL's Arch
-  and Kali images, for example) lacks some of them, and the app then stops at once
-  with "error while loading shared libraries: libGLX.so.0" (or
-  `libfreetype.so.6`, or another). Mesa and the font libraries fix it:
-  `pacman -S --needed libglvnd mesa fontconfig freetype2` on Arch, and
-  `apt-get install libgl1 libegl1 libopengl0 libfontconfig1 libfreetype6 libgpg-error0`
-  on Debian and its kin.
-
-### Linux: the core packages
-
-`packaging/linux/make-core-packages.sh <version> [build dir] [out dir]`
-builds core and `havne-cli` in a core-only tree of its own and packs
-them ([ADR-0035](adr/0035-linux-downloads-sbom-reproducible.md)):
-
-for the build machine's architecture (`dpkg --print-architecture`:
-`amd64` or `arm64`, the tarballs naming it `x86_64` or `aarch64`):
-
-| File | Holds |
-|---|---|
-| `havne-core_<version>_amd64.deb` | `/usr/bin/havne-cli`, `/usr/lib/libecuio-core.a`, the public headers in `/usr/include/ecuio/`, a CMake package (`find_package(ecuio)`, target `ecuio::core`) and `ecuio.pc` |
-| `havne-core-<version>-linux-x86_64.tar.gz` | the same tree under one folder, relocatable |
-| `havne-core-dbgsym_<version>_amd64.deb`, `…-debug.tar.gz` | `havne-cli`'s debug info, `/usr/lib/debug/.build-id/<xx>/<rest>.debug` |
-
-`cmake --install <tree> --prefix <dir>` lays out the same tree from any
-core build (`install()` rules in `core/` and `cli/`; the internal
-headers stay out).
-
-- **The build machine** needs `cmake ninja-build dpkg-dev
-  systemtap-sdt-dev` (Ubuntu); the script refuses a build without the
-  USDT probes.
-- **Reproducible:** the same commit and toolchain give the same bytes
-  anywhere. `-ffile-prefix-map` maps the source and build folders away,
-  `SOURCE_DATE_EPOCH` (default: the commit's time) dates every file,
-  and modes, owners and order are fixed. CI's `linux-packages` builds
-  twice under `reprotest` and fails on any difference;
-  `reprotest 'bash packaging/linux/make-core-packages.sh 0.3.4-x build-packages dist' 'dist/*'`
-  does the same by hand (Ubuntu: `sudo apt install reprotest diffoscope`).
-- **The checks** in the script: the stripped `havne-cli` keeps its
-  build ID and the three probes, has no debug info left and a debug link;
-  no internal header ships; no file names the build's folders.
-  `tests/package_check.sh <out dir> <version>` (needs `sudo`, `gdb` and
-  `pkg-config`) installs both debs, runs `havne-cli`, builds
-  `tests/package/consumer.c` through `find_package`, `pkg-config` and
-  the unpacked tarball, and checks `gdb` finds the debug info.
-
-To read a crash or a profile of the packaged `havne-cli`, install
-`havne-core-dbgsym` (or unpack the `-debug` tarball under `/`): `gdb`
-and `perf report` find the debug file by the binary's build ID.
-
-### The SBOM
-
-`packaging/sbom.py` writes the release's SPDX 2.3 document
-(ADR-0035 section 5) from the component lists the build jobs write beside each
-download (`<download>.components.json`): `stage.ps1` (every DLL in the
-Windows folder, by its version resource; an unknown one fails the
-stage), `make-appimage.sh` (Qt and ICU from the kit, every other
-library by its Ubuntu package), `make-core-packages.sh` (the deb's
-`Depends`) and `sbom.py apk` (the APK's native libraries and
-`gradlew dependencies`). `python3 packaging/sbom.py selftest` pins its
-rules (ctest `SbomTest.SelfTest`). Validate a document with
-`pyspdxtools -i <file>` from `.github/spdx-requirements.txt` (hash-pinned;
-bump by hand, as its comment says).
-
-## Releases
-
-A version tag publishes these downloads through
-`.github/workflows/release.yml`:
-
-- **Windows x64,** a zip that runs on a PC with neither Qt nor Visual
-  Studio: the app, the x86 and x64 J2534 surrogates, the Qt runtime
-  that windeployqt deploys, and the app-local Visual C++ runtime.
-- **Android arm64-v8a,** an APK for Android 12 or later, signed with
-  the release key ([ADR-0030](adr/0030-signed-android-releases.md)),
-  so each release installs over the one before.
-- **Linux x86_64 and 64-bit ARM (aarch64),** for each the AppImage
-  ([Linux: the AppImage](#linux-the-appimage)), and core alone as a deb
-  and a tarball ([Linux: the core packages](#linux-the-core-packages)),
-  built on Ubuntu 24.04, so they run where glibc is 2.39 or later
-  (on a Raspberry Pi, the 64-bit Raspberry Pi OS 13).
-- **The Python wheel,** one for Windows x64
-  (`havne-<version>-py3-none-win_amd64.whl`), Linux x86_64 and aarch64
-  (`manylinux_2_39`: glibc 2.39 or later) and macOS arm64 (13.0 or
-  later): the `havne` package with core's shared library, the Visual
-  C++ runtime linked into it, and on Windows both J2534 surrogates
-  ([ADR-0053](adr/0053-python-bindings.md)). An `-rcN` tag's wheel is
-  `<version>rcN` (PEP 440).
-
-Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
-SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
-provenance over every file.
-
-**To release:**
-
-1. In one commit, set `project(Havne VERSION X.Y.Z)` in the root
-   `CMakeLists.txt` and `__version__` in `python/havne/_version.py`
-   (`PythonTest.test_version` holds them together; `make_wheel.py`
-   refuses a release whose two differ), move CHANGELOG.md's "Unreleased" entries under
-   `## [X.Y.Z] - <date>` (and add its compare link at the foot), and
-   add `docs/releases/vX.Y.Z.md`, the release notes, starting from
-   those entries. Open with a Downloads table linking the file each
-   platform wants, since the release's own list is flat and sorted by
-   name. Say what's new, and what's verified at which tier
-   ([testing.md](testing.md)), including what hasn't run on hardware,
-   and give the release key's certificate fingerprint.
-2. Make that commit on `dev`, after the review's fixes and the docs,
-   and push it; open the PR from `dev` to `main` (or push to the open
-   one). Once the PR's CI run passes, merge it with a merge commit, and
-   wait for the merge's CI run on `main` to pass: the release job
-   refuses a commit whose CI hasn't. A tag pushed first fails the job
-   at its CI gate; once CI on the commit passes, rerun the failed job
-   (`gh run rerun <run id>`), which keeps the tag's ref and so the
-   provenance's signer.
-   For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
-   workflow publishes a pre-release. Download its zip, run it on a PC
-   without Visual Studio if one is available, install its APK on a
-   phone, run its AppImage on the distributions (the `linux` skill's
-   `distros`), and check the provenances with
-   `gh attestation verify <file> -R erickramer42/havne` and the SBOM's
-   with `--predicate-type https://spdx.dev/Document/v2.3` added. Then
-   delete the pre-release and its tag.
-3. Tag `vX.Y.Z` and push it.
-
-**What the jobs do,** in order:
-
-- **`gate`: the version.** The tag must be `vX.Y.Z` or `vX.Y.Z-rcN`,
-  its `X.Y.Z` must equal the CMake project version, and
-  `docs/releases/vX.Y.Z.md` must exist, or the run fails before
-  anything builds. An `-rcN` tag publishes as a pre-release with the
-  same notes.
-- **`gate`: CI.** ci.yml never runs on tags, so the job reads the newest
-  `push` run of ci.yml on the tagged commit (`gh run list --commit`),
-  the merge's run on `main`,
-  and fails unless it has completed with `success`: a tag pushed
-  before CI finished, or on a commit whose CI failed, publishes
-  nothing.
-- **`windows`: build.** Qt 6.12.0 is installed as `win-build` does it,
-  then `build-win32` (the surrogate only) and `build` (the app only),
-  both with `BUILD_TESTING=OFF`, in the usual order so the app's build
-  copies the x86 surrogate beside `havne.exe`, with its own x64 one.
-  CI has already run the suite on the commit; the cross-arch suite is
-  `scripts/verify.sh`'s.
-- **`windows`: stage, check and zip:** `packaging/windows/stage.ps1`,
-  which also runs locally against a built tree
-  (`pwsh packaging/windows/stage.ps1 -Version X.Y.Z-local -OutDir Testing/dist`).
-  It copies the deployed app without its `.pdb`, `.lib`, `.exp` and
-  `.ilk` files, adds the x64 CRT from Visual Studio's redistributable folder
-  (found with `vswhere`; windeployqt runs with `--no-compiler-runtime`),
-  `LICENSE`, `DISCLAIMER.md` and `packaging/windows/`'s README,
-  third-party notices and license texts. It then fails the release if
-  either surrogate imports a CRT DLL (each links the CRT statically, `/MT`,
-  because an x86 `vcruntime140.dll` can't sit beside the app's x64
-  one), if `havne.exe` imports a DLL that is neither in the folder nor
-  part of Windows, if `havne.exe` or either surrogate carries a version
-  resource other than "Havne X.Y.Z" (`packaging/windows/version.rc.in`,
-  filled from the CMake project version; a stale tree fails it), if it
-  carries QML debugging (an import of
-  `QQmlDebuggingEnabler`, or `qmltooling` plugins in the folder: a
-  build with `QT_QML_DEBUG` opens an unauthenticated debug server when
-  launched with `-qmljsdebugger`, so `app/CMakeLists.txt` defines it
-  and windeployqt deploys the plugins in Debug only), or if the staged
-  `havne.exe` isn't still running
-  10 s after it starts (QML that fails to load exits at once; the
-  check was confirmed against a package with `qml/QtQuick/Controls`
-  removed, 2026-10-25). It writes the zip to `dist/` (git-ignored).
-  Beside it goes `havne-X.Y.Z-windows-x64-symbols.zip`, the four
-  executables' PDBs from the trees that built them
-  ([ADR-0034](adr/0034-debug-symbols-and-probes.md)). The release fails
-  if one is missing, if an exe records anything but its PDB's file name
-  (the job builds with `LINK=/PDBALTPATH:%_PDB%` in the environment,
-  since CMake's Visual Studio generator can't pass the `%` through; a
-  local stage needs the same), or if `dumpbin /pdbpath:verbose` doesn't
-  find the PDB beside its exe, which it does only when the signature and
-  age match (a PDB from another build failed it, 2026-10-29). A local
-  dry run of trees built without `LINK` (`scripts/verify.sh`'s) passes
-  `-AllowBuildPath`: the recorded path may be the build's, the PDB must
-  still match.
-- **`android`: build and sign.** The kit, NDK and JDK as
-  `android-build`, but a Release build: optimized, not debuggable, and
-  unsigned. The job is the only one that names the `release`
-  environment, whose secrets hold the release key; the keystore exists
-  on the runner for the signing step only.
-  `packaging/android/sign-apk.sh` checks the unsigned APK (package
-  `io.github.erickramer42.havne`, the version name and code, not
-  debuggable, arm64-v8a only, no `qmltooling` plugins, an app built
-  without `QT_QML_DEBUG`), aligns it, signs it with APK Signature
-  Scheme v3, and fails unless the signer's certificate SHA-256 is the
-  one pinned in `packaging/android/release-cert.sha256`. Locally,
-  `HAVNE_CERT_SHA256` overrides the pin, so a throwaway key runs the
-  same checks. A last step writes the APK's component list
-  (`sbom.py apk`).
-- **`linux`: build and pack** (Ubuntu 24.04, once on x86_64 and once on
-  the ARM runner). Qt as `linux-appimage`, the app built and packed by
-  `make-appimage.sh`, dated by the commit, then
-  `make-core-packages.sh`: the same scripts and checks CI ran on the
-  commit.
-- **`windows`, `linux`, `macos`: the wheel.** `packaging/python/make_wheel.py`
-  packs each platform's wheel under its tag (`win_amd64` with both
-  surrogates; `manylinux_2_39_<arch>` from `make-core-packages.sh`'s
-  tree, its debug info stripped; `macosx_13_0_arm64`) and refuses a
-  library that doesn't fit it. `check_wheel.py` then installs it into a
-  fresh venv and runs `read_pids.py mock://` through it, under
-  `ECUIO_PYTEST_REQUIRED=1`, so it can't skip. Each wheel's
-  `.components.json` is a job artifact for the SBOM, never a release
-  file.
-- **`macos`: the shared core** (macOS arm64): a core-only tree with
-  `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` (Qt 6.12 needs 14.4, core no more
-  than 13.0); the only build at 13.0, so a release candidate is its
-  first run.
-- **`publish`: the SBOM.** `sbom.py build` over the zip, the APK,
-  each architecture's AppImage, deb and tarball, and the four wheels (the symbols and debug files carry
-  no component of their own), dated by the commit, then validated by
-  `pyspdxtools` before anything is published.
-- **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
-  download, the debug files and the SBOM, with LF line ends.
-  `actions/attest-build-provenance` signs one SLSA build provenance
-  over every download, tied to this repository's workflow, and stores
-  it in GitHub's attestation store; `actions/attest` attests the SBOM
-  over the downloads it describes. The job also copies the Sigstore
-  bundle into `dist/` as `havne-X.Y.Z.intoto.jsonl`, one file for all
-  the downloads, because OpenSSF Scorecard's Signed-Releases check
-  reads only release files (it counts `*.intoto.jsonl` as provenance
-  and `*.sig`, `*.asc` or `*.sigstore.json` as signatures), and so a
-  download can be checked with
-  `gh attestation verify <file> --bundle havne-X.Y.Z.intoto.jsonl`.
-- **`publish`: the release.** `gh release create` with the downloads,
-  the provenance bundle, the SBOM, `SHA256SUMS.txt` and the notes
-  file. A
-  manual run for an existing tag
-  (`gh workflow run release.yml -f tag=vX.Y.Z`) rebuilds it and
-  replaces the release's files.
-
-The exe isn't code-signed, so SmartScreen warns on first run; the
-zip's `README.txt` and the release notes say how to get past it.
-
-### The Android release key
-
-Android installs an update only when it carries the same certificate
-as the app it replaces, so the release key is the app's identity for
-good ([ADR-0030](adr/0030-signed-android-releases.md)). It is made
-once:
-
-1. **The key:** a PKCS12 keystore with one RSA 4096 key, alias
-   `havne`, one password for store and key, validity 10,000 days, and
-   the certificate name `CN=Havne` only (anyone with the APK can read
-   it). Pass the password through an environment variable, never on
-   the command line:
-
-   ```sh
-   read -rs -p 'release key password: ' HAVNE_KEYSTORE_PASS; echo; export HAVNE_KEYSTORE_PASS
-   keytool -genkeypair -keystore havne-release.p12 -storetype PKCS12 -alias havne \
-       -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Havne" \
-       -storepass:env HAVNE_KEYSTORE_PASS -keypass:env HAVNE_KEYSTORE_PASS
-   ```
-
-2. **The pin:** the certificate's SHA-256, lowercase hex without
-   colons, in `packaging/android/release-cert.sha256`, committed:
-
-   ```sh
-   keytool -list -v -keystore havne-release.p12 -alias havne -storepass:env HAVNE_KEYSTORE_PASS \
-       | tr -d '\r' | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr 'A-F' 'a-f' \
-       > packaging/android/release-cert.sha256
-   ```
-
-3. **The environment:** a GitHub environment named `release` that only
-   `v*` tags and `main` may deploy to (Settings to Environments, or
-   `gh api -X PUT repos/<repo>/environments/release` with a custom
-   deployment policy, then one tag rule and one branch rule).
-4. **Its secrets,** from stdin, so neither lands in the shell's
-   history:
-
-   ```sh
-   base64 -w0 havne-release.p12 | gh secret set ANDROID_KEYSTORE_B64 --env release
-   printf '%s' "$HAVNE_KEYSTORE_PASS" | gh secret set ANDROID_KEYSTORE_PASS --env release
-   ```
-
-5. **A local signing** with the real key, before any tag: a Release
-   tree built with the Android kit (as above, with
-   `-DCMAKE_BUILD_TYPE=Release`), then
-   `HAVNE_KEYSTORE=havne-release.p12 ANDROID_SDK_ROOT=<sdk> packaging/android/sign-apk.sh <tree>/app/android-build/build/outputs/apk/release/android-build-release-unsigned.apk X.Y.Z-local Testing/dist`.
-
-Keep the keystore and its password in two places off the development
-machine, a password manager and an offline copy. A lost key can't be
-replaced: every phone would have to uninstall the app, and its data
-with it, to take a build signed by another.
+with the Android NDK's Clang and for iOS, so code that compiles cleanly
+on MSVC isn't necessarily portable. Three traps have bitten:
+designated initializers are C++20 (MSVC accepts them in C++17 mode, GCC
+rejects them; use constructor helpers such as `mk()` in
+`signal_sets.cpp`); `strncpy_s` and the rest of Annex K are MSVC-only
+(use a bounded copy such as `copy_str()`); and an implicit int to enum
+conversion fails on MSVC with C2664.

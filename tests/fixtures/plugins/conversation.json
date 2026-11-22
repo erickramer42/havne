@@ -1,0 +1,124 @@
+{
+  "havne_plugin": 2,
+  "id": "talker",
+  "name": "A plugin that asks",
+  "version": "1.0.0",
+  "requires": {
+    "core": "0.1.0"
+  },
+  "source": {
+    "name": "Written by hand for Havne's tests",
+    "license": "MIT"
+  },
+  "tiers": [
+    "data",
+    "conversation"
+  ],
+  "ecus": [
+    {
+      "id": "pcm",
+      "rx": "7E8"
+    },
+    {
+      "id": "tcm",
+      "rx": "7E9"
+    }
+  ],
+  "variants": [
+    {
+      "id": "base",
+      "files": [
+        "data/base.json"
+      ]
+    }
+  ],
+  "conversation": {
+    "notes": "The module is the least one the guest ABI takes: its six exports, each returning a constant, and one page of memory.",
+    "code": {
+      "file": "code/guest.wasm",
+      "sha256": "3d3854650ca1a655ba8aac88c18eb14befa0e552fc65033127dbd2a2e3a8428a"
+    },
+    "budget": 100000,
+    "ecus": [
+      "pcm",
+      "tcm"
+    ],
+    "services": [
+      {
+        "sid": "10",
+        "sub": [
+          "03"
+        ]
+      },
+      {
+        "sid": "19"
+      },
+      {
+        "sid": "22"
+      },
+      {
+        "sid": "27",
+        "sub": [
+          "01",
+          "02",
+          "03",
+          "04"
+        ]
+      },
+      {
+        "sid": "2C",
+        "sub": [
+          "01",
+          "03"
+        ]
+      },
+      {
+        "sid": "3E",
+        "sub": [
+          "00"
+        ]
+      }
+    ],
+    "security": [
+      {
+        "ecu": "pcm",
+        "level": "01",
+        "seed_bytes": 4,
+        "key_bytes": 4
+      },
+      {
+        "ecu": "tcm",
+        "level": "03",
+        "seed_bytes": 16,
+        "key_bytes": 16,
+        "delay_ms": 30000,
+        "key_window_ms": 250
+      }
+    ]
+  },
+  "files": {
+    "data/base.json": {
+      "havne_signals": 1,
+      "signals": [
+        {
+          "key": "oil_temp",
+          "name": "Oil Temp",
+          "ecu": "pcm",
+          "read": {
+            "service": "22",
+            "number": "F40D"
+          },
+          "field": {
+            "byte": 0
+          },
+          "offset": -40,
+          "unit": "deg C"
+        }
+      ]
+    },
+    "code/guest.wasm": {
+      "kind": "wasm",
+      "base64": "AGFzbQEAAAABDgNgAAF/YAJ/fwF/YAAAAwcGAAABAAECBQQBAQEBB0IGCWVjdWlvX2FiaQAADGVjdWlvX2J1ZmZlcgABBWJlZ2luAAIMbmV4dF9yZXF1ZXN0AAMGYWNjZXB0AAQDZW5kAAUKHgYEAEEBCwUAQYAICwQAQQALBABBAAsEAEEACwIACw=="
+    }
+  }
+}

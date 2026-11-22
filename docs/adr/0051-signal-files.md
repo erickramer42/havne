@@ -650,8 +650,8 @@ Section 7's import reaches the app, so a set needs no `havne-cli`:
   kept waiting for the disconnect.
 
 Tested at the bridge (`ObdbImportTest`, `BridgeTest.Obdb*`, on
-`tests/fixtures/obdb/`) and in QML (`QmlTest.settings`,
-`QmlTest.vehiclebook`).
+`tests/fixtures/obdb/`) and in QML (`QmlTest.settings_listobdb`,
+`QmlTest.settings_plugins`, `QmlTest.vehiclebook`).
 
 ## Appendix: a signal's gauge (2026-11-09)
 
@@ -838,3 +838,26 @@ before and after (`scripts/bench_ab.py`, five runs each alternated, on
 a desktop running other work) put every figure inside both builds'
 spread, the decode at 1.00 to 1.02 of the base, the bridge's load at
 0.91 to 0.98, reply timing at 1.00 over J2534.
+
+Note of 2026-11-16: section 6's "`ECUIO_MAX_CHANNELS` stays 4 until a real car needs more" is answered by [ADR-0065](0065-car-sized-profile.md): it is 32.
+
+## Note: the bounds as they are (2026-11-16)
+
+| What | Bound |
+|---|---|
+| A file | 1024 signals and 1 MiB |
+| An ECU | 1024 requests, the base set's counted |
+| A variant's merged list | 16,384 signals, and 4 MiB written |
+
+The third row is a plugin variant's files read together (ADR-0065).
+
+## Note: where an imported file is kept (2026-11-18)
+
+The appendix "the OBDb import in the app" says the report waits for
+**Keep**, which keeps the converted file through the same store as any
+signal file (`SignalStore`, its copy named by its SHA-256). Since v0.8.0
+every import of a signal file keeps the file as a plugin of the user's
+own ([ADR-0064](0064-one-store.md): an OBDb set is converted, wrapped and
+kept the same way). `SignalStore` is removed from the app (ADR-0064's
+appendix "step 6 as built"); the earlier version's `signals/` folder is
+read once by the move and removed at the next start.

@@ -356,16 +356,8 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
             }
         }
     }
-    /* A recording keys its values by name; each name is terminated, as
-     * ecuio_validate_signal checked above */
-    for (uint32_t i = 0; i < set->count; ++i) {
-        for (uint32_t j = 0; j < i; ++j) {
-            if (strcmp(set->defs[j].name, set->defs[i].name) == 0) {
-                *index = i; /* the second of the pair */
-                return ECUIO_VALIDATE_ERR_DUPLICATE_NAME;
-            }
-        }
-    }
+    /* A name may repeat: a recording keeps a value under its key
+     * (ADR-0065 section 9) */
     /* ADR-0013 section 4: channel declarations, bounded, legal CAN
      * ids, unique rx. Negative codes so they can't collide with
      * ecuio_validate_signal's per-def returns. */
@@ -379,6 +371,10 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
                 tx == 0 || tx > 0x1FFFFFFFu) {
                 *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_ID;
+            }
+            if (set->channels[i].flags != 0 || set->channels[i].reserved != 0) {
+                *index = i;
+                return ECUIO_VALIDATE_ERR_CHANNEL_RESERVED;
             }
             for (uint32_t j = 0; j < i; ++j) {
                 if (set->channels[j].rx_id == rx) {

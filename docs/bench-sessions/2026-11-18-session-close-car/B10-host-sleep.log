@@ -1,0 +1,31 @@
+# B10's wire log, ecuio-elm327.20261118-194716-786.log: the last exchanges before the sleep, then the wake
+[elm327 19:47:19.545 +2.754931] prompt 66.9 ms after 22<DID>
+[elm327 19:47:19.545 +2.754984] > 22F1951
+[elm327 19:47:19.582 +2.800871] < 7E8037F2231
+[elm327 19:47:19.582 +2.800936] prompt 45.9 ms after 22F1951
+[elm327 19:47:19.582 +2.800983] > 22<DID>
+[elm327 19:47:19.611 +2.827946] < 7E8100D62<DID>000300
+[elm327 19:47:19.611 +2.827990] < 7E82100000000000000
+[elm327 20:06:19.515 +1142.730462] no line and no prompt for 5 s (22<DID>)
+[elm327 20:06:19.515 +1142.730543] COM5 closed
+[elm327 20:06:19.581 +1142.797242] the session closes
+# B10's havne-cli output (jsonl): its lines after the session's entry but the frames and values
+{"type":"slept","us":1139290490}
+{"type":"timing","t_s":1141.681,"ecu":"0x7E8","request":"22 <DID>","answered":13,"refused":0,"timeouts":0,"packed":0,"latency_p50_us":16383,"latency_p99_us":null,"latency_p999_us":null,"latency_max_us":66884,"intervals":12,"intervals_mixed":0,"interval_p50_us":90111,"interval_p99_us":null,"interval_p999_us":null,"interval_max_us":225105,"interval_clock":"host"}
+{"type":"health","code":9,"message":"transport hard failure","episodes":1}
+{"type":"end","reason":"seconds","frames":27,"dropped_frames":0,"dropped_values":0,"isotp":{"first_frames":21,"completed":27,"dropped":3,"malformed":0}}
+# candump-B2.log's last frames (can0): frames from before the sleep, stamped at the wake; none after
+(1795052839.379966) can0 7E0#3000000000000000
+(1795052839.384419) can0 7E8#2100000000000000
+(1795053983.330419) can0 7E0#0322F19400000000
+(1795053983.330500) can0 7E8#037F223100000000
+(1795053983.330506) can0 7E0#0322<DID>00000000
+(1795053983.330509) can0 7E8#100D62<DID>000300
+(1795053983.330513) can0 7E0#3000000000000000
+(1795053983.330655) can0 7E8#2100000000000000
+(1795053983.330664) can0 7E0#0322F19500000000
+(1795053983.331211) can0 7E8#037F223100000000
+(1795053983.331225) can0 7E0#0322<DID>00000000
+(1795053983.331242) can0 7E8#100D62<DID>000300
+(1795053983.331246) can0 7E0#3000000000000000
+(1795053983.331253) can0 7E8#2100000000000000

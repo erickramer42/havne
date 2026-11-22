@@ -16,6 +16,14 @@
 # compile. It reads C++ only: the headers that compile as C keep their C
 # casts behind a NOLINTBEGIN with that reason.
 #
+# Two size checks run as warnings clang-tidy itself never fails on
+# (WarningsAsErrors excludes them); scripts/tidy.sh judges their lines
+# against scripts/tidy-size-baseline.txt, which only shrinks:
+# readability-function-size at 80 lines, since a function that long is
+# read and rebuilt as one unit, and readability-function-cognitive-complexity
+# at 40, which also names short functions that branch deeply. The size
+# check's other thresholds keep their defaults, so the line count alone speaks.
+#
 # Turned off, and why:
 #   bugprone-easily-swappable-parameters     the C ABI's flat functions
 #       take neighboring parameters of one type by design
@@ -47,12 +55,19 @@ Checks: >-
   readability-braces-around-statements,
   google-explicit-constructor,
   google-readability-casting,
+  readability-function-size,
+  readability-function-cognitive-complexity,
   -bugprone-easily-swappable-parameters,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-inc-dec-in-conditions,
   -bugprone-throwing-static-initialization,
   -performance-enum-size
-WarningsAsErrors: '*'
+WarningsAsErrors: '*,-readability-function-size,-readability-function-cognitive-complexity'
 CheckOptions:
   readability-braces-around-statements.ShortStatementLines: 1
+  readability-function-size.LineThreshold: 80
+  readability-function-cognitive-complexity.Threshold: 40
+  readability-function-cognitive-complexity.IgnoreMacros: true
 HeaderFilterRegex: '.*[/\\](core|surrogate|cli|app)[/\\].*'
+# Another project's headers (WAMR's own tree has a core/ folder)
+ExcludeHeaderFilterRegex: '.*[/\\]third_party[/\\].*'

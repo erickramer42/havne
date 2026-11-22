@@ -49,13 +49,18 @@ public:
     static constexpr uint8_t kTimeoutDefault = 0x32;
     /* P2*: how long an ECU's 7F <service> 78 has the adapter wait on */
     static constexpr int64_t kPendingWaitUs = 5000000;
-    /* Consecutive Frames one after another at STmin 0 */
+    /* Consecutive Frames one after another at STmin 0, unless the
+     * module's own fc or cf (ecuio_sim_reply_t) is longer */
     static constexpr int64_t kFrameGapUs = 500;
     /* The stalled fault's gap before the last Consecutive Frame */
     static constexpr int64_t kStalledGapUs = 160000;
 
     /* sim: an unbound sim (ecuio_sim_create_unbound), not owned */
-    explicit Elm327Emulator(ecuio_sim_t* sim) : sim_(sim) { power_on(); }
+    explicit Elm327Emulator(ecuio_sim_t* sim)
+        : sim_(sim), replies_(ECUIO_SIM_MAX_REPLIES)
+    {
+        power_on();
+    }
 
     /* A new link: the settings as at power-on, nothing queued */
     void power_on()
@@ -168,6 +173,8 @@ private:
     };
 
     ecuio_sim_t* sim_;
+    /* Room for a request's replies, made once: each is a whole message */
+    std::vector<ecuio_sim_reply_t> replies_;
     std::deque<Chunk> out_;
     int64_t due_at_ = 0; /* output stays in order: nothing due before */
     std::string line_;
@@ -485,28 +492,31 @@ private:
             reply("UNABLE TO CONNECT", now + wait);
             return;
         }
-        std::vector<ecuio_sim_reply_t> replies(ECUIO_SIM_MAX_REPLIES);
         uint32_t n = 0;
         if (ecuio_sim_ask(sim_, header_ & 0x7FFu, req.data(),
                           static_cast<uint32_t>(req.size()), now,
-                          replies.data(), ECUIO_SIM_MAX_REPLIES,
+                          replies_.data(), ECUIO_SIM_MAX_REPLIES,
                           &n) != ECUIO_OK) {
             n = 0;
         }
-        replies.resize(std::min<uint32_t>(n, ECUIO_SIM_MAX_REPLIES));
+        n = std::min<uint32_t>(n, ECUIO_SIM_MAX_REPLIES);
         if (!responses_) {
             prompt(now);
             return;
         }
-        print_frames(frames_of(replies, now), now, count_digit, wait);
+        print_frames(frames_of(replies_.data(), n, now), now, count_digit,
+                     wait);
     }
 
-    /* The CAN frames the replies put on the bus, in time order */
-    static std::vector<Frame>
-    frames_of(const std::vector<ecuio_sim_reply_t>& replies, int64_t now)
+    /* The CAN frames the replies put on the bus, in time order: the
+     * first Consecutive Frame fc after the adapter's Flow Control (sent
+     * as the First Frame comes), the rest cf apart, each at least
+     * kFrameGapUs */
+    static std::vector<Frame> frames_of(const ecuio_sim_reply_t* replies,
+                                        uint32_t count, int64_t now)
     {
         std::vector<Frame> frames;
-        for (uint32_t m = 0; m < replies.size(); ++m) {
+        for (uint32_t m = 0; m < count; ++m) {
             const ecuio_sim_reply_t& r = replies[m];
             const uint32_t len = std::min<uint32_t>(r.length, 4095);
             int64_t at = now + r.delay_us;
@@ -534,9 +544,11 @@ private:
                 Frame cf{};
                 cf.id = r.reply_id;
                 cf.message = m;
+                /* fc before the first, cf before each after it */
+                const int64_t pace = i == 6 ? r.fc_us : r.cf_us;
                 at += (last && (r.flags & ECUIO_SIM_REPLY_STALLED) != 0)
                           ? kStalledGapUs
-                          : kFrameGapUs;
+                          : std::max<int64_t>(kFrameGapUs, pace);
                 cf.at = at;
                 const uint8_t s =
                     (last && (r.flags & ECUIO_SIM_REPLY_BAD_SEQUENCE) != 0)

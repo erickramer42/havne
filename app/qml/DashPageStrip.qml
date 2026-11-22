@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashPageStrip.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit (test_qml)
+// Testing: QML: QmlTest.dashboard{,_pages,_panel}, QmlTest.dashedit (test_qml)
 
 import QtQuick
 
@@ -23,6 +23,14 @@ Item {
 
     signal pageChosen(int index)
     signal addRequested()
+    signal renamed(int index, string name)
+
+    // The tab being renamed in place (a double click in edit mode), -1 for none
+    property int renaming: -1
+    onEditingChanged: {
+        if (!editing)
+            renaming = -1
+    }
 
     // The touch size where Theme.compact asks for it (qml.md's density rule)
     readonly property real tabHeight: Math.max(36, Theme.touchTarget)
@@ -121,11 +129,45 @@ Item {
                     checked: index === strip.current
                     text: strip.nameOf(index)
                     Accessible.name: text
-                    width: Math.max(64, Math.min(220, label.implicitWidth + 32))
+                    width: Math.max(strip.renaming === index ? 120 : 64, Math.min(220, label.implicitWidth + 32))
                     height: strip.tabHeight
                     leftPadding: 16
                     rightPadding: 16
                     onClicked: strip.pageChosen(index)
+                    onDoubleClicked: {
+                        if (strip.editing)
+                            strip.renaming = index
+                    }
+
+                    ThemedTextField {
+                        id: renameField
+                        objectName: "dashPageRename_" + tabButton.index
+                        anchors.fill: parent
+                        visible: strip.editing && strip.renaming === tabButton.index
+                        maximumLength: DashboardBook.maxLabel
+                        Accessible.name: qsTr("This page's name")
+                        property bool finished: false
+                        onVisibleChanged: {
+                            if (visible) {
+                                finished = false
+                                text = tabButton.text
+                                forceActiveFocus()
+                                selectAll()
+                            }
+                        }
+                        // Enter or leaving the field keeps the name; Escape drops it
+                        onEditingFinished: {
+                            if (finished)
+                                return
+                            finished = true
+                            strip.renaming = -1
+                            strip.renamed(tabButton.index, text)
+                        }
+                        Keys.onEscapePressed: {
+                            finished = true
+                            strip.renaming = -1
+                        }
+                    }
 
                     background: Item {
                         // The open sheet: the panel's surface and edge, its foot
@@ -155,6 +197,7 @@ Item {
                         }
                     }
                     contentItem: Text {
+                        textFormat: Text.PlainText
                         id: label
                         text: tabButton.text
                         elide: Text.ElideRight
@@ -173,9 +216,9 @@ Item {
                 visible: strip.editing
                 enabled: strip.canAddPage
                 flat: true
-                width: 48
+                width: Math.max(48, implicitWidth)
                 height: strip.tabHeight
-                text: "+"
+                text: qsTr("+ Page")
                 Accessible.name: qsTr("Add a page")
                 onClicked: strip.addRequested()
             }

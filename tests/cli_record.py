@@ -25,6 +25,7 @@
 # through that copy decodes the same (ADR-0052 section 4). --update
 # rewrites both goldens from the run.
 
+import csv
 import hashlib
 import json
 import subprocess
@@ -230,6 +231,20 @@ def decoded(folder):
     return [r.split(",", 1)[1] for r in rows[1:]]
 
 
+def key_of(folder, name):
+    """The key signals.csv keeps the one signal named name under, from
+    events.log's header line `signal  <key>,<name>,...`"""
+    text = (folder / "events.log").read_text(encoding="utf-8")
+    keys = [cells[0] for cells in csv.reader(
+                l[len("signal  "):] for l in text.splitlines()
+                if l.startswith("signal  "))
+            if len(cells) > 1 and cells[1] == name]
+    if len(keys) != 1:
+        raise SystemExit(f"FAIL  {len(keys)} signals named {name!r} "
+                         "in events.log's header")
+    return keys[0]
+
+
 def signals(cli, fixture, signal_file):
     want = Path(signal_file).read_bytes()
     sha = hashlib.sha256(want).hexdigest()
@@ -266,7 +281,12 @@ def signals(cli, fixture, signal_file):
             return 1
         second = the_folder(second_root)
         a, b = decoded(first), decoded(second)
-        if len(a) < 100 or not any(",Road Speed," in "," + r for r in a):
+        # The file's second signal at 01 0D goes by its author's key
+        road = key_of(first, "Road Speed")
+        if road != "road_speed":
+            print(f"FAIL  Road Speed is kept under {road!r}, not its key")
+            return 1
+        if len(a) < 100 or not any(f",{road}," in "," + r for r in a):
             print(f"FAIL  the first recording decoded {len(a)} values, "
                   "none of the file's")
             return 1
@@ -322,7 +342,8 @@ def plugin(cli, package):
             return 1
         second = the_folder(second_root)
         a, b = decoded(first), decoded(second)
-        if not any(",Oil Temp," in "," + r for r in a):
+        oil = key_of(first, "Oil Temp")
+        if not any(f",{oil}," in "," + r for r in a):
             print(f"FAIL  the first recording decoded {len(a)} values, "
                   "none of the plugin's")
             return 1

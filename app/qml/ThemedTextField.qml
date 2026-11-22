@@ -1,5 +1,5 @@
 // File/layer: app/qml/ThemedTextField.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.fields, QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.fields, QmlTest.settings, QmlTest.phone_* (test_qml)
 // A TextField drawn like the cards' controls: an elevated fill, an outline, a text-colored ring with the focus
 
 import QtQuick

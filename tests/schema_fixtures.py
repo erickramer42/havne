@@ -5,7 +5,7 @@
 #   python tests/schema_fixtures.py <source dir> [<havne-cli>]
 #
 # schema/ against the files core's loaders read (ADR-0051, ADR-0052,
-# ADR-0063):
+# ADR-0063, ADR-0066):
 # - every committed signal file, condition file, plugin manifest (a
 #   folder's or packed), a folder plugin's data files and value-fixture
 #   files validate;
@@ -17,8 +17,10 @@
 # Exits 77 (ctest's skip) when jsonschema can't be imported, unless
 # ECUIO_SCHEMA_REQUIRED=1 (CI's core-and-tests), which fails instead.
 
+import base64
 import copy
 import glob
+import hashlib
 import json
 import os
 import subprocess
@@ -116,6 +118,13 @@ CONDITION_FILE = {
     ],
 }
 
+def ecus(n):
+    """n modules: the engine ECU, then made-up 11-bit pairs"""
+    return [{"id": "pcm", "rx": "7E8"}] + [
+        {"id": "m%d" % i, "rx": "%03X" % (0x640 + i), "tx": "%03X" % (0x600 + i)}
+        for i in range(1, n)]
+
+
 S0 = ["signals", 0]
 S1 = ["signals", 1]
 S3 = ["signals", 3]
@@ -133,6 +142,10 @@ CASES = [
     ("an rx that isn't hex", SIGNAL_FILE, ["ecus", 0, "rx"], "7G8", False),
     ("an rx the standard gives no tx", SIGNAL_FILE, ["ecus", 0, "rx"], "7B8", False),
     ("an ECU id with a dash", SIGNAL_FILE, ["ecus", 0, "id"], "p-cm", False),
+    ("32 ECUs", SIGNAL_FILE, ["ecus"], ecus(32), True),
+    ("33 ECUs", SIGNAL_FILE, ["ecus"], ecus(33), False),
+    ("a plugin of 32 ECUs", PACKED, ["ecus"], ecus(32), True),
+    ("a plugin of 33 ECUs", PACKED, ["ecus"], ecus(33), False),
     ("a file name with no letter or digit", SIGNAL_FILE, ["name"], "--", False),
     ("a file name of 64 bytes", SIGNAL_FILE, ["name"], "n" * 64, False),
     ("a gauge with both levels", SIGNAL_FILE, S0 + ["gauge"],
@@ -203,7 +216,15 @@ CASES = [
     ("a lineage in upper case", PACKED, ["lineage"], "A" * 32, False),
     ("a lineage that is a number", PACKED, ["lineage"], 7, False),
     ("a tier named twice", PACKED, ["tiers"], ["data", "data"], False),
-    ("a tier this core doesn't run", PACKED, ["tiers"], ["conversation"], False),
+    ("a tier this core doesn't run", PACKED, ["tiers"], ["data", "write"], False),
+    ("the conversation tier in format 1", PACKED, ["tiers"], ["data", "conversation"], False),
+    ("a conversation in format 1", PACKED, ["conversation"],
+     {"code": {"file": "a.wasm", "sha256": "0" * 64}, "ecus": ["pcm"],
+      "services": [{"sid": "22"}]}, False),
+    ("a binary file in format 1", PACKED, ["files", "guest.wasm"],
+     {"kind": "wasm", "base64": ""}, False),
+    ("format 2 with the data tier alone", PACKED, ["havne_plugin"], 2, True),
+    ("format 3 of a plugin", PACKED, ["havne_plugin"], 3, False),
     ("a manufacturer code with an I", PACKED, ["match", 0, "wmi"], ["ZZI"], False),
     ("a manufacturer code of 6", PACKED, ["match", 0, "wmi"], ["ZZ9ABC"], True),
     ("a manufacturer code of 4", PACKED, ["match", 0, "wmi"], ["ZZZZ"], False),
@@ -371,6 +392,147 @@ FORMAT2 = [
      changed(F2, S3 + ["expr"], "max(rpm_raw, 1)" + " " * 250), False),
 ]
 
+# A format 2 plugin with the conversation tier (ADR-0066). The module is
+# the least one the guest ABI takes: its six exports, each returning a
+# constant, and one page of memory (fuzz/seeds.py's wasm_module() wrote it)
+MODULE_B64 = ("AGFzbQEAAAABDgNgAAF/YAJ/fwF/YAAAAwcGAAABAAECBQQBAQEBB0IGCWVjdWlvX2FiaQAADGVj"
+              "dWlvX2J1ZmZlcgABBWJlZ2luAAIMbmV4dF9yZXF1ZXN0AAMGYWNjZXB0AAQDZW5kAAUKHgYEAEEB"
+              "CwUAQYAICwQAQQALBABBAAsEAEEACwIACw==")
+PACKED2 = changed(PACKED, ["havne_plugin"], 2)
+PACKED2["tiers"] = ["data", "conversation"]
+PACKED2["files"]["guest.wasm"] = {"kind": "wasm", "base64": MODULE_B64}
+PACKED2["conversation"] = {
+    "code": {"file": "guest.wasm",
+             "sha256": hashlib.sha256(base64.b64decode(MODULE_B64)).hexdigest()},
+    "budget": 100000,
+    "ecus": ["pcm"],
+    "services": [{"sid": "10", "sub": ["03"]}, {"sid": "22"},
+                 {"sid": "27", "sub": ["01", "02"]}],
+    "security": [{"ecu": "pcm", "level": "01", "seed_bytes": 4, "key_bytes": 4}],
+}
+CV = ["conversation"]
+SV = CV + ["services"]
+S27 = SV + [2, "sub"]
+L0 = CV + ["security", 0]
+B0 = ["files", "guest.wasm"]
+CONVERSATION = [
+    ("the base conversation plugin", PACKED2, [], None, True),
+    ("the conversation tier alone", PACKED2, ["tiers"], ["conversation"], False),
+    ("the conversation tier with no conversation", PACKED2, CV, DELETE, False),
+    ("a conversation with no such tier", PACKED2, ["tiers"], ["data"], False),
+    ("a conversation key it doesn't take", PACKED2, CV + ["writes"], [], False),
+    ("no budget", PACKED2, CV + ["budget"], DELETE, True),
+    ("a budget of 0", PACKED2, CV + ["budget"], 0, False),
+    ("a budget of 1", PACKED2, CV + ["budget"], 1, True),
+    ("a budget of 1000000", PACKED2, CV + ["budget"], 1000000, True),
+    ("a budget of 1000001", PACKED2, CV + ["budget"], 1000001, False),
+    ("no conversation ECUs", PACKED2, CV + ["ecus"], [], False),
+    ("no ecus key in the conversation", PACKED2, CV + ["ecus"], DELETE, False),
+    ("a conversation ECU listed twice", PACKED2, CV + ["ecus"], ["pcm", "pcm"], False),
+    ("no services", PACKED2, SV, [], False),
+    ("no services key", PACKED2, SV, DELETE, False),
+    ("17 services", PACKED2, SV, [{"sid": "22"}] * 17, False),
+    ("a service that writes", PACKED2, SV + [1, "sid"], "2E", False),
+    ("a routine", PACKED2, SV + [1, "sid"], "31", False),
+    ("a service in lower case", PACKED2, SV + [1, "sid"], "2a", False),
+    ("the periodic read", PACKED2, SV + [1, "sid"], "2A", True),
+    ("the trouble-code read", PACKED2, SV + [1, "sid"], "19", True),
+    ("a read with sub-functions", PACKED2, SV + [1, "sub"], ["01"], False),
+    ("a session with no sub-function", PACKED2, SV + [0, "sub"], DELETE, False),
+    ("the programming session", PACKED2, SV + [0, "sub"], ["02"], False),
+    ("the default session", PACKED2, SV + [0, "sub"], ["01"], False),
+    ("no sub-functions listed", PACKED2, SV + [0, "sub"], [], False),
+    ("tester present", PACKED2, SV + [1], {"sid": "3E", "sub": ["00"]}, True),
+    ("tester present with no reply", PACKED2, SV + [1], {"sid": "3E", "sub": ["80"]}, False),
+    ("defining by identifier and clearing", PACKED2, SV + [1],
+     {"sid": "2C", "sub": ["01", "03"]}, True),
+    ("defining by memory address", PACKED2, SV + [1], {"sid": "2C", "sub": ["02"]}, False),
+    ("a service key it doesn't take", PACKED2, SV + [1, "did"], "F190", False),
+    ("security access 00", PACKED2, S27, ["01", "02", "00"], False),
+    ("security access 5F", PACKED2, S27, ["01", "02", "5F"], False),
+    ("security access 60", PACKED2, S27, ["01", "02", "60"], False),
+    ("security access 7E", PACKED2, S27, ["01", "02", "7E"], True),
+    ("security access 7F", PACKED2, S27, ["01", "02", "7F"], False),
+    ("security access with bit 7", PACKED2, S27, ["01", "02", "81"], False),
+    ("a sub-function in lower case", PACKED2, S27, ["01", "02", "0a"], False),
+    ("a sub-function of one digit", PACKED2, S27, ["01", "02", "3"], False),
+    ("a sub-function listed twice", PACKED2, S27, ["01", "02", "02"], False),
+    ("14 sub-functions", PACKED2, S27, ["%02X" % n for n in range(1, 15)], True),
+    ("15 sub-functions", PACKED2, S27, ["%02X" % n for n in range(1, 16)], False),
+    ("no security levels", PACKED2, CV + ["security"], DELETE, True),
+    ("an even security level", PACKED2, L0 + ["level"], "02", False),
+    ("security level 5F", PACKED2, L0 + ["level"], "5F", False),
+    ("security level 7F", PACKED2, L0 + ["level"], "7F", False),
+    ("a security level that is a number", PACKED2, L0 + ["level"], 1, False),
+    ("a security level with no ECU", PACKED2, L0 + ["ecu"], DELETE, False),
+    ("a security level with no seed length", PACKED2, L0 + ["seed_bytes"], DELETE, False),
+    ("a seed of 0 bytes", PACKED2, L0 + ["seed_bytes"], 0, False),
+    ("a seed of 255 bytes", PACKED2, L0 + ["seed_bytes"], 255, True),
+    ("a seed of 256 bytes", PACKED2, L0 + ["seed_bytes"], 256, False),
+    ("a key of 0 bytes", PACKED2, L0 + ["key_bytes"], 0, False),
+    ("a key of 58 bytes", PACKED2, L0 + ["key_bytes"], 58, True),
+    ("a key of 59 bytes", PACKED2, L0 + ["key_bytes"], 59, False),
+    ("a delay of 999 ms", PACKED2, L0 + ["delay_ms"], 999, False),
+    ("a delay of 1000 ms", PACKED2, L0 + ["delay_ms"], 1000, True),
+    ("a delay of an hour", PACKED2, L0 + ["delay_ms"], 3600000, True),
+    ("a delay past an hour", PACKED2, L0 + ["delay_ms"], 3600001, False),
+    ("a key window of 49 ms", PACKED2, L0 + ["key_window_ms"], 49, False),
+    ("a key window of 50 ms", PACKED2, L0 + ["key_window_ms"], 50, True),
+    ("a key window of 4000 ms", PACKED2, L0 + ["key_window_ms"], 4000, True),
+    ("a key window of 4001 ms", PACKED2, L0 + ["key_window_ms"], 4001, False),
+    ("a key window with a fraction", PACKED2, L0 + ["key_window_ms"], 100.5, False),
+    ("a security level key it doesn't take", PACKED2, L0 + ["algorithm"], "xor", False),
+    ("code with no file", PACKED2, CV + ["code", "file"], DELETE, False),
+    ("code with no hash", PACKED2, CV + ["code", "sha256"], DELETE, False),
+    ("a hash in upper case", PACKED2, CV + ["code", "sha256"], "A" * 64, False),
+    ("a hash of 63 digits", PACKED2, CV + ["code", "sha256"], "a" * 63, False),
+    ("code outside the package", PACKED2, CV + ["code", "file"], "../guest.wasm", False),
+    ("a binary file of another kind", PACKED2, B0 + ["kind"], "elf", False),
+    ("a binary file with no bytes", PACKED2, B0 + ["base64"], DELETE, False),
+    ("a binary file key it doesn't take", PACKED2, B0 + ["sha256"], "0" * 64, False),
+    ("base64 with a line break", PACKED2, B0 + ["base64"],
+     MODULE_B64[:76] + "\n" + MODULE_B64[76:], False),
+    ("base64 in the URL alphabet", PACKED2, B0 + ["base64"],
+     MODULE_B64.replace("/", "_"), False),
+    ("base64 with no padding", PACKED2, B0 + ["base64"], MODULE_B64.rstrip("="), False),
+    ("base64 with padding bits set", PACKED2, B0 + ["base64"],
+     MODULE_B64[:-3] + "x==", False),
+]
+
+# A Dashboard page a packed plugin carries (ADR-0052's appendix on pages):
+# core's envelope, which the schema's pageFile states
+PAGE = {
+    "format": 2, "form": "phone", "files": [],
+    "pages": [{"name": "Engine", "cells": [
+        {"kind": "digital", "w": 3, "h": 9, "label": "Oil temp", "refs": ["key:oil_temp"],
+         "unit": "deg C", "options": {"from": 0, "to": 160}}]}],
+}
+PACKED_PAGE = changed(PACKED, ["pages"], ["p/phone.json"])
+PACKED_PAGE["files"]["p/phone.json"] = PAGE
+PG = ["files", "p/phone.json"]
+SEVENTEEN = changed(PACKED, ["pages"], [f"p/{n}.json" for n in range(17)])
+SEVENTEEN["files"].update({f"p/{n}.json": changed(PAGE, ["pages", 0, "name"], f"Engine {n}")
+                           for n in range(17)})
+PAGES = [
+    ("a page", PACKED_PAGE, [], None, True),
+    ("a page for the desktop", PACKED_PAGE, PG + ["form"], "desktop", True),
+    ("a page with no form", PACKED_PAGE, PG + ["form"], DELETE, False),
+    ("a page for a tablet", PACKED_PAGE, PG + ["form"], "tablet", False),
+    ("a page of format 1", PACKED_PAGE, PG + ["format"], 1, False),
+    ("a page with no format", PACKED_PAGE, PG + ["format"], DELETE, False),
+    ("a page file with no page", PACKED_PAGE, PG + ["pages"], [], False),
+    ("a page file with two pages", PACKED_PAGE, PG + ["pages"], PAGE["pages"] * 2, False),
+    ("a page naming a signal file", PACKED_PAGE, PG + ["files"],
+     [{"name": "x", "sha256": "0" * 64}], False),
+    ("a page with no files key", PACKED_PAGE, PG + ["files"], DELETE, True),
+    ("a page key the envelope doesn't list", PACKED_PAGE, PG + ["theme"], "dark", True),
+    ("no pages listed", PACKED_PAGE, ["pages"], [], False),
+    ("a page listed twice", PACKED_PAGE, ["pages"], ["p/phone.json", "p/phone.json"], False),
+    ("16 pages", changed(SEVENTEEN, ["pages"], SEVENTEEN["pages"][:16]), ["files", "p/16.json"],
+     DELETE, True),
+    ("17 pages", SEVENTEEN, [], None, False),
+]
+
 class Cli:
     def __init__(self, exe, scratch):
         self.exe = exe
@@ -428,6 +590,8 @@ def main():
                   for name, s in schemas.items()}
     validators["data-file"] = jsonschema.Draft202012Validator(
         {"$ref": schemas["plugin-manifest"]["$id"] + "#/$defs/dataFile"}, registry=registry)
+    validators["page-file"] = jsonschema.Draft202012Validator(
+        {"$ref": schemas["plugin-manifest"]["$id"] + "#/$defs/pageFile"}, registry=registry)
 
     failures = []
     checked = 0
@@ -470,6 +634,8 @@ def main():
             validate("data-file", os.path.join(folder, rel))
         for rel in manifest.get("fixtures", []):
             validate("plugin-fixtures", os.path.join(folder, rel))
+        for rel in manifest.get("pages", []):
+            validate("page-file", os.path.join(folder, rel))
     for path in sorted(glob.glob(os.path.join(fixtures, "plugins", "*.json"))):
         validate("plugin-manifest", path)
 
@@ -497,7 +663,7 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES) + FORMAT2 + CONDITION_CASES
+        cases = list(CASES) + FORMAT2 + CONDITION_CASES + CONVERSATION + PAGES
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

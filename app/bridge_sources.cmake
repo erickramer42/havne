@@ -7,7 +7,10 @@
 # A new bridge source joins this list alone.
 set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_conditions.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_connect.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics_entries.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics_text.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_files.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_profiles.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recorder.cpp
@@ -16,6 +19,7 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_store.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_support.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridgetext.h
+    ${CMAKE_CURRENT_LIST_DIR}/choicerows.h
     ${CMAKE_CURRENT_LIST_DIR}/framelistmodel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/framelistmodel.h
     ${CMAKE_CURRENT_LIST_DIR}/hostclock.h
@@ -23,4 +27,5 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/sessionbridge.h
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.h
+    ${CMAKE_CURRENT_LIST_DIR}/signalplot.cpp
 )
