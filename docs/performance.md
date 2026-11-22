@@ -102,10 +102,14 @@ running (ranges across the runs; milliseconds as median / p99):
   passed at 229,915.
 - **Recorded runs:** the looping run and the 100x pass run again with
   core's recorder attached ([ADR-0049](adr/0049-recordings-in-core.md)).
-  The looping pair runs twice, unrecorded and recorded alternated, and
-  the faster recorded run gates CI at 0.6 of the faster unrecorded one
+  The looping pair runs three times, unrecorded and recorded alternated, and
+  the best recorded run gates CI at 0.6 of the best unrecorded one
   (0.96 on the dev machine, 471,840 frames a second against 493,534, and
-  1.01 under WSL, 2026-11-03, no record dropped in either); the 100x one must write all 7,074 frames and
+  1.01 under WSL, 2026-11-03, no record dropped in either); Linux's floor is
+  0.66 (`tests/bench_load_judge.h` holds both): 50 `linux-build` runs of
+  2026-11-19 to 2026-11-21, each the faster of two pairs, gave a lowest 0.69,
+  a tenth percentile 0.76, a median 0.86 and a highest 0.97, and the third pair
+  only raises a job's figure, so the floor sits looser than those runs say; the 100x one must write all 7,074 frames and
   7,061 values with no record dropped. On a shared runner the share
   measures the runner as much as the recorder: the writer is a third
   busy thread on two cores, and the bridge's worker rate follows the
@@ -528,9 +532,13 @@ and 6 and 12 replies lost, all at the start. Each row's first answer
 comes by 0.9 s and 1.0 s. `bench_pacing`'s "unequal modules" rows are
 these figures.
 
-Beside absent modules (the hold's test bus, `J2534HoldTest.AbsentModulesHoldNoOne`): four present modules beside 14 absent ones answer 92% of their own count in the first 3 s when the absent ones' rows are short and 40% when they read long (the absent module holds the bus once, for its first ask's wait of 100 ms); before, 40% and 1%.
+Beside absent modules (the hold's test bus, `J2534HoldTest.AbsentModulesHoldNoOne`): four present modules beside 14 absent ones answer 88% of their own count in the first 3 s when the absent ones' rows are short and 36% when they read long (the absent module holds the bus once, for its first ask's wait of 100 ms, and the hold's probe of a quiet module's first steps holds the present modules' identification items meanwhile; 92% and 40% without that probe); before, 40% and 1%.
 
 v0.8.0's Dashboard stall as a whole scenario (`tests/test_pacing_stall.cpp`, 2026-11-21, the model's draw is fixed so a run repeats bit for bit): four modules through the MX+ model, every value's P50 106.5 ms and worst 120.0 ms (bounds 150 and 200 ms), RPM 106.5 ms against 73.7 ms without the transmission's DID (1.45x, bound 1.7x). The J2534 hold over four modules: the engine's rows 81.9 ms, the transmission's 26.6 ms and the segmented module's 53.2 ms against a share of 66.4 ms, worst 206.9 ms, nothing lost. With turns by channel the Dashboard's P50 reads 163.8 ms and the spread 3.1x; with `?hold=0` the engine's rows read 360-655 ms and 1,107 replies are lost under the segments.
+
+A table row's first ask (the pacing bench's four unequal modules through the VX, the model, 2026-11-20; no car run): a row never answered counted as one frame, so its first ask shared the bus and a segmented reply could lose another module's Single Frame, 9 to 13 replies in the first lap (15 to 17 with words in the second module, 134 to 142 with 250 rows a module). A row whose defs or J1979's length read past a Single Frame goes alone at its first ask: nothing is lost on any of the three, and the first lap shortens because no wait runs out, 1.6 s to 0.9 s on the unequal modules, 2.0 s to 1.0 s with words in the second, 14.8 s to 8.4 s with 250 rows a module; the values a second and the slowest signal's median are unchanged. Four modules of 250 one-frame DIDs keep their 1.8 s first lap, one of them absent too. The cost falls on a silent module whose defs read long: with an absent module of 250 10-byte texts beside three of words the first lap takes 2.2 s where it took 1.8 s and the first minute gives 406 values a second where it gave 429.
+
+Modules that answer nothing beside modules that answer (the model, 2026-11-21; no car run): through the MX+ model the engine ECU's 8 one-frame rows update every 164 ms alone, and beside a silent module of 1 to 40 rows or 1 to 6 silent modules of 4 rows still 164-165 ms (279 ms to 2.8 s without the quiet rule); beside 14 absent modules 277 ms (6.3 s). Four modules that answer beside 14 absent keep 524 ms against 426 ms alone (6.5 s without the rule), and the connect as shipped shows their last first value at 5.2 s against 2.0 s with none absent (12.7 s). Through the VX model with the hold, 20 segmented rows keep 491 ms beside 1 to 28 absent modules (572 ms to 3.1 s without). SocketCAN's figures don't move (163 ms); an absent module's requests fall from about 10 a second to 18 in 70 s. A module that starts answering 30 s into a run is read 2.7-3.3 s later (0.0-0.3 s without the rule); through the VX with the hold, one heard before is read within 3.2 s of answering again and one silent from the connect within 37.9 s (the hold's own probe). Through the MX+ with 14 absent beside 4 present each absent module is asked about every 8 s, where in channel order the last were never asked again; with 16 absent beside 16 present the present modules' values update every 763 ms (1,104 ms in channel order). `PacingTest`'s pins are in `tests/test_pacing_quiet.cpp`.
 
 ### The signal-file loader at 16,384 signals
 
