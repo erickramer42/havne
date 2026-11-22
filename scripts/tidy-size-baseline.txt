@@ -74,7 +74,6 @@ core/src/import.cpp	write_frames	97	-
 core/src/isotp.h	isotp_take	91	41
 core/src/j2534_surrogate_client.cpp	ecuio_j2534_sur_open	299	50
 core/src/j2534_transport.cpp	j2534_attach	119	-
-core/src/j2534_worker.cpp	j2534_worker	132	54
 core/src/json.cpp	number	-	42
 core/src/mock_drive_cycle.h	drive_script	140	67
 core/src/mock_drive_cycle.h	update_vehicle	178	60

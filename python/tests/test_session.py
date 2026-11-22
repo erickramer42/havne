@@ -67,8 +67,10 @@ def test_frames_come_whole():
 def test_a_slow_reader_s_drops_are_counted_and_said_once_each(caplog):
     with havne.Session("mock://py") as s:
         frames = s.frames(capacity=2)
+        counter = s.frames()   # roomy: counts what the mock has sent
         s.start()
-        time.sleep(0.5)   # the mock sends a frame every 50 ms: the queue fills
+        # the mock sends a frame every 50 ms: past 2 unread, the queue drops
+        assert len(take(counter, 8, 30)) >= 8
         with caplog.at_level(logging.WARNING, logger="havne"):
             frames.read(0)
             first = frames.dropped
@@ -86,7 +88,7 @@ def test_a_close_from_another_thread_ends_the_iteration():
     seen = []
     reader = threading.Thread(target=lambda: seen.extend(v for v in values))
     reader.start()
-    time.sleep(0.4)
+    assert take_until(lambda: seen, 30), "a value reached the reader before the close"
     t = time.monotonic()
     s.close()
     reader.join(5)
