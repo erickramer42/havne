@@ -117,3 +117,43 @@ TEST(RequestTurnsTest, EverySessionIsKeptWhenTheLapOutlastsS3)
         EXPECT_EQ(a->e.chans[c].session_lost, 0u) << "channel " << c;
     }
 }
+
+/* Channel 0's four rows beside 13 channels with nothing to ask but their
+ * keep-alive, at its least, and a 90 ms exchange: 13 keep-alives every
+ * 500 ms would take more than the adapter has. A keep-alive with nothing
+ * else due gives way to a due row until its session is urgent, so channel
+ * 0 keeps its lap and every session is kept */
+TEST(RequestTurnsTest, AKeepAliveWithNothingElseGivesWayToADueRow)
+{
+    auto a = adapter(14);
+    dids(&a->e, 0, 4);
+    ASSERT_TRUE(
+        ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MIN_US));
+    a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
+    a->until(60000 * kMs);
+    const int64_t from = 10000 * kMs;
+    std::vector<int64_t> last(4, -1);
+    std::vector<std::vector<int64_t>> intervals(4);
+    for (const Sent& x : a->sent) {
+        if (x.c != 0 || x.at_us < from || x.bytes[0] != 0x22) {
+            continue;
+        }
+        const uint8_t i = x.bytes[2];
+        if (last[i] >= 0) {
+            intervals[i].push_back(x.at_us - last[i]);
+        }
+        last[i] = x.at_us;
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        ASSERT_FALSE(intervals[i].empty()) << "row " << i;
+        std::sort(intervals[i].begin(), intervals[i].end());
+        EXPECT_LE(intervals[i][intervals[i].size() / 2],
+                  4 * a->exchange_us * 5 / 4)
+            << "row " << i;
+    }
+    const std::vector<int64_t> gap = longest_gaps(*a, from);
+    for (uint32_t c = 0; c < 14; ++c) {
+        EXPECT_LT(gap[c], ECUIO_ENGINE_S3_US - 500 * kMs) << "channel " << c;
+        EXPECT_EQ(a->e.chans[c].session_lost, 0u) << "channel " << c;
+    }
+}

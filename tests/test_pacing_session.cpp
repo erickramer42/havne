@@ -217,3 +217,20 @@ TEST(PacingTest, FourteenModulesInTheSessionKeepTheirLapThroughTheMxPlus)
     EXPECT_EQ(keepalives(r), 0u);
     expect_every_session_kept(r, 14);
 }
+
+/* The same 14 modules, module 0's four rows picked: the other 13 have
+ * nothing to ask but their keep-alive. Each gives way to a due row until
+ * its session is urgent, so the picks keep their pace and every session
+ * is kept */
+TEST(PacingTest,
+     APickBesideThirteenModulesInTheSessionKeepsItsPaceThroughTheMxPlus)
+{
+    const Car car(14, 4);
+    const seen alone = seen_of(run(config(car, 14, 4, 0, true)), ids(4));
+    const pacing::bench_result r = run(config(car, 14, 4, 500, true));
+    const seen s = seen_of(r, ids(4));
+    EXPECT_EQ(s.answered, 4u);
+    EXPECT_LT(s.high_p50, 1.25 * alone.high_p50)
+        << s.high_p50 << " ms against " << alone.high_p50 << " alone";
+    expect_every_session_kept(r, 14);
+}
