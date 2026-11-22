@@ -1,7 +1,8 @@
 // File/layer: tests/test_security_store_lock.cpp | test_core, Qt-free
 // Testing: UNIT: SecurityStoreTest (security_store.cpp's lock across a
 //          save, folder_files.h's lock_file: a second save waits for the
-//          first's replace, a lock held past the wait refused in words)
+//          first's replace, a lock held past the wait refused in words, a
+//          lock file this account can't write)
 
 #include "security_store.h"
 
@@ -14,7 +15,12 @@
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <system_error>
 #include <thread>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace security_store_test;
 using std::chrono::steady_clock;
@@ -179,4 +185,50 @@ TEST(SecurityStoreTest, ALockInAFolderThatIsNotThereFailsInWords)
     EXPECT_EQ(why, "the folder it goes in doesn't exist");
     EXPECT_FALSE(lock.locked);
     EXPECT_EQ(f.entries(), 0u);
+}
+
+/* A lock file this account can't write (another account's, as a run as
+ * root leaves it) is opened to read and still locks: a save goes
+ * through, and waits on another holder as before */
+TEST(SecurityStoreTest, ALockFileThisAccountCantWriteStillLocks)
+{
+#ifndef _WIN32
+    if (geteuid() == 0) {
+        GTEST_SKIP() << "root writes a read-only file";
+    }
+#endif
+    Folder f;
+    const Seams seams;
+    store s;
+    s.entries.push_back(entry(kRx, 0x01, 1, kUtc));
+    std::string why;
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+    const fs::path lock = f.path / kLockName;
+    fs::permissions(lock, fs::perms::owner_read | fs::perms::group_read |
+                              fs::perms::others_read);
+    struct Writable {
+        fs::path path;
+        ~Writable()
+        {
+            std::error_code ec;
+            fs::permissions(path, fs::perms::owner_write, fs::perm_options::add,
+                            ec);
+        }
+    } const writable{lock};
+
+    s.entries[0].failed = 2;
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+    EXPECT_EQ(f.read(), store_text(s));
+
+    ecuio_files::file_lock other;
+    ASSERT_EQ(ecuio_files::lock_file(lock.generic_u8string(), 0, &other, &why),
+              ecuio_files::lock_got::locked)
+        << why;
+    store_test_lock_wait_ms.store(20);
+    s.entries[0].failed = 3;
+    EXPECT_EQ(store_save(f.file(), &s, &why), store_io::refused);
+    EXPECT_EQ(why, "another program is using the security store");
+    other.release();
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+    EXPECT_EQ(f.read(), store_text(s));
 }

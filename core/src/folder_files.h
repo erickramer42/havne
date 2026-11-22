@@ -551,12 +551,22 @@ inline lock_got lock_once(const std::string& utf8, file_lock* lock,
             *why = "the name isn't valid UTF-8";
             return lock_got::failed;
         }
+        constexpr DWORD share =
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
         lock->handle =
-            CreateFileW(w.c_str(), GENERIC_READ | GENERIC_WRITE,
-                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            CreateFileW(w.c_str(), GENERIC_READ | GENERIC_WRITE, share, nullptr,
+                        OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        DWORD code = GetLastError();
+        if (lock->handle == INVALID_HANDLE_VALUE &&
+            code == ERROR_ACCESS_DENIED) {
+            /* A lock file this account can't write: LockFileEx takes a
+             * read handle too */
+            lock->handle =
+                CreateFileW(w.c_str(), GENERIC_READ, share, nullptr,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            code = GetLastError();
+        }
         if (lock->handle == INVALID_HANDLE_VALUE) {
-            const DWORD code = GetLastError();
             if (code == ERROR_SHARING_VIOLATION) {
                 return lock_got::busy;
             }
@@ -580,6 +590,11 @@ inline lock_got lock_once(const std::string& utf8, file_lock* lock,
 #else
     if (lock->fd < 0) {
         lock->fd = open(utf8.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        if (lock->fd < 0 && errno == EACCES) {
+            /* Another account's lock file (a run as root): flock takes a
+             * read-only descriptor too */
+            lock->fd = open(utf8.c_str(), O_RDONLY | O_CLOEXEC);
+        }
         if (lock->fd < 0) {
             *why = os_words(errno);
             return lock_got::failed;
