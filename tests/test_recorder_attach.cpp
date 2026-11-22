@@ -542,12 +542,26 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     while (std::chrono::steady_clock::now() < looked) {
         std::this_thread::yield();
     }
+    /* The writer counts a wake before it looks, so the second wake counted
+     * after an add comes from a look that saw the add: a wait for two wakes
+     * keeps each sleep to a wake of its own, whatever the runner's turns */
+    const auto after_two_wakes = [&](uint64_t from) {
+        const auto bound =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (ecuio_recorder_test_wakes(rec) < from + 2 &&
+               std::chrono::steady_clock::now() < bound) {
+            std::this_thread::yield();
+        }
+        return ecuio_recorder_test_wakes(rec) >= from + 2;
+    };
+    const uint64_t before_add = ecuio_recorder_test_wakes(rec);
     const uint64_t added_from = ecuio_clock_us();
     ecuio_recorder_test_add_slept(rec, 2340000);
     const uint64_t added_to = ecuio_clock_us();
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ASSERT_TRUE(after_two_wakes(before_add)) << "the writer took no wake";
+    const uint64_t before_second = ecuio_recorder_test_wakes(rec);
     ecuio_recorder_test_add_slept(rec, 600000); /* under a second */
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    ASSERT_TRUE(after_two_wakes(before_second)) << "the writer took no wake";
     ecuio_session_destroy(s);
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
 

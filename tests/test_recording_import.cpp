@@ -8,6 +8,13 @@
 
 #include "test_recording_import_support.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+
+#include "ecuio/internal.h" /* ecuio_import_test_between_passes */
+
 namespace {
 
 // Two buses, can0 three frames over 0.5 s and can1 two
@@ -23,6 +30,45 @@ const QByteArray kOneBus = "(1700000000.000000) vcan0 7E8#03410550\n"
 
 const QRegularExpression
     kStamped(QStringLiteral("^[0-9]{8}-[0-9]{6}(-[0-9]+)? (.+)$"));
+
+/* core's between-passes seam held: the import parks after its partial folder
+ * is made until release() (or the scope's end, so a failed ASSERT can't hang
+ * the import's join); once released it passes. Declared after the importer
+ * it holds */
+class ImportHold {
+public:
+    ImportHold() { ecuio_import_test_between_passes(&ImportHold::hook, this); }
+    ~ImportHold()
+    {
+        release();
+        ecuio_import_test_between_passes(nullptr, nullptr);
+    }
+    ImportHold(const ImportHold&) = delete;
+    ImportHold& operator=(const ImportHold&) = delete;
+    bool reached() const { return m_reached.load(); }
+    void release()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_open = true;
+        }
+        m_cv.notify_all();
+    }
+
+private:
+    static void hook(void* user)
+    {
+        auto* self = static_cast<ImportHold*>(user);
+        self->m_reached = true;
+        std::unique_lock<std::mutex> lock(self->m_mutex);
+        self->m_cv.wait_for(lock, std::chrono::seconds(60),
+                            [self] { return self->m_open; });
+    }
+    std::atomic<bool> m_reached{false};
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    bool m_open = false;
+};
 
 } // namespace
 
@@ -246,29 +292,22 @@ TEST(BridgeTest, ImportCanceledEndsCanceledAndLeavesNoRecording)
     expectCanceled("held before core's call");
     im.setHoldForTesting(0);
 
-    // Mid-way: the second pass has made its partial folder. An import
-    // that outran the look (it ended, or its folder was already in place)
-    // is no judgment: its folder goes and the next is tried
-    bool caught = false;
-    for (int attempt = 0; attempt < 5 && !caught; ++attempt) {
+    // Mid-way: core's seam holds the import after the second pass made its
+    // partial folder, so the cancel lands there whatever the machine's speed
+    {
+        ImportHold hold;
         const int was = ends;
         ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
-        ASSERT_TRUE(waitUntil(
-            [&] { return !entries(root).isEmpty() || ends > was; }, 60000));
+        ASSERT_TRUE(waitUntil([&] { return hold.reached(); }, 60000));
         const QStringList seen = entries(root);
-        const bool partial = ends == was && seen.size() == 1 &&
-                             seen[0].contains(QStringLiteral(".partial-"));
+        ASSERT_EQ(seen.size(), 1) << seen.join(QLatin1Char(' ')).toStdString();
+        EXPECT_TRUE(seen[0].contains(QStringLiteral(".partial-")));
+        EXPECT_EQ(ends, was) << "held, so not ended";
         im.cancel();
+        hold.release();
         ASSERT_TRUE(waitUntil([&] { return ends > was; }, 60000));
-        caught = partial && result.value(QStringLiteral("canceled")).toBool();
-        if (caught) {
-            expectCanceled("in the second pass");
-        } else {
-            ASSERT_TRUE(QDir(root).removeRecursively());
-        }
+        expectCanceled("in the second pass");
     }
-    EXPECT_TRUE(caught) << "no import was stopped with its partial folder "
-                           "there in five tries";
 
     // In the copy of a file core can't read in place
     im.setCopyLocalFilesForTesting(true);
