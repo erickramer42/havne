@@ -50,8 +50,9 @@
 //     when its attempt ends well before that store's next save. A
 //     count can still come out too high, never too low: once a store has
 //     saved another's mark counted, that attempt ending well doesn't take
-//     it back. A store always holds what it last put in the file, a
-//     failed save whose new file stood included.
+//     it back, and its failing counts it twice (the price of adding two
+//     writers' failures). A store always holds what it last put in the
+//     file, a failed save whose new file stood included.
 //   - The words name no path (it can hold the account name).
 
 #ifndef ECUIO_SECURITY_STORE_H

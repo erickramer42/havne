@@ -436,7 +436,8 @@ store_io merged_entries(const std::string& path, const store& s,
     if (read != store_io::ok) {
         return read;
     }
-    /* on_disk read or was written, so only out of memory refuses it */
+    /* on_disk was read or written, or is "" (no file then): "" is refused
+     * and leaves was empty, the right base; only out of memory stops here */
     std::vector<store_entry> was;
     std::string ignored;
     if (read_entries(s.on_disk.data(), s.on_disk.size(), &was, &ignored) ==
