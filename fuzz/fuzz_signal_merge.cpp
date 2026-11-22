@@ -242,6 +242,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
                                         &f) == ECUIO_OK) {
             loaded.push_back(f);
         }
+        if (stop == end) {
+            break; /* end + 1 is no pointer to form */
+        }
         at = stop + 1;
     }
     const std::vector<const ecuio_signal_file_t*> parts(loaded.begin(),
