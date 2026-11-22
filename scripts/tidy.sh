@@ -7,7 +7,10 @@
 # written to Testing/tidy/size.txt and judged against the committed baseline
 # scripts/tidy-size-baseline.txt (scripts/tidy-size-ratchet.sh): a function
 # past a threshold that the baseline doesn't list fails, and so does a
-# baseline line that no longer applies, so the list only shrinks.
+# baseline line that no longer applies or a listed function that grew, so
+# the list and its numbers only shrink. It also runs the file-length ratchet
+# (scripts/filelength_check.py, scripts/filelength-baseline.txt): a source file
+# past 1,000 lines that isn't listed, or a listed one that grew, fails.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
@@ -56,6 +59,20 @@ else
     TREE=${1:-build-tidy}
 fi
 DB=$TREE/compile_commands.json
+
+# The file-length ratchet (scripts/filelength_check.py): cheap, needs no
+# compiler, and runs before the long part. CI's shards share the tree, so
+# shard 1 alone judges it.
+case "${HAVNE_TIDY_SHARD:-1/1}" in
+    1/*)
+        PY=python
+        command -v python > /dev/null 2>&1 || PY=python3
+        fl=
+        [ "$UPDATE" = 1 ] && fl=--update
+        if ! "$PY" -I scripts/filelength_check.py $fl; then
+            exit 1
+        fi ;;
+esac
 
 # A Developer environment on Windows: vcvars64's variables, read through
 # a cmd of its own and taken into this shell (PATH converted)
@@ -171,10 +188,13 @@ dur=$((SECONDS - start))
 # A header's warning repeats in every file that includes it: print once.
 # The size checks are judged apart (the baseline), listed in size.txt.
 all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
-    sed "s#^$root/##" | sort -u)
+    sed "s#^$root/##I" | sort -u)
 sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
 found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
 printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
+# The size check's line count is in a note that follows its warning
+cat "$LOGDIR"/*.log | grep -E 'note: [0-9]+ lines including whitespace' | tr '\\' '/' |
+    sed "s#^$root/##I" | sort -u > "$LOGDIR/size-notes.txt"
 nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
@@ -191,11 +211,11 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##" > "$LOGDIR/checked.txt"
+printf '%s\n' "$files" | tr '\' '/' | sed "s#^$root/##I" > "$LOGDIR/checked.txt"
 sharded=0
 [ -z "${HAVNE_TIDY_SHARD:-}" ] || sharded=1
 if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-baseline.txt \
-        "$LOGDIR/checked.txt" "$sharded" "$UPDATE"; then
+        "$LOGDIR/checked.txt" "$sharded" "$UPDATE" "$LOGDIR/size-notes.txt"; then
     exit 1
 fi
 printf 'tidy        ok    %4s s  %s files, no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \

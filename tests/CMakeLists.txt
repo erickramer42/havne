@@ -26,7 +26,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
     test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
-    test_json.cpp test_obdb_import.cpp
+    test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
     test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
     test_recorder_attach.cpp test_recorder_file.cpp
     test_recording.cpp test_recording_reader.cpp
@@ -327,6 +327,10 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME TidyRatchetTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tidy_ratchet_selftest.py)
     set_tests_properties(TidyRatchetTest.SelfTest PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+    # scripts/filelength_check.py, the file-length ratchet (skip 77 where no git is found)
+    add_test(NAME FileLengthTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/filelength_check.py selftest)
+    set_tests_properties(FileLengthTest.SelfTest PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)

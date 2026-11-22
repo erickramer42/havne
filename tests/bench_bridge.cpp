@@ -31,9 +31,9 @@
 // flat; checking every def made it over 20x), and the looping run's
 // worker rate under obd2 against the same run under raw, which decodes
 // nothing. The looping run and the 100x pass run again recorded through
-// core's recorder (ADR-0049): the looping pair twice, unrecorded and
-// recorded alternated, the faster recorded run at least
-// kMinRecordedLoopShare of the faster unrecorded one (0.6); the 100x one
+// core's recorder (ADR-0049): the looping pair three times, unrecorded and
+// recorded alternated, the best recorded run at least the platform's
+// floor (bench_load_judge.h) of the best unrecorded one; the 100x one
 // writing every frame and value with no record dropped. Exit status 1 on
 // any failed check.
 //

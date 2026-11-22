@@ -21,6 +21,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
+#include "bench_load_judge.h"
 #include "bench_bridge_common.h"
 #include "bench_bridge_frame.h"
 
@@ -45,7 +46,7 @@ constexpr double kMaxPacedFrameP99Ms = 500.0;    // dev: under 1
 constexpr double kMaxDecodeRatio = 3.0;
 constexpr double kMinDecodingShare = 0.5;
 // The looping run recorded through core's recorder against the same run
-// not recorded, the faster of two each (a runner's noise only slows a
+// not recorded, the best of three each (a runner's noise only slows a
 // run): ADR-0049 section 9's CI gate for a gross regression, a cost of a
 // microsecond or more a frame; the 10%, and the recorder's own
 // nanoseconds a frame, are judged on the dev machine by --record's
@@ -54,14 +55,9 @@ constexpr double kMinDecodingShare = 0.5;
 // the bridge's worker rate follows the GUI thread's through the
 // in-flight gate, so holding the worker to a core of its own moved the
 // share above 1 rather than steadying it (0.94 to 1.13 on two of the dev
-// machine's cores). Over 63 CI runs each, Linux read 0.79 to 0.95
-// (median 0.89) and Windows 0.68 to 0.95 (median 0.80, 4 under 0.75, one
-// under 0.70), most of the spread runner to runner: a job's two recorded
-// runs agree within a few percent. A loaded Linux runner has read 0.67.
-// The 0.6 floor leaves room for that load, and a 25% loss from a typical
-// figure still trips it: about 2 us a frame on Windows' typical runner
-// (220,000 frames a second unrecorded), 1 us on its fastest.
-constexpr double kMinRecordedLoopShare = 0.6;
+// machine's cores). The floor is per platform (bench_load_judge.h, which
+// gives each one's figures): Linux's runners read lower and wider than
+// Windows', so its floor is a point of its own.
 constexpr int kDecodeFrames = 100000;
 
 std::string typicalConditions();
@@ -275,6 +271,12 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
     LoadRun recordedAgain = recordedLoop;
     recordedAgain.label = "full speed, looping 3 s, recorded, again";
     runs.push_back(recordedAgain); // runs[7]
+    LoadRun loopThird = loopAgain;
+    loopThird.label = "full speed, looping 3 s, a third time";
+    runs.push_back(loopThird); // runs[8]
+    LoadRun recordedThird = recordedLoop;
+    recordedThird.label = "full speed, looping 3 s, recorded, a third time";
+    runs.push_back(recordedThird); // runs[9]
     if (withSlowRun) {
         LoadRun slow;
         slow.label = "10x, one pass";
@@ -361,28 +363,34 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
                   "looping under obd2 at %.2f of raw's rate, under %.2f",
                   decodingShare, kMinDecodingShare);
     check(decodingShare >= kMinDecodingShare, bound);
-    const double unrecordedRate =
-        std::max(runs[2].workerRate, runs[6].workerRate);
-    const double recordedRate =
-        std::max(runs[4].workerRate, runs[7].workerRate);
-    const double recordedShare = recordedRate / unrecordedRate;
+    const std::vector<double> unrecordedRates = {
+        runs[2].workerRate, runs[6].workerRate, runs[8].workerRate};
+    const std::vector<double> recordedRates = {
+        runs[4].workerRate, runs[7].workerRate, runs[9].workerRate};
+    const double unrecordedRate = bench_judge::best(unrecordedRates);
+    const double recordedRate = bench_judge::best(recordedRates);
+    const double recordedShare =
+        bench_judge::recordedShare(recordedRates, unrecordedRates);
+    const double recordedFloor = bench_judge::minRecordedLoopShare();
     std::printf(
-        "Looping, recorded against not, the faster of two each: %.0f against "
+        "Looping, recorded against not, the best of three each: %.0f against "
         "%.0f frames/s (%.2f), %llu frames written, %llu records dropped. "
         "100x recorded: %llu frames and %llu values written, %llu records "
         "dropped.\n",
         recordedRate, unrecordedRate, recordedShare,
         static_cast<unsigned long long>(runs[4].rec.frame_rows +
-                                        runs[7].rec.frame_rows),
+                                        runs[7].rec.frame_rows +
+                                        runs[9].rec.frame_rows),
         static_cast<unsigned long long>(runs[4].rec.records_dropped +
-                                        runs[7].rec.records_dropped),
+                                        runs[7].rec.records_dropped +
+                                        runs[9].rec.records_dropped),
         static_cast<unsigned long long>(runs[5].rec.frame_rows),
         static_cast<unsigned long long>(runs[5].rec.value_rows),
         static_cast<unsigned long long>(runs[5].rec.records_dropped));
     std::snprintf(bound, sizeof(bound),
                   "looping recorded at %.2f of the unrecorded rate, under %.2f",
-                  recordedShare, kMinRecordedLoopShare);
-    check(recordedShare >= kMinRecordedLoopShare, bound);
+                  recordedShare, recordedFloor);
+    check(bench_judge::recordedShareHolds(recordedShare, recordedFloor), bound);
 
     const LoadRun& paced = runs[1];
     check(ms(paced.stats.valueToModel.quantileUs(0.99)) <= kMaxPacedValueP99Ms,
@@ -400,7 +408,7 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
             "%.2f of its unrecorded rate; the recorded 100x pass wrote every "
             "frame and value.\n",
             kMinWorkerFramesPerSecond, kMaxPacedValueP99Ms, kMaxPacedFrameP99Ms,
-            kMaxDecodeRatio, kMinDecodingShare, kMinRecordedLoopShare);
+            kMaxDecodeRatio, kMinDecodingShare, recordedFloor);
         return true;
     }
     std::printf("\n");
