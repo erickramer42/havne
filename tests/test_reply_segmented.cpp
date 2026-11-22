@@ -458,3 +458,26 @@ TEST(RequestEngineTest, EveryIdentificationAndDiagnosticsItemIsSegmented)
     ASSERT_TRUE(walk.chans[0].walking);
     EXPECT_FALSE(ecuio_engine_reply_segmented(&walk, 0, ECUIO_ENGINE_ONCE));
 }
+
+/* A row never answered counts its waits run out in a row (one frame from
+ * the first); past 255 the count goes on from 128, so every eighth comes
+ * round for ever (the J2534 hold's probe); an answer ends it, and a wait
+ * run out after an answer counts nothing */
+TEST(RequestEngineTest, ARowsWaitsRunOutBeforeAnyAnswerAreCountedForEver)
+{
+    ecuio_request q{};
+    uint32_t eighths = 0;
+    for (uint32_t k = 1; k <= 600; ++k) {
+        ecuio_engine_row_ran_out(q);
+        ASSERT_EQ(q.reply_frames, 1u);
+        ASSERT_NE(q.ran_out, 0u) << k;
+        ASSERT_EQ(q.ran_out, k <= 255 ? k : 128 + (k - 256) % 128) << k;
+        eighths += q.ran_out % 8 == 0 ? 1u : 0u;
+    }
+    EXPECT_EQ(eighths, 600u / 8);
+    ecuio_engine_row_frames(q, 3);
+    EXPECT_EQ(q.ran_out, 0u);
+    ecuio_engine_row_ran_out(q);
+    EXPECT_EQ(q.reply_frames, 3u) << "an answered row keeps its frames";
+    EXPECT_EQ(q.ran_out, 0u);
+}
