@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-21
+
 ### Added
 
 - The Dashboard has three presets for each form: Standard (the built-in page), Temperatures (coolant, oil, intake air, outside air, catalyst, battery, boost and MAF as numbers, a color for each row) and Showcase (one gauge of each kind, with zones and peak hold). The "+" tab and a phone's Page > Add page open a list (Blank page, Standard, Temperatures, Showcase, From a file...) that adds the choice as a new page after the shown one. The Page row's "Replace this page with..." puts a preset's gauges on the shown page and keeps its name; it asks first only when the page holds gauges that are none of the presets'. Each is one undo step. A gauge whose signal the car doesn't send (outside air and catalyst temperature are the likely ones) says so.
@@ -1911,7 +1913,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/erickramer42/havne/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/erickramer42/havne/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/erickramer42/havne/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/erickramer42/havne/compare/v0.7.2...v0.7.3

@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Version:** v0.8.0 (2026-11-15). **Next:** v0.9.0, the whole car through plugins. [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
+**Version:** v0.9.0 (2026-11-21). **Next:** v0.9.1, a vehicle's plugins read together and the conversation tier. [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 Havne reads a car's ECUs through an OBD-II adapter and shows, records and exports what they say. It runs on Windows, Linux and Android, with `havne-cli` and a Python package over the same core. It reads only: nothing it sends changes a module's memory or settings, apart from clearing trouble codes when asked.
 
@@ -19,9 +19,9 @@ This file is the present state: what works, how far it's verified, what's planne
 | `havne-cli` and Python | Every session, recording, export, condition and plugin command the app has, as JSON lines; Python's `havne` package over the same C ABI, as wheels for Windows, Linux and macOS | [ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md) |
 | Platforms | Windows (zip), Linux (AppImage, `.deb` and tarball for x86_64 and 64-bit ARM), Android 12+ (APK); macOS builds in CI; iOS runs on the Simulator and has launched on one iPhone (sideloaded) | [linux.md](docs/linux.md), [docs/development.md](docs/development.md) |
 
-**Verified:** 2711 tests on Windows and the cross-arch subset (111) at v0.8.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
+**Verified:** 3491 tests on Windows and the cross-arch subset (127) at v0.9.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
 
-**Next, v0.9.0:** a profile sized for a whole car (up to 32 modules a session), the viewer's panes chosen by hand, the Dashboard's presets and a plugin's pages, computed signals you write, a hold that stops the VX losing a second module's replies, and a simulated car of many modules. Then v0.9.1: a vehicle's plugins read together in one session, and the conversation tier (security access, the safety gates and the write mechanics behind them, [ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)). [Roadmap](#roadmap).
+**v0.9.0, the latest release:** a profile sized for a whole car (up to 32 modules a session), the viewer's panes chosen by hand, the Dashboard's presets and a plugin's pages, computed signals you write, a hold that stops the VX losing a second module's replies, a module that stops answering no longer slowing the others, and a simulated car of many modules. **Next, v0.9.1:** a vehicle's plugins read together in one session, and the conversation tier (security access, the safety gates and the write mechanics behind them, [ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)). [Roadmap](#roadmap).
 
 ---
 
@@ -145,7 +145,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
 | v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
-| v0.9.0 | The whole car's groundwork: a profile sized for every module (up to 32), keys for signals, computed signals, the viewer's and the Dashboard's work (a plugin's pages among it), a hold that stops the VX losing a second module's replies, the simulated ECU answering as a car of many modules, and the conversation tier's sandbox as built and inert | In progress |
+| v0.9.0 | The whole car's groundwork: a profile sized for every module (up to 32), keys for signals, computed signals, the viewer's and the Dashboard's work (a plugin's pages among it), a hold that stops the VX losing a second module's replies, the simulated ECU answering as a car of many modules, and the conversation tier's sandbox as built and inert | Released |
 | v0.9.1 | The whole car's read and the conversation tier: a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), the modules opened by what is picked, sessions a plugin declares, the desktop staying awake while a session is up, and the fixes held over from v0.9.0; a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built | Planned |
 | v0.9.2-v0.11.0 | v0.9.2, writes over more transports behind the same gates: a WiFi or Bluetooth network adapter, J2534 on Linux through a library named by path, and DoIP. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
@@ -172,10 +172,10 @@ For people who want a log or a warning to start from the car's own state. A feat
 - **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
 - **Left for a v0.9.x patch:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063).
 
-### v0.9.0: the whole car (in progress)
+### v0.9.0: the whole car
 
-A feature release: the C ABI grows, append-only except the recording format and the signal set's layout, which break ([CHANGELOG.md](CHANGELOG.md) "Unreleased" lists each).
-- **Built on `dev`:**
+A feature release: the C ABI grows, append-only except the recording format and the signal set's layout, which break ([CHANGELOG.md](CHANGELOG.md) "0.9.0" lists each).
+- **Built:**
   - a profile sized for a whole car: up to 32 modules a session, a plugin variant's files read together, and a session that asks only the signals picked when a set derives more than 1024 requests ([ADR-0065](docs/adr/0065-car-sized-profile.md));
   - a signal's key, so two signals of one name stay two: recording format 4, `--signal` and the viewer, a vehicle's ticks and Compare's pairs by key, and a validator that takes a repeated name;
   - computed signals written in the signal form, and `havne-cli signals expr`;
@@ -185,8 +185,8 @@ A feature release: the C ABI grows, append-only except the recording format and 
   - a module that stops answering is asked one request on a backoff (0.5, 1, 2 and 4 s, then every 5 s) while another module answers, its lists settled unanswered until it answers: one rule for every requesting transport ([ADR-0065](docs/adr/0065-car-sized-profile.md)'s appendix of 2026-11-21);
   - the ELM327 wire log says when the machine slept with a request out, in place of the 5 s quiet line;
   - the simulated car: faults, a pace, a busy module and a shared bus for each module, and `example-car`, a made-up car of 18 modules.
-- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it. The pacing model matches the car's runs of 2026-11-18 within 10% (the MX+ within 5%).
-- **Left:** the full verify, the release candidate and the release; the screen-reader pass of the variant button (Narrator's speech); the car gate, a run of the release candidate on the phone (the transmission gauge on the four-channel Dashboard) and on the laptop with the VX and the hold on, with the quiet-module checks (a module switched off beside the engine ECU's gauges: the others keep their pace, its gauges stay empty, switching it back on shows its values within about 5 s).
+- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes. The pacing model matches the car's runs of 2026-11-18 within 10% (the MX+ within 5%). The release was tagged only once its release candidate had run in the car with every gauge updating at its rate: on the phone with the MX+ (the transmission gauge on the four-channel Dashboard) and on the laptop with the VX and the hold on, with the quiet-module checks (a module switched off beside the engine ECU's gauges: the others keep their pace, and switching it back on shows its values within about 5 s).
+- **Left:** Narrator's speech on Settings > Signals' variant button (its keys, Narrator's commands and scan mode pass); TalkBack's on the phone, for a mock-only run.
 
 ### v0.9.1: the whole car's read and the conversation tier
 
