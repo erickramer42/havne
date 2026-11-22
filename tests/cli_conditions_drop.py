@@ -166,20 +166,28 @@ def main():
             for side in (ours, theirs):
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
+        cut_r = cut_w = None
+        if pipe_cut:
+            # Cut before the child exists: Linux refuses (EBUSY) to shrink a
+            # pipe already holding more than the new size
+            cut_r, cut_w = os.pipe()
+            fcntl.fcntl(cut_w, fcntl.F_SETPIPE_SZ, 4096)
         proc = subprocess.Popen(
             [cli, "stream", "mock://demo", "--values", "--conditions", named,
              "--record", root, "--count", str(COUNT), "--seconds",
              str(SECONDS)],
             stdin=subprocess.DEVNULL,
-            stdout=theirs.fileno() if theirs else subprocess.PIPE,
+            stdout=(theirs.fileno() if theirs else
+                    cut_w if pipe_cut else subprocess.PIPE),
             stderr=subprocess.PIPE, env=env)
         if theirs:
             theirs.close()
             reader = ours.makefile("rb")
+        elif pipe_cut:
+            os.close(cut_w)
+            reader = os.fdopen(cut_r, "rb")
         else:
             reader = proc.stdout
-            if pipe_cut:
-                fcntl.fcntl(reader.fileno(), fcntl.F_SETPIPE_SZ, 4096)
         held_fd = ours.fileno() if ours else reader.fileno()
         lines = []
         stalled = None
