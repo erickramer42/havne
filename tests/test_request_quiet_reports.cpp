@@ -1,7 +1,8 @@
 // File/layer: tests/test_request_quiet_reports.cpp | test_obd2, Qt-free
 // Testing: UNIT: RequestQuietTest (what a quiet module's waking does to
-//          its session, request_engine_quiet.h's rule 5, through the
-//          turns' adapter with the time passed in)
+//          its session, and Read again and a clear beside its step's
+//          diagnostics item, through the turns' adapter with the time
+//          passed in)
 
 #include "request_quiet_support.h"
 
@@ -116,4 +117,134 @@ TEST(RequestQuietTest, AWakeKeepsAnEnteredSession)
     EXPECT_EQ(entries_asked(*p->a), 1u);
     EXPECT_EQ(p->a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(p->a->e.chans[1].session_lost, 0u);
+}
+
+namespace {
+
+/* The engine ECU's 4 rows on channel 0, answered in 30 ms; on channel 1 a
+ * module with no rows that never answers; diagnostics on both */
+std::unique_ptr<Adapter> quiet_reports()
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 4);
+    a->exchange_us = 30 * kMs;
+    a->ecus = [](uint32_t c, const Bytes& q) {
+        return c == 0 ? answer(q) : Bytes{};
+    };
+    ecuio_engine_diagnose(&a->e, nullptr);
+    return a;
+}
+
+/* Passes until channel 1, quiet with its report settled, has a step's
+ * diagnostics item out, channel 0's report settled too */
+void to_step_item_out(Adapter& a)
+{
+    const ecuio_engine_channel& ch = a.e.chans[1];
+    for (int i = 0; i < 100000 && !(ch.quiet && ch.diagnosing &&
+                                    ch.outstanding != ECUIO_ENGINE_NONE);
+         ++i) {
+        a.pass();
+    }
+    ASSERT_TRUE(ch.diagnosing && ch.outstanding != ECUIO_ENGINE_NONE);
+    ASSERT_TRUE(ch.diag_step);
+    ASSERT_NE(ch.diag.flags & ECUIO_DIAG_COMPLETE, 0u);
+    ASSERT_NE(a.e.chans[0].diag.flags & ECUIO_DIAG_COMPLETE, 0u);
+}
+
+/* A positive answer to the diagnostics item q, padded to six bytes */
+Bytes diag_answer(const ecuio_request& q)
+{
+    Bytes r(q.bytes, q.bytes + q.len);
+    r[0] = static_cast<uint8_t>(r[0] + 0x40);
+    r.resize(6, 0x00);
+    return r;
+}
+
+/* Channel 1's requests from its nth on */
+std::vector<Bytes> asked_after(const Adapter& a, size_t n)
+{
+    std::vector<Bytes> out;
+    for (size_t i = n; i < a.sent.size(); ++i) {
+        if (a.sent[i].c == 1) {
+            out.push_back(a.sent[i].bytes);
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+/* Read again pressed while a quiet module's step asks an item
+ * of its settled report. The live channel starts over at once; the quiet
+ * one at the item's settle (its generation moves), so the press is never
+ * lost and the item's reply settles no slot of the new list. */
+TEST(RequestQuietTest,
+     AReadAgainWhileAQuietModulesItemIsOutRestartsItAtTheSettle)
+{
+    auto a = quiet_reports();
+    to_step_item_out(*a);
+    const uint32_t g0 = a->e.chans[0].diag.generation;
+    const uint32_t g1 = a->e.chans[1].diag.generation;
+    ecuio_engine_diagnose_again(&a->e);
+    EXPECT_EQ(a->e.chans[0].diag.generation, g0 + 1);
+    EXPECT_EQ(a->e.chans[1].diag.generation, g1) << "not while its item is out";
+    a->until(a->now + ECUIO_ENGINE_WAIT_US);
+    EXPECT_GT(a->e.chans[1].diag.generation, g1) << "started over";
+    EXPECT_FALSE(a->e.chans[1].diag_again);
+    a->until(a->now + 1000 * kMs);
+    EXPECT_NE(a->e.chans[1].diag.flags & ECUIO_DIAG_COMPLETE, 0u);
+}
+
+/* A clear at the report's generation while the step's item is
+ * out is accepted; its first request goes once the item has settled
+ * unanswered again */
+TEST(RequestQuietTest,
+     AClearAskedWhileAQuietModulesItemIsOutIsSentAfterTheSettle)
+{
+    auto a = quiet_reports();
+    to_step_item_out(*a);
+    const size_t n = a->sent.size();
+    ASSERT_TRUE(ecuio_engine_clear(&a->e, 1, a->e.chans[1].diag.generation));
+    a->until(a->now + 2000 * kMs);
+    const std::vector<Bytes> after = asked_after(*a, n);
+    ASSERT_FALSE(after.empty());
+    EXPECT_EQ(after[0], (Bytes{0x01, 0x0C}));
+    EXPECT_EQ(a->e.chans[1].clear_step, ECUIO_CLEAR_STEP_NONE);
+    EXPECT_EQ(a->e.chans[1].diag.clear, ECUIO_CLEAR_NO_ENGINE_SPEED);
+}
+
+/* A clear waiting on the step's item when the module wakes and answers
+ * it: the report the user agreed to is gone, so the clear ends
+ * REPORT_CHANGED with nothing of it sent */
+TEST(RequestQuietTest, AClearWaitingOnAQuietModulesItemEndsChangedWhenItAnswers)
+{
+    auto a = quiet_reports();
+    to_step_item_out(*a);
+    const size_t n = a->sent.size();
+    ASSERT_TRUE(ecuio_engine_clear(&a->e, 1, a->e.chans[1].diag.generation));
+    const Bytes r = diag_answer(a->e.chans[1].once);
+    (void)ecuio_engine_on_frame(
+        &a->e, 1, r.data(), static_cast<uint16_t>(r.size()), a->now, nullptr);
+    const ecuio_engine_channel& ch = a->e.chans[1];
+    EXPECT_EQ(ch.diag.clear, ECUIO_CLEAR_REPORT_CHANGED);
+    EXPECT_EQ(ch.clear_step, ECUIO_CLEAR_STEP_NONE);
+    EXPECT_EQ(ch.diag.flags & ECUIO_DIAG_CLEARING, 0u);
+    a->until(a->now + 10000 * kMs);
+    for (const Bytes& q : asked_after(*a, n)) {
+        EXPECT_NE(q, (Bytes{0x01, 0x0C}));
+        EXPECT_NE(q, (Bytes{0x04}));
+    }
+}
+
+/* A Read again waiting on the step's item restarts the report at its
+ * settle, so a clear asked after it is refused as changed */
+TEST(RequestQuietTest, AClearAfterAReadAgainWaitingOnTheStepsItemIsRefused)
+{
+    auto a = quiet_reports();
+    to_step_item_out(*a);
+    const uint32_t g = a->e.chans[1].diag.generation;
+    ecuio_engine_diagnose_again(&a->e);
+    EXPECT_FALSE(ecuio_engine_clear(&a->e, 1, g));
+    EXPECT_EQ(a->e.chans[1].diag.clear, ECUIO_CLEAR_REPORT_CHANGED);
+    EXPECT_EQ(a->e.chans[1].clear_step, ECUIO_CLEAR_STEP_NONE);
 }
