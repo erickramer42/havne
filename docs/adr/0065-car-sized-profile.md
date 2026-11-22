@@ -1301,6 +1301,12 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
     replaced keys, and no notes.
   - *The own variant last* is the caller's ordering (step 7): core
     merges the parts in the order given and knows no vehicle.
+  - *A module a part names is one of the set's, whatever reads it.* It
+    takes one of the `ECUIO_MAX_CHANNELS` places and an entry in the
+    written `ecus`, also when every signal on it was replaced or left
+    out. The modules stand in the order the parts name them, the base's
+    first; which of them a session opens is step 5's rule, not this
+    order.
 - **What is left out, never refused.** A module whose reply ID an earlier
   one answers under another request ID, a module past
   `ECUIO_MAX_CHANNELS` and a part of the other ID width (the first part
@@ -1333,7 +1339,12 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
   signals read the replaced key and, when any does and the units differ,
   both units: "'Boost' (My car signals) replaces 'Boost' (Example import)
   by its key 'boost'; it reads another address; 2 computed signals read
-  'boost'; unit 'kPa', was 'psi'".
+  'boost'; unit 'kPa', was 'psi'". A `_BESIDE_BASE` note follows its
+  signal as the others do: when a later part's signal took its place the
+  sentence names both ("'Boost' (My car signals) is read beside obd2's
+  'Boost' in the place of 'Boost' (Example import)") and the def is the
+  one that stands, so what showed the one can show the other. With
+  nothing standing there the note isn't given.
 - **A recording** of a session on a merged set copies the merged text as
   its `signals.json`, past a data file's megabyte too, and writes one
   `plugin` line for each part that is a plugin's variant, in merge order,
