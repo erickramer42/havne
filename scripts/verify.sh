@@ -57,10 +57,11 @@
 # --changed [base] picks the steps from what changed since base (default
 # the merge-base with origin/dev), uncommitted and untracked files
 # included, by scripts/verify_scope.py's table: docs and markdown only run
-# nothing, QML only runs build and QmlTest.*, a change the table maps to
-# areas (core/src's families, cli/, app/'s C++, a test file) runs the suites
-# that read those areas, and anything else, or a change it can't read, is
-# the full run. The x86 steps run when core or the surrogate changed.
+# nothing, QML only runs build and QmlTest.* (only the files that read a
+# changed tests/qml file, when that is all that changed), a change the table
+# maps to areas (core/src's families, cli/, app/'s C++, a test file) runs the
+# suites that read those areas, and anything else, or a change it can't
+# read, is the full run. The x86 steps run when core or the surrogate changed.
 #
 # Anything less than the full run prints what it skipped and ends with a
 # "not a full verify" line, and says whether clang-tidy applies. A full
@@ -204,7 +205,7 @@ if [ "$changed" = 1 ]; then
             ;;
         qml)
             do_win32=0; do_cross=0
-            regex='^QmlTest\.'
+            regex=${plan_regex:-'^QmlTest\.'}
             add_scope "$plan_reason"
             ;;
         areas)

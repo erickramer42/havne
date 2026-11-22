@@ -15,18 +15,22 @@
 # and for plan=areas also regex= (the ctest -R that runs the areas' suites) and
 # cross=yes|no (whether the x86 steps apply). Areas are the table below: a
 # path in core/src, cli/, app/ or a test file maps to the groups of suites that
-# read its output; a path the table doesn't name takes the full run.
+# read its output; a path the table doesn't name takes the full run. plan=qml
+# also prints a regex= when every QML path is a tests/qml test file or kit:
+# the QmlTest of each file that is, or derives from, a changed one.
 # suite prints the regex, then one line per name: the name, a tab and that
 # name's own regex, which verify.sh uses to refuse a name matching nothing.
 
 import os
 import re
 import sys
+import tempfile
 
 FULL = "full"
 QML = "qml"
 NONE = "none"
 AREAS = "areas"
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 RANK = {NONE: 0, QML: 1, AREAS: 2, FULL: 3}
 
 CPP = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inc")
@@ -176,8 +180,39 @@ def areas_regex(root, specs):
     if "qml" in groups or qml_all:
         parts.append(r"QmlTest\.")
     elif qml:
-        parts.append(r"QmlTest\.(" + "|".join(qml) + ")")
+        parts.append(r"QmlTest\.(" + "|".join(qml) + ")$")
     return "^(" + "|".join(parts) + ")", cross
+
+
+def qml_tests_named(root, paths):
+    """The QmlTest names to run when every QML path is a test file under
+    tests/qml (tst_<name>.qml, or a kit a test file derives from); None when
+    any path is app QML or another file, which no table maps to its tests."""
+    d = os.path.join(root, "tests", "qml")
+    files = {fn: read(root, "tests/qml/" + fn) for fn in os.listdir(d) if fn.endswith(".qml")}
+    stems, kits = set(), set()
+    for p in paths:
+        base = p[len("tests/qml/"):] if p.startswith("tests/qml/") else ""
+        if base not in files:
+            return None
+        if base.startswith("tst_"):
+            stems.add(base[4:-4])
+        elif base.endswith("Kit.qml"):
+            kits.add(base[:-4])
+        else:
+            return None
+    # a kit reaches the test files that derive from it, and the kits that do
+    seen = set()
+    while kits - seen:
+        kit = (kits - seen).pop()
+        seen.add(kit)
+        for fn, text in files.items():
+            if re.search(r"\b" + kit + r"\s*\{", text):
+                if fn.startswith("tst_"):
+                    stems.add(fn[4:-4])
+                elif fn.endswith("Kit.qml"):
+                    kits.add(fn[:-4])
+    return sorted(stems)
 
 
 def plural(count, noun):
@@ -193,7 +228,15 @@ def plan(paths, root=None):
     if worst == NONE:
         return NONE, "only docs and markdown changed (" + plural(len(paths), "file") + ")", "", False
     if worst == QML:
-        return QML, "only QML changed, or QML and docs (" + plural(len(paths), "file") + ")", "", False
+        reason = "only QML changed, or QML and docs (" + plural(len(paths), "file") + ")"
+        try:
+            names = qml_tests_named(root or ROOT, [p for p, k in zip(paths, kinds) if k == QML])
+        except OSError:
+            names = None
+        if names:
+            return QML, reason + ": runs " + plural(len(names), "QmlTest"), \
+                "^QmlTest\\.(" + "|".join(names) + ")$", False
+        return QML, reason, "", False
     first = next(p for p, k in zip(paths, kinds) if k == FULL)
     if is_build_file(first):
         return FULL, first + " changes the build", "", False
@@ -209,7 +252,7 @@ def plan(paths, root=None):
         elif k == QML:
             specs.append(area(["qml"], "all"))
     try:
-        regex, cross = areas_regex(root or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."), specs)
+        regex, cross = areas_regex(root or ROOT, specs)
     except OSError:
         return FULL, "the suites can't be read from the tests", "", False
     return AREAS, "areas of " + plural(len(paths), "changed file"), regex, cross
@@ -230,7 +273,11 @@ def classify_text(text, root=None):
     paths = list(dict.fromkeys(line for line in lines if line))
     kind, reason, regex, cross = plan(paths, root)
     applies, why = tidy(paths)
-    extra = f"regex={regex}\ncross={'yes' if cross else 'no'}\n" if kind == AREAS else ""
+    extra = ""
+    if kind == AREAS:
+        extra = f"regex={regex}\ncross={'yes' if cross else 'no'}\n"
+    elif kind == QML and regex:
+        extra = f"regex={regex}\n"
     return f"plan={kind}\nreason={reason}\n{extra}tidy={applies}\ntidy_why={why}\n"
 
 
@@ -344,6 +391,32 @@ def selftest():
     kind, regex, cross = areas("app/sessionbridge.cpp", "app/qml/A.qml")
     check("app C++ with QML", (kind, cross, bool(re.search(regex, "QmlTest.home"))), (AREAS, False, True))
     check("the QML words come from the files", bool(qml_files(root, "elm327")), True)
+
+    tests_dir = os.path.join(root, "tests", "qml")
+    some = sorted(fn for fn in os.listdir(tests_dir) if fn.startswith("tst_") and fn.endswith(".qml"))[0]
+    kind, _, regex, cross = plan(["tests/qml/" + some], root)
+    check("one QML test file runs its own test", (kind, regex, cross), (QML, r"^QmlTest\.(" + some[4:-4] + ")$", False))
+    check("a QML test is anchored", bool(re.search(regex, "QmlTest." + some[4:-4] + "_more")), False)
+    kit = "PhoneKit"
+    users = sorted(fn[4:-4] for fn in os.listdir(tests_dir) if fn.startswith("tst_")
+                   and re.search(r"\b" + kit + r"\s*\{", read(root, "tests/qml/" + fn)))
+    check("a kit runs the files that derive from it", plan(["tests/qml/" + kit + ".qml"], root)[2],
+          r"^QmlTest\.(" + "|".join(users) + ")$")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "tests", "qml"))
+        for fn, text in [("AKit.qml", "TestCase {}"), ("BKit.qml", "AKit { id: t }"),
+                         ("tst_one.qml", "BKit {}"), ("tst_two.qml", "AKit {\n}"), ("tst_three.qml", "TestCase {}")]:
+            with open(os.path.join(tmp, "tests", "qml", fn), "w", encoding="utf-8") as f:
+                f.write(text)
+        check("a kit reaches a kit's files", qml_tests_named(tmp, ["tests/qml/AKit.qml"]), ["one", "two"])
+        check("a test file alone", qml_tests_named(tmp, ["tests/qml/tst_three.qml"]), ["three"])
+        check("a kit nobody derives from", qml_tests_named(tmp, ["tests/qml/tst_three.qml", "tests/qml/BKit.qml"]),
+              ["one", "three"])
+    check("app QML runs every QML test", plan(["app/qml/Main.qml", "tests/qml/" + some], root)[2:], ("", False))
+    check("a QML file that isn't a test or kit runs every QML test", plan(["tests/qml/helper.qml"], root)[2], "")
+    check("a QML test and docs", plan(["docs/a.md", "tests/qml/" + some], root)[0], QML)
+    check("the text names the regex", classify_text("tests/qml/" + some + "\n", root).split("\n")[2],
+          "regex=" + r"^QmlTest\." + "(" + some[4:-4] + ")$")
 
     for paths, want in [
         (["docs/a.md"], "no"),
