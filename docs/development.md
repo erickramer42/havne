@@ -633,10 +633,21 @@ scripts/tidy.sh --qt C:/Qt/6.12.0/msvc2022_64   # app/ too, in build-tidy-qt
 ```
 
 A function past 80 lines or cognitive complexity 40 fails the run unless
-`scripts/tidy-size-baseline.txt` lists it (one `file<TAB>function` line), and
-a listed line that no longer applies fails too, so the list only shrinks:
-`scripts/tidy.sh --update-size-baseline` drops those lines, and a line is
-added by hand only. CI's three shards each judge their own sources.
+`scripts/tidy-size-baseline.txt` lists it (one `file<TAB>function<TAB>lines<TAB>complexity`
+line, a measure the function is within written `-`). A listed function
+whose lines or complexity grew, or that passes a threshold its line lists it
+within, fails, and so does a listed line that no longer applies, so the
+list only shrinks: `scripts/tidy.sh --update-size-baseline` (unsharded)
+lowers a number, drops a measure that fell to `-` and drops a stale line,
+and a line is added by hand only. CI's three shards each judge their own
+sources.
+
+A source file past 1,000 lines (`.c`, `.cc`, `.cpp`, `.h`, `.hpp`, `.qml`,
+`.py`, `.sh`; not the public headers, the two data tables, `_ecuio.py` or
+`third_party/`) fails the same way against `scripts/filelength-baseline.txt`
+(`path<TAB>lines`): a new file past the limit or a listed file that grew
+fails, and `--update-size-baseline` lowers a number and drops a stale line.
+`scripts/tidy.sh` runs the check first, on shard 1 only.
 
 On Windows outside a Developer prompt, the script enters one (vswhere's
 newest VC tools), so clang-tidy and the tree see one MSVC's headers, and
