@@ -83,8 +83,9 @@ with a 504 come from the cache the same way: Gradle's distribution and
 the Android build's dependencies (keyed on the Qt version, whose
 template pins them) and linuxdeploy's pinned files (keyed on
 `make-appimage.sh`). The compiler caches (sccache in `win-build`,
-`win-coverage`, `macos-build` and `linux-build`; the Windows jobs and
-`linux-build` build with Ninja for it) save the same way:
+`win-coverage`, `macos-build`, `linux-build`, `core-and-tests`,
+`core-sanitizers` and `fuzz`; the Windows jobs and `linux-build` build with
+Ninja for it) save the same way, except the last three:
 
 - **Each job's first shard** (`win-coverage`'s gtest leg) saves its
   cache right after the build, before the tests, under the run's own
@@ -95,10 +96,22 @@ template pins them) and linuxdeploy's pinned files (keyed on
   the default branch's. A lane branch's first run therefore compiles
   against `main`'s last entry, and its reruns and later commits against
   its own.
+- **`core-and-tests`, `core-sanitizers` and `fuzz`** key their entries
+  `sccache-<job>-3-<ref slug>-<ISO week>-<run id>` (the slug is the ref
+  name with every character outside letters and digits as `_`, so no slug
+  is the prefix of another). `main` and `dev` save on every run that
+  compiled 20 or more objects. A lane branch saves only when its restore
+  found no entry under its own slug (the restored key tells its own from
+  `main`'s), so its second run builds warm and its later runs add nothing
+  to the shared 10 GB. A pull request only restores. A run restores its
+  own newest entry, else `main`'s of this week, else `main`'s newest.
 - **Each cache is capped** at 500 MB (600 MB for `win-build`).
 - **Why:** an entry for each job and week, frozen once saved and read
   by a lane branch only as `main`'s, left the hit rate at 0% on Linux
-  and 15-18% on Windows and macOS.
+  and 15-18% on Windows and macOS. A save on every ref would put up to
+  about 1.5 GB per lane run into the shared 10 GB, where eviction reaches
+  the Qt kits' entries: one save for each lane keeps the warm rerun and
+  bounds the cost.
 
 GitHub drops an entry unread for 7 days, and evicts the least recently
 used past 10 GB. `win-build`, `macos-build` and `linux-build` also cache
@@ -112,9 +125,9 @@ minutes cold on a busy runner, and less with a warm cache):
 | Job | Runner | Does |
 |---|---|---|
 | `scope` | Ubuntu | Judges whether the change is docs alone (above), and when it is checks the docs' relative links. Every other job needs it and skips on a docs-only change. |
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
-| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, and it runs `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo (CI's one run of it) and `CliTransferRunTest.candump` (`can-utils` gives it `candump`). Blocking since its first green run (2026-10-20). |
-| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
+| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, and it runs `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo (CI's one run of it) and `CliTransferRunTest.candump` (`can-utils` gives it `candump`). Blocking since its first green run (2026-10-20). Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
+| `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
 | `clang-tidy` (1/3 to 3/3) | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app, each runner a third of the files (`HAVNE_TIDY_SHARD=<k>/3`). Any warning fails it, and so does a baselined function whose lines or complexity grew. Shard 1 also runs `scripts/filelength_check.py` through `scripts/tidy.sh`: a new source file past 1,000 lines, or a listed file that grew, fails. Only the app's moc output is built. |
 | `win-build` (1/2, 2/2) | Windows, MSVC 2022 | Builds the full app with Ninja and sccache, then runs its half of ctest (the bridge, J2534 and QML suites included). sccache caches the build because the reproducible compile options are spelled `-Brepro` and `-d1trimfile:` (a `/` spelling reads as a second input file and nothing is cached). The first shard runs the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](performance.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `build-vs` | Windows, MSVC 2022 | Builds core, the shared library, the surrogate and the app with the Visual Studio generator, which `release.yml` builds with (no sccache, Qt restored as `win-build` does and never saved). It needs the scope job and skips a docs-only change. |
