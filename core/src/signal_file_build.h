@@ -41,6 +41,18 @@ struct ecuio_signal_file {
         std::string text;
     };
 
+    /* A part of a merged set, as its "parts" entry gives it */
+    struct part {
+        std::string profile;
+        std::string name;
+        uint32_t format = 0;
+        bool has_plugin = false;
+        std::string plugin_id;
+        std::string plugin_version;
+        std::string plugin_variant;
+        ecuio_signal_source_t source{};
+    };
+
     std::string name;
     std::string profile;
     std::string extends; /* "obd2" or "" */
@@ -50,6 +62,12 @@ struct ecuio_signal_file {
     std::vector<ecuio_enum_entry_t> enums;
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
+    /* A merged set's (signal_file_merged.cpp), empty for any other file:
+     * its parts, each def's part (none for a base def) and the keys a
+     * signal stands for besides its own */
+    std::vector<part> parts;
+    std::vector<uint32_t> def_part; /* by def index */
+    std::vector<std::pair<std::string, uint32_t>> second_keys; /* def index */
     std::vector<std::pair<uint32_t, ecuio_signal_gauge_t>>
         gauges; /* def index */
     std::vector<std::pair<uint32_t, std::string>> exprs; /* def index */

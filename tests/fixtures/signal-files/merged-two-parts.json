@@ -1,0 +1,64 @@
+{
+  "havne_signals": 3,
+  "name": "2 parts read together",
+  "notes": "A merged set as Havne writes one (ADR-0065 section 9), by hand: a made-up import under a hand-written file, whose oil temperature took the place of the import's and whose margin reads it by the key the import gave it. Every address is made up.",
+  "source": { "name": "A merge of 2 parts" },
+  "extends": "obd2",
+  "parts": [
+    {
+      "profile": "plugin.example-import.base",
+      "name": "Example import",
+      "format": 2,
+      "plugin": { "id": "example-import", "version": "1.2.0", "variant": "base" },
+      "source": {
+        "name": "A made-up import",
+        "url": "https://example.org/signals",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "profile": "user.my-car-signals",
+      "name": "My car signals",
+      "format": 3,
+      "source": { "name": "Written by hand" }
+    }
+  ],
+  "ecus": [
+    { "id": "pcm", "rx": "7E8", "part": 0 },
+    { "id": "tcm", "name": "Transmission", "rx": "7E9", "part": 0 }
+  ],
+  "signals": [
+    {
+      "key": "oil_temp", "part": 1, "replaced": ["oil_t"],
+      "name": "Oil temperature", "ecu": "tcm",
+      "read": { "service": "22", "number": "4A10" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40, "unit": "°C"
+    },
+    {
+      "key": "gear", "part": 0,
+      "name": "Gear", "kind": "enum", "ecu": "tcm",
+      "read": { "service": "22", "number": "4A20" },
+      "field": { "byte": 0 },
+      "values": { "0": "Park", "1": "Reverse", "2": "Neutral", "3": "Drive" }
+    },
+    {
+      "key": "gear_raw", "part": 0,
+      "name": "Gear number", "ecu": "tcm",
+      "read": { "service": "22", "number": "4A20" },
+      "field": { "byte": 0 }
+    },
+    {
+      "key": "oil_margin", "part": 1,
+      "name": "Oil margin", "kind": "computed",
+      "expr": "130 - oil_t", "unit": "°C"
+    },
+    {
+      "key": "line_p", "part": 0,
+      "name": "Line pressure", "ecu": "pcm",
+      "read": { "service": "22", "number": "4A11" },
+      "field": { "byte": 0, "bits": 16 },
+      "scale": 0.1, "unit": "kPa", "decimals": 1
+    }
+  ]
+}

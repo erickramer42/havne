@@ -65,6 +65,7 @@ add_library(ecuio-core STATIC
     src/signal_file_rules.cpp
     src/signal_file_source.cpp
     src/signal_file_format3.cpp
+    src/signal_file_merged.cpp
     src/signal_file_readers.cpp
     src/signal_expr.cpp
     src/signal_file_expr.cpp

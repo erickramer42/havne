@@ -189,7 +189,7 @@ struct checking {
     {
         scope.base = f.extends == "obd2" ? ecuio_obd2_signal_set() : nullptr;
         scope.file = &f;
-        scope.own.reserve(f.keys.size() + 1);
+        scope.own.reserve(f.keys.size() + f.second_keys.size() + 1);
         for (const auto& k : f.keys) {
             const ecuio_signal_def_t& d = f.defs[k.second];
             own_signal s{&k.first, d.id, expr_kind::number, nullptr, k.second};
@@ -205,6 +205,15 @@ struct checking {
             }
             own_of[k.second] = scope.own.size();
             scope.own.push_back(s);
+        }
+        /* A key a signal replaced reads the signal that stands for it */
+        for (const auto& k : f.second_keys) {
+            const size_t own = own_of[k.second];
+            if (own != kNone) {
+                own_signal s = scope.own[own];
+                s.key = &k.first;
+                scope.own.push_back(s);
+            }
         }
         was_computed =
             checked != kNone && scope.own[checked].kind == expr_kind::computed;

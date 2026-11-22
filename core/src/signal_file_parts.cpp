@@ -191,6 +191,24 @@ std::string name_of(const Value& e, const std::string& id, ecuio_signal_file& f)
     return text;
 }
 
+/* An ECU's "part" in a merged set: the part whose id stands for it */
+uint32_t part_of(const Value& e, const std::string& id,
+                 const ecuio_signal_file& f)
+{
+    const Value* part = e.find("part");
+    if (part == nullptr) {
+        return ECUIO_SIGNAL_PART_NONE;
+    }
+    if (f.parts.empty()) {
+        refuse(*part, "ecu " + q(id) +
+                          "'s \"part\" is a merged set's: a "
+                          "file with no \"parts\" takes none");
+    }
+    return static_cast<uint32_t>(
+        whole_of(*part, 0, static_cast<int64_t>(f.parts.size()) - 1,
+                 "ecu " + q(id) + "'s part"));
+}
+
 /* A channel for ecu id, of the width the set carries, within its count */
 void add_channel(const Value& e, const std::string& id, uint32_t rx,
                  uint32_t tx, ecuio_signal_file& f)
@@ -227,7 +245,7 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
     expect(*ecus, Type::array, "\"ecus\"");
     for (const Value& e : ecus->items) {
         expect(e, Type::object, "an ECU");
-        only_keys(e, {"id", "rx", "tx", "name"}, "an ECU");
+        only_keys(e, {"id", "rx", "tx", "name", "part"}, "an ECU");
         const Value* id_v = e.find("id");
         if (id_v == nullptr) {
             refuse(e, "an ECU needs an \"id\"");
@@ -270,6 +288,7 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         }
         f.modules[channel].id = id;
         f.modules[channel].name = name_of(e, id, f);
+        f.modules[channel].part = part_of(e, id, f);
         ids->emplace_back(id, rx);
     }
 }

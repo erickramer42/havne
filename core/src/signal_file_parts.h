@@ -61,9 +61,23 @@ void settle_needs(const parts& in, const std::vector<entry>& entries,
  * would replace the base def were its variant not format 3 */
 void named_as_base(const parts& in, const entry& e, size_t place,
                    const ecuio_signal_def_t& base_def);
-/* Two of the set's own signals at one address, refused at the later */
+/* Two of the set's own signals at one address, refused at the later;
+ * taken in a merged set when both are one format 1 or 2 part's, which
+ * may read one field as a number and as an enum */
 void one_signal_each_address(const std::vector<entry>& entries,
                              const ecuio_signal_file& f);
+
+/* A merged set's written form (signal_file_merged.cpp).
+ * root's "parts" into f, with the profile they name into p and the rule
+ * for the file's own source; nothing for a file with none */
+void read_merged(const ecuio_json::Value& root, uint32_t format, parts& p,
+                 ecuio_signal_file& f);
+/* Each signal's "part" and "replaced": a merged set's, refused in any
+ * other file. The replaced keys join at_key, so an expression reads
+ * the signal that stands for one. */
+void read_merged_keys(const std::vector<entry>& entries,
+                      std::unordered_map<std::string, size_t>& at_key,
+                      size_t first_own, ecuio_signal_file& f);
 
 /* A signal's "gauge", in the signal's own unit: refused when its numbers
  * can't be a dial for this def, stored as written otherwise */

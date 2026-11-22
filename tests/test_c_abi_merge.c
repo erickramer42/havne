@@ -21,6 +21,23 @@ typedef char abi_module_part_check[(offsetof(ecuio_signal_module_t, part) == 16)
 typedef char abi_module_reserved_check[(offsetof(ecuio_signal_module_t, reserved) == 20) ? 1 : -1];
 typedef char abi_module_id_check[(offsetof(ecuio_signal_module_t, id) == 40) ? 1 : -1];
 typedef char abi_module_name_check[(offsetof(ecuio_signal_module_t, name) == 72) ? 1 : -1];
+typedef char abi_part_size_check[(sizeof(ecuio_signal_part_t) == 248) ? 1 : -1];
+typedef char abi_part_format_check[(offsetof(ecuio_signal_part_t, format) == 8)
+                                       ? 1
+                                       : -1];
+typedef char abi_part_reserved_check
+    [(offsetof(ecuio_signal_part_t, reserved) == 20) ? 1 : -1];
+typedef char
+    abi_part_profile_check[(offsetof(ecuio_signal_part_t, profile) == 40) ? 1
+                                                                          : -1];
+typedef char
+    abi_part_name_check[(offsetof(ecuio_signal_part_t, name) == 104) ? 1 : -1];
+typedef char abi_part_plugin_check
+    [(offsetof(ecuio_signal_part_t, plugin_id) == 168) ? 1 : -1];
+typedef char abi_part_version_check
+    [(offsetof(ecuio_signal_part_t, plugin_version) == 200) ? 1 : -1];
+typedef char abi_part_variant_check
+    [(offsetof(ecuio_signal_part_t, plugin_variant) == 216) ? 1 : -1];
 typedef char abi_note_size_check[(sizeof(ecuio_signal_note_t) == 424) ? 1 : -1];
 typedef char abi_note_kind_check[(offsetof(ecuio_signal_note_t, kind) == 4) ? 1 : -1];
 typedef char abi_note_def_check[(offsetof(ecuio_signal_note_t, def) == 16) ? 1 : -1];
@@ -39,6 +56,74 @@ static const char kNeeding[] =
     "{\"havne_signals\":3,\"name\":\"N\",\"source\":{\"name\":\"n\"},"
     "\"needs\":[\"oil_t\"],\"signals\":[{\"key\":\"margin\",\"name\":"
     "\"Margin\",\"kind\":\"computed\",\"expr\":\"130 - oil_t\"}]}";
+
+/* A merged set of one plugin's part: b took the place of a */
+static const char kMerged[] =
+    "{\"havne_signals\":3,\"name\":\"M\",\"source\":{\"name\":\"m\"},"
+    "\"parts\":[{\"profile\":\"plugin.p.base\",\"name\":\"P\",\"format\":2,"
+    "\"plugin\":{\"id\":\"p\",\"version\":\"1.2.3\",\"variant\":\"base\"},"
+    "\"source\":{\"name\":\"s\",\"license\":\"CC-BY-SA-4.0\"}}],"
+    "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\",\"part\":0}],"
+    "\"signals\":[{\"key\":\"b\",\"part\":0,\"replaced\":[\"a\"],\"name\":"
+    "\"B\","
+    "\"read\":{\"service\":\"22\",\"number\":\"D100\"},\"field\":{\"byte\":0}}]"
+    "}";
+
+static int merged_text_from_c(void)
+{
+    ecuio_signal_file_t* file = NULL;
+    ecuio_signal_part_t part;
+    ecuio_signal_source_t source;
+    ecuio_signal_key_t key;
+    const ecuio_signal_def_t* def;
+    uint32_t count = 0;
+
+    if (ECUIO_MERGE_MAX_PARTS != 16u || ECUIO_PART_PLUGIN != 0x1u ||
+        ECUIO_SOURCE_MERGED != 0x2u) {
+        printf("FAIL: a constant of a merged set's parts moved\n");
+        return 1;
+    }
+    if (ecuio_signal_file_load(kMerged, sizeof kMerged - 1, &file) !=
+            ECUIO_OK ||
+        ecuio_signal_file_part_count(file) != 1u) {
+        printf("FAIL: a merged text from C: %s\n", ecuio_last_error_detail());
+        return 1;
+    }
+    memset(&part, 0, sizeof part);
+    part.struct_size = sizeof part;
+    memset(&source, 0, sizeof source);
+    source.struct_size = sizeof source;
+    if (ecuio_signal_file_part(file, 0, &part) != ECUIO_OK ||
+        part.flags != ECUIO_PART_PLUGIN || part.format != 2u ||
+        part.signal_count != 1u || part.module_count != 1u ||
+        strcmp(part.profile, "plugin.p.base") != 0 ||
+        strcmp(part.plugin_version, "1.2.3") != 0 ||
+        strcmp(part.plugin_variant, "base") != 0 ||
+        ecuio_signal_file_part_source(file, 0, &source) != ECUIO_OK ||
+        source.flags != ECUIO_SOURCE_SHARE_ALIKE ||
+        ecuio_signal_file_part(file, 1, &part) != ECUIO_ERR_INVALID_ARGUMENT ||
+        ecuio_signal_file_part(NULL, 0, &part) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_signal_file_part_source(file, 1, &source) !=
+            ECUIO_ERR_INVALID_ARGUMENT) {
+        printf("FAIL: a part from C: %s\n", ecuio_last_error_detail());
+        return 1;
+    }
+    def = ecuio_signal_file_find(file, "a");
+    if (def == NULL || def != ecuio_signal_file_find(file, "b") ||
+        strcmp(ecuio_signal_file_key(file, def), "b") != 0 ||
+        ecuio_signal_file_def_part(file, def) != 0u ||
+        ecuio_signal_file_def_part(file, NULL) != ECUIO_SIGNAL_PART_NONE ||
+        ecuio_signal_file_replaced_keys(file, def, &key, 1, &count) !=
+            ECUIO_OK ||
+        count != 1u || strcmp(key.text, "a") != 0 ||
+        ecuio_signal_file_replaced_keys(file, def, NULL, 1, &count) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
+        printf("FAIL: a replaced key from C\n");
+        return 1;
+    }
+    ecuio_signal_file_free(file);
+    return 0;
+}
 
 int main(void)
 {
@@ -98,6 +183,9 @@ int main(void)
         return 1;
     }
     ecuio_signal_file_free(file);
+    if (merged_text_from_c() != 0) {
+        return 1;
+    }
     printf("c_abi_merge: ok\n");
     return 0;
 }

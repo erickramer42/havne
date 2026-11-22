@@ -412,7 +412,8 @@ void check_expr_against_load(const ecuio_signal_file_t* a, const char* bytes,
 }
 
 /* Its text is the bytes it was read from, and its source has a name,
- * every text ended within its room, and no flag but share-alike */
+ * every text ended within its room, and no flag but share-alike, or
+ * for a set with parts the merged flag alone */
 void check_text_and_source(const ecuio_signal_file_t* a, const char* bytes,
                            size_t size)
 {
@@ -423,8 +424,10 @@ void check_text_and_source(const ecuio_signal_file_t* a, const char* bytes,
     ecuio_signal_source_t source{};
     source.struct_size = sizeof source;
     check(ecuio_signal_file_source(a, &source) == ECUIO_OK);
+    const bool merged = ecuio_signal_file_part_count(a) > 0;
     check(source.name[0] != '\0' &&
-          (source.flags & ~ECUIO_SOURCE_SHARE_ALIKE) == 0);
+          source.flags == (merged ? ECUIO_SOURCE_MERGED
+                                  : source.flags & ECUIO_SOURCE_SHARE_ALIKE));
     for (const char* t : {source.name, source.url, source.commit,
                           source.license, source.modified}) {
         check(memchr(t, '\0', ECUIO_SOURCE_TEXT_LEN) != nullptr);

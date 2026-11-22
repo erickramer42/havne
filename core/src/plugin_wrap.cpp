@@ -125,9 +125,14 @@ void check_signal_file(const char* file, size_t length)
 {
     ecuio_signal_file_t* f = nullptr;
     const ecuio_status_t s = ecuio_signal_file_load(file, length, &f);
+    const bool merged = ecuio_signal_file_part_count(f) > 0;
     ecuio_signal_file_free(f);
     if (s != ECUIO_OK) {
         throw passed{s};
+    }
+    if (merged) {
+        throw refusal{"the file is a merged set, which isn't imported: "
+                      "import its plugins"};
     }
 }
 

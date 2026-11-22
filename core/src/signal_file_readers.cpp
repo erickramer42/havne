@@ -1,10 +1,12 @@
 // File/layer: core/src/signal_file_readers.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileFormat3Test (test_signals), c_abi_merge
+// Testing: UNIT: SignalFileFormat3Test, SignalNeedsTest, MergedTextTest
+//          (test_signals), c_abi_merge
 //
 // What a loaded signal file says of how its set is made up (signals.h,
-// ADR-0065 section 9): its modules as its "ecus" entries name them, the
-// keys it needs from another file, and the notes its load left. Each
-// call only reads, so any thread may make it while the file lives.
+// ADR-0065 section 9): its modules as its "ecus" entries name them, a
+// merged set's parts, each def's part and the keys it replaced, the keys
+// a file needs from another, and the notes its load left. Each call only
+// reads, so any thread may make it while the file lives.
 
 #include "ecuio/signals.h"
 #include "error_detail.h"
@@ -13,6 +15,7 @@
 #include <cstring>
 #include <new>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -29,9 +32,148 @@ bool sized(uint32_t struct_size, size_t size, const char* what)
     return false;
 }
 
+/* The part at index, or NULL with the detail set: out's size is judged
+ * first, as each getter by index does */
+const ecuio_signal_file::part* part_at(const ecuio_signal_file_t* file,
+                                       uint32_t index, bool has_out,
+                                       uint32_t struct_size, size_t size,
+                                       ecuio_status_t* status)
+{
+    ecuio_detail_clear();
+    if (file == nullptr || !has_out) {
+        ecuio_detail_set("the part needs a file and a struct to fill");
+        *status = ECUIO_ERR_NULL_ARGUMENT;
+        return nullptr;
+    }
+    *status = ECUIO_ERR_INVALID_ARGUMENT;
+    if (!sized(struct_size, size, "part")) {
+        return nullptr;
+    }
+    if (index >= file->parts.size()) {
+        ecuio_detail_set("the file has %u parts, and index %u is none",
+                         static_cast<unsigned>(file->parts.size()),
+                         static_cast<unsigned>(index));
+        return nullptr;
+    }
+    *status = ECUIO_OK;
+    return &file->parts[index];
+}
+
+/* def's index among the file's defs, or the count for one not the file's */
+size_t def_index(const ecuio_signal_file_t* file, const ecuio_signal_def_t* def)
+{
+    const ecuio_signal_def_t* first = file->defs.data();
+    return def >= first && def < first + file->defs.size()
+               ? static_cast<size_t>(def - first)
+               : file->defs.size();
+}
+
 } // namespace
 
 extern "C" {
+
+uint32_t ecuio_signal_file_part_count(const ecuio_signal_file_t* file)
+{
+    return file != nullptr ? static_cast<uint32_t>(file->parts.size()) : 0;
+}
+
+ecuio_status_t ecuio_signal_file_part(const ecuio_signal_file_t* file,
+                                      uint32_t index, ecuio_signal_part_t* out)
+{
+    ecuio_status_t status = ECUIO_OK;
+    const ecuio_signal_file::part* p = part_at(
+        file, index, out != nullptr, out != nullptr ? out->struct_size : 0,
+        sizeof(ecuio_signal_part_t), &status);
+    if (p == nullptr) {
+        return status;
+    }
+    ecuio_signal_part_t filled{};
+    filled.struct_size = sizeof(ecuio_signal_part_t);
+    filled.flags = p->has_plugin ? ECUIO_PART_PLUGIN : 0u;
+    filled.format = p->format;
+    /* Its signals in the set, and the modules they read */
+    uint32_t modules[ECUIO_MAX_CHANNELS] = {};
+    for (size_t d = 0; d < file->def_part.size(); ++d) {
+        if (file->def_part[d] != index) {
+            continue;
+        }
+        ++filled.signal_count;
+        if ((file->defs[d].flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue;
+        }
+        uint32_t m = 0;
+        while (m < filled.module_count &&
+               modules[m] != file->defs[d].message_id) {
+            ++m;
+        }
+        if (m == filled.module_count && m < ECUIO_MAX_CHANNELS) {
+            modules[filled.module_count++] = file->defs[d].message_id;
+        }
+    }
+    ecuio_sf::copy_text(filled.profile, sizeof filled.profile, p->profile);
+    ecuio_sf::copy_text(filled.name, sizeof filled.name, p->name);
+    ecuio_sf::copy_text(filled.plugin_id, sizeof filled.plugin_id,
+                        p->plugin_id);
+    ecuio_sf::copy_text(filled.plugin_version, sizeof filled.plugin_version,
+                        p->plugin_version);
+    ecuio_sf::copy_text(filled.plugin_variant, sizeof filled.plugin_variant,
+                        p->plugin_variant);
+    std::memcpy(out, &filled, sizeof filled);
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_signal_file_part_source(const ecuio_signal_file_t* file,
+                                             uint32_t index,
+                                             ecuio_signal_source_t* out)
+{
+    ecuio_status_t status = ECUIO_OK;
+    const ecuio_signal_file::part* p = part_at(
+        file, index, out != nullptr, out != nullptr ? out->struct_size : 0,
+        sizeof(ecuio_signal_source_t), &status);
+    if (p == nullptr) {
+        return status;
+    }
+    std::memcpy(out, &p->source, sizeof p->source);
+    out->struct_size = sizeof(ecuio_signal_source_t);
+    return ECUIO_OK;
+}
+
+uint32_t ecuio_signal_file_def_part(const ecuio_signal_file_t* file,
+                                    const ecuio_signal_def_t* def)
+{
+    if (file == nullptr || def == nullptr) {
+        return ECUIO_SIGNAL_PART_NONE;
+    }
+    const size_t d = def_index(file, def);
+    return d < file->def_part.size() ? file->def_part[d]
+                                     : ECUIO_SIGNAL_PART_NONE;
+}
+
+ecuio_status_t ecuio_signal_file_replaced_keys(const ecuio_signal_file_t* file,
+                                               const ecuio_signal_def_t* def,
+                                               ecuio_signal_key_t* keys,
+                                               uint32_t capacity,
+                                               uint32_t* count)
+{
+    if (file == nullptr || def == nullptr || count == nullptr ||
+        (keys == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const size_t d = def_index(file, def);
+    uint32_t found = 0;
+    for (const auto& k : file->second_keys) {
+        if (k.second != d) {
+            continue;
+        }
+        if (found < capacity) {
+            ecuio_sf::copy_text(keys[found].text, sizeof keys[found].text,
+                                k.first);
+        }
+        ++found;
+    }
+    *count = found;
+    return ECUIO_OK;
+}
 
 ecuio_status_t ecuio_signal_file_module(const ecuio_signal_file_t* file,
                                         uint32_t index,

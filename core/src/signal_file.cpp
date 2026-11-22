@@ -109,8 +109,8 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
     expect(root, Type::object, "the file");
     const uint32_t format = format_of(root, "a signal file");
     only_keys(root,
-              {"havne_signals", "name", "source", "extends", "needs", "ecus",
-               "signals"},
+              {"havne_signals", "name", "source", "extends", "needs", "parts",
+               "ecus", "signals"},
               "the file");
 
     parts p;
@@ -145,6 +145,7 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
     p.format = format;
     p.max_signals = max_signals;
     read_needs(root, format, &p.needs);
+    read_merged(root, format, p, f);
     build(p, f);
 }
 
@@ -334,6 +335,7 @@ void build(const parts& in, ecuio_signal_file& f, needs_pass* pass)
         }
     }
 
+    read_merged_keys(entries, at_key, first_own, f);
     f.defs.resize(first_own + entries.size());
     const entries_scope scope(entries, at_key, base, pass);
     std::unordered_map<std::string, size_t> first_named; /* a name's first */
@@ -352,20 +354,24 @@ void build(const parts& in, ecuio_signal_file& f, needs_pass* pass)
         if (computed) {
             only_keys(s,
                       {"key", "name", "kind", "expr", "max_age", "unit",
-                       "decimals", "group", "plot", "gauge"},
+                       "decimals", "group", "plot", "gauge", "part",
+                       "replaced"},
                       what);
         } else if (text) {
-            only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "group",
-                          "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "ecu", "read", "field", "group",
+                       "plot", "part", "replaced"},
                       what);
         } else if (e.kind == "enum") {
-            only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "values",
-                          "group", "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "ecu", "read", "field", "values",
+                       "group", "plot", "part", "replaced"},
                       what);
         } else {
             only_keys(s,
                       {"key", "name", "kind", "ecu", "read", "field", "scale",
-                       "offset", "unit", "decimals", "group", "plot", "gauge"},
+                       "offset", "unit", "decimals", "group", "plot", "gauge",
+                       "part", "replaced"},
                       what);
         }
 
@@ -415,10 +421,10 @@ void build(const parts& in, ecuio_signal_file& f, needs_pass* pass)
                         refuse(m, what + "'s max_age names " + q(m.key) +
                                       ", which its expr doesn't read");
                     }
-                    for (const entry& x : entries) {
-                        if (x.key == m.key && x.kind == "computed") {
-                            refuse(m, aged_computed_words(e.key, m.key));
-                        }
+                    const auto aged = at_key.find(m.key);
+                    if (aged != at_key.end() &&
+                        entries[aged->second].kind == "computed") {
+                        refuse(m, aged_computed_words(e.key, m.key));
                     }
                     const double seconds = finite_of(m.value, what + "'s max_age");
                     if (seconds < 0.1 || seconds > 60.0) {
@@ -677,9 +683,11 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
     if (file == nullptr || key == nullptr) {
         return nullptr;
     }
-    for (const auto& k : file->keys) {
-        if (k.first == key) {
-            return &file->defs[k.second];
+    for (const auto* keys : {&file->keys, &file->second_keys}) {
+        for (const auto& k : *keys) {
+            if (k.first == key) {
+                return &file->defs[k.second];
+            }
         }
     }
     return nullptr;

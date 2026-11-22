@@ -63,7 +63,14 @@ void one_signal_each_address(const std::vector<entry>& entries,
             continue;
         }
         const auto at = first.emplace(key.text, i);
-        if (!at.second) {
+        /* One format 1 or 2 part's own two stay, as in the part alone */
+        const uint32_t part = f.def_part.empty() ? ECUIO_SIGNAL_PART_NONE
+                                                 : f.def_part[entries[i].def];
+        const bool one_parts =
+            !at.second && part != ECUIO_SIGNAL_PART_NONE &&
+            part == f.def_part[entries[at.first->second].def] &&
+            f.parts[part].format < 3;
+        if (!at.second && !one_parts) {
             refuse(
                 *entries[i].v,
                 "signal " + q(entries[i].key) + " reads the address signal " +
