@@ -44,7 +44,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_condition_recording.cpp test_condition_recording_events.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
-    test_security_store_file.cpp)
+    test_security_store_file.cpp test_security_store_lock.cpp
+    test_security_store_owner.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).

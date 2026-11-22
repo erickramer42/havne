@@ -177,6 +177,62 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
         << "the fake's reply delay";
 }
 
+/* The engine reads the adapter's stamp of the reply it is handed, so
+ * the stamp is set before the frame reaches it. No ECU answers; the
+ * test posts the two replies to the one DID's requests, 50 ms apart on
+ * the adapter's clock, as the requests go out: the interval is the
+ * posted stamps' difference, nothing the host's clock or the load
+ * moves. A stamp set after the frame leaves the first answer to the
+ * host's time and the second to the first's stamp, an interval that
+ * counts as mixed or comes out near 0 */
+TEST_F(J2534HealthTest, AnIntervalIsTheDifferenceOfTheRepliesOwnStamps)
+{
+    ASSERT_TRUE(fake_control::set(page, "ECUIO_FAKE_ABSENT_ECU", "FFFFFFFF"));
+    ASSERT_NO_FATAL_FAILURE(start_session(
+        "?profile=uds-generic&did=7E8:F190:u8&probe=0&identify=0&diagnose=0"));
+    const uint8_t reply[8] = {0x00, 0x00, 0x07, 0xE8, 0x62, 0xF1, 0x90, 0x05};
+    const uint32_t kBase = 2000000u;
+    const uint32_t kStepUs = 50000u;
+    for (uint32_t k = 0; k < 2; ++k) {
+        const auto by =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (fake_control::writes(page) <= k &&
+               std::chrono::steady_clock::now() < by) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        ASSERT_GT(fake_control::writes(page), k) << "request " << k;
+        ASSERT_TRUE(fake_control::post(page, reply, sizeof(reply),
+                                       kBase + k * kStepUs, 0));
+        ASSERT_TRUE(wait_for_frames(static_cast<int>(k) + 1, 5000))
+            << "reply " << k;
+    }
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                       static_cast<uint32_t>(rows.size()),
+                                       &count),
+              ECUIO_OK);
+    /* published once a second: wait for the row to show both answers */
+    const auto by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < by) {
+        ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                           static_cast<uint32_t>(rows.size()),
+                                           &count),
+                  ECUIO_OK);
+        if (count > 0 && rows[0].answered >= 2) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ASSERT_EQ(count, 1u);
+    EXPECT_EQ(rows[0].answered, 2u);
+    EXPECT_EQ(rows[0].intervals_mixed, 0u);
+    EXPECT_EQ(rows[0].intervals, 1u);
+    EXPECT_GE(rows[0].interval_max_us, kStepUs - 1000u);
+    EXPECT_LE(rows[0].interval_max_us, kStepUs + 1000u);
+}
+
 /* The surrogate holds a 1 ms timer: the fake as the VX waits for its
  * message inside the surrogate's process, in the timer's steps, so the
  * default timer sees a 4 ms reply at 15.6 ms. With Windows' default 15.6 ms timer
