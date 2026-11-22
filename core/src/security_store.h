@@ -38,14 +38,20 @@
 //     replace is one rename, so it reads the old file or the new whole.
 //   - One owner for a path: one store, in one process, reads and writes
 //     a file. A save that finds the file isn't what this store last read
-//     or wrote merges: every entry there is kept, and where both hold one
-//     the larger count, the later second and the later mark stand. So a
-//     second writer can leave a count too high, never too low: once the
-//     file has changed, a right key's zero is lost to the file's older
-//     count, on an entry the other writer never touched too, and an ended
-//     mark can come back. Only a second writer's store does that: a store
-//     always holds what it last put in the file, a failed save whose new
-//     file stood included.
+//     or wrote merges three ways. Each side is judged against itself at
+//     that read or write: the store's entries then (a load counts a mark
+//     as a failure) and the file's then, marks in place. An entry only
+//     one side changed is that side's whole; where both changed one, a
+//     count or second only one changed is that side's, the failures each
+//     side counted since are added (where one side's went down, the
+//     larger stands), and the later second and the later mark stand. So a
+//     right key's zero and an ended mark stay as written, two writers'
+//     failures are both counted, and a mark a load counted is taken back
+//     when its attempt ends well before that store's next save. A
+//     count can still come out too high, never too low: once a store has
+//     saved another's mark counted, that attempt ending well doesn't take
+//     it back. A store always holds what it last put in the file, a
+//     failed save whose new file stood included.
 //   - The words name no path (it can hold the account name).
 
 #ifndef ECUIO_SECURITY_STORE_H
@@ -85,6 +91,8 @@ struct store {
     std::string on_disk; /* the file's bytes as this store last read or
                             wrote them, "" for no file: store_load's and
                             store_save's to set */
+    std::vector<store_entry> base; /* the entries as that read or write
+                                      left them: a merge's base */
 };
 
 enum class store_io : uint8_t {
