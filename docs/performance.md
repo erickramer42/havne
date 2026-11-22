@@ -96,7 +96,9 @@ running (ranges across the runs; milliseconds as median / p99):
   the bench with itself: core's decode at 1,000 defs within 3x its
   cost at 9 (1.26 to 1.94x in four runs on the dev machine,
   2026-11-01), and the looping run under `obd2` at least 0.5 of the
-  same run under `raw`, which decodes nothing (0.69 to 0.76). With the
+  same run under `raw`, which decodes nothing (0.69 to 0.76), each
+  side's best of three passes, since one pass can land in a trough when
+  a shared runner's speed changes within the step. With the
   decode visiting every def instead of the ones the index finds, both
   failed (27x, 0.48), where the 10,000 frames a second floor still
   passed at 229,915.
@@ -110,7 +112,11 @@ running (ranges across the runs; milliseconds as median / p99):
   2026-11-19 to 2026-11-21, each the faster of two pairs, gave a lowest 0.69,
   a tenth percentile 0.76, a median 0.86 and a highest 0.97, and the third pair
   only raises a job's figure, so the floor sits looser than those runs say; the 100x one must write all 7,074 frames and
-  7,061 values with no record dropped. On a shared runner the share
+  7,061 values with no record dropped. When the first three pairs
+  miss the floor, three more run and the best of all six a side is
+  judged: a runner busy for one block doesn't fail it, and a regression,
+  which slows every pair, still does (the summary line says "best of 6"
+  when it happened). On a shared runner the share
   measures the runner as much as the recorder: the writer is a third
   busy thread on two cores, and the bridge's worker rate follows the
   GUI thread's through the in-flight gate (holding the worker to a core

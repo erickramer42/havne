@@ -41,13 +41,14 @@ constexpr double kMaxPacedValueP99Ms = 1000.0;   // dev: about 112, a tick and a
 constexpr double kMaxPacedFrameP99Ms = 500.0;    // dev: under 1
 // The ratios, which a slow runner moves on both sides alike: decode at
 // 1000 defs against 9 (dev: 1.26 to 1.94x), and the looping run's rate
-// under obd2 against raw (dev: 0.69 to 0.76); a run of the
+// under obd2 against raw (dev: 0.69 to 0.76), each side's best of three
+// passes, since a runner's speed can change within a step; a run of the
 // decode ratio is kDecodeFrames frames
 constexpr double kMaxDecodeRatio = 3.0;
 constexpr double kMinDecodingShare = 0.5;
 // The looping run recorded through core's recorder against the same run
 // not recorded, the best of three each (a runner's noise only slows a
-// run): ADR-0049 section 9's CI gate for a gross regression, a cost of a
+// run), or of six when the first three miss: ADR-0049 section 9's CI gate for a gross regression, a cost of a
 // microsecond or more a frame; the 10%, and the recorder's own
 // nanoseconds a frame, are judged on the dev machine by --record's
 // pinned runs. On a shared runner the share measures the runner as much
@@ -277,6 +278,11 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
     LoadRun recordedThird = recordedLoop;
     recordedThird.label = "full speed, looping 3 s, recorded, a third time";
     runs.push_back(recordedThird); // runs[9]
+    LoadRun rawAgain = raw;
+    rawAgain.label = "full speed, looping 3 s, raw, again";
+    runs.push_back(rawAgain); // runs[10]
+    rawAgain.label = "full speed, looping 3 s, raw, a third time";
+    runs.push_back(rawAgain); // runs[11]
     if (withSlowRun) {
         LoadRun slow;
         slow.label = "10x, one pass";
@@ -286,6 +292,32 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
     for (LoadRun& run : runs) {
         run.conditions = conditions;
         replayFixture(run);
+    }
+    // The looping rates a ratio is judged on: each side's best (a runner's
+    // noise only slows a run), over the first block's three runs a side
+    std::vector<double> unrecordedRates = {
+        runs[2].workerRate, runs[6].workerRate, runs[8].workerRate};
+    std::vector<double> recordedRates = {
+        runs[4].workerRate, runs[7].workerRate, runs[9].workerRate};
+    const std::vector<double> rawRates = {
+        runs[3].workerRate, runs[10].workerRate, runs[11].workerRate};
+    const double recordedFloor = bench_judge::minRecordedLoopShare();
+    // A miss may be a runner busy for the whole first block: a second block
+    // of three pairs, judged with the first over all six, is an independent
+    // sample, and a regression misses in both
+    if (!bench_judge::recordedShareHolds(
+            bench_judge::recordedShare(recordedRates, unrecordedRates),
+            recordedFloor)) {
+        for (int k = 0; k < 3; ++k) {
+            for (const bool rec : {false, true}) {
+                LoadRun r = runs[rec ? 4 : 2];
+                r.label = rec ? "full speed, looping 3 s, recorded, retry"
+                              : "full speed, looping 3 s, retry";
+                replayFixture(r);
+                (rec ? recordedRates : unrecordedRates).push_back(r.workerRate);
+                runs.push_back(r);
+            }
+        }
     }
 
     std::printf("\n### Load test: the engine-start fixture under obd2\n\n"
@@ -348,12 +380,15 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
     const double decode9 = decodeMicros(9);
     const double decode1000 = decodeMicros(1000);
     const double decodeRatio = decode1000 / decode9;
-    const double decodingShare = runs[2].workerRate / runs[3].workerRate;
+    const double decodingShare =
+        bench_judge::best(unrecordedRates) / bench_judge::best(rawRates);
     std::printf(
         "\nDecode, 1000 defs against 9: %.3f against %.3f us a frame (%.2fx). "
-        "Looping, obd2 against raw: %.0f against %.0f frames/s (%.2f).\n",
-        decode1000, decode9, decodeRatio, runs[2].workerRate,
-        runs[3].workerRate, decodingShare);
+        "Looping, obd2 against raw, the best of %zu against the best of 3: "
+        "%.0f against %.0f frames/s (%.2f).\n",
+        decode1000, decode9, decodeRatio, unrecordedRates.size(),
+        bench_judge::best(unrecordedRates), bench_judge::best(rawRates),
+        decodingShare);
     char bound[160];
     std::snprintf(bound, sizeof(bound),
                   "decode at 1000 defs %.2fx its cost at 9, over %.1fx",
@@ -363,21 +398,16 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
                   "looping under obd2 at %.2f of raw's rate, under %.2f",
                   decodingShare, kMinDecodingShare);
     check(decodingShare >= kMinDecodingShare, bound);
-    const std::vector<double> unrecordedRates = {
-        runs[2].workerRate, runs[6].workerRate, runs[8].workerRate};
-    const std::vector<double> recordedRates = {
-        runs[4].workerRate, runs[7].workerRate, runs[9].workerRate};
     const double unrecordedRate = bench_judge::best(unrecordedRates);
     const double recordedRate = bench_judge::best(recordedRates);
     const double recordedShare =
         bench_judge::recordedShare(recordedRates, unrecordedRates);
-    const double recordedFloor = bench_judge::minRecordedLoopShare();
     std::printf(
-        "Looping, recorded against not, the best of three each: %.0f against "
+        "Looping, recorded against not, the best of %zu each: %.0f against "
         "%.0f frames/s (%.2f), %llu frames written, %llu records dropped. "
         "100x recorded: %llu frames and %llu values written, %llu records "
         "dropped.\n",
-        recordedRate, unrecordedRate, recordedShare,
+        recordedRates.size(), recordedRate, unrecordedRate, recordedShare,
         static_cast<unsigned long long>(runs[4].rec.frame_rows +
                                         runs[7].rec.frame_rows +
                                         runs[9].rec.frame_rows),
