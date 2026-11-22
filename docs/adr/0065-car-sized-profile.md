@@ -1189,3 +1189,15 @@ Through an ELM327 a module that answers nothing costs every other module its wai
 - **Accepted:** the earliest-first order spends fewer of a lap's held slots than channel order, so with 16 absent beside 16 present each absent module is asked about every 9 s and the present modules' values update every 763 ms (1,104 ms in channel order). Under `?hold=0` a module answering every second row at Known Issue #42's loss goes quiet on a run of its rotation with 2 s of silence, and its worst gap grows (the model: 6.5 to 12.2 s); the hold, on by default, keeps it.
 - **The figures** (the pacing model; no car run): through the MX+ the engine ECU's values keep their pace alone (164 ms) beside silent modules where they took 0.28 to 6.3 s; a connect beside 14 absent modules shows the others' first values at 5.2 s (12.7 s); under the hold the segmented rows keep 491 ms beside 1 to 28 absent modules (0.57 to 3.1 s).
 - **Left for v0.9.1:** a module that answers some rows and never others is no quiet, rightly, so under the hold its unanswered requests still hold a chosen segmented request.
+
+## Appendix: measured with no car (2026-11-22)
+
+`build/tests/Release/bench_car.exe` (`tests/bench_car.cpp`; the figures and the machine are in `docs/performance.md`, "A car-sized set, no car") settles these "To measure" lines on a generated set of 4,000 signals over 18 modules, the desktop's x64 Release build:
+
+- **The sizes and a session's memory:** read from the structs (the engine's channel 2,592 bytes, the three reports 152, 1,184 and 552, each ISO-TP state about 4.1 KB); a session holds 502,065 bytes more than an empty one for the set (125.5 a signal), its peak 32 bytes above. The J2534 and ELM327 workers' own state is not measured.
+- **The rotation and `ecuio_take_focus`:** a step past 3,580 parked rows with a pick of 20 takes 241 ns; a take of the pick takes 0.75 ms and its end 0.40 ms, with or without the maps' refresh.
+- **A focus change's time:** 0.79 ms at the median and 1.24 ms worst on the calling thread, no transport.
+- **The loader's build:** 4.3 ms at 1,000 signals, 19.9 ms at 4,000 and 200.7 ms at 16,384, the load alone. The merge half is not measured.
+- **The written copy's bytes:** 264.8 a signal for the generated set and 91.0 for `example-car`'s `whole` variant, about 15,800 and 46,100 signals in 4 MiB.
+
+The figures are the model's inputs; none is a car's, the phone's or the VX's.
