@@ -109,8 +109,8 @@ core/src/signal_file.cpp	build	372	193
 core/src/signal_file_parts.cpp	read_field	118	45
 core/src/signals.cpp	ecuio_decode_signal	89	-
 core/src/signals.cpp	ecuio_validate_signal	122	59
-core/src/sim_ecu.h	ecuio_sim_answer	96	47
-core/src/sim_ecu.h	pid_data	105	-
+core/src/sim_engine.h	ecuio_sim_answer	96	47
+core/src/sim_pids.h	pid_data	105	-
 core/src/socketcan_link.h	socketcan_send_refusal	85	-
 core/src/uds_generic.cpp	ecuio_uds_build	104	48
 surrogate/surrogate_main.cpp	handle_op_read	171	-
