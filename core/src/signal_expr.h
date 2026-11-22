@@ -28,6 +28,11 @@ inline constexpr uint32_t kGrammarFormat = 2;
 /* What a name in an expression is: text covers a hex signal too */
 enum class expr_kind { number, computed, text };
 
+/* Why a key find doesn't have is not read: no signal has it, the file
+ * needs it from another ("needs"), or it is a signal of the file's left
+ * out while a need of it is unmet */
+enum class absent { unknown, needed, waiting };
+
 /* The signals an expression can read by key, and base, the obd2 set when
  * "obd2.<key>" names its defs, else NULL */
 struct expr_scope {
@@ -35,6 +40,11 @@ struct expr_scope {
     /* key's def ID and kind; false for a key no signal has */
     virtual bool find(const std::string& key, uint16_t* id,
                       expr_kind* kind) const = 0;
+    /* What a key find refused is, for the refusal's words */
+    virtual absent why_absent(const std::string& /*key*/) const
+    {
+        return absent::unknown;
+    }
 
 protected:
     ~expr_scope() = default;

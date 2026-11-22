@@ -247,6 +247,8 @@ ECUIO_MODULE_MAX_REQUESTS = 0x400
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
+ECUIO_NOTE_SIGNAL_LEFT_OUT = 8
+ECUIO_NOTE_TEXT_LEN = 0x180
 ECUIO_OBDB_ALONE = 1
 ECUIO_OBDB_MAX_BYTES = 0x100000
 ECUIO_OBDB_NOTE_CHANGED = 1
@@ -741,6 +743,9 @@ class ecuio_signal_key_t(Structure):
     pass
 
 class ecuio_signal_module_t(Structure):
+    pass
+
+class ecuio_signal_note_t(Structure):
     pass
 
 class ecuio_signal_set_t(Structure):
@@ -1515,6 +1520,16 @@ ecuio_signal_module_t._fields_ = [
     ('id', (c_char * 32)),
     ('name', (c_char * 64)),
 ]
+ecuio_signal_note_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('kind', c_uint32),
+    ('part', c_uint32),
+    ('other_part', c_uint32),
+    ('def', c_uint32),
+    ('count', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+    ('text', (c_char * 384)),
+]
 ecuio_signal_set_t._fields_ = [
     ('layout_version', c_uint32),
     ('count', c_uint32),
@@ -1781,6 +1796,9 @@ FUNCTIONS = {
     'ecuio_signal_file_load_with': (c_int, [c_char_p, c_size_t, c_uint32, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_module': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_module_t)]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_needs': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_key_t), c_uint32, POINTER(c_uint32)]),  # signals.h
+    'ecuio_signal_file_note': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_note_t)]),  # signals.h
+    'ecuio_signal_file_note_count': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_source': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_source_t)]),  # signals.h

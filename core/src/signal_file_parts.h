@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -30,6 +31,29 @@ struct entry {
     std::string name;      /* its "name" when that is text, else "" */
     bool replaces = false; /* it stands in a base def's place */
 };
+
+/* The first of the two builds of a set with "needs"
+ * (signal_file_format3.cpp): every signal judged with each needed key
+ * standing for a number, then which of them wait for one */
+struct needs_pass {
+    /* A needed key's stand-in ID, above every ID a file's own signal has */
+    std::unordered_map<std::string, uint16_t> ids;
+    std::vector<uint8_t> waiting; /* by place in the list: left out */
+    std::vector<std::string> waiting_keys;
+    std::vector<ecuio_signal_file::note> notes;
+};
+
+/* The set from in into f. With pass, the judging build alone: f is left
+ * unfinished (no validator, no module's request count) and pass says
+ * which signals wait. */
+void build(const parts& in, ecuio_signal_file& f, needs_pass* pass);
+/* A set with "needs": judged whole, then built from the signals that
+ * wait for none, the rest noted */
+void build_around_needs(const parts& in, ecuio_signal_file& f);
+/* After the judging build's signals are read: refuses a need the set
+ * defines and one nothing reads, and fills pass's waiting and notes */
+void settle_needs(const parts& in, const std::vector<entry>& entries,
+                  const ecuio_signal_file& f, needs_pass& pass);
 
 /* Format 3's gates (signal_file_format3.cpp, ADR-0065 section 9).
  * A format 3 set's signal at place, named as base_def: a second signal of

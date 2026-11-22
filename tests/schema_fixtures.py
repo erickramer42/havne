@@ -201,6 +201,7 @@ CASES = [
     ("extends something other than obd2", SIGNAL_FILE, ["extends"], "uds", False),
     ("format 3", SIGNAL_FILE, ["havne_signals"], 3, True),
     ("format 4", SIGNAL_FILE, ["havne_signals"], 4, False),
+    ("needs in format 1", SIGNAL_FILE, ["needs"], [], False),
     ("an ECU's name", SIGNAL_FILE, ["ecus", 0, "name"], "Engine", True),
     ("an ECU's name of 63 bytes", SIGNAL_FILE, ["ecus", 0, "name"], "n" * 63, True),
     ("an ECU's name of 64 bytes", SIGNAL_FILE, ["ecus", 0, "name"], "n" * 64, False),
@@ -396,6 +397,23 @@ FORMAT2 = [
      changed(F2, S3 + ["expr"], "rpm_raw ? 1 : 0"), False),
     ("a format 2 expression of 257 characters", SIGNAL_FILE, None,
      changed(F2, S3 + ["expr"], "max(rpm_raw, 1)" + " " * 250), False),
+]
+
+# Format 3 (ADR-0065 section 9): a file that needs another's signal
+F3_NEEDS = changed(SIGNAL_FILE, ["havne_signals"], 3)
+F3_NEEDS["needs"] = ["oil_t"]
+F3_NEEDS["signals"].append({"key": "oil_margin", "name": "Oil margin", "kind": "computed",
+                            "expr": "130 - oil_t"})
+FORMAT3 = [
+    ("a format 3 file with a need an expression reads", SIGNAL_FILE, None, F3_NEEDS, True),
+    ("a need that is no key", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], ["Oil-T"]), False),
+    ("a need given twice", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], ["oil_t", "oil_t"]), False),
+    ("needs that is no list", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], "oil_t"), False),
+    ("needs in format 2", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["havne_signals"], 2), False),
 ]
 
 # A format 2 plugin with the conversation tier (ADR-0066). The module is
@@ -669,7 +687,7 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES) + FORMAT2 + CONDITION_CASES + CONVERSATION + PAGES
+        cases = list(CASES) + FORMAT2 + FORMAT3 + CONDITION_CASES + CONVERSATION + PAGES
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

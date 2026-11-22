@@ -152,6 +152,21 @@ private:
         ++p_.constant_count;
     }
 
+    /* How a name no signal of the scope has is refused, after the name */
+    const char* absent_words(const std::string& name) const
+    {
+        switch (scope_.why_absent(name)) {
+        case absent::needed:
+            return ", which this file needs from another: check it "
+                   "against the set the files make together";
+        case absent::waiting:
+            return ", which is left out until another file gives what it "
+                   "reads: check it against the set the files make together";
+        default:
+            return ", which no signal is";
+        }
+    }
+
     void input(size_t at, const std::string& name)
     {
         uint16_t id = 0;
@@ -167,7 +182,7 @@ private:
         } else {
             expr_kind kind = expr_kind::number;
             if (!scope_.find(name, &id, &kind)) {
-                fail(at, "reads " + q(name) + ", which no signal is");
+                fail(at, "reads " + q(name) + absent_words(name));
             }
             if (kind == expr_kind::computed && format_ < 2) {
                 fail(at, "reads " + q(name) +

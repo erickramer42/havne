@@ -228,3 +228,111 @@ TEST(PluginWrapTest, AWrapAndAPutCarryAnEcusName)
                     sig("tft", "F40E", "tcm"))));
     EXPECT_EQ(manifest_name(added, "tcm"), "Transmission");
 }
+
+namespace {
+
+std::vector<std::string> needs_of(const ecuio_signal_file_t* f)
+{
+    uint32_t count = 0;
+    EXPECT_EQ(ecuio_signal_file_needs(f, nullptr, 0, &count), ECUIO_OK);
+    std::vector<ecuio_signal_key_t> keys(count);
+    EXPECT_EQ(ecuio_signal_file_needs(f, keys.data(), count, &count), ECUIO_OK);
+    std::vector<std::string> out;
+    for (const ecuio_signal_key_t& k : keys) {
+        out.emplace_back(k.text);
+    }
+    return out;
+}
+
+const char kMargin[] =
+    R"({"key": "margin", "name": "Oil margin", "kind": "computed", )"
+    R"("expr": "130 - oil_t"})";
+
+} // namespace
+
+// A variant is one set: what one of its files needs and another gives is
+// met there, and only what none of them gives is the variant's need
+TEST(PluginTest, AVariantsFilesMeetEachOthersNeeds)
+{
+    const std::string needing = data_of(3, kMargin, R"("needs": ["oil_t"])");
+    const std::string giving =
+        data_of(3, named_sig("oil_t", "Oil temp", "D100"));
+    const std::string package = packed(
+        kPcm,
+        R"({"id": "both", "files": ["a.json", "b.json"]}, )"
+        R"({"id": "alone", "files": ["a.json", "c.json"]})",
+        "\"a.json\": " + needing + ", \"b.json\": " + giving +
+            ", \"c.json\": " +
+            data_of(3,
+                    R"({"key": "twice", "name": "Twice", "kind": "computed", )"
+                    R"("expr": "oil_t * 2"})",
+                    R"("needs": ["oil_t"])"));
+    Plugin p = load(package);
+    ASSERT_NE(p, nullptr);
+
+    const ecuio_signal_file_t* both = ecuio_plugin_variant_file(p.get(), 0);
+    ASSERT_NE(both, nullptr);
+    EXPECT_NE(ecuio_signal_file_find(both, "margin"), nullptr)
+        << "its need is met by the variant's other file";
+    EXPECT_EQ(ecuio_signal_file_note_count(both), 0u);
+    EXPECT_TRUE(needs_of(both).empty());
+    EXPECT_FALSE(has(written(p.get(), 0), "\"needs\""));
+
+    /* Without the file that gives it, both readers wait, and the two
+     * files' one need is the variant's, once */
+    const ecuio_signal_file_t* alone = ecuio_plugin_variant_file(p.get(), 1);
+    ASSERT_NE(alone, nullptr);
+    EXPECT_EQ(ecuio_signal_file_find(alone, "margin"), nullptr);
+    EXPECT_EQ(ecuio_signal_file_find(alone, "twice"), nullptr);
+    EXPECT_EQ(ecuio_signal_file_set(alone)->count, 0u);
+    EXPECT_EQ(ecuio_signal_file_note_count(alone), 2u);
+    EXPECT_EQ(needs_of(alone), (std::vector<std::string>{"oil_t"}));
+
+    /* Its copy holds the need and the waiting signals, and reads back so */
+    const std::string copy = written(p.get(), 1);
+    const Value doc = parsed(copy);
+    ASSERT_NE(doc.find("needs"), nullptr) << copy.substr(0, 300);
+    ASSERT_EQ(doc.find("needs")->items.size(), 1u);
+    EXPECT_EQ(doc.find("needs")->items[0].text, "oil_t");
+    EXPECT_EQ(doc.find("signals")->items.size(), 2u);
+    ecuio_signal_file_t* back = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load_with(copy.data(), copy.size(),
+                                          ECUIO_SIGNAL_FILE_LOAD_SET, &back),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_note_count(back), 2u);
+    EXPECT_EQ(needs_of(back), (std::vector<std::string>{"oil_t"}));
+    ecuio_signal_file_free(back);
+
+    /* A data file takes "needs" only in format 3 */
+    EXPECT_TRUE(
+        has(refusal_of(packed(
+                kPcm, kOneFile,
+                "\"a.json\": " + data_of(2, kMargin, R"("needs": ["oil_t"])"))),
+            "\"needs\" is signal-file format 3's, and this file is format 2"))
+        << ecuio_last_error_detail();
+}
+
+// A wrap keeps a file's needs in its data file, and a put carries them
+TEST(PluginWrapTest, AWrapAndAPutCarryNeeds)
+{
+    std::string needing = file("Mine", "By hand", kPcm,
+                               sig("oil", "F40D", "pcm") + ", " + kMargin,
+                               R"("needs": ["oil_t"])");
+    needing.replace(needing.find("\"havne_signals\": 1"), 18,
+                    "\"havne_signals\": 3");
+    const std::string wrapped = ok(wrap(needing));
+    Plugin p = load(wrapped);
+    ASSERT_NE(p, nullptr);
+    const ecuio_signal_file_t* f = ecuio_plugin_variant_file(p.get(), 0);
+    EXPECT_EQ(needs_of(f), (std::vector<std::string>{"oil_t"}));
+    EXPECT_EQ(ecuio_signal_file_find(f, "margin"), nullptr);
+    EXPECT_NE(ecuio_signal_file_find(f, "oil"), nullptr);
+
+    const std::string added = ok(put(ok(wrap(file_a())), "mine", needing));
+    Plugin q = load(added);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(variants_of(q.get()), (Strings{"base", "mine"}));
+    EXPECT_EQ(needs_of(ecuio_plugin_variant_file(q.get(), 1)),
+              (std::vector<std::string>{"oil_t"}));
+}

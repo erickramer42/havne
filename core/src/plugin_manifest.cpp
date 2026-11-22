@@ -613,8 +613,10 @@ void loader::check_data_file(data_file& f)
         refuse(*ecus, "a plugin's data file declares no \"ecus\": it names the "
                       "manifest's by id");
     }
-    only_keys(root, {"havne_signals", "name", "source", "extends", "signals"},
-              "a data file");
+    only_keys(
+        root,
+        {"havne_signals", "name", "source", "extends", "needs", "signals"},
+        "a data file");
     if (const Value* name = root.find("name")) {
         text_of(*name, 1, 63, "\"name\"");
     }

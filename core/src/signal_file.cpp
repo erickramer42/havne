@@ -37,8 +37,8 @@ using ecuio_json::Value;
 struct entries_scope final : expr_scope {
     entries_scope(const std::vector<entry>& all,
                   const std::unordered_map<std::string, size_t>& places,
-                  const ecuio_signal_set_t* obd2)
-        : entries(all), at_key(places)
+                  const ecuio_signal_set_t* obd2, const needs_pass* pass)
+        : entries(all), at_key(places), needs(pass)
     {
         base = obd2;
     }
@@ -48,7 +48,17 @@ struct entries_scope final : expr_scope {
     {
         const auto at = at_key.find(key);
         if (at == at_key.end()) {
-            return false;
+            /* A needed key stands for a number while the file is judged */
+            if (needs == nullptr) {
+                return false;
+            }
+            const auto needed = needs->ids.find(key);
+            if (needed == needs->ids.end()) {
+                return false;
+            }
+            *id = needed->second;
+            *kind = expr_kind::number;
+            return true;
         }
         const entry* e = &entries[at->second];
         *id = e->id;
@@ -60,6 +70,7 @@ struct entries_scope final : expr_scope {
 
     const std::vector<entry>& entries;
     const std::unordered_map<std::string, size_t>& at_key;
+    const needs_pass* needs;
 };
 
 /* A signal's "expr" compiled, a refusal placed at the member */
@@ -97,7 +108,9 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
 {
     expect(root, Type::object, "the file");
     const uint32_t format = format_of(root, "a signal file");
-    only_keys(root, {"havne_signals", "name", "source", "extends", "ecus", "signals"},
+    only_keys(root,
+              {"havne_signals", "name", "source", "extends", "needs", "ecus",
+               "signals"},
               "the file");
 
     parts p;
@@ -131,6 +144,7 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
     p.own_list = true;
     p.format = format;
     p.max_signals = max_signals;
+    read_needs(root, format, &p.needs);
     build(p, f);
 }
 
@@ -214,6 +228,15 @@ void one_name_each(std::unordered_map<std::string, size_t>& first_named,
 
 void build(const parts& in, ecuio_signal_file& f)
 {
+    if (in.needs.empty()) {
+        build(in, f, nullptr);
+    } else {
+        build_around_needs(in, f);
+    }
+}
+
+void build(const parts& in, ecuio_signal_file& f, needs_pass* pass)
+{
     f.name = in.name;
     f.profile = in.profile;
     f.format = in.format;
@@ -251,7 +274,7 @@ void build(const parts& in, ecuio_signal_file& f)
             list.push_back(&v);
         }
     }
-    if (list.empty()) {
+    if (list.empty() && !in.may_be_empty) {
         refuse(*signals, "\"signals\" lists none");
     }
     if (list.size() > in.max_signals) {
@@ -312,7 +335,7 @@ void build(const parts& in, ecuio_signal_file& f)
     }
 
     f.defs.resize(first_own + entries.size());
-    const entries_scope scope(entries, at_key, base);
+    const entries_scope scope(entries, at_key, base, pass);
     std::unordered_map<std::string, size_t> first_named; /* a name's first */
     std::vector<std::pair<const entry*, std::vector<std::string>>> programs;
     for (size_t i = 0; i < entries.size(); ++i) {
@@ -435,6 +458,10 @@ void build(const parts& in, ecuio_signal_file& f)
         one_signal_each_address(entries, f);
     }
     const std::vector<uint32_t> depth = check_chains(entries, f);
+    if (pass != nullptr) {
+        settle_needs(in, entries, f, *pass);
+        return;
+    }
     for (const entry& e : entries) {
         f.keys.emplace_back(e.key, e.def);
     }

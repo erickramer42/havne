@@ -65,6 +65,18 @@ struct file_scope final : ecuio_sf::expr_scope {
         return false;
     }
 
+    ecuio_sf::absent why_absent(const std::string& key) const override
+    {
+        if (std::find(file->needs.begin(), file->needs.end(), key) !=
+            file->needs.end()) {
+            return ecuio_sf::absent::needed;
+        }
+        return std::find(file->waiting.begin(), file->waiting.end(), key) !=
+                       file->waiting.end()
+                   ? ecuio_sf::absent::waiting
+                   : ecuio_sf::absent::unknown;
+    }
+
     size_t by_id(uint16_t id) const
     {
         for (size_t i = 0; i < own.size(); ++i) {
@@ -76,6 +88,7 @@ struct file_scope final : ecuio_sf::expr_scope {
     }
 
     std::vector<own_signal> own;
+    const ecuio_signal_file* file = nullptr;
 };
 
 bool is_computed(const ecuio_signal_def_t& d)
@@ -175,6 +188,7 @@ struct checking {
         : f(file), key(its_key), own_of(file.defs.size(), kNone)
     {
         scope.base = f.extends == "obd2" ? ecuio_obd2_signal_set() : nullptr;
+        scope.file = &f;
         scope.own.reserve(f.keys.size() + 1);
         for (const auto& k : f.keys) {
             const ecuio_signal_def_t& d = f.defs[k.second];

@@ -22,6 +22,7 @@
     },
     "source": { "$ref": "#/$defs/source" },
     "extends": { "$ref": "#/$defs/extends" },
+    "needs": { "$ref": "#/$defs/needs" },
     "ecus": { "$ref": "#/$defs/ecus" },
     "signals": {
       "title": "Signals",
@@ -35,7 +36,20 @@
   },
   "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
   "additionalProperties": false,
+  "if": {
+    "properties": { "havne_signals": { "enum": [1, 2] } },
+    "required": ["havne_signals"]
+  },
+  "then": { "properties": { "needs": false } },
   "$defs": {
+    "needs": {
+      "title": "Needs",
+      "description": "Format 3: the keys this file's expressions read that another file provides, each once, none of them a key this file defines, each read by an expression. Read alone, a computed signal that reads one is left out with a note, and so is each signal computed from it; read together with a file that provides the key, it computes. The loader refuses a key no expression reads.",
+      "type": "array",
+      "maxItems": 16384,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/key" }
+    },
     "notes": {
       "title": "Notes",
       "description": "Free text for the reader of the file, allowed in every object the loader checks keys in. JSON has no comments: a \"notes\" string goes where one would.",

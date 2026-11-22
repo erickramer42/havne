@@ -811,7 +811,10 @@ _Static_assert(offsetof(ecuio_expr_check_t, program) == 40,
  * a NULL expr with a length. ECUIO_ERR_OUT_OF_MEMORY. A caller zeroes
  * out and sets struct_size first, so at tells the two refusals apart.
  * A plugin variant's file (ecuio_plugin_variant_file) is checked the
- * same.
+ * same. An expression naming a key the file needs from another
+ * (ecuio_signal_file_needs), or a signal left out for one, is refused
+ * in words that say so: it is checked against the set the files make
+ * together.
  *
  * Not judged: the signal's other members (its name, which can put a new
  * signal in a base def's place, its unit, gauge and max_age) and the
@@ -1234,6 +1237,72 @@ ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
                                      const ecuio_signal_key_t* keys,
                                      uint32_t count, const char* text_utf8,
                                      uint32_t* index);
+
+/* ---- What a file needs, and what a load left out (ADR-0065 section 9) ----
+ * A format 3 file's "needs" lists keys its expressions read that another
+ * file provides. Loaded alone, each computed signal reading a needed key
+ * is judged whole and then left out of the set with a note, and so is
+ * each signal computed from it; the rest of the file reads as written. */
+
+/* The file's "needs" as written, in their order, by the serial ports'
+ * contract (serial.h): *count is all of them, the first capacity are
+ * copied, each zeroed past its text, and a capacity of 0 with keys NULL
+ * asks for the count. None for a file with no "needs".
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file or count, or NULL keys with a
+ * capacity. Any thread may call it while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_needs(const ecuio_signal_file_t* file,
+                                       ecuio_signal_key_t* keys,
+                                       uint32_t capacity, uint32_t* count);
+
+/* A note's kinds. Values are append-only. */
+#define ECUIO_NOTE_SIGNAL_LEFT_OUT 8u /* a signal isn't in the set */
+
+/* A note's room for its sentence: its bytes, the NUL, the rest zero */
+#define ECUIO_NOTE_TEXT_LEN 384u
+
+/* One thing a load did that its file didn't say outright, for a front
+ * end to show: a kind to fold the notes by and a sentence in words */
+typedef struct ecuio_signal_note {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                             out: core's own, the bytes filled */
+    uint32_t kind;        /* ECUIO_NOTE_* */
+    uint32_t part;        /* ECUIO_SIGNAL_PART_NONE */
+    uint32_t other_part;  /* ECUIO_SIGNAL_PART_NONE */
+    uint32_t def;         /* the def the note is about, its place in the
+                             set; UINT32_MAX for what isn't in the set */
+    uint32_t count;       /* 0 */
+    uint32_t reserved[4]; /* zero */
+    char text[ECUIO_NOTE_TEXT_LEN]; /* one line, UTF-8, no control
+                                       character */
+} ecuio_signal_note_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_note_t) == 424,
+              "ecuio_signal_note_t size is ABI");
+static_assert(offsetof(ecuio_signal_note_t, def) == 16,
+              "note def offset is ABI");
+static_assert(offsetof(ecuio_signal_note_t, text) == 40,
+              "note text offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_note_t) == 424,
+               "ecuio_signal_note_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, def) == 16,
+               "note def offset is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, text) == 40,
+               "note text offset is ABI");
+#endif
+
+/* How many notes the file's load left; 0 for NULL */
+uint32_t ecuio_signal_file_note_count(const ecuio_signal_file_t* file);
+
+/* The note at index, in the order the load made them, into out.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, out untouched, for an index at or past the
+ * count and for a struct_size under the struct's, each with a line in
+ * ecuio_last_error_detail(); ECUIO_ERR_OUT_OF_MEMORY. Any thread may
+ * call it while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_note(const ecuio_signal_file_t* file,
+                                      uint32_t index, ecuio_signal_note_t* out);
 
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a

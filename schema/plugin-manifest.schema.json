@@ -238,6 +238,10 @@
           "$ref": "signal-file.schema.json#/$defs/extends",
           "description": "A built-in set the variant adds to, only in a variant's first file: \"obd2\" in format 1."
         },
+        "needs": {
+          "$ref": "signal-file.schema.json#/$defs/needs",
+          "description": "Format 3: the keys this file's expressions read that another file provides. A key another file of the same variant defines is met there; what is left is the variant's need, met when the variant is read together with a plugin that provides it."
+        },
         "signals": {
           "title": "Signals",
           "description": "The file's signals, each key once. A variant's files' signals merged hold 1 to 1024.",
@@ -248,7 +252,12 @@
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": { "havne_signals": { "enum": [1, 2] } },
+        "required": ["havne_signals"]
+      },
+      "then": { "properties": { "needs": false } }
     },
     "packedFile": {
       "title": "Packed file",

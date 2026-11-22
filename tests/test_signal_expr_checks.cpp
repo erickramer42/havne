@@ -424,3 +424,36 @@ TEST(SignalExprTest, ACheckAnswersNoFormatPastTheGrammars)
         EXPECT_EQ(call.out.format, 2u) << "in a format " << format << " file";
     }
 }
+
+// A file with "needs" is checked as it stands alone: an expression that
+// reads a needed key, or a signal left out for one, is refused in words
+// that say where it can be checked
+TEST(SignalExprTest, AnExpressionOverANeedIsRefusedInItsWords)
+{
+    File f = load(file_of(3, {computed("w", "a + x"), computed("e", "w * 2")},
+                          "\"needs\":[\"x\"],"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+
+    const Checked needed = check(f.get(), nullptr, "b + x");
+    EXPECT_EQ(needed.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(needed.detail,
+              "the expression reads 'x', which this file needs from another: "
+              "check it against the set the files make together");
+    EXPECT_EQ(needed.out.at, 5u);
+
+    for (const char* gone : {"w", "e"}) {
+        const Checked waiting =
+            check(f.get(), nullptr, std::string(gone) + " + 1");
+        EXPECT_EQ(waiting.status, ECUIO_ERR_INVALID_ARGUMENT) << gone;
+        EXPECT_EQ(waiting.detail,
+                  "the expression reads '" + std::string(gone) +
+                      "', which is left out until another file gives what it "
+                      "reads: check it against the set the files make "
+                      "together");
+        EXPECT_EQ(waiting.out.at, 1u);
+    }
+
+    EXPECT_EQ(check(f.get(), nullptr, "nope + 1").detail,
+              "the expression reads 'nope', which no signal is");
+    EXPECT_EQ(check(f.get(), nullptr, "a + b").status, ECUIO_OK);
+}
