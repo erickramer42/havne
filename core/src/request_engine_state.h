@@ -269,6 +269,8 @@ struct ecuio_engine_channel {
     uint32_t diag_count = 0;     /* items listed; 0 = not diagnosing */
     uint32_t diag_pending = 0;   /* unasked items */
     bool diagnosing = false;     /* the one-shot is an item */
+    bool diag_step = false;      /* that item is a quiet step's: no read */
+    bool diag_again = false;     /* Read again waits for its settle */
     uint32_t diag_index = 0;     /* the item out, while diagnosing */
     uint8_t freeze_bits[4] = {}; /* 02 00 00's answer: PIDs 01 to 20 */
     ecuio_channel_diagnostics_t diag = {}; /* the report, but rx_id */

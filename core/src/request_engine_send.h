@@ -221,7 +221,9 @@ inline bool ecuio_engine_take_scan(ecuio_request_engine* e, uint32_t c)
 
 /* due's ask for held channel c with no rows (request_engine_quiet.h's
  * rule 3): once its step has passed, an unanswered item into the
- * one-shot, its outcome standing until the item settles again */
+ * one-shot, its outcome standing until the item settles again; a
+ * diagnostics item marked diag_step, which Read again and a clear wait
+ * out (ecuio_engine_diagnose_again, ecuio_engine_clear) */
 inline int32_t ecuio_engine_due_quiet_item(ecuio_request_engine* e, uint32_t c,
                                            int64_t now_us)
 {
@@ -236,6 +238,7 @@ inline int32_t ecuio_engine_due_quiet_item(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_take_ident_at(e, c, i);
     } else if (i - ch.ident_count < ch.diag_count) {
         ecuio_engine_take_diag_at(e, c, i - ch.ident_count);
+        ch.diag_step = true; /* a settled report asked again */
     } else {
         ecuio_engine_take_scan_at(e, c, i - ch.ident_count - ch.diag_count);
     }

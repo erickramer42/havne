@@ -171,46 +171,6 @@ inline void ecuio_engine_diag_take_freeze(ecuio_request_engine* e, uint32_t c,
     }
 }
 
-/* Settles the item channel c has out: answered, with the reply (the
- * whole frame), refused with its code, or unanswered; the report takes
- * what it says, and the freeze frame's answers list what comes next */
-inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
-                                     uint8_t outcome, uint8_t nrc,
-                                     const uint8_t* data, uint16_t len)
-{
-    ecuio_engine_channel& ch = e->chans[c];
-    ecuio_diag_item& it = ch.diag_items[ch.diag_index];
-    ecuio_channel_diagnostics_t& d = ch.diag;
-    /* a quiet module's step unanswered again changes no report */
-    const bool same =
-        it.outcome == ECUIO_DIAG_UNANSWERED && outcome == ECUIO_DIAG_UNANSWERED;
-    ch.diagnosing = false;
-    it.outcome = outcome;
-    it.nrc = nrc;
-    if (ch.diag_pending > 0) {
-        --ch.diag_pending;
-    }
-    switch (it.request[0]) {
-    case 0x01:
-        ecuio_engine_diag_take_status(d, it, outcome, nrc, data, len);
-        break;
-    case 0x03:
-    case 0x07:
-    case 0x0A:
-        ecuio_engine_diag_take_list(d, it, outcome, nrc, data, len);
-        break;
-    case 0x02:
-        ecuio_engine_diag_take_freeze(e, c, it, outcome, nrc, data, len);
-        break;
-    default:
-        break;
-    }
-    if (ch.diag_pending == 0) {
-        d.flags |= ECUIO_DIAG_COMPLETE;
-    }
-    d.generation += same ? 0u : 1u;
-}
-
 /* Lists the first items on a channel holding none, and marks its
  * report asked */
 inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
@@ -218,21 +178,6 @@ inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
     ch.diag.flags |= ECUIO_DIAG_ASKED;
     for (const auto& q : ECUIO_DIAG_FIRST) {
         ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
-    }
-}
-
-/* Diagnostics (ADR-0037): gives every channel the list to ask, through
- * the one-shot slot after identification and ahead of the scan; set
- * decodes the freeze frame (the obd2 set). Idempotent: a channel
- * already holding the list keeps its answers. */
-inline void ecuio_engine_diagnose(ecuio_request_engine* e,
-                                  const ecuio_signal_set_t* set)
-{
-    e->diag_set = set;
-    for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (e->chans[c].diag_count == 0) {
-            ecuio_engine_diag_list(e->chans[c]);
-        }
     }
 }
 
@@ -262,15 +207,98 @@ inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
     ecuio_engine_diag_list(ch);
 }
 
+/* A quiet step's item on channel ch settled, the report changed or
+ * not (same): a clear accepted meanwhile, nothing of it sent yet, ends
+ * ECUIO_CLEAR_REPORT_CHANGED when the report changed (the user agreed to
+ * the one shown); a Read again pressed meanwhile starts the read over */
+inline void ecuio_engine_diag_step_settled(ecuio_engine_channel& ch, bool same)
+{
+    ch.diag_step = false;
+    if (!same && ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+        ch.clear_step = ECUIO_CLEAR_STEP_NONE;
+        ch.diag.flags &= ~ECUIO_DIAG_CLEARING;
+        ch.diag.clear = ECUIO_CLEAR_REPORT_CHANGED;
+    }
+    if (ch.diag_again) {
+        ch.diag_again = false;
+        ecuio_engine_diag_restart(ch);
+    }
+}
+
+/* Settles the item channel c has out: answered, with the reply (the
+ * whole frame), refused with its code, or unanswered; the report takes
+ * what it says, and the freeze frame's answers list what comes next */
+inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
+                                     uint8_t outcome, uint8_t nrc,
+                                     const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_diag_item& it = ch.diag_items[ch.diag_index];
+    ecuio_channel_diagnostics_t& d = ch.diag;
+    /* a quiet module's step unanswered again changes no report */
+    const bool same =
+        it.outcome == ECUIO_DIAG_UNANSWERED && outcome == ECUIO_DIAG_UNANSWERED;
+    const bool step = ch.diag_step;
+    ch.diagnosing = false;
+    it.outcome = outcome;
+    it.nrc = nrc;
+    if (ch.diag_pending > 0) {
+        --ch.diag_pending;
+    }
+    switch (it.request[0]) {
+    case 0x01:
+        ecuio_engine_diag_take_status(d, it, outcome, nrc, data, len);
+        break;
+    case 0x03:
+    case 0x07:
+    case 0x0A:
+        ecuio_engine_diag_take_list(d, it, outcome, nrc, data, len);
+        break;
+    case 0x02:
+        ecuio_engine_diag_take_freeze(e, c, it, outcome, nrc, data, len);
+        break;
+    default:
+        break;
+    }
+    if (ch.diag_pending == 0) {
+        d.flags |= ECUIO_DIAG_COMPLETE;
+    }
+    d.generation += same ? 0u : 1u;
+    if (step) {
+        ecuio_engine_diag_step_settled(ch, same);
+    }
+}
+
+/* Diagnostics (ADR-0037): gives every channel the list to ask, through
+ * the one-shot slot after identification and ahead of the scan; set
+ * decodes the freeze frame (the obd2 set). Idempotent: a channel
+ * already holding the list keeps its answers. */
+inline void ecuio_engine_diagnose(ecuio_request_engine* e,
+                                  const ecuio_signal_set_t* set)
+{
+    e->diag_set = set;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].diag_count == 0) {
+            ecuio_engine_diag_list(e->chans[c]);
+        }
+    }
+}
+
 /* Asks the whole list again on every channel whose last read has
  * settled ("Read again"): its report starts over, its generation moves
- * on. A channel mid-read, mid-clear, or never asked, is left as it is. */
+ * on. A channel mid-read, mid-clear, or never asked, is left as it is.
+ * A quiet step's item out is no read: that channel starts over at the
+ * item's settle, so its reply settles no slot of the new list. */
 inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
-        if (ch.diag_count == 0 || ch.diagnosing || ch.diag_pending > 0 ||
+        if (ch.diag_count == 0 || ch.diag_pending > 0 ||
             ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+            continue;
+        }
+        if (ch.diagnosing) {
+            ch.diag_again = ch.diag_again || ch.diag_step;
             continue;
         }
         ecuio_engine_diag_restart(ch);
@@ -284,7 +312,10 @@ inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
  * asks the vehicle speed next (ecuio_engine_clear_settle). Any other
  * report records ECUIO_CLEAR_REPORT_CHANGED and sends nothing. False
  * then, and for a channel past the count, one that reads no
- * diagnostics, or one already clearing (which carries on). */
+ * diagnostics, or one already clearing (which carries on). A quiet
+ * step's item out is no read, unless a Read again waits on it: the clear
+ * goes once it settles, or ends REPORT_CHANGED if it changed the report
+ * (ecuio_engine_diag_step_settled). */
 inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
                                uint32_t generation, uint32_t flags = 0)
 {
@@ -301,7 +332,8 @@ inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
     d.clear_kmh = 0;
     d.flags &= ~(ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH);
     ++d.generation;
-    if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 || ch.diagnosing ||
+    const bool reading = ch.diagnosing && (!ch.diag_step || ch.diag_again);
+    if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 || reading ||
         ch.diag_pending > 0 || d.generation != generation + 1) {
         d.clear = ECUIO_CLEAR_REPORT_CHANGED;
         return false;
