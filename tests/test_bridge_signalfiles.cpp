@@ -12,7 +12,8 @@
 
 /* A format 2 file (ADR-0062) is kept and used as any: its chain counts
  * among its signals, its profile registers, and a format 1 file using a
- * call or a format 3 file is refused in the loader's words */
+ * call or a file of a format this core doesn't read is refused in the
+ * loader's words */
 TEST(BridgeTest, AFormat2SignalFileImportsAndIsUsedAsAny)
 {
     SettingsDirScope dir;
@@ -45,13 +46,21 @@ TEST(BridgeTest, AFormat2SignalFileImportsAndIsUsedAsAny)
                     .contains(QStringLiteral("\"havne_signals\": 2")))
         << r.value(QStringLiteral("words")).toString().toStdString();
 
-    r = keep("3", "a");
+    r = keep("4", "a");
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     EXPECT_TRUE(r.value(QStringLiteral("words"))
                     .toString()
-                    .contains(QStringLiteral("format 3")))
+                    .contains(QStringLiteral("format 4")))
         << r.value(QStringLiteral("words")).toString().toStdString();
     EXPECT_EQ(bridge.plugins().size(), 1);
+
+    /* Format 3 (ADR-0065 section 9) is kept as formats 1 and 2 are */
+    r = keep("3", "a");
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    const QByteArray third =
+        r.value(QStringLiteral("profiles")).toStringList().value(0).toUtf8();
+    EXPECT_TRUE(registered(third.constData())) << third.constData();
 }
 
 // ---- ADR-0057's refs and ranges: the model's rows and profileSignals ----
