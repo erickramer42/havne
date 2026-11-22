@@ -389,6 +389,13 @@ the link read OK (the pacing model; no car run).
   answers `3E 00` as well, so tester present would read as a session kept.
   The J2534 hold's session gate opens 300 ms before S3, before that time
   (a `static_assert` in `core/src/j2534_hold.h`).
+- **A module that wakes:** a module whose `10 03` went unanswered while
+  it was silent reads in default until a recovery, its extended-only DIDs
+  refused; its first frame after a quiet spell
+  ([ADR-0065](0065-car-sized-profile.md)'s appendix of 2026-11-21) enters
+  the session again. One whose session reads entered keeps it: a reset
+  answers `7F xx 7F`, which enters it again, and a needless `10 03`
+  would lock an unlocked level again.
 - **The hold** ([ADR-0065](0065-car-sized-profile.md)'s appendix of
   2026-11-18) asks `ecuio_engine_due_session`, the session request alone,
   at its gate: a row in its place would pass the hold.
