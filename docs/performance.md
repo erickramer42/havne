@@ -544,6 +544,20 @@ Modules that answer nothing beside modules that answer (the model, 2026-11-21; n
 
 `PluginTest.AVariantHoldsMoreSignalsThanOneFileMay` takes 0.43-0.45 s (desktop, Release), 1.46-1.81 s before the loader indexed a file's keys and first names. A reverse chain of 16,384 computed signals is refused in 31 ms, 1.22-1.30 s before the depths were settled over a queue of reads.
 
+### The merge of two parts
+
+Result: merging the example car's variant with a second file of a
+thousand signals takes 9.7 ms.
+
+2026-11-22, Windows 11 desktop, MSVC Release, the shared core called
+through ctypes (`ecuio_signal_file_merge`,
+[ADR-0065](adr/0065-car-sized-profile.md) section 9): `plugins/example-car`'s
+variant written as one file (9.9 KB) and a format 3 file of a thousand
+number signals on a module of its own (150 KB), with obd2 under them.
+The median of 30 merges is 9.7 ms (9.3 to 13.6), after 4.2 ms to load
+the two parts; the merged text is 278 KB, and the process's peak commit
+rose 4.5 MiB over the loaded parts.
+
 ### Connect cost: a surrogate per session
 
 Result: a create and close takes 18 to 28 ms against the x64 fake.

@@ -108,10 +108,11 @@ The top level is one JSON object. Its keys:
 
 | Key | Required | What it holds |
 |---|---|---|
-| `havne_signals` | yes, first | The format's version: `1`. A reader refuses a version it doesn't know |
+| `havne_signals` | yes, first | The format's version: `1`, `2` (more for a computed signal, below) or `3` (files read together, below). A reader refuses a version it doesn't know |
 | `name` | yes | The file's name, shown where you pick it. A loaded file registers as the profile `user.<slug>` made from it: "Daily driver extras" is `?profile=user.daily-driver-extras` |
 | `source` | yes | Where the signals come from (below) |
 | `extends` | no | A built-in set the file adds to: `obd2` only, in format 1 |
+| `needs` | no | Format 3: the keys the file's expressions read from another file (below) |
 | `ecus` | no | The modules the file reads from (below) |
 | `signals` | yes | The signals, an array (below) |
 | `notes` | no | Free text, anywhere; JSON has no comments |
@@ -169,6 +170,9 @@ when the file extends one:
 - `tx`: the module's request ID. Leave it out only where the standard
   gives it: rx - 8 for `7E8` to `7EF`, and for `18DAF1xx` the swapped
   `18DAxxF1`. Every other module needs it.
+- `name`: optional, what a screen calls the module (`"Transmission"`), 1
+  to 63 bytes. Left out, the `id` stands in upper case. Havne 0.9.1 or
+  later reads it; an older one refuses the key.
 
 A signal with no `ecu` is read from the first module listed.
 
@@ -437,6 +441,122 @@ refuses that recording's scrubbed export too, its `signals.json` being a
 file it can't load. `havne-cli plugins check` says when a plugin's data
 files use `gauge` and its `requires.core` names an older version.
 
+## Format 3
+
+`"havne_signals": 3` is for files that are read together with others
+([ADR-0065](adr/0065-car-sized-profile.md) section 9). It keeps format
+2's expressions and changes this:
+
+- **A name may repeat.** Two signals of one file may share a name (two
+  modules' "Battery voltage"); a key still names one signal.
+- **No signal of `obd2`'s is replaced.** A signal named as one of
+  `obd2`'s is a second signal of that name, read beside it, and
+  `obd2.<key>` in an expression always reads `obd2`'s.
+- **One address, one signal.** Two signals of the file that read the
+  same module, request and field are refused, as two of one key are. A
+  signal at one of `obd2`'s addresses is still taken, beside it.
+- **`needs`** (below).
+
+Havne 0.9.1 or later reads a format 3 file; an older one refuses it by
+its version. Nothing raises a file to format 3 by itself: a file that
+uses none of this stays the format it is.
+
+### Reading another file's signals
+
+A computed signal can read a signal another file defines. The file
+lists the keys it reads that way in `needs`:
+
+```json
+{
+  "havne_signals": 3,
+  "name": "My car signals",
+  "source": { "name": "Written by hand" },
+  "needs": ["oil_t"],
+  "signals": [
+    { "key": "oil_margin", "name": "Oil margin", "kind": "computed",
+      "expr": "130 - oil_t", "unit": "°C" }
+  ]
+}
+```
+
+- A need is a key another file provides: given once, not a key this
+  file defines, and read by at least one expression. A need nothing
+  reads is refused, as a key that is neither defined nor needed is: both
+  are what a typing error looks like.
+- **Loaded alone, the file still loads.** A computed signal that reads a
+  needed key is checked whole (its syntax, its other inputs, its bounds)
+  and then left out of the set with a note, and so is each signal
+  computed from it. The other signals read as written, and a file may
+  load with every signal left out.
+- **Read together** with a file that defines the key, the signal
+  computes. When no file defines it, the signal is left out with a note
+  and nothing is refused.
+- A need never names `obd2.<key>`: a file that reads `obd2` extends it.
+- A plugin's data file takes `needs` too. A key another file of the
+  same variant defines is met inside the variant.
+
+### A set made of several files
+
+Core can read several loaded files as one set (`ecuio_signal_file_merge`):
+a plugin of your own over an import over a manufacturer's package, with
+`obd2` under them. The files are layers in the order given, and a later
+file's signal takes the place of an earlier one's:
+
+1. **The same key:** it takes that signal's place in the list.
+2. **The same address** (module, request and field): it takes that
+   signal's place and keeps its key beside its own, so a gauge, a
+   condition or an expression that named the earlier signal reads the
+   later one.
+3. **Otherwise** it is added at the end.
+
+A name alone replaces nothing. Modules at the same reply and request IDs
+are one module, under the earliest file's `id`; an `id` another module
+already has takes `_2`. What the set can't hold or compute is left out
+with a note and the rest still reads: a module whose reply ID another
+answers under another request ID, a module past 32, a file whose IDs are
+of the other width, and a computed signal that reads a key no file gives,
+a text, or a signal left out.
+
+The result is written as one format 3 file, which a recording of such a
+session keeps as its `signals.json`. Havne writes it; you don't:
+
+```json
+{
+  "havne_signals": 3,
+  "name": "2 parts read together",
+  "source": { "name": "A merge of 2 parts" },
+  "extends": "obd2",
+  "parts": [
+    { "profile": "plugin.example-import.base", "name": "Example import", "format": 2,
+      "plugin": { "id": "example-import", "version": "1.2.0", "variant": "base" },
+      "source": { "name": "A made-up import", "license": "CC-BY-SA-4.0" } },
+    { "profile": "user.my-car-signals", "name": "My car signals", "format": 3,
+      "source": { "name": "Written by hand" } }
+  ],
+  "ecus": [ { "id": "tcm", "name": "Transmission", "rx": "7E9", "part": 0 } ],
+  "signals": [
+    { "key": "oil_temp", "part": 1, "replaced": ["oil_t"], "name": "Oil temperature",
+      "ecu": "tcm", "read": { "service": "22", "number": "4A10" },
+      "field": { "byte": 0, "bits": 8 }, "offset": -40, "unit": "°C" }
+  ]
+}
+```
+
+- `parts` lists the files in the order they were read, each with the
+  profile it registers under alone, its name, its own format, its plugin
+  when it is a plugin's variant, and its `source` whole. **Each part
+  keeps its source and its license:** the set's own `source` says only
+  that it is a merge, so share-alike terms stay with the signals they
+  came with and reach no other part.
+- Each signal names its `part`, and `replaced` lists the keys of the
+  signals it took the place of. An ECU's `part` is the part whose `id`
+  stands for the module.
+- The set's profile is `merged.` and 16 hex digits worked out from the
+  parts' profiles in order (and `obd2` when it is the base), so the same
+  files in the same order give the same profile on every device.
+- A merged set is not imported and is no part of another: import, or
+  read together, the plugins it names.
+
 ## Bounds
 
 | What | Bound |
@@ -446,6 +566,8 @@ files use `gauge` and its `requires.core` names an older version.
 | Modules | 32, the base set's counted |
 | An ECU's requests | 1024, the base set's counted (`obd2` alone asks over 90 of the engine ECU) |
 | A variant's files together | 16,384 signals; its one written file 4 MiB |
+| Files read together | 16 files; 16,384 signals and as many replaced keys; the written set 4 MiB |
+| An ECU's `name` | 1 to 63 bytes |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
 | `decimals` | 0 to 3 |
@@ -471,8 +593,8 @@ A file is refused for:
 
 - **Its shape:** text that isn't JSON, a duplicate key in an object, a
   value of the wrong type, a key the format doesn't have, a missing
-  required key, a `havne_signals` other than 1, more than the bounds
-  above.
+  required key, a `havne_signals` this Havne doesn't read, more than
+  the bounds above.
 - **Its signals:** a duplicate `key`; a `field` the decoder can't read
   (a big-endian field that isn't whole bytes, `bit` on a big-endian
   field, `bits` out of range); a text or hex field with `bits`; an
@@ -494,6 +616,11 @@ A file is refused for:
   a file that extends it takes 11-bit modules only.
 - **Its size:** more signals than one ECU's 1024 requests
   hold with the base set's.
+- **Format 3's rules:** two signals of the file at one address; a need
+  that is no key, is given twice, is a key the file defines, or is read
+  by no expression; `needs` in a format 1 or 2 file; and a merged set's
+  keys (`parts`, a signal's `part` and `replaced`, an ECU's `part`)
+  anywhere but in a merged set.
 
 Every refusal names the line and column of what it refuses, then why:
 
