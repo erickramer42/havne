@@ -23,6 +23,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QQmlAbstractUrlInterceptor>
+#include <QQmlApplicationEngine>
 #include <QQmlNetworkAccessManagerFactory>
 #include <QUrl>
 
@@ -122,5 +123,26 @@ private:
     {
         static std::atomic<int> n{0};
         return n;
+    }
+};
+
+// The two objects an engine must outlive, made before it and destroyed after
+// it. Nothing the QML loads is remote: a name from a file drawn as markup
+// could otherwise fetch a URL
+struct RefusingNetworkHolder
+{
+    RefusingNetworkFactory factory;
+    RefusingUrlInterceptor interceptor;
+};
+
+// The application's engine with both refusals installed
+class RefusingEngine : private RefusingNetworkHolder, public QQmlApplicationEngine
+{
+public:
+    RefusingEngine()
+    {
+        RefusingNetworkHolder& held = *this;
+        setNetworkAccessManagerFactory(&held.factory);
+        addUrlInterceptor(&held.interceptor);
     }
 };
