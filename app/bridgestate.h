@@ -37,7 +37,9 @@
 // SessionBridge's data members and the helper types they use, apart from
 // the few its constructor initializes. No moc: nothing here is a signal,
 // slot or property. The bridge inherits it protected, so only the bridge
-// and the test seams (bridgeseams.h) see a member.
+// and the test seams (bridgeseams.h) see a member. Members stay grouped by
+// topic, not packed.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct BridgeState
 {
     ecuio_session_t* m_session = nullptr;
