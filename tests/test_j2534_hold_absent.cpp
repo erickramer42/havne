@@ -90,7 +90,8 @@ Count run(const Shape& s, int64_t until_us = 3000 * kMs)
         if (s.wake_us != 0 && b.now < s.wake_us) {
             at_wake = b.lost;
         }
-        if (s.wake_us != 0 && b.now < heard_us + 1000 * kMs) {
+        if (s.wake_us != 0 &&
+            (heard_us == INT64_MAX || b.now - heard_us < 1000 * kMs)) {
             at_settled = b.lost;
         }
         b.pass();
