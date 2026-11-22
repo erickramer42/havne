@@ -31,7 +31,7 @@ void SessionBridge::setVehicleLabel(const QString& label)
     emit vehicleLabelChanged();
 }
 
-QString SessionBridge::folderLabel(const QString& label)
+QString BridgeFormats::folderLabel(const QString& label)
 {
     QString out;
     for (const QChar ch : label) {
@@ -119,7 +119,7 @@ QString SessionBridge::uriLabelFor(const QString& uri)
 /* What the session runs on, for the activity log (and so the
  * recording's events.log). Static, like linkStateForError, so
  * test_bridge pins the wording without an adapter. */
-QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
+QString BridgeFormats::sessionInfoText(const ecuio_session_info_t& info)
 {
     const QString profile = QStringLiteral("profile ") + QString::fromUtf8(
         info.profile, static_cast<qsizetype>(
@@ -251,7 +251,7 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
  * device: an ELM327's AT I answer, then STI's on an STN chip; a J2534
  * adapter's firmware, DLL and API. "" without a reading, and for the
  * backends that have no adapter. */
-QString SessionBridge::versionsText(const ecuio_session_info_t& info)
+QString BridgeFormats::versionsText(const ecuio_session_info_t& info)
 {
     if ((info.flags & ECUIO_SESSION_INFO_VERSIONS) == 0) {
         return {};

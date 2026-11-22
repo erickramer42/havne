@@ -16,7 +16,7 @@
 
 #include <algorithm>
 
-QString SessionBridge::replayUriFor(const QString& folder,
+QString BridgeFormats::replayUriFor(const QString& folder,
                                     const QString& recordedUri)
 {
     const qsizetype q = recordedUri.indexOf(QLatin1Char('?'));
