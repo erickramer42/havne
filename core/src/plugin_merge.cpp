@@ -36,6 +36,24 @@ bool same_source(const Value& manifest, const ecuio_signal_source_t& own)
            std::strcmp(m.modified, own.modified) == 0;
 }
 
+/* What one file needs and another of the variant gives (slot_of holds
+ * the variant's keys) is met in the variant; what two need is one need */
+void meet_needs(ecuio_sf::parts& parts,
+                const std::unordered_map<std::string, size_t>& slot_of)
+{
+    std::vector<std::pair<std::string, const Value*>> unmet;
+    for (const auto& need : parts.needs) {
+        const bool again =
+            std::any_of(unmet.begin(), unmet.end(), [&need](const auto& u) {
+                return u.first == need.first;
+            });
+        if (!again && slot_of.count(need.first) == 0) {
+            unmet.push_back(need);
+        }
+    }
+    parts.needs.swap(unmet);
+}
+
 } // namespace
 
 /* The variant's files' signals merged by key, a later file's
@@ -59,6 +77,7 @@ void loader::build_variant(const ecuio_plugin& p, const Value& at,
     for (size_t n = 0; n < list.size(); ++n) {
         const Value& root = *list[n]->root;
         parts.format = std::max(parts.format, list[n]->format);
+        ecuio_sf::read_needs(root, list[n]->format, &parts.needs);
         if (const Value* own = root.find("source")) {
             if (!own_source) {
                 source = own;
@@ -99,6 +118,7 @@ void loader::build_variant(const ecuio_plugin& p, const Value& at,
             }
         }
     }
+    meet_needs(parts, slot_of);
     out.file.reset(new ecuio_signal_file());
     ecuio_sf::build(parts, *out.file);
     if (source != nullptr) {
@@ -161,6 +181,14 @@ std::string loader::variant_json(const ecuio_plugin& p, const variant& v,
     }
     if (parts.extends != nullptr) {
         add("extends", *parts.extends);
+    }
+    if (!parts.needs.empty()) {
+        Value needs;
+        needs.type = Type::array;
+        for (const auto& need : parts.needs) {
+            needs.items.push_back(*need.second);
+        }
+        add("needs", std::move(needs));
     }
     if (parts.ecus != nullptr) {
         add("ecus", *parts.ecus);

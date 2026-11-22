@@ -72,6 +72,7 @@
     },
     "ecus": {
       "$ref": "signal-file.schema.json#/$defs/ecus",
+      "items": { "properties": { "part": false } },
       "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 32 in all, of one ID width."
     },
     "variants": {
@@ -223,8 +224,8 @@
       "properties": {
         "havne_signals": {
           "title": "Format",
-          "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 and 2: a variant takes the newest of its files, and a plugin with a format 2 file names a core that reads it in requires.core.",
-          "enum": [1, 2]
+          "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 to 3: a variant is read at the newest of its files' formats whole, and a plugin with a format 2 or 3 file names a core that reads it in requires.core. A variant that holds a format 3 file is a format 3 set, so a format 1 or 2 file's signal named as one of the extended set's is refused there: give every file of the variant format 3.",
+          "enum": [1, 2, 3]
         },
         "name": {
           "title": "Name",
@@ -238,17 +239,29 @@
           "$ref": "signal-file.schema.json#/$defs/extends",
           "description": "A built-in set the variant adds to, only in a variant's first file: \"obd2\" in format 1."
         },
+        "needs": {
+          "$ref": "signal-file.schema.json#/$defs/needs",
+          "description": "Format 3: the keys this file's expressions read that another file provides. A key another file of the same variant defines is met there; what is left is the variant's need, met when the variant is read together with a plugin that provides it."
+        },
         "signals": {
           "title": "Signals",
           "description": "The file's signals, each key once. A variant's files' signals merged hold 1 to 1024.",
           "type": "array",
           "maxItems": 1024,
-          "items": { "$ref": "signal-file.schema.json#/$defs/signal" }
+          "items": {
+            "$ref": "signal-file.schema.json#/$defs/signal",
+            "properties": { "part": false, "replaced": false }
+          }
         },
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": { "havne_signals": { "enum": [1, 2] } },
+        "required": ["havne_signals"]
+      },
+      "then": { "properties": { "needs": false } }
     },
     "packedFile": {
       "title": "Packed file",

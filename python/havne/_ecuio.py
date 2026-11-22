@@ -242,16 +242,29 @@ ECUIO_J2534_DLL_PATH_LEN = 0x100
 ECUIO_J2534_MAX_VENDORS = 16
 ECUIO_J2534_VENDOR_NAME_LEN = 64
 ECUIO_MAX_CHANNELS = 32
+ECUIO_MERGE_BASE_OBD2 = 1
+ECUIO_MERGE_MAX_PARTS = 16
+ECUIO_MODULE_BASE = 1
 ECUIO_MODULE_MAX_REQUESTS = 0x400
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
+ECUIO_NOTE_BESIDE_BASE = 4
+ECUIO_NOTE_KEY_TAKEN = 3
+ECUIO_NOTE_MODULE_LEFT_OUT = 6
+ECUIO_NOTE_MODULE_RENAMED = 5
+ECUIO_NOTE_PART_LEFT_OUT = 7
+ECUIO_NOTE_REPLACED_BY_ADDRESS = 1
+ECUIO_NOTE_REPLACED_BY_KEY = 2
+ECUIO_NOTE_SIGNAL_LEFT_OUT = 8
+ECUIO_NOTE_TEXT_LEN = 0x180
 ECUIO_OBDB_ALONE = 1
 ECUIO_OBDB_MAX_BYTES = 0x100000
 ECUIO_OBDB_NOTE_CHANGED = 1
 ECUIO_OBDB_NOTE_CONVERTED = 0
 ECUIO_OBDB_NOTE_FILE = 3
 ECUIO_OBDB_NOTE_SKIPPED = 2
+ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
 ECUIO_PLUGIN_FORMAT = 1
@@ -354,7 +367,7 @@ ECUIO_SESSION_STATE_NOT_ASKED = 0
 ECUIO_SESSION_STATE_REFUSED = 3
 ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
-ECUIO_SIGNAL_FILE_FORMAT = 2
+ECUIO_SIGNAL_FILE_FORMAT = 3
 ECUIO_SIGNAL_FILE_FORMAT_OLDEST = 1
 ECUIO_SIGNAL_FILE_LOAD_SET = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
@@ -370,6 +383,7 @@ ECUIO_SIGNAL_GROUP_OXYGEN = 4
 ECUIO_SIGNAL_GROUP_VEHICLE = 6
 ECUIO_SIGNAL_KEY_LEN = 32
 ECUIO_SIGNAL_KEY_MAX = 31
+ECUIO_SIGNAL_PART_NONE = 0xffffffff
 ECUIO_SIGNAL_SET_LAYOUT = 5
 ECUIO_SIGNAL_SET_MAX_BYTES = 0x400000
 ECUIO_SIGNAL_SET_MAX_SIGNALS = 0x4000
@@ -382,6 +396,7 @@ ECUIO_SIM_REPLY_LATE = 2
 ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
 ECUIO_SIM_YIELDED = 2
+ECUIO_SOURCE_MERGED = 2
 ECUIO_SOURCE_SHARE_ALIKE = 1
 ECUIO_SOURCE_TEXT_LEN = 0x208
 ECUIO_SOURCE_TEXT_MAX = 0x200
@@ -624,6 +639,9 @@ class ecuio_j2534_device_t(Structure):
 class ecuio_j2534_handle_t(Structure):
     pass
 
+class ecuio_merge_options_t(Structure):
+    pass
+
 class ecuio_monitor_t(Structure):
     pass
 
@@ -736,6 +754,15 @@ class ecuio_signal_gauge_t(Structure):
     pass
 
 class ecuio_signal_key_t(Structure):
+    pass
+
+class ecuio_signal_module_t(Structure):
+    pass
+
+class ecuio_signal_note_t(Structure):
+    pass
+
+class ecuio_signal_part_t(Structure):
     pass
 
 class ecuio_signal_set_t(Structure):
@@ -1165,6 +1192,11 @@ ecuio_j2534_device_t._fields_ = [
     ('supported_protocols', c_uint32),
     ('reserved', (c_uint32 * 8)),
 ]
+ecuio_merge_options_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 6)),
+]
 ecuio_obdb_note_t._fields_ = [
     ('what', c_uint32),
     ('line', c_uint32),
@@ -1500,6 +1532,40 @@ ecuio_signal_gauge_t._fields_ = [
 ecuio_signal_key_t._fields_ = [
     ('text', (c_char * 32)),
 ]
+ecuio_signal_module_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('rx_id', c_uint32),
+    ('tx_id', c_uint32),
+    ('part', c_uint32),
+    ('reserved', (c_uint32 * 5)),
+    ('id', (c_char * 32)),
+    ('name', (c_char * 64)),
+]
+ecuio_signal_note_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('kind', c_uint32),
+    ('part', c_uint32),
+    ('other_part', c_uint32),
+    ('def', c_uint32),
+    ('count', c_uint32),
+    ('base_def', c_uint32),
+    ('reserved', (c_uint32 * 3)),
+    ('text', (c_char * 384)),
+]
+ecuio_signal_part_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('format', c_uint32),
+    ('signal_count', c_uint32),
+    ('module_count', c_uint32),
+    ('reserved', (c_uint32 * 5)),
+    ('profile', (c_char * 64)),
+    ('name', (c_char * 64)),
+    ('plugin_id', (c_char * 32)),
+    ('plugin_version', (c_char * 16)),
+    ('plugin_variant', (c_char * 32)),
+]
 ecuio_signal_set_t._fields_ = [
     ('layout_version', c_uint32),
     ('count', c_uint32),
@@ -1752,6 +1818,7 @@ FUNCTIONS = {
     'ecuio_shutdown': (None, []),  # core.h
     'ecuio_signal_address_key': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_signal_key_t)]),  # signals.h
     'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h
+    'ecuio_signal_file_def_part': (c_uint32, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_evaluate': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(ecuio_eval_input_t), c_uint32, POINTER(ecuio_eval_result_t)]),  # signals.h
     'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_expr_leaves': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # signals.h
@@ -1764,8 +1831,17 @@ FUNCTIONS = {
     'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_load_with': (c_int, [c_char_p, c_size_t, c_uint32, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
+    'ecuio_signal_file_merge': (c_int, [POINTER(POINTER(ecuio_signal_file_t)), c_uint32, POINTER(ecuio_merge_options_t), POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
+    'ecuio_signal_file_module': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_module_t)]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_needs': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_key_t), c_uint32, POINTER(c_uint32)]),  # signals.h
+    'ecuio_signal_file_note': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_note_t)]),  # signals.h
+    'ecuio_signal_file_note_count': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_part': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_part_t)]),  # signals.h
+    'ecuio_signal_file_part_count': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_part_source': (c_int, [POINTER(ecuio_signal_file_t), c_uint32, POINTER(ecuio_signal_source_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_replaced_keys': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t), POINTER(ecuio_signal_key_t), c_uint32, POINTER(c_uint32)]),  # signals.h
     'ecuio_signal_file_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_source': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_source_t)]),  # signals.h
     'ecuio_signal_file_text': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(c_size_t)]),  # signals.h

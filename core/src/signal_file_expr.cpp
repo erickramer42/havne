@@ -65,6 +65,18 @@ struct file_scope final : ecuio_sf::expr_scope {
         return false;
     }
 
+    ecuio_sf::absent why_absent(const std::string& key) const override
+    {
+        if (std::find(file->needs.begin(), file->needs.end(), key) !=
+            file->needs.end()) {
+            return ecuio_sf::absent::needed;
+        }
+        return std::find(file->waiting.begin(), file->waiting.end(), key) !=
+                       file->waiting.end()
+                   ? ecuio_sf::absent::waiting
+                   : ecuio_sf::absent::unknown;
+    }
+
     size_t by_id(uint16_t id) const
     {
         for (size_t i = 0; i < own.size(); ++i) {
@@ -76,6 +88,7 @@ struct file_scope final : ecuio_sf::expr_scope {
     }
 
     std::vector<own_signal> own;
+    const ecuio_signal_file* file = nullptr;
 };
 
 bool is_computed(const ecuio_signal_def_t& d)
@@ -107,7 +120,7 @@ bool aged_by_key(const ecuio_signal_file& f, const file_scope& scope, size_t i,
         }
         std::vector<std::string> names;
         try {
-            ecuio_sf::compile_expr(e.second, scope, ECUIO_SIGNAL_FILE_FORMAT,
+            ecuio_sf::compile_expr(e.second, scope, ecuio_sf::kGrammarFormat,
                                    &names, nullptr);
         } catch (const expr_refused&) {
             return false;
@@ -175,7 +188,8 @@ struct checking {
         : f(file), key(its_key), own_of(file.defs.size(), kNone)
     {
         scope.base = f.extends == "obd2" ? ecuio_obd2_signal_set() : nullptr;
-        scope.own.reserve(f.keys.size() + 1);
+        scope.file = &f;
+        scope.own.reserve(f.keys.size() + f.second_keys.size() + 1);
         for (const auto& k : f.keys) {
             const ecuio_signal_def_t& d = f.defs[k.second];
             own_signal s{&k.first, d.id, expr_kind::number, nullptr, k.second};
@@ -191,6 +205,15 @@ struct checking {
             }
             own_of[k.second] = scope.own.size();
             scope.own.push_back(s);
+        }
+        /* A key a signal replaced reads the signal that stands for it */
+        for (const auto& k : f.second_keys) {
+            const size_t own = own_of[k.second];
+            if (own != kNone) {
+                own_signal s = scope.own[own];
+                s.key = &k.first;
+                scope.own.push_back(s);
+            }
         }
         was_computed =
             checked != kNone && scope.own[checked].kind == expr_kind::computed;
@@ -219,7 +242,7 @@ struct checking {
         std::vector<std::string> names;
         try {
             program = ecuio_sf::compile_expr(
-                text, scope, ECUIO_SIGNAL_FILE_FORMAT, &names, &places);
+                text, scope, ecuio_sf::kGrammarFormat, &names, &places);
         } catch (const expr_refused& r) {
             throw refusal{static_cast<uint32_t>(r.at + 1),
                           "the expression " + r.words};
@@ -362,7 +385,7 @@ void check(const ecuio_signal_file& f, const std::string& key,
     c.base_programs_fit();
     format2 = format2 || c.oldest_format_refuses(text);
     out.format =
-        format2 ? ECUIO_SIGNAL_FILE_FORMAT : ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
+        format2 ? ecuio_sf::kGrammarFormat : ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
     out.depth = c.depth[c.checked];
     out.program = c.program;
 }

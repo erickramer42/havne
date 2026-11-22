@@ -24,7 +24,7 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
-    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
+    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp test_core_merge.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
     test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
     test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
@@ -119,6 +119,8 @@ app_enable_warnings(bench_car)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
+    test_signal_file_format3.cpp test_plugin_format3.cpp test_signal_needs.cpp
+    test_signal_merged_text.cpp test_signal_merge.cpp test_signal_merge_bounds.cpp
     test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
@@ -1922,6 +1924,20 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
+# The structs and calls of a set made of several files (ADR-0065 section
+# 9), in a translation unit of their own: test_c_abi.c is held to its
+# length. Built as test_c_abi is, against the archive and the shared core.
+add_executable(test_c_abi_merge test_c_abi_merge.c)
+set_target_properties(test_c_abi_merge PROPERTIES C_EXTENSIONS OFF)
+app_enable_warnings(test_c_abi_merge)
+if(NOT MSVC)
+    target_compile_options(test_c_abi_merge PRIVATE -pedantic)
+endif()
+target_include_directories(test_c_abi_merge PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+target_link_libraries(test_c_abi_merge PRIVATE ecuio-core)
+add_test(NAME c_abi_merge COMMAND test_c_abi_merge)
+set_tests_properties(c_abi_merge PROPERTIES LABELS "abi")
+
 # The shared core (HAVNE_SHARED_CORE, ADR-0053's appendix "the shared
 # core as built"): test_c_abi.c again, linked against the library rather
 # than the archive, so each call resolves through its export table
@@ -1949,6 +1965,23 @@ if(HAVNE_SHARED_CORE)
     endif()
     add_test(NAME c_abi_shared COMMAND test_c_abi_shared)
     set_tests_properties(c_abi_shared PROPERTIES LABELS "abi")
+
+    add_executable(test_c_abi_merge_shared test_c_abi_merge.c)
+    set_target_properties(test_c_abi_merge_shared PROPERTIES C_EXTENSIONS OFF)
+    app_enable_warnings(test_c_abi_merge_shared)
+    if(NOT MSVC)
+        target_compile_options(test_c_abi_merge_shared PRIVATE -pedantic)
+    endif()
+    target_include_directories(test_c_abi_merge_shared PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(test_c_abi_merge_shared PRIVATE ecuio)
+    if(WIN32)
+        add_custom_command(TARGET test_c_abi_merge_shared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:test_c_abi_merge_shared> $<TARGET_FILE_DIR:test_c_abi_merge_shared>
+            COMMAND_EXPAND_LISTS)
+    endif()
+    add_test(NAME c_abi_merge_shared COMMAND test_c_abi_merge_shared)
+    set_tests_properties(c_abi_merge_shared PROPERTIES LABELS "abi")
 
     if(MSVC)
         # dumpbin ships beside link.exe, in the toolset's own folder (the

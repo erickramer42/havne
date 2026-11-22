@@ -22,7 +22,8 @@ import re
 import sys
 
 LOADERS = ("core/src/signal_file.cpp", "core/src/signal_file_parts.cpp",
-           "core/src/signal_file_source.cpp", "core/src/plugin_manifest.cpp",
+           "core/src/signal_file_source.cpp", "core/src/signal_file_merged.cpp",
+           "core/src/plugin_manifest.cpp",
            "core/src/plugin_conversation.cpp", "core/src/plugin.cpp",
            "core/src/condition_file.cpp")
 # Where only_keys itself is defined
@@ -41,6 +42,9 @@ CALLS = {
     ("signal_file_parts.cpp", "what + \"'s gauge\"", 1): ("signal-file", "/$defs/gauge"),
     ("signal_file_source.cpp", '"\\"source\\""', 1): ("signal-file", "/$defs/source"),
     ("signal_file.cpp", '"the file"', 1): ("signal-file", ""),
+    ("signal_file_merged.cpp", '"a part"', 1): ("signal-file", "/$defs/part"),
+    ("signal_file_merged.cpp", '"a part\'s plugin"', 1):
+        ("signal-file", "/$defs/partPlugin"),
     # build: computed, then text and hex, then enum, then number
     ("signal_file.cpp", "what", 1): ("signal-file", "/$defs/computedSignal"),
     ("signal_file.cpp", "what", 2): ("signal-file", "/$defs/textSignal"),

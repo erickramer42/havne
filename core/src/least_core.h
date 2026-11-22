@@ -67,10 +67,16 @@ inline constexpr version kSetSignals = {{0, 9, 0}};
 inline constexpr version kSetBytes = {{0, 9, 0}};
 /* A manifest's "pages", the Dashboard pages it carries (v0.9.0) */
 inline constexpr version kPages = {{0, 9, 0}};
+/* Signal-file format 3 (v0.9.1, ADR-0065 section 9): a name may repeat,
+ * a signal named as a base def is beside it, one address has one signal */
+inline constexpr version kFormat3 = {{0, 9, 1}};
+/* An ECU's "name", in a signal file or a manifest of any format (v0.9.1;
+ * an older core refuses the key) */
+inline constexpr version kEcuName = {{0, 9, 1}};
 
 /* Each "havne_signals" by its number: [0] stands for none */
 inline constexpr version kSignalFormatSince[] = {kSignalFile, kSignalFile,
-                                                 kFormat2};
+                                                 kFormat2, kFormat3};
 static_assert(sizeof kSignalFormatSince / sizeof kSignalFormatSince[0] ==
                   ECUIO_SIGNAL_FILE_FORMAT + 1,
               "a new signal-file format needs its row in kSignalFormatSince");

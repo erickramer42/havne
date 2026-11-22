@@ -32,25 +32,13 @@ using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
 
-/* One signal of the file as read so far */
-struct entry {
-    const Value* v = nullptr;
-    std::string key;
-    std::string kind;
-    uint32_t def = 0;   /* its index in the set's defs */
-    uint16_t id = 0;    /* its def's id: the base def's it replaces, else
-                           ECUIO_USER_SIG_ID_BASE + its place in the list */
-    std::string name;   /* its "name" when that is text, else "" */
-    bool replaces = false; /* it stands in a base def's place */
-};
-
 /* The names a file's expressions read: its signals as read so far, each
  * found by its key's place */
 struct entries_scope final : expr_scope {
     entries_scope(const std::vector<entry>& all,
                   const std::unordered_map<std::string, size_t>& places,
-                  const ecuio_signal_set_t* obd2)
-        : entries(all), at_key(places)
+                  const ecuio_signal_set_t* obd2, const needs_pass* pass)
+        : entries(all), at_key(places), needs(pass)
     {
         base = obd2;
     }
@@ -60,7 +48,17 @@ struct entries_scope final : expr_scope {
     {
         const auto at = at_key.find(key);
         if (at == at_key.end()) {
-            return false;
+            /* A needed key stands for a number while the file is judged */
+            if (needs == nullptr) {
+                return false;
+            }
+            const auto needed = needs->ids.find(key);
+            if (needed == needs->ids.end()) {
+                return false;
+            }
+            *id = needed->second;
+            *kind = expr_kind::number;
+            return true;
         }
         const entry* e = &entries[at->second];
         *id = e->id;
@@ -72,6 +70,7 @@ struct entries_scope final : expr_scope {
 
     const std::vector<entry>& entries;
     const std::unordered_map<std::string, size_t>& at_key;
+    const needs_pass* needs;
 };
 
 /* A signal's "expr" compiled, a refusal placed at the member */
@@ -100,7 +99,7 @@ uint32_t format_of(const Value& root, const char* what)
                                              : std::string("?")) +
                             ", and this Havne reads formats " +
                             std::to_string(ECUIO_SIGNAL_FILE_FORMAT_OLDEST) +
-                            " and " + std::to_string(ECUIO_SIGNAL_FILE_FORMAT));
+                            " to " + std::to_string(ECUIO_SIGNAL_FILE_FORMAT));
     }
     return static_cast<uint32_t>(version.whole);
 }
@@ -109,7 +108,9 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
 {
     expect(root, Type::object, "the file");
     const uint32_t format = format_of(root, "a signal file");
-    only_keys(root, {"havne_signals", "name", "source", "extends", "ecus", "signals"},
+    only_keys(root,
+              {"havne_signals", "name", "source", "extends", "needs", "parts",
+               "ecus", "signals"},
               "the file");
 
     parts p;
@@ -143,6 +144,8 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
     p.own_list = true;
     p.format = format;
     p.max_signals = max_signals;
+    read_needs(root, format, &p.needs);
+    read_merged(root, format, p, f);
     build(p, f);
 }
 
@@ -167,7 +170,73 @@ std::vector<uint32_t> check_chains(const std::vector<entry>& entries,
     }
 }
 
+/* The base's defs into the set, less those a format 1 or 2 file
+ * replaces: a signal named as a base def stands in its place with its
+ * ID, so what reads that ID (a base program, a layout's cell, a focus)
+ * reads the file's, as a plugin variant's later file replaces a signal
+ * by key. A file of format 1 or 2 names each signal once; format 3
+ * replaces no base def and may repeat a name (ADR-0065 section 9). */
+void take_base(const parts& in, const ecuio_signal_set_t* base,
+               std::vector<entry>& entries, ecuio_signal_file& f)
+{
+    std::vector<ecuio_signal_def_t> kept;
+    for (const ecuio_signal_def_t& d : f.defs) {
+        entry* by = nullptr;
+        for (entry& e : entries) {
+            if (e.name != d.name) {
+                continue;
+            }
+            if (in.format >= 3) {
+                named_as_base(in, e, static_cast<size_t>(&e - entries.data()),
+                              d);
+            } else {
+                by = &e;
+            }
+        }
+        if (by == nullptr) {
+            kept.push_back(d);
+        } else {
+            by->id = d.id;
+            by->replaces = true;
+            ecuio_least::raise(f.least, ecuio_least::kReplacesByName);
+        }
+    }
+    f.computed.clear();
+    for (ecuio_signal_def_t& d : kept) {
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+            continue;
+        }
+        const ecuio_computed_t p = base->computed[d.table_first];
+        d.table_first = static_cast<uint16_t>(f.computed.size());
+        f.computed.push_back(p);
+    }
+    f.defs.swap(kept);
+}
+
+/* Formats 1 and 2: the signal at i, named as an earlier one, is refused */
+void one_name_each(std::unordered_map<std::string, size_t>& first_named,
+                   const std::vector<entry>& entries, size_t i,
+                   const Value& name_v, const std::string& what)
+{
+    const auto named = first_named.emplace(entries[i].name, i);
+    if (!named.second) {
+        refuse(name_v, what + " has the name " + q(entries[i].name) +
+                           ", which signal " +
+                           q(entries[named.first->second].key) +
+                           " has too: a name names one signal");
+    }
+}
+
 void build(const parts& in, ecuio_signal_file& f)
+{
+    if (in.needs.empty()) {
+        build(in, f, nullptr);
+    } else {
+        build_around_needs(in, f);
+    }
+}
+
+void build(const parts& in, ecuio_signal_file& f, needs_pass* pass)
 {
     f.name = in.name;
     f.profile = in.profile;
@@ -206,7 +275,7 @@ void build(const parts& in, ecuio_signal_file& f)
             list.push_back(&v);
         }
     }
-    if (list.empty()) {
+    if (list.empty() && !in.may_be_empty) {
         refuse(*signals, "\"signals\" lists none");
     }
     if (list.size() > in.max_signals) {
@@ -255,40 +324,8 @@ void build(const parts& in, ecuio_signal_file& f)
         entries.push_back(e);
     }
 
-    /* A signal named as a base def replaces it, as a plugin variant's
-     * later file replaces a signal by key: the base def is left out of
-     * the set, with the program a computed one held, and the file's def
-     * stands in its place with its ID, so what reads that ID (a base
-     * program, a layout's cell, a focus) reads the file's. A file of
-     * format 1 or 2 names each signal once (ADR-0065 section 9), though a
-     * set may repeat a name. */
     if (base != nullptr) {
-        std::vector<ecuio_signal_def_t> kept;
-        for (const ecuio_signal_def_t& d : f.defs) {
-            const entry* by = nullptr;
-            for (const entry& e : entries) {
-                if (e.name == d.name) {
-                    by = &e;
-                }
-            }
-            if (by == nullptr) {
-                kept.push_back(d);
-            } else {
-                entries[by - entries.data()].id = d.id;
-                entries[by - entries.data()].replaces = true;
-                ecuio_least::raise(f.least, ecuio_least::kReplacesByName);
-            }
-        }
-        f.computed.clear();
-        for (ecuio_signal_def_t& d : kept) {
-            if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
-                continue;
-            }
-            const ecuio_computed_t p = base->computed[d.table_first];
-            d.table_first = static_cast<uint16_t>(f.computed.size());
-            f.computed.push_back(p);
-        }
-        f.defs.swap(kept);
+        take_base(in, base, entries, f);
     }
     const size_t first_own = f.defs.size();
     for (size_t i = 0; i < entries.size(); ++i) {
@@ -298,8 +335,9 @@ void build(const parts& in, ecuio_signal_file& f)
         }
     }
 
+    read_merged_keys(entries, at_key, first_own, f);
     f.defs.resize(first_own + entries.size());
-    const entries_scope scope(entries, at_key, base);
+    const entries_scope scope(entries, at_key, base, pass);
     std::unordered_map<std::string, size_t> first_named; /* a name's first */
     std::vector<std::pair<const entry*, std::vector<std::string>>> programs;
     for (size_t i = 0; i < entries.size(); ++i) {
@@ -316,20 +354,24 @@ void build(const parts& in, ecuio_signal_file& f)
         if (computed) {
             only_keys(s,
                       {"key", "name", "kind", "expr", "max_age", "unit",
-                       "decimals", "group", "plot", "gauge"},
+                       "decimals", "group", "plot", "gauge", "part",
+                       "replaced"},
                       what);
         } else if (text) {
-            only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "group",
-                          "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "ecu", "read", "field", "group",
+                       "plot", "part", "replaced"},
                       what);
         } else if (e.kind == "enum") {
-            only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "values",
-                          "group", "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "ecu", "read", "field", "values",
+                       "group", "plot", "part", "replaced"},
                       what);
         } else {
             only_keys(s,
                       {"key", "name", "kind", "ecu", "read", "field", "scale",
-                       "offset", "unit", "decimals", "group", "plot", "gauge"},
+                       "offset", "unit", "decimals", "group", "plot", "gauge",
+                       "part", "replaced"},
                       what);
         }
 
@@ -339,12 +381,8 @@ void build(const parts& in, ecuio_signal_file& f)
         }
         copy_text(d.name, sizeof d.name, text_of(*name_v, 1, 31, what + "'s name"));
         no_formula(*name_v, what + "'s name");
-        const auto named = first_named.emplace(entries[i].name, i);
-        if (!named.second) {
-            refuse(*name_v, what + " has the name " + q(entries[i].name) +
-                                ", which signal " +
-                                q(entries[named.first->second].key) +
-                                " has too: a name names one signal");
+        if (in.format < 3) {
+            one_name_each(first_named, entries, i, *name_v, what);
         }
         if (const Value* unit = s.find("unit")) {
             copy_text(d.unit, sizeof d.unit, text_of(*unit, 0, 15, what + "'s unit"));
@@ -383,10 +421,10 @@ void build(const parts& in, ecuio_signal_file& f)
                         refuse(m, what + "'s max_age names " + q(m.key) +
                                       ", which its expr doesn't read");
                     }
-                    for (const entry& x : entries) {
-                        if (x.key == m.key && x.kind == "computed") {
-                            refuse(m, aged_computed_words(e.key, m.key));
-                        }
+                    const auto aged = at_key.find(m.key);
+                    if (aged != at_key.end() &&
+                        entries[aged->second].kind == "computed") {
+                        refuse(m, aged_computed_words(e.key, m.key));
                     }
                     const double seconds = finite_of(m.value, what + "'s max_age");
                     if (seconds < 0.1 || seconds > 60.0) {
@@ -422,7 +460,14 @@ void build(const parts& in, ecuio_signal_file& f)
             read_gauge(s, d, e.def, f, what);
         }
     }
+    if (in.format >= 3) {
+        one_signal_each_address(entries, f);
+    }
     const std::vector<uint32_t> depth = check_chains(entries, f);
+    if (pass != nullptr) {
+        settle_needs(in, entries, f, *pass);
+        return;
+    }
     for (const entry& e : entries) {
         f.keys.emplace_back(e.key, e.def);
     }
@@ -638,9 +683,11 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
     if (file == nullptr || key == nullptr) {
         return nullptr;
     }
-    for (const auto& k : file->keys) {
-        if (k.first == key) {
-            return &file->defs[k.second];
+    for (const auto* keys : {&file->keys, &file->second_keys}) {
+        for (const auto& k : *keys) {
+            if (k.first == key) {
+                return &file->defs[k.second];
+            }
         }
     }
     return nullptr;

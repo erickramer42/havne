@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/signal-file.schema.json",
   "title": "Havne signal file",
-  "description": "A Havne signal file (formats 1 and 2, ADR-0051, ADR-0062): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most ECUIO_MAX_CHANNELS (signals.h, 32) ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key; in format 2 also min, max, abs, clamp, sqrt, round, floor, ceil, if, all, any, not and the comparisons, each typed as a number or a truth), its inputs (signals of the file that are not text, computed ones only in format 2, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations (a program of 33 steps in format 2) and 16 levels of nesting, a chain of computed signals at most 8 deep and none in a circle; \"max_age\" naming only inputs its expression reads; a gauge's min below its max, its levels within them and in order, and its range meeting what the signal's field can read; the signal set's validator; for each ECU at most ECUIO_MODULE_MAX_REQUESTS (profile.h, 1024) requests with the base set's.",
+  "description": "A Havne signal file (formats 1 to 3, ADR-0051, ADR-0062, ADR-0065): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most ECUIO_MAX_CHANNELS (signals.h, 32) ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; in format 3 one address read by one signal; in a merged set (\"parts\") each part's profile given once, a signal's and an ECU's \"part\" one of the parts, each key once among the signals' own keys and the keys they replaced, and two signals at one address only when both are one format 1 or 2 part's; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key; in format 2 also min, max, abs, clamp, sqrt, round, floor, ceil, if, all, any, not and the comparisons, each typed as a number or a truth), its inputs (signals of the file that are not text, computed ones only in format 2, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations (a program of 33 steps in format 2) and 16 levels of nesting, a chain of computed signals at most 8 deep and none in a circle; \"max_age\" naming only inputs its expression reads; a gauge's min below its max, its levels within them and in order, and its range meeting what the signal's field can read; the signal set's validator; for each ECU at most ECUIO_MODULE_MAX_REQUESTS (profile.h, 1024) requests with the base set's.",
   "type": "object",
   "required": ["havne_signals", "name", "source", "signals"],
   "properties": {
     "havne_signals": {
       "title": "Format",
-      "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 and 2. Format 2 adds functions, comparisons and a computed signal that reads another; a file that uses them says 2, and the loader refuses them in a file that says 1.",
-      "enum": [1, 2]
+      "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 to 3. Format 2 adds functions, comparisons and a computed signal that reads another; a file that uses them says 2, and the loader refuses them in a file that says 1. Format 3 keeps format 2's expressions and changes what a file means: two signals may share a name, a signal named as one of the extended set's is a second signal of that name (in formats 1 and 2 it replaces that one), and two signals at one address are refused.",
+      "enum": [1, 2, 3]
     },
     "name": {
       "title": "Name",
@@ -22,20 +22,148 @@
     },
     "source": { "$ref": "#/$defs/source" },
     "extends": { "$ref": "#/$defs/extends" },
+    "needs": { "$ref": "#/$defs/needs" },
+    "parts": { "$ref": "#/$defs/parts" },
     "ecus": { "$ref": "#/$defs/ecus" },
     "signals": {
       "title": "Signals",
-      "description": "The file's signals, 1 to 1024. An expression may read a signal listed after it.",
+      "description": "The file's signals, 1 to 1024; a merged set's, 1 to 16384. An expression may read a signal listed after it.",
       "type": "array",
       "minItems": 1,
-      "maxItems": 1024,
+      "maxItems": 16384,
       "items": { "$ref": "#/$defs/signal" }
     },
     "notes": { "$ref": "#/$defs/notes" }
   },
   "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "havne_signals": { "enum": [1, 2] } },
+        "required": ["havne_signals"]
+      },
+      "then": { "properties": { "needs": false, "parts": false } }
+    },
+    {
+      "if": { "required": ["parts"] },
+      "then": { "$ref": "#/$defs/mergedSet" },
+      "else": { "$ref": "#/$defs/noParts" }
+    }
+  ],
   "$defs": {
+    "parts": {
+      "title": "Parts",
+      "description": "Format 3, written by Havne: the files a merged set is made of, 1 to 16, in the order they were read together, a later one's signal taking the place of an earlier one's of the same key or the same address. A recording of a session on several plugins holds such a set as its signals.json. A file with \"parts\" has no \"needs\", its \"source\" holds a \"name\" alone, and each of its signals names its part.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/part" }
+    },
+    "part": {
+      "title": "Part",
+      "description": "One file of a merged set: a signal file or a plugin's variant, with the source its signals keep.",
+      "type": "object",
+      "required": ["profile", "name", "format", "source"],
+      "properties": {
+        "profile": {
+          "title": "Profile",
+          "description": "The profile the part registers under read alone, 1 to 63 of a-z, 0-9, '.', '_' and '-', each part's once. A merged set is no part.",
+          "type": "string",
+          "pattern": "^(?!merged\\.)[a-z0-9._-]{1,63}$"
+        },
+        "name": {
+          "title": "Name",
+          "description": "The part's own name, 1 to 63 bytes.",
+          "$ref": "#/$defs/plainText",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "format": {
+          "title": "Format",
+          "description": "The part's own signal-file format. Two signals at one address stay only when both are one format 1 or 2 part's.",
+          "enum": [1, 2, 3]
+        },
+        "plugin": { "$ref": "#/$defs/partPlugin" },
+        "source": { "$ref": "#/$defs/source" },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "partPlugin": {
+      "title": "Plugin",
+      "description": "The plugin variant a part is, as a recording's plugin line names it.",
+      "type": "object",
+      "required": ["id", "version", "variant"],
+      "properties": {
+        "id": {
+          "title": "Plugin id",
+          "description": "1 to 31 of a-z, 0-9 and -, a letter or digit at each end.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "version": {
+          "title": "Version",
+          "description": "The plugin's own version, X.Y.Z: each 0 to 65535 with no leading zero, 15 characters at most.",
+          "type": "string",
+          "maxLength": 15,
+          "pattern": "^(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$"
+        },
+        "variant": {
+          "title": "Variant id",
+          "description": "1 to 24 of a-z, 0-9 and -, a letter or digit at each end.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,22}[a-z0-9])?$"
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "signalPart": {
+      "title": "Part",
+      "description": "In a merged set: the part the signal came from, its place in \"parts\" from 0. A signal that took another's place is its own part's.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15
+    },
+    "replaced": {
+      "title": "Replaced keys",
+      "description": "In a merged set: the keys of the signals this one took the place of. Each still names this signal, in an expression and wherever a key was kept; no key is given twice in the file, as a signal's own or as one it replaced.",
+      "type": "array",
+      "maxItems": 16384,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/key" }
+    },
+    "mergedSet": {
+      "$comment": "A file with \"parts\": no needs, a source of its name alone, a part for every signal",
+      "properties": {
+        "needs": false,
+        "source": {
+          "properties": { "url": false, "commit": false, "license": false, "modified": false }
+        },
+        "signals": { "items": { "required": ["part"] } }
+      }
+    },
+    "noParts": {
+      "$comment": "A file with no \"parts\" takes none of a merged set's keys, and holds a file's signals at most",
+      "properties": {
+        "ecus": { "items": { "properties": { "part": false } } },
+        "signals": {
+          "maxItems": 1024,
+          "items": { "properties": { "part": false, "replaced": false } }
+        }
+      }
+    },
+    "needs": {
+      "title": "Needs",
+      "description": "Format 3: the keys this file's expressions read that another file provides, each once, none of them a key this file defines, each read by an expression. Read alone, a computed signal that reads one is left out with a note, and so is each signal computed from it; read together with a file that provides the key, it computes. The loader refuses a key no expression reads.",
+      "type": "array",
+      "maxItems": 16384,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/key" }
+    },
     "notes": {
       "title": "Notes",
       "description": "Free text for the reader of the file, allowed in every object the loader checks keys in. JSON has no comments: a \"notes\" string goes where one would.",
@@ -143,6 +271,20 @@
           "title": "Request ID",
           "description": "The CAN ID the module is asked on, in hex, of the rx's width. It may be left out only where the standard gives it: rx - 8 for 7E8 to 7EF, and the 18DA swap for 18DAF1xx.",
           "$ref": "#/$defs/hexId"
+        },
+        "name": {
+          "title": "Module name",
+          "description": "What a screen calls the module, 1 to 63 bytes, beside two signals of one name and in a list of modules. Left out, the id stands in upper case. A core older than 0.9.1 refuses the key.",
+          "$ref": "#/$defs/displayText",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "part": {
+          "title": "Part",
+          "description": "In a merged set: the part whose id stands for the module, its place in \"parts\" from 0.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
         },
         "notes": { "$ref": "#/$defs/notes" }
       },
@@ -427,6 +569,8 @@
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
         "gauge": { "$ref": "#/$defs/gauge" },
+        "part": { "$ref": "#/$defs/signalPart" },
+        "replaced": { "$ref": "#/$defs/replaced" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
@@ -460,6 +604,8 @@
         },
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
+        "part": { "$ref": "#/$defs/signalPart" },
+        "replaced": { "$ref": "#/$defs/replaced" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
@@ -479,6 +625,8 @@
         "field": { "$ref": "#/$defs/textField" },
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
+        "part": { "$ref": "#/$defs/signalPart" },
+        "replaced": { "$ref": "#/$defs/replaced" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
@@ -517,6 +665,8 @@
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
         "gauge": { "$ref": "#/$defs/gauge" },
+        "part": { "$ref": "#/$defs/signalPart" },
+        "replaced": { "$ref": "#/$defs/replaced" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },

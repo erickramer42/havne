@@ -599,6 +599,20 @@ Four times the signals takes 4.6 times as long between 1,000 and 4,000, and 4.1 
 
 **The written copy** (a variant's file as `ecuio_signal_file_text` writes it, two spaces a level): the generated set at 1,000 signals writes 264,776 bytes, 264.8 a signal (about 15,800 signals in the 4 MiB bound at that rate); `example-car`'s `whole` variant writes 15,557 bytes for 171 signals, 91.0 a signal (about 46,100 in 4 MiB).
 
+### The merge of two parts
+
+Result: merging the example car's variant with a second file of a
+thousand signals takes 9.7 ms.
+
+2026-11-22, Windows 11 desktop, MSVC Release, the shared core called
+through ctypes (`ecuio_signal_file_merge`,
+[ADR-0065](adr/0065-car-sized-profile.md) section 9): `plugins/example-car`'s
+variant written as one file (9.9 KB) and a format 3 file of a thousand
+number signals on a module of its own (150 KB), with obd2 under them.
+The median of 30 merges is 9.7 ms (9.3 to 13.6), after 4.2 ms to load
+the two parts; the merged text is 278 KB, and the process's peak commit
+rose 4.5 MiB over the loaded parts.
+
 ### Connect cost: a surrogate per session
 
 Result: a create and close takes 18 to 28 ms against the x64 fake.

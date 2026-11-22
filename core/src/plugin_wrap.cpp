@@ -10,6 +10,7 @@
 
 #include "ecuio/plugin.h"
 #include "ecuio/signal_sets.h"
+#include "ecu_join.h"
 #include "error_detail.h"
 #include "json.h"
 #include "least_core.h"
@@ -29,6 +30,10 @@
 
 namespace {
 
+using ecuio_ecus::address;
+using ecuio_ecus::ecu;
+using ecuio_ecus::ecus_of;
+using ecuio_ecus::fallback_of;
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
@@ -120,9 +125,14 @@ void check_signal_file(const char* file, size_t length)
 {
     ecuio_signal_file_t* f = nullptr;
     const ecuio_status_t s = ecuio_signal_file_load(file, length, &f);
+    const bool merged = ecuio_signal_file_part_count(f) > 0;
     ecuio_signal_file_free(f);
     if (s != ECUIO_OK) {
         throw passed{s};
+    }
+    if (merged) {
+        throw refusal{"the file is a merged set, which isn't imported: "
+                      "import its plugins"};
     }
 }
 
@@ -338,47 +348,6 @@ std::string wrapped(const char* file, size_t length,
     return ecuio_json::write(doc);
 }
 
-/* An ECU by its addresses: two ids at one rx and tx are one module */
-struct address {
-    uint32_t rx = 0;
-    uint32_t tx = 0;
-
-    bool operator==(const address& o) const { return rx == o.rx && tx == o.tx; }
-};
-
-struct ecu {
-    std::string id;
-    address addr;
-};
-
-std::vector<ecu> ecus_of(const Value* list)
-{
-    std::vector<ecu> out;
-    if (list != nullptr) {
-        for (const Value& e : list->items) {
-            ecu x;
-            x.id = e.find("id")->text;
-            ecuio_sf::ecu_addresses(e, &x.addr.rx, &x.addr.tx);
-            out.push_back(std::move(x));
-        }
-    }
-    return out;
-}
-
-/* What a signal naming no ECU reads: the manifest's first, or with none
- * the first that the set a file extends asks */
-address fallback_of(const std::vector<ecu>& ecus)
-{
-    if (!ecus.empty()) {
-        return ecus.front().addr;
-    }
-    const ecuio_channel_decl_t& c = ecuio_obd2_signal_set()->channels[0];
-    address a;
-    a.rx = c.rx_id;
-    a.tx = c.tx_id;
-    return a;
-}
-
 /* A signal that reads a reply and names no ECU */
 bool unnamed(const Value& signal)
 {
@@ -523,11 +492,12 @@ struct package {
 };
 
 /* A put's work on the manifest's ECUs and the signals that name them */
-class ecu_merge
+class ecu_merge : private ecuio_ecus::joined
 {
 public:
+    /* have_ is the manifest's ECUs, then those added */
     ecu_merge(package& p, Value& file)
-        : p_(p), file_(file), have_(ecus_of(at(p.doc, "ecus")))
+        : joined(ecus_of(at(p.doc, "ecus"))), p_(p), file_(file)
     {}
 
     void run()
@@ -542,6 +512,7 @@ public:
             const ecu* same = at_address(t.addr);
             if (same != nullptr) {
                 id_here[t.id] = same->id;
+                keep_name(own_list.items[i], same->id);
                 if (same->id != t.id) {
                     notes_.push_back("the file's ecu " + q(t.id) +
                                      " is the plugin's " + q(same->id));
@@ -611,34 +582,17 @@ public:
     }
 
 private:
-    const ecu* at_address(const address& a) const
+    /* The file's name for a module the manifest's entry leaves unnamed */
+    void keep_name(const Value& theirs, const std::string& id)
     {
-        for (const ecu& e : have_) {
-            if (e.addr == a) {
-                return &e;
-            }
+        const Value* name = theirs.find("name");
+        Value* list = at(p_.doc, "ecus");
+        if (name == nullptr || list == nullptr) {
+            return;
         }
-        return nullptr;
-    }
-
-    bool taken(const std::string& id) const
-    {
-        for (const ecu& e : have_) {
-            if (e.id == id) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /* "<id>_2", "_3" and on, the id cut so an ECU id's 31 bytes hold it */
-    std::string free_id(const std::string& id) const
-    {
-        for (unsigned n = 2;; ++n) {
-            const std::string tail = "_" + std::to_string(n);
-            const std::string candidate = id.substr(0, 31 - tail.size()) + tail;
-            if (!taken(candidate)) {
-                return candidate;
+        for (Value& e : list->items) {
+            if (e.find("id")->text == id && e.find("name") == nullptr) {
+                add(e, "name", *name);
             }
         }
     }
@@ -673,7 +627,6 @@ private:
 
     package& p_;
     Value& file_;
-    std::vector<ecu> have_;    /* the manifest's, then those added */
     std::vector<Value> added_; /* joined to the manifest at the end */
     std::vector<std::string> notes_;
 };

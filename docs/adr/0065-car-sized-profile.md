@@ -5,8 +5,9 @@
   "1024 requests"). As of 2026-11-20, v0.9.0 also builds steps 1 to 3
   (the layout and constants, tables from the set, keys and recording
   format 4), the simulated car of step 6 and the hold of the appendix
-  below. Not built, v0.9.1's: step 4 (the merged set, `needs` and
-  signal-file format 3), step 5 (the pick opens modules), step 7 (a
+  below. Built for v0.9.1: step 4 (the merged set, `needs` and
+  signal-file format 3; the appendix "step 4 as built"). Not built,
+  v0.9.1's: step 5 (the pick opens modules), step 7 (a
   vehicle's plugins read together) and step 8 (faster), and the
   simulated car's `vcan` cases.
 - **Date:** 2026-11-15.
@@ -689,7 +690,7 @@ the tables:
 | The ABI | `test_c_abi.c` on both widths, `test_signals`, abidiff | The decl's 16 bytes and its reserved words refused when set; layout 4 refused; the info's size, its first four pairs and `module_count`; the getter past the count; every struct the reports use, unchanged; a set with a repeated name validates, and a format 1 or 2 file with one is still refused |
 | Tables from the set | Unit (`RequestEngineTest`, `CoreTest`) | A set of several thousand requests with a pick of 20: the engine's table and the timing pool's sizes; a row taken at first ask and kept; a pick past the pool refused with nothing changed; an unranked set past the pool asked for nothing; no allocation on the worker (`WorkersAllocateNothingPerFrame`) |
 | The ceilings | Unit (the signal-file and plugin suites), fuzz | A module past 1024 requests, a set past its signals or its copy's bytes, a 33rd module: each refused with its words; a variant of several data files past one file's 1024 signals loads, writes its copy and reads it back |
-| The merge | Unit (a suite of its own in `test_core`), `fuzz_signal_file`'s corpus through the merge | Each rule (the same key, the same address, added), the order and the own variant last; a name alone never replaces, and two signals of one name are both kept under it; a base def never replaced, by a DID of its name, by a signal at its address or by a format 1 or 2 part that names it, which is added beside it with its note; a format 3 part merged alone equal to the part's set; each part's `source` and its share-alike flag read back, a replacing signal's part its own; each note's words; modules joined by their IDs, renamed, left out; a replaced key found again; an expression across parts, `needs` met and unmet and a chain left out; the parts, each def's part and the notes; deterministic bytes; the text read back to the same set; every refusal's words |
+| The merge | Unit (`MergeTest` and the format 3 suites in `test_signals`, `MergeSessionTest` in `test_core`), `fuzz_signal_merge`, `fuzz_signal_file`'s corpus through the merge | Each rule (the same key, the same address, added), the order and the own variant last; a name alone never replaces, and two signals of one name are both kept under it; a base def never replaced, by a DID of its name, by a signal at its address or by a format 1 or 2 part that names it, which is added beside it with its note; a format 3 part merged alone equal to the part's set; each part's `source` and its share-alike flag read back, a replacing signal's part its own; each note's words; modules joined by their IDs, renamed, left out; a replaced key found again; an expression across parts, `needs` met and unmet and a chain left out; the parts, each def's part and the notes; deterministic bytes; the text read back to the same set; every refusal's words |
 | Live modules | Unit (`RequestEngineTest`), Harness (`test_j2534_*`, `test_elm327`, `test_vcan`) | A module opened by a pick and closed when nothing picks it; a module nothing picks sent nothing; never more than the cap outstanding; the longest-waiting module takes the slot; a refused filter leaves one module closed and the rest open (a fake DLL knob); the ELM327 filter sent again on a change |
 | The simulated car | Unit (`SimEcuTest`, `SimAskTest`, `SimDidsTest`), Harness on `vcan` (`SimBusTest`) | 32 nodes from a set; a functional request answered by each; a fault on one module alone and each module's own count; one session reading the made-up car whole, a segmented reply from two modules at once |
 | Faster | Unit, Harness | Section 11's raise, back-off and hold at each signal; `?inflight=`; `AT SH` counted for each order on the fake ELM327; three fake DLL knobs (filters refused past a count, a module busy past a number of requests out, Known Issue #42's shape) |
@@ -1234,3 +1235,183 @@ Through an ELM327 a module that answers nothing costs every other module its wai
 - **The written copy's bytes:** 264.8 a signal for the generated set and 91.0 for `example-car`'s `whole` variant, about 15,800 and 46,100 signals in 4 MiB.
 
 The figures are the model's inputs; none is a car's, the phone's or the VX's.
+
+## Appendix: step 4 as built (2026-11-22)
+
+Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
+(`havne_signals` 3). A plugin's manifest keeps its own format number
+(`havne_plugin`, ADR-0052, ADR-0066): step 4 raises none.
+
+- **The merge composes, then loads.** Each part's own text is parsed
+  again, section 9's rules are applied to its signals as JSON, one format
+  3 text is written and the signal-file loader reads it at a set's
+  bounds. The loaded file is the result, so the text reads back to the
+  same set by construction, the loader's rules and words are the only
+  ones, and no writer from a def back to JSON exists. A signal's address
+  and kind come from the part's loaded set (its def by key), never from
+  the JSON, so the address rule is the address key's own. A refusal by
+  the loader of a text the composer wrote is the composer's defect: it
+  answers "the merged set doesn't read back: ..." and `fuzz_signal_merge`
+  stops on those words.
+- **The calls (section 9 left the names to the build).**
+  `ecuio_signal_file_merge(parts, count, options, out)` with
+  `ecuio_merge_options_t` (32 bytes) and `ECUIO_MERGE_BASE_OBD2`;
+  `ecuio_signal_file_part_count`, `ecuio_signal_file_part`
+  (`ecuio_signal_part_t`, 248 bytes: the part's format, its counts of
+  signals and modules in the set, its profile, name and plugin),
+  `ecuio_signal_file_part_source`, `ecuio_signal_file_def_part`,
+  `ecuio_signal_file_replaced_keys`, `ecuio_signal_file_module`
+  (`ecuio_signal_module_t`, 136 bytes), `ecuio_signal_file_needs`,
+  `ecuio_signal_file_note_count` and `ecuio_signal_file_note`
+  (`ecuio_signal_note_t`, 424 bytes). No status code is added: every
+  refusal is `ECUIO_ERR_INVALID_ARGUMENT` with its words. No existing
+  struct grew and the set's layout is unchanged.
+  `ECUIO_SIGNAL_FILE_FORMAT` is 3 and means the newest format read; a
+  check of an expression still answers format 1 or 2, since format 3 adds
+  no grammar, so a file that uses nothing of format 3 is never raised to
+  it.
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | The calls and structs above, `ECUIO_MERGE_BASE_OBD2` and the note kinds | Additive | New names only; the note kinds are an append-only list |
+  | `ECUIO_SIGNAL_FILE_FORMAT` 2 to 3, beside `ECUIO_SIGNAL_FILE_FORMAT_OLDEST` (1) | Constant change | The newest format this core reads; one line in `abi/api_changes.txt` |
+
+- **Format 3 against formats 1 and 2.**
+
+  | | Formats 1 and 2 | Format 3 |
+  |---|---|---|
+  | A name twice in a file | refused | taken |
+  | A signal named as an `obd2` signal | replaces it, takes its ID | a second signal of that name |
+  | Two own signals at one address | taken (the later under its author's key) | refused, as two of one key are |
+  | `needs` | refused, naming format 3 | optional |
+  | `parts`, a signal's `part` and `replaced`, an ECU's `part` | refused, naming format 3 | a merged set's |
+  | The expression grammar | 1's, then 2's | 2's, unchanged |
+  | The oldest core that reads it | 0.5.0, 0.8.0 | 0.9.1 |
+
+  An ECU's `name` (1 to 63 bytes, no formula start) is taken in a signal
+  file and a manifest of any format, with a least-core row of its own
+  (0.9.1), as `gauge` came into format 1. A plugin variant that mixes a
+  format 3 file with format 1 or 2 files is a format 3 set, and a format
+  1 or 2 file's signal named as an `obd2` signal is refused there in
+  words ("give every file of it \"havne_signals\": 3"), never moved
+  silently.
+- **`needs` as built.** A list of keys, each given once, none the file
+  defines, each read by an expression (a need nothing reads is refused as
+  a typing error). The file is built twice: every signal is judged with
+  each needed key standing for a number, so the rest of such an
+  expression is still judged; then the set is built from the signals
+  that wait for none, so their IDs are consecutive and a format 3 part
+  merged alone gives its own set byte for byte. A file may load with none
+  of its signals kept. A variant meets one file's need from another of
+  its files, and its written copy keeps the needs no file of it meets.
+  Each signal left out has a note.
+- **A merged set's written form.** `parts` (1 to 16 entries: `profile`,
+  `name`, `format`, an optional `plugin` of `id`, `version` and
+  `variant`, and the part's `source` whole), each signal's `part` and its
+  `replaced` keys, an ECU's `part` (whose id stands). With `parts`:
+  every signal names a part; no `needs`; the file's own `source` holds
+  its `name` alone, the rest refused; two signals at one address are
+  refused across parts and inside a format 3 part, and taken when both
+  are one format 1 or 2 part's. A file with no `parts` takes none of
+  these keys. `ecuio_signal_file_find` answers a replaced key, an
+  expression reads one, and a `max_age` on one is judged by the signal
+  that stands for it. A merged set is never imported and never a part: a
+  plugin's data file, `ecuio_plugin_wrap`, `ecuio_plugin_put_variant` and
+  the merge each refuse one (the merge: "merge its parts instead"; a wrap
+  and a put: "import its plugins"), since a wrap would move one `source`
+  to the manifest and lose each part's.
+- **The profile's exact input.** `merged.` and the first 16 hex digits of
+  the SHA-256 of: `obd2` and a line feed when the set extends obd2, then
+  each part's profile name and a line feed, in merge order. The base is
+  in it because the same parts with and without obd2 are two sets. A part
+  left out stays in `parts` and in the name: the name follows the picks,
+  not their outcome. The loader works the same name out from a text's
+  `parts` and `extends`, so a copy read back has the profile it was
+  recorded under. The file's name is "N parts read together" ("1 part
+  read alone") and its source "A merge of N parts".
+- **Where section 9 left a choice, or reads otherwise.**
+  - *A module's name* is the earliest part's that gives one, not the
+    earliest part's entry whole: an import with no names picked ahead of
+    a package with names would otherwise show every module by its id.
+    The id is the earliest part's.
+  - *An own key beats a second key.* A later part's signal whose key
+    another signal only kept for one it replaced takes that key
+    (`ECUIO_NOTE_KEY_TAKEN`) and is otherwise judged by its address or
+    added: the replaced signal is gone, and the part that defines the
+    key afresh is its newest definer.
+  - *A signal matching one earlier signal by key and another by address
+    replaces both,* in the key match's place, with a note for each. The
+    alternative leaves two parts' signals at one address.
+  - *`obd2.<key>` reads obd2's in every part.* A format 1 or 2 part that
+    alone stood in an obd2 signal's place has that signal beside obd2's
+    in the merged set, and its own expressions that name `obd2.<key>`
+    read the standard signal; the note names them.
+  - *One module asked more than 1024 requests by the parts together* is
+    refused, naming the module and the count: a ceiling of section 3.
+  - *The notes are not in the text.* They describe one merge, not the
+    set: a copy read back has its parts, each def's part and the
+    replaced keys, and no notes.
+  - *The own variant last* is the caller's ordering (step 7): core
+    merges the parts in the order given and knows no vehicle.
+  - *A module a part names is one of the set's, whatever reads it.* It
+    takes one of the `ECUIO_MAX_CHANNELS` places and an entry in the
+    written `ecus`, also when every signal on it was replaced or left
+    out. The modules stand in the order the parts name them, the base's
+    first; which of them a session opens is step 5's rule, not this
+    order.
+- **What is left out, never refused.** A module whose reply ID an earlier
+  one answers under another request ID, a module past
+  `ECUIO_MAX_CHANNELS` and a part of the other ID width (the first part
+  with an ECU sets the width when no base does), each with its signals
+  counted. A computed signal that reads a key no signal has (said as
+  "which its part needs and no part gives" for a need), a text, or a
+  signal left out; that names in `max_age` what is a computed signal in
+  the set; that sits on a circle through any parts or past
+  `ECUIO_COMPUTED_MAX_DEPTH`; and each signal computed from one left
+  out. A signal that replaced another and is then left out takes the
+  replaced key with it: both notes are given, and nothing brings the
+  replaced signal back.
+- **What is refused.** No part, more than 16, a part given twice or two
+  parts of one profile, a merged set as a part, a part with no text (a
+  variant whose copy doesn't read back), options this core doesn't know;
+  no signal left to read; past 16,384 signals or replaced keys, 4 MiB of
+  text, 65,536 enum labels, or 1024 requests of one module with the
+  base's counted.
+- **The notes.** A record for each: a kind (`ECUIO_NOTE_REPLACED_BY_ADDRESS`
+  1, `_REPLACED_BY_KEY` 2, `_KEY_TAKEN` 3, `_BESIDE_BASE` 4,
+  `_MODULE_RENAMED` 5, `_MODULE_LEFT_OUT` 6, `_PART_LEFT_OUT` 7,
+  `_SIGNAL_LEFT_OUT` 8), the part it is about and the other signal's
+  part, the def that stands where the note's signal was (through later
+  replacements; none for what is left out), a left-out module's or
+  part's count of signals, and a sentence of at most 383 bytes with no
+  control character. A sentence names a signal as `'Name' (Part name)`,
+  a part's name cut to 40 bytes at a character, and an address as the
+  module (its name, else its id in upper case), the service, the PID or
+  DID and the field's byte. A replacement also says how many computed
+  signals read the replaced key and, when any does and the units differ,
+  both units: "'Boost' (My car signals) replaces 'Boost' (Example import)
+  by its key 'boost'; it reads another address; 2 computed signals read
+  'boost'; unit 'kPa', was 'psi'". A `_BESIDE_BASE` note follows its
+  signal as the others do: when a later part's signal took its place the
+  sentence names both ("'Boost' (My car signals) is read beside obd2's
+  'Boost' in the place of 'Boost' (Example import)") and the def is the
+  one that stands, so what showed the one can show the other. Its
+  `base_def` is obd2's def's place in the set (`UINT32_MAX` in a note
+  of any other kind), so a front end knows which obd2 signal the
+  standing one is read beside without reading the sentence. With
+  nothing standing there the note isn't given.
+- **A recording** of a session on a merged set copies the merged text as
+  its `signals.json`, past a data file's megabyte too, and writes one
+  `plugin` line for each part that is a plugin's variant, in merge order,
+  and none for a file read alone. A replay through the copy decodes
+  under the same profile.
+- **The suites** are in `test_signals` beside the loader's
+  (`SignalFileFormat3Test`, `SignalNeedsTest`, `MergedTextTest`,
+  `MergeTest`), with `MergeSessionTest` in `test_core` (every allocation
+  of a merge failed once; a session decoding a merged set) and
+  `c_abi_merge`; `fuzz_signal_merge` merges up to four fuzzed files, and
+  `fuzz_signal_file` merges each file it loads alone.
+- **Left to later steps.** The module lines and the health report's
+  modules from a recording (step 5); the own variant's place, the
+  vehicle's picks merged on a change, `--together`, `plugins together`
+  and `SignalFile.merge` (step 7).

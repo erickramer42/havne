@@ -3,6 +3,8 @@
 
 #include "test_signal_expr_support.h"
 
+#include "signal_expr.h" /* core/src: the grammar's format */
+
 TEST(SignalExprTest, ACheckRefusesItsArgumentsApartFromTheExpression)
 {
     File f = load(file_of(2));
@@ -402,4 +404,56 @@ TEST(SignalExprTest, AnAgeBoundOnAStandInIsWordedByTheNameItIsReadBy)
         EXPECT_NE(c.detail.find(r.words), std::string::npos) << c.detail;
         EXPECT_EQ(c.out.at, 1u) << name;
     }
+}
+
+// A check's format is the grammar's, which format 2 changed last: a
+// form's file that uses nothing of a later format is never raised to it
+TEST(SignalExprTest, ACheckAnswersNoFormatPastTheGrammars)
+{
+    EXPECT_EQ(ecuio_sf::kGrammarFormat, 2u);
+    EXPECT_GT(ECUIO_SIGNAL_FILE_FORMAT, ecuio_sf::kGrammarFormat);
+    for (int format = 1; format <= static_cast<int>(ECUIO_SIGNAL_FILE_FORMAT);
+         ++format) {
+        File f = load(file_of(format));
+        ASSERT_TRUE(f) << format << ": " << ecuio_last_error_detail();
+        const Checked plain = check(f.get(), nullptr, "a + b");
+        EXPECT_EQ(plain.status, ECUIO_OK) << plain.detail;
+        EXPECT_EQ(plain.out.format, 1u) << "in a format " << format << " file";
+        const Checked call = check(f.get(), nullptr, "max(a, b)");
+        EXPECT_EQ(call.status, ECUIO_OK) << call.detail;
+        EXPECT_EQ(call.out.format, 2u) << "in a format " << format << " file";
+    }
+}
+
+// A file with "needs" is checked as it stands alone: an expression that
+// reads a needed key, or a signal left out for one, is refused in words
+// that say where it can be checked
+TEST(SignalExprTest, AnExpressionOverANeedIsRefusedInItsWords)
+{
+    File f = load(file_of(3, {computed("w", "a + x"), computed("e", "w * 2")},
+                          "\"needs\":[\"x\"],"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+
+    const Checked needed = check(f.get(), nullptr, "b + x");
+    EXPECT_EQ(needed.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(needed.detail,
+              "the expression reads 'x', which this file needs from another: "
+              "check it against the set the files make together");
+    EXPECT_EQ(needed.out.at, 5u);
+
+    for (const char* gone : {"w", "e"}) {
+        const Checked waiting =
+            check(f.get(), nullptr, std::string(gone) + " + 1");
+        EXPECT_EQ(waiting.status, ECUIO_ERR_INVALID_ARGUMENT) << gone;
+        EXPECT_EQ(waiting.detail,
+                  "the expression reads '" + std::string(gone) +
+                      "', which is left out until another file gives what it "
+                      "reads: check it against the set the files make "
+                      "together");
+        EXPECT_EQ(waiting.out.at, 1u);
+    }
+
+    EXPECT_EQ(check(f.get(), nullptr, "nope + 1").detail,
+              "the expression reads 'nope', which no signal is");
+    EXPECT_EQ(check(f.get(), nullptr, "a + b").status, ECUIO_OK);
 }
