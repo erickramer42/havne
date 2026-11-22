@@ -27,8 +27,8 @@
 //      repeating); a channel with no rows (nothing picked of it) asks one
 //      of its unanswered items in turn in the row's place, at every step
 //      once heard, at the first four never heard. Held channels ask
-//      ECUIO_ENGINE_QUIET_SPACING_US apart, and none ahead of a later
-//      channel whose step passed first.
+//      ECUIO_ENGINE_QUIET_SPACING_US apart, and none ahead of another
+//      whose step passed first.
 //      What isn't held: a session's request, a key or talk, the walk, a
 //      clear, the unpicked check, a one-shot already in the slot.
 //   4. Held, its unasked identification, diagnostics and scan items settle
@@ -189,16 +189,17 @@ inline bool ecuio_engine_quiet_steps(const ecuio_request_engine* e, uint32_t c)
 }
 
 /* When held channel ch's next ask may go: its step passed and the spacing
- * since any held channel's last; INT64_MAX while a later channel's step
- * passed first. Each worker reaches the channels in their order (an
- * ELM327's turns, the others' passes), so the oldest goes next and none
- * starves when the slots are short (an ELM327 lap holds about one) */
+ * since any held channel's last; INT64_MAX while another channel's step
+ * passed first. The oldest goes next whatever order a worker reaches the
+ * channels in (an ELM327's turns and SocketCAN's pass start past the last
+ * asked), so none starves when the slots are short (an ELM327 lap holds
+ * about one) */
 inline int64_t ecuio_engine_quiet_due_us(const ecuio_request_engine* e,
                                          const ecuio_engine_channel& ch)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         const ecuio_engine_channel& o = e->chans[k];
-        if (&o > &ch && o.quiet && o.quiet_next_us < ch.quiet_next_us &&
+        if (&o != &ch && o.quiet && o.quiet_next_us < ch.quiet_next_us &&
             ecuio_engine_quiet_steps(e, k)) {
             return INT64_MAX;
         }

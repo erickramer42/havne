@@ -26,6 +26,23 @@ std::vector<int64_t> times_of(const Adapter& a, uint32_t c, size_t k = 0)
     return out;
 }
 
+/* A channel's asks past from_us, and the worst gap from an ask past it */
+struct Late {
+    size_t asks = 0;
+    int64_t worst = 0;
+};
+
+Late late_of(const std::vector<int64_t>& t, int64_t from_us)
+{
+    Late l;
+    for (size_t i = 1; i < t.size(); ++i) {
+        l.asks += t[i] > from_us ? 1 : 0;
+        l.worst =
+            t[i - 1] > from_us ? std::max(l.worst, t[i] - t[i - 1]) : l.worst;
+    }
+    return l;
+}
+
 size_t asked_between(const Adapter& a, uint32_t c, int64_t from, int64_t to)
 {
     size_t n = 0;
@@ -473,16 +490,9 @@ TEST(RequestQuietTest, ManyQuietChannelsTakeTheirStepsInTurn)
     SideBySide b(30);
     ASSERT_NO_FATAL_FAILURE(b.until(120000 * kMs));
     for (uint32_t c = 1; c < 30; ++c) {
-        const std::vector<int64_t>& t = b.asked[c];
-        size_t late = 0;
-        int64_t worst = 0;
-        for (size_t i = 1; i < t.size(); ++i) {
-            late += t[i] > 30000 * kMs ? 1 : 0;
-            worst = t[i - 1] > 30000 * kMs ? std::max(worst, t[i] - t[i - 1])
-                                           : worst;
-        }
-        EXPECT_GE(late, 12u) << "channel " << c;
-        EXPECT_LE(worst, 29 * 250 * kMs + 10 * kMs) << "channel " << c;
+        const Late l = late_of(b.asked[c], 30000 * kMs);
+        EXPECT_GE(l.asks, 12u) << "channel " << c;
+        EXPECT_LE(l.worst, 29 * 250 * kMs + 10 * kMs) << "channel " << c;
     }
 }
 
@@ -598,15 +608,116 @@ TEST(RequestQuietTest, AnElm327sTurnsAskTheQuietModulesInTurn)
     };
     a->until(70000 * kMs);
     for (uint32_t c = 4; c < 18; ++c) {
-        const std::vector<int64_t> t = times_of(*a, c);
-        size_t late = 0;
-        int64_t worst = 0;
-        for (size_t i = 1; i < t.size(); ++i) {
-            late += t[i] > 15000 * kMs ? 1 : 0;
-            worst = t[i - 1] > 15000 * kMs ? std::max(worst, t[i] - t[i - 1])
-                                           : worst;
+        const Late l = late_of(times_of(*a, c), 15000 * kMs);
+        EXPECT_GE(l.asks, 5u) << "channel " << c;
+        EXPECT_LE(l.worst, 9500 * kMs) << "channel " << c;
+    }
+}
+
+/* The oldest step goes first whatever channel a lap starts at: an ELM327's
+ * turn starts past the last one's, so with the modules that answer at 4-7
+ * every lap reaches 8-17 before 0-3. Waiting only for a later channel left
+ * 0-3 unasked from 15 s. */
+TEST(RequestQuietTest, QuietModulesBelowTheLiveOnesAreAskedInTurn)
+{
+    auto a = adapter(18);
+    for (uint32_t c = 0; c < 18; ++c) {
+        dids(&a->e, c, 4);
+    }
+    a->exchange_us = 30 * kMs;
+    a->ecus = [](uint32_t c, const Bytes& q) {
+        return (c >= 4 && c < 8) ? answer(q) : Bytes{};
+    };
+    a->until(70000 * kMs);
+    for (uint32_t c = 0; c < 18; ++c) {
+        if (c >= 4 && c < 8) {
+            continue;
         }
-        EXPECT_GE(late, 5u) << "channel " << c;
-        EXPECT_LE(worst, 9500 * kMs) << "channel " << c;
+        const Late l = late_of(times_of(*a, c), 15000 * kMs);
+        EXPECT_GE(l.asks, 5u) << "channel " << c;
+        EXPECT_LE(l.worst, 9500 * kMs) << "channel " << c;
+    }
+}
+
+namespace {
+
+/* SocketCAN's pass: one request at a time, the first due from the channel
+ * after the last asked. Channel 1's 4 rows are answered 10 ms after each
+ * write; the others, 4 rows each, answer nothing. */
+struct Rotating {
+    ecuio_request_engine e;
+    std::vector<std::vector<int64_t>> asked; /* each channel's writes */
+    int64_t now = 0;
+    int64_t answer1 = INT64_MAX;
+    uint32_t next_chan = 0;
+    explicit Rotating(uint32_t chans) : asked(chans)
+    {
+        EXPECT_TRUE(ecuio_engine_init(&e, chans));
+        for (uint32_t c = 0; c < chans; ++c) {
+            dids(&e, c, 4, static_cast<int>(0x10 * c));
+        }
+    }
+    void answer_1()
+    {
+        const ecuio_request& q = e.requests[e.chans[1].outstanding];
+        const Bytes r = answer(Bytes(q.bytes, q.bytes + q.len));
+        (void)ecuio_engine_on_frame(
+            &e, 1, r.data(), static_cast<uint16_t>(r.size()), now, nullptr);
+        answer1 = INT64_MAX;
+    }
+    /* The first request due from next_chan on, sent; false with none */
+    bool send_due()
+    {
+        for (uint32_t k = 0; k < e.chan_count; ++k) {
+            const uint32_t c = (next_chan + k) % e.chan_count;
+            const int32_t r = ecuio_engine_due(&e, c, now);
+            if (r != ECUIO_ENGINE_NONE) {
+                ecuio_engine_sent(&e, c, r, true, now);
+                asked[c].push_back(now);
+                answer1 = c == 1 ? now + 10 * kMs : answer1;
+                next_chan = (c + 1) % e.chan_count;
+                return true;
+            }
+        }
+        return false;
+    }
+    void until(int64_t t_us)
+    {
+        while (now < t_us) {
+            for (uint32_t c = 0; c < e.chan_count; ++c) {
+                (void)ecuio_engine_expire(&e, c, now);
+            }
+            if (now >= answer1) {
+                answer_1();
+            }
+            if (send_due()) {
+                now += kMs; /* the echo */
+                continue;
+            }
+            const int64_t next = ecuio_engine_next_event_us(&e, now);
+            const int64_t step = std::min(next, answer1 - now);
+            ASSERT_NE(step, INT64_MAX);
+            now += std::max<int64_t>(step, 1);
+        }
+    }
+};
+
+} // namespace
+
+/* SocketCAN's pass starts past the last channel asked, nearly always the
+ * one that answers, so channel 0 below it is reached last: the oldest step
+ * going first, it is asked in turn with the 30 above it. Waiting only for
+ * a later channel left it unasked from 30 s. */
+TEST(RequestQuietTest, SocketCansPassAsksAQuietModuleBelowTheLiveOne)
+{
+    Rotating b(32);
+    ASSERT_NO_FATAL_FAILURE(b.until(120000 * kMs));
+    for (uint32_t c = 0; c < 32; ++c) {
+        if (c == 1) {
+            continue;
+        }
+        const Late l = late_of(b.asked[c], 30000 * kMs);
+        EXPECT_GE(l.asks, 10u) << "channel " << c;
+        EXPECT_LE(l.worst, 31 * 250 * kMs + 10 * kMs) << "channel " << c;
     }
 }
