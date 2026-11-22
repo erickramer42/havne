@@ -30,7 +30,7 @@ app/signallistmodel.cpp	sliced	-	43
 cli/clear_run.h	run_clear	138	56
 cli/cmd_check.cpp	run_conditions_check	117	-
 cli/cmd_health.cpp	run_health_session	117	-
-cli/cmd_sim.cpp	run_sim_elm327	90	-
+cli/cmd_sim.cpp	run_sim_elm327	88	-
 cli/cmd_stream.cpp	run_stream	307	80
 cli/cmd_view.cpp	run_view	497	255
 cli/diagnostics_line.h	diagnostics_line	139	65
@@ -106,7 +106,7 @@ core/src/request_setup.h	ecuio_build_requests	167	57
 core/src/signal_expr.cpp	call	-	43
 core/src/signal_expr.cpp	emit	-	41
 core/src/signal_expr.cpp	factor	104	50
-core/src/signal_file.cpp	build	372	199
+core/src/signal_file.cpp	build	372	193
 core/src/signal_file_parts.cpp	read_ecus	84	65
 core/src/signal_file_parts.cpp	read_field	118	45
 core/src/signals.cpp	ecuio_decode_signal	89	-
