@@ -297,9 +297,9 @@ They shape what Havne asks the car.
 | `packframes` | 1 to 15 | no limit | The most CAN frames a packed request's reply may take: `1` packs only what fits one frame. For an adapter that is slow after a reply of several frames. Refused with `pack=0`, `probe=0` or `poll=`. |
 | `scan` | `turns` or `first` | `turns` | With `uds-generic` ranges: `turns` alternates the scan with the polled DIDs, `first` asks the whole scan before polling. `first` is refused with any other profile. |
 | `gap` | `0` to `1000`, decimal ms | the transport's floor (5 ms on `j2534://`, 20 ms on `elm327://` and `socketcan://`) | The least time between the starts of two requests on a channel. |
-| `hold` | `0` or `1` | 1 | `j2534://` only, with two or more modules: no other module is asked while one module's reply comes in segments, since the OBDX Pro VX loses replies then. `0` turns it off for an adapter that doesn't. |
+| `hold` | `0` or `1` | 1 | `j2534://` only, with two or more modules: no other module is asked while one module's reply comes in segments, since the OBDX Pro VX loses replies then. A reading a module has never answered stops holding the others from its second unanswered ask. `0` turns it off for an adapter that doesn't. |
 | `session` | `01` or `03` | `01` | With `uds-generic`: `03` enters the extended diagnostic session before the reads, keeps it alive, and returns to the default session at the end. A module that refuses it is read in the default session, with the refusal named. `01` sends no session request. `03` is refused with any other profile. The value is a number, so `3` and `0x03` are `03`. |
-| `keepalive_ms` | 500 to 4500 | 2000 | How long with nothing sent before a tester-present goes out. Needs `session=03`. |
+| `keepalive_ms` | 500 to 4500 | 2000 | How long with nothing sent before a tester-present goes out. A module's readings keep its session too, so one with readings due sends none; through an ELM327 with many modules a tester-present can wait for a free exchange until 4 s after the module's last request (or `keepalive_ms`, if longer). Needs `session=03`. |
 
 Channels, whether from the profile or from `filter` and `txid`, must all
 be 11-bit or all 29-bit. A session with nothing to ask and no channel
@@ -319,7 +319,7 @@ plays, not a session to read one with.
 
 | Address | Meaning |
 |---|---|
-| `mock://sim[?values=drive\|canned][&modules=1\|2][&profile=<name>][&vin=<VIN>][&faults=<list>]` | The simulated car: moving `drive` values (the default) or fixed `canned` ones; `modules=2` adds a second module; `profile=` serves a profile's DIDs, and isn't taken with `modules=2`. |
+| `mock://sim[?values=drive\|canned][&modules=1\|2][&profile=<name>][&vin=<VIN>][&faults=<list>]` | The simulated car: moving `drive` values (the default) or fixed `canned` ones; `modules=2` adds a second module; `profile=` serves a profile's DIDs, and isn't taken with `modules=2`; `sessions=1` (only with `profile=`) gives the profile's modules the extended session. |
 | `replay://<absolute path>[?loop=0\|1][&from=<s>][&to=<s>][&vin=<VIN>][&faults=<list>]` | A recording's replies, played as an engine ECU. |
 
 - `vin=` is 17 characters of the VIN alphabet, upper case, with no I, O

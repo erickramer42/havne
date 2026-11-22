@@ -1171,6 +1171,37 @@ second with the slowest signal's median at 1,573 ms; the order gives 137.4
 and 721 ms, and the first laps lose no reply. The figures are the model's;
 no car run has measured them.
 
+### Rows a module never answers (2026-11-22)
+
+A module that answers some rows and never others is no quiet module (the
+appendix of 2026-11-21), so each of its unanswered rows held a chosen
+segmented request for its whole wait on every lap: beside 8, 20 and 40
+long rows, a module of 8 answering every second row slowed the long rows
+from 196, 490 and 980 ms to 574, 1,436 and 2,874 (the pacing model).
+Under the hold such a row holds no chosen request from its second wait
+in a row run out before any answer, but on every eighth, which is asked
+under the hold. A flag set at the first wait run out can't tell a row its
+module never answers from a reply the VX lost before the hold learned
+another module's length: the hold would then let that row's next replies
+go beside a segmented one and lose them, and the row would never be
+answered to clear the flag. So `ran_out` counts a row's waits run out in
+a row (an answer, a waking or a rescan zeroes it), the silent channel's
+rule one row at a time: one lost reply leaves the row protected, and a
+row its module begins to answer is read at its next ask under the hold,
+within eight asks. A channel in a run of waits run out stays under the
+silent channel's own rule, whose probes ask its rows under the hold.
+Built, the long rows read every 164, 393 and 786 ms (197, 492 and 983
+with every row answered), none lost; the module's own answered rows read
+every 492 to 586 ms (197 with every row answered), the cost of its
+unanswered rows' waits (the pacing model, the VX's loss on).
+`J2534HoldTest.RowsAModuleNeverAnswersHoldNoChosenRequest`,
+`.ARowThatStartsAnsweringIsReadByItsNextAskUnderTheHold`,
+`RequestEngineTest.ARowsWaitsRunOutBeforeAnyAnswerAreCountedForEver`;
+`J2534HoldTest.AModuleAnsweringInsideTheOthersReplyStaysProtected`,
+`.ARowWhoseFirstReplyWasLostCostsOneExchange` and
+`.AModuleBackFromSilenceIsProtectedAgain` hold the protection. No car
+run has measured it.
+
 ## Appendix: notes from the review pass (2026-11-20)
 
 - **Section 9, "Keys stay stable":** of two defs at one address the earlier in the set's order keeps the address key, whichever was written first; the other goes by its author's key (or `id:<n>`). A signal placed ahead of another at its address takes the key, and a vehicle's ticks and later recordings follow it. `signals.h` states the rule; `SignalKeysTest.TheEarlierOfTwoAtOneAddressKeepsTheAddressKey` pins it both ways.
@@ -1189,3 +1220,5 @@ Through an ELM327 a module that answers nothing costs every other module its wai
 - **Accepted:** the earliest-first order spends fewer of a lap's held slots than channel order, so with 16 absent beside 16 present each absent module is asked about every 9 s and the present modules' values update every 763 ms (1,104 ms in channel order). Under `?hold=0` a module answering every second row at Known Issue #42's loss goes quiet on a run of its rotation with 2 s of silence, and its worst gap grows (the model: 6.5 to 12.2 s); the hold, on by default, keeps it.
 - **The figures** (the pacing model; no car run): through the MX+ the engine ECU's values keep their pace alone (164 ms) beside silent modules where they took 0.28 to 6.3 s; a connect beside 14 absent modules shows the others' first values at 5.2 s (12.7 s); under the hold the segmented rows keep 491 ms beside 1 to 28 absent modules (0.57 to 3.1 s).
 - **Left for v0.9.1:** a module that answers some rows and never others is no quiet, rightly, so under the hold its unanswered requests still hold a chosen segmented request.
+
+  > **Amended 2026-11-22:** such a row holds no chosen request from its second unanswered wait (the hold appendix's note "Rows a module never answers").
