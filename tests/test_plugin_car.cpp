@@ -144,6 +144,71 @@ TEST(PluginTest, TheMadeUpCarHoldsEighteenModulesOnMadeUpAddresses)
     EXPECT_EQ(named.size(), size_t{kModules}) << "each module's own name";
 }
 
+// Each module's manifest entry names it, in the words its name DID's
+// signal uses, and the file reads the name back by index
+TEST(PluginTest, TheMadeUpCarsModulesAreNamed)
+{
+    static const char* const kNames[kModules] = {
+        "Engine",       "Transmission",    "Brakes",     "Steering",
+        "Body",         "Cluster",         "Climate",    "Restraints",
+        "Gateway",      "Tire pressure",   "Steering column", "Driver door",
+        "Passenger door", "Seat",          "Park assist", "Camera",
+        "Radar",        "Audio"};
+    Car car;
+    Plugin p = load(car);
+    ASSERT_NE(p, nullptr);
+    const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p.get(), 0);
+    ASSERT_NE(file, nullptr);
+    for (uint32_t i = 0; i < kModules; ++i) {
+        SCOPED_TRACE(kIds[i]);
+        ecuio_signal_module_t m{};
+        m.struct_size = sizeof m;
+        ASSERT_EQ(ecuio_signal_file_module(file, i, &m), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_STREQ(m.name, kNames[i]);
+    }
+}
+
+// A format 3 file that needs one of the car's keys, merged after the car,
+// leaves the 18 modules named by the car (the earliest part that names one)
+TEST(PluginTest, TheMadeUpCarKeepsItsNamesThroughAMerge)
+{
+    static const char kNeeding[] =
+        R"({"havne_signals":3,"name":"A trip file","source":{"name":"made up"},)"
+        R"("needs":["abs_wheel_fl"],"signals":[{"key":"trip_wheel",)"
+        R"("name":"Trip wheel","kind":"computed","expr":"abs_wheel_fl * 2"}]})";
+    Car car;
+    Plugin p = load(car);
+    ASSERT_NE(p, nullptr);
+    const ecuio_signal_file_t* base = ecuio_plugin_variant_file(p.get(), 0);
+    ASSERT_NE(base, nullptr);
+    ecuio_signal_file_t* needing = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load_with(kNeeding, sizeof kNeeding - 1, 0,
+                                          &needing),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_file_t* parts[2] = {base, needing};
+    ecuio_signal_file_t* merged = nullptr;
+    ASSERT_EQ(ecuio_signal_file_merge(parts, 2, nullptr, &merged), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_NE(ecuio_signal_file_find(merged, "trip_wheel"), nullptr);
+    ASSERT_EQ(ecuio_signal_file_set(merged)->channel_count, kModules);
+    for (uint32_t i = 0; i < kModules; ++i) {
+        SCOPED_TRACE(kIds[i]);
+        ecuio_signal_module_t m{};
+        m.struct_size = sizeof m;
+        ASSERT_EQ(ecuio_signal_file_module(merged, i, &m), ECUIO_OK);
+        ecuio_signal_module_t own{};
+        own.struct_size = sizeof own;
+        ASSERT_EQ(ecuio_signal_file_module(base, i, &own), ECUIO_OK);
+        EXPECT_STRNE(m.name, "");
+        EXPECT_STREQ(m.name, own.name);
+        EXPECT_EQ(m.part, 0u);
+    }
+    ecuio_signal_file_free(merged);
+    ecuio_signal_file_free(needing);
+}
+
 // Every number and computed signal of the car's own gives a gauge (a dial
 // starts on its range, not a guess) and no text or enumeration does; a few
 // are ranked, so a session with no pick asks something
