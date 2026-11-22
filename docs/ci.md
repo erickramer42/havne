@@ -83,8 +83,9 @@ with a 504 come from the cache the same way: Gradle's distribution and
 the Android build's dependencies (keyed on the Qt version, whose
 template pins them) and linuxdeploy's pinned files (keyed on
 `make-appimage.sh`). The compiler caches (sccache in `win-build`,
-`win-coverage`, `macos-build` and `linux-build`; the Windows jobs and
-`linux-build` build with Ninja for it) save the same way:
+`win-coverage`, `macos-build`, `linux-build`, `core-and-tests`,
+`core-sanitizers` and `fuzz`; the Windows jobs and `linux-build` build with
+Ninja for it) save the same way, except the last three:
 
 - **Each job's first shard** (`win-coverage`'s gtest leg) saves its
   cache right after the build, before the tests, under the run's own
@@ -95,6 +96,11 @@ template pins them) and linuxdeploy's pinned files (keyed on
   the default branch's. A lane branch's first run therefore compiles
   against `main`'s last entry, and its reruns and later commits against
   its own.
+- **`core-and-tests`, `core-sanitizers` and `fuzz`** key their entries
+  `sccache-<job>-3-<ISO week>-<run id>` and save on `main`'s and `dev`'s
+  runs only (when the build compiled 20 or more objects); every other run,
+  a lane branch's, a PR's and a fork's, only restores: this week's newest
+  entry of its job, else the newest of any week.
 - **Each cache is capped** at 500 MB (600 MB for `win-build`).
 - **Why:** an entry for each job and week, frozen once saved and read
   by a lane branch only as `main`'s, left the hit rate at 0% on Linux
