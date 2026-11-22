@@ -56,8 +56,12 @@ void sent(ecuio_sim* s, const sim_sending& r)
 uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out)
 {
+    /* sessions=1's modules take 10 03 but have no security access */
+    const bool security = len > 0 && req[0] == 0x27;
     const bool has_extended =
-        n.module == 0 && !n.from_set && s->ecu.recording == nullptr;
+        s->ecu.recording == nullptr &&
+        ((n.module == 0 && !n.from_set) ||
+         (n.from_set && s->ecu.config.sessions && !security));
     if (s->ecu.recording == nullptr) {
         n.session.security.strict = s->strict.load(std::memory_order_relaxed);
     }

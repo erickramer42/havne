@@ -23,6 +23,7 @@ extern "C" {
  *
  * The URI, one of:
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
+ *          [&sessions=0|1]
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
@@ -47,7 +48,9 @@ extern "C" {
  * 31 for another, 7F <service> 11 for another service). A set with no
  * channels puts its DIDs on the engine ECU. 11-bit IDs only. Not with
  * modules=2. The set must stay valid while the sim runs, as for a
- * session (profile.h's lifetime).
+ * session (profile.h's lifetime). sessions=1 (only with profile=): each
+ * of the set's modules has the extended session too (10 03 enters it,
+ * 3E 00 keeps it, S3 of silence leaves it), with no security access.
  * replay://, a recording (its folder or its frames.csv): each request
  * gets the engine ECU's reply the recording held for it at the simulated
  * ECU's time since create, the car's own bitmaps, identification and

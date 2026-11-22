@@ -57,9 +57,9 @@ struct sim_node {
     /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
      * ECU, everything on another module */
     bool from_set = false;
-    /* The diagnostic session (ADR-0060): only the engine ECU with no
-     * profile has an extended session; a profile's nodes and modules=2's
-     * module refuse 10 03 */
+    /* The diagnostic session (ADR-0060): the engine ECU with no profile
+     * has an extended session, and a profile's nodes under sessions=1;
+     * the rest and modules=2's module refuse 10 03 */
     ecuio_sim_session session;
     /* A node hears its own request ID and the functional one */
     isotp_rx_of<2> rx;

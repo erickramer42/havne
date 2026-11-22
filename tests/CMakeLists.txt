@@ -2767,7 +2767,7 @@ find_package(Threads REQUIRED)
 # test_pacing gates the pacing on the model's figures; bench_pacing
 # prints them for docs/performance.md (not in ctest)
 add_executable(test_pacing test_pacing.cpp test_pacing_quiet.cpp
-                           test_pacing_stall.cpp)
+                           test_pacing_session.cpp test_pacing_stall.cpp)
 target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
     ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)
