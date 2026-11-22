@@ -17,14 +17,30 @@ import pytest
 import havne
 
 
-def recorded(tmp_path, seconds=1.2):
+def recorded(tmp_path, seconds=1.2, samples=12):
+    """A mock:// session recorded for `seconds` of the mock's own clock and
+    at least `samples` RPM values, a marker at the half way: judged on what
+    the session delivered, so a machine too loaded to keep the mock's pace
+    only makes it take longer"""
     with havne.Session("mock://py") as s:
+        values = s.values()
         rec = s.record(tmp_path, label="py test")
         s.start()
-        time.sleep(seconds / 2)
-        rec.mark("half way")
-        rec.note("a note from the script")
-        time.sleep(seconds / 2)
+        marked = False
+        newest_us = 0
+        rpm = 0
+        until = time.monotonic() + 30
+        while not (marked and newest_us >= seconds * 1e6 and rpm >= samples):
+            if time.monotonic() > until:
+                pytest.fail("the mock delivered %d RPM values in %.2f s of its clock "
+                            "in 30 s" % (rpm, newest_us / 1e6))
+            for v in values.read(0.05):
+                newest_us = max(newest_us, v.timestamp_us)
+                rpm += v.name == "RPM"
+            if not marked and newest_us >= seconds * 5e5:
+                marked = True
+                rec.mark("half way")
+                rec.note("a note from the script")
         folder = rec.folder
     return folder
 

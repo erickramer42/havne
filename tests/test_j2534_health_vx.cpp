@@ -123,10 +123,13 @@ TEST_F(J2534HealthTest, VxReplyArrivesBeforeTheNextRequest)
 
 /* Reply timing (ADR-0042) through the surrogate, the fake as the VX
  * (each reply 4 ms after its write, stamped by the fake's own clock):
- * a row per request, each answer the fake's delay after its write on
- * the host's clock (less the write's return), the intervals on the
- * adapter's stamps, none across a fallback, and no ISO-TP counts (the
- * adapter reassembles) */
+ * a row per request, the answers the fake's delay after its write on
+ * the host's clock (less the write's return: the send is stamped after
+ * a pipe round trip a loaded machine stretches past kWriteReturnUs, so
+ * the floor is judged on the median of the rows' medians, as the next
+ * case does, never on one row's), the intervals on the adapter's
+ * stamps, none across a fallback, and no ISO-TP counts (the adapter
+ * reassembles) */
 TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VX", "1"));
@@ -143,10 +146,12 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
                                            &count),
                   ECUIO_OK);
         intervals = 0;
+        uint32_t deep = 0;
         for (uint32_t i = 0; i < count; ++i) {
             intervals += rows[i].intervals;
+            deep += rows[i].answered >= 5 ? 1u : 0u;
         }
-        if (intervals >= 40) {
+        if (intervals >= 40 && deep >= 3) {
             break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -154,16 +159,22 @@ TEST_F(J2534HealthTest, VxTimingReportsEachRequestOnTheAdaptersClock)
     ASSERT_GE(intervals, 40u) << "intervals published";
     EXPECT_EQ(t.interval_clock, ECUIO_TIMING_CLOCK_ADAPTER);
     EXPECT_EQ(t.flags & ECUIO_TIMING_ISOTP, 0u);
+    std::vector<uint32_t> medians;
     for (uint32_t i = 0; i < count; ++i) {
         const ecuio_request_timing_t& r = rows[i];
         if (r.answered == 0) {
             continue;
         }
         SCOPED_TRACE("PID " + std::to_string(r.request[1]));
-        EXPECT_GE(r.latency_p50_us, 4000u - kWriteReturnUs)
-            << "the fake's reply delay";
+        if (r.answered >= 5) {
+            medians.push_back(r.latency_p50_us);
+        }
         EXPECT_EQ(r.intervals_mixed, 0u);
     }
+    ASSERT_GE(medians.size(), 3u) << "requests with five replies or more";
+    std::sort(medians.begin(), medians.end());
+    EXPECT_GE(medians[medians.size() / 2], 4000u - kWriteReturnUs)
+        << "the fake's reply delay";
 }
 
 /* The surrogate holds a 1 ms timer: the fake as the VX waits for its
