@@ -14,8 +14,9 @@ namespace {
 
 ecuio_files::path_registry<store_owner>& owners()
 {
-    static ecuio_files::path_registry<store_owner> registry;
-    return registry;
+    /* Never destroyed: a reference released during exit still finds it */
+    static auto* const registry = new ecuio_files::path_registry<store_owner>;
+    return *registry;
 }
 
 /* The key's entry, or one of zero counts; allocates nothing */
