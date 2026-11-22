@@ -1,0 +1,17 @@
+# Excerpt of the C3-absent-nohold session's surrogate log (ECUIO_SUR_LOG_FRAMES=1): every request written to 0x7E5, the address with no module
+[surrogate 01:19:42.662] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:19:42.784] OP_WRITE frame: status 0, tx 0x00000040, len 6: 00 00 07 E5 09 02
+[surrogate 01:19:43.397] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:19:44.402] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:19:46.403] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:19:50.405] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:19:55.409] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:00.408] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:05.409] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:10.410] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:15.414] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:20.420] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:25.420] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:30.430] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:35.432] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
+[surrogate 01:20:40.435] OP_WRITE frame: status 0, tx 0x00000040, len 7: 00 00 07 E5 22 F4 0D
