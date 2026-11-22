@@ -160,8 +160,10 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
+    test_request_quiet.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
-    test_j2534_hold_order.cpp test_sim_car.cpp test_sim_timing.cpp
+    test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
+    test_sim_timing.cpp
     test_scan_retry.cpp test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE
@@ -204,7 +206,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_stream.cpp test_elm327_session_links.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
-    test_elm327_pack.cpp)
+    test_elm327_pack.cpp test_elm327_gate.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -298,6 +300,11 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 # (growth into a struct's reserved room passes, a break fails): its
 # self-test runs over reports of real mutants, on every platform.
 if(Python3_Interpreter_FOUND)
+    # The names a CTest include sets properties on still exist (the include
+    # ignores a missing one)
+    add_test(NAME CtestIncludeNamesTest.TheJ2534TimeoutNamesExist
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ctest_include_names.py)
+    set_tests_properties(CtestIncludeNamesTest.TheJ2534TimeoutNamesExist PROPERTIES TIMEOUT 60)
     add_test(NAME GoldenTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/golden.py selftest)
     # recording_compare.py, golden.py's like for recording folders
@@ -348,6 +355,13 @@ if(Python3_Interpreter_FOUND)
     # (ADR-0051, ADR-0052): a key on one side alone fails
     add_test(NAME SchemaKeysTest.EachObjectsKeysAreItsLoaders
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_keys.py
+                ${CMAKE_SOURCE_DIR})
+    # Every Text and Label in app/qml sets textFormat: a text's <img> loads
+    # a file: URL's host with no interceptor asked, so outside text is plain
+    add_test(NAME PlainTextPinTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py --selftest)
+    add_test(NAME PlainTextPinTest.EveryTextSetsItsFormat
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/plaintext_pin.py
                 ${CMAKE_SOURCE_DIR})
 endif()
 
@@ -2401,6 +2415,25 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     set(_qml_cost_settings_plugins 6)
     set(_qml_cost_settings_vehicle 10)
     set(_qml_cost_theme 6)
+    set(_qml_cost_alertband 1)
+    set(_qml_cost_buttons 1)
+    set(_qml_cost_chartfonts 1)
+    set(_qml_cost_chartlayout 1)
+    set(_qml_cost_dashboardbook 1)
+    set(_qml_cost_driveplatform 1)
+    set(_qml_cost_fields 1)
+    set(_qml_cost_gauges 1)
+    set(_qml_cost_segments 1)
+    set(_qml_cost_sessionlabel 1)
+    set(_qml_cost_settings_computed 2)
+    set(_qml_cost_settings_own 5)
+    set(_qml_cost_settings_rows 1)
+    set(_qml_cost_settings_store 4)
+    set(_qml_cost_settings_unloadable 1)
+    set(_qml_cost_settings_uri 4)
+    set(_qml_cost_signalform 1)
+    set(_qml_cost_storemove 1)
+    set(_qml_cost_vehiclebook 1)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -2577,6 +2610,7 @@ if(WIN32)
         ../tests/test_j2534_stream_stamps.cpp
         ../tests/test_j2534_stream_focus.cpp
         ../tests/test_j2534_stream_condition.cpp
+        ../tests/test_j2534_clock.cpp
         ../tests/test_j2534_pack.cpp
     )
     # core/src for j2534_clock.h, which is internal (test_obd2 precedent).
@@ -2696,6 +2730,10 @@ if(WIN32)
     gtest_discover_tests(test_j2534_connect DISCOVERY_TIMEOUT 60
         PROPERTIES TIMEOUT ${J2534_TEST_TIMEOUT_SECONDS}
     )
+    # The out-of-memory loop outlasts the ceiling's margin under load; the
+    # include runs after the discovery's, which defines the test
+    set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_SOURCE_DIR}/j2534_timeouts.cmake)
 endif()
 
 # J2534 routing tests (Win32-only, HARNESS tier: the surrogate chosen by
@@ -2728,7 +2766,8 @@ find_package(Threads REQUIRED)
 # The request engine on a simulated clock (tests/pacing_bench.h):
 # test_pacing gates the pacing on the model's figures; bench_pacing
 # prints them for docs/performance.md (not in ctest)
-add_executable(test_pacing test_pacing.cpp)
+add_executable(test_pacing test_pacing.cpp test_pacing_quiet.cpp
+                           test_pacing_stall.cpp)
 target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
     ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)

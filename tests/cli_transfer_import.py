@@ -159,7 +159,7 @@ def committed(path):
 def wide_columns(path):
     """A wide CSV's header and each column's cells, its comment line
     left out"""
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         rows = [r for r in csv.reader(f) if r and not r[0].startswith("#")]
     head = rows[0]
     return head, {h: [r[i] for r in rows[1:]] for i, h in enumerate(head)}

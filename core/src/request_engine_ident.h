@@ -224,6 +224,9 @@ inline void ecuio_engine_ident_settle(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_identity_item_t& it = ch.ident[ch.ident_index];
+    /* a quiet module's step unanswered again changes no report */
+    const bool same = it.outcome == ECUIO_IDENTITY_UNANSWERED &&
+                      outcome == ECUIO_IDENTITY_UNANSWERED;
     ch.identifying = false;
     it.outcome = outcome;
     it.nrc = nrc;
@@ -238,7 +241,7 @@ inline void ecuio_engine_ident_settle(ecuio_request_engine* e, uint32_t c,
     if (ch.ident_pending > 0) {
         --ch.ident_pending;
     }
-    ++ch.ident_generation;
+    ch.ident_generation += same ? 0u : 1u;
 }
 
 /* What channel c's ECU has said it is, for

@@ -32,6 +32,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -104,10 +105,13 @@ inline header read_header(const std::string& folder)
     std::vector<char> buf(rows::kRowMax + 2);
     bool too_long = false;
     bool first = true;
+    std::unordered_set<std::string> held; /* the signal lines' ids */
     while (ecuio_frames_csv::read_line(f.get(), buf, &too_long)) {
         if (too_long) {
             /* A line past a row (an older core's focus line): passed by
-             * whole, so the signal lines after it are still read */
+             * whole, so the signal lines after it are still read; a first
+             * line so long is no format the reader knows either */
+            first = false;
             bool more = true;
             while (more && ecuio_frames_csv::read_line(f.get(), buf, &more)) {
             }
@@ -134,10 +138,12 @@ inline header read_header(const std::string& folder)
             rows::header_signal hs;
             const char* bad = nullptr;
             std::string id;
+            /* An id's first line alone, as the reader keeps */
             if (ecuio_recording_keys::parse_signal_line(
                     h.keyed ? ECUIO_RECORDING_FORMAT_KEYS
                             : ECUIO_RECORDING_FORMAT_ENUMS,
-                    buf.data() + 8, n - 8, &id, hs, &bad)) {
+                    buf.data() + 8, n - 8, &id, hs, &bad) &&
+                held.insert(id).second) {
                 if (hs.text) {
                     h.text_names.emplace_back(id);
                 }

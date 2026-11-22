@@ -59,6 +59,7 @@ GaugeBase {
     implicitHeight: 96
 
     Text {
+        textFormat: Text.PlainText
         id: title
         objectName: "gaugeTitle"
         Accessible.ignored: true
@@ -73,6 +74,7 @@ GaugeBase {
     }
     readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: gauge.noteAlone ? parent.left : title.right
@@ -95,6 +97,7 @@ GaugeBase {
         spacing: 3
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             id: valueLabel
             objectName: "readout"
             Accessible.ignored: true
@@ -112,6 +115,7 @@ GaugeBase {
             anchors.verticalCenter: valueLabel.verticalCenter
         }
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             visible: gauge.hasValue
@@ -132,6 +136,7 @@ GaugeBase {
         width: Math.max(highText.implicitWidth, lowText.implicitWidth,
                         sampleLow.implicitWidth, sampleHigh.implicitWidth)
         Text {
+            textFormat: Text.PlainText
             id: highText
             objectName: "scaleHigh"
             Accessible.ignored: true
@@ -142,6 +147,7 @@ GaugeBase {
         }
         Item { width: 1; height: Math.max(0, scaleBox.height - highText.height - lowText.height) }
         Text {
+            textFormat: Text.PlainText
             id: lowText
             objectName: "scaleLow"
             Accessible.ignored: true
@@ -153,6 +159,7 @@ GaugeBase {
     }
 
     Text {
+        textFormat: Text.PlainText
         id: sampleLow
         Accessible.ignored: true
         visible: false
@@ -161,6 +168,7 @@ GaugeBase {
         font.features: Theme.valueFeatures
     }
     Text {
+        textFormat: Text.PlainText
         id: sampleHigh
         Accessible.ignored: true
         visible: false

@@ -535,15 +535,18 @@ struct TwoDids {
     static constexpr const char* kName = "pacing-two-dids";
 };
 
-// A car run's model, checked to be the same run with ?hold=0: one
-// module's channel, which the hold leaves alone
+// A car run's model; a J2534 one checked to be the same run with
+// ?hold=0, one module's channel, which the hold leaves alone. The
+// ELM327 model never reads the hold, so its rerun would prove nothing.
 pacing::bench_result car_run(pacing::bench_config cfg)
 {
     cfg.seconds = 60;
     const pacing::bench_result r = run(cfg);
-    cfg.model.hold = false;
-    const pacing::bench_result plain = run(cfg);
-    EXPECT_EQ(r.sent_us, plain.sent_us) << "the hold acted on one module";
+    if (cfg.model.kind == pacing::adapter::j2534) {
+        cfg.model.hold = false;
+        const pacing::bench_result plain = run(cfg);
+        EXPECT_EQ(r.sent_us, plain.sent_us) << "the hold acted on one module";
+    }
     EXPECT_EQ(r.timeouts, 0u);
     return r;
 }
@@ -570,8 +573,8 @@ pacing::bench_config the_car(pacing::adapter_model model)
 
 /* The car pins: each model against its run in
  * docs/bench-sessions/2026-11-18-pacing-car.md, replies a second from
- * the engine ECU. Every run there asked one module, so each holds with
- * ?hold= on or off. D1, obd2 whole through the VX, packed: 58.7. D4, the
+ * the engine ECU. Every run there asked one module, so each VX run holds
+ * with ?hold= on or off. D1, obd2 whole through the VX, packed: 58.7. D4, the
  * same at ?gap=0, ran 52.7 on the car, its ECU's first frame later (P50
  * 5.05 against 3.80 ms); the model's reply timing doesn't follow the
  * pace, so it runs D4 as D1, a gap it doesn't cover and no pin */
@@ -816,4 +819,89 @@ TEST(PacingTest, TheDrawsFixedVectors)
               (std::vector<int64_t>{7344, 1638, 2645, 4478, 2293}));
     EXPECT_EQ(five(7, 0x7E8),
               (std::vector<int64_t>{2689, 6248, 4034, 5173, 2489}));
+}
+
+namespace {
+
+// Six modules of one DID each (a word in one Single Frame), more than the
+// session's info lists, registered as TwoModules is
+struct SixModules {
+    SixModules()
+    {
+        static const ecuio_signal_def_t defs[] = {
+            did_word(1, 0x7E8, 0x1E1C, "Engine"),
+            did_word(2, 0x7E9, 0xD200, "Module 1"),
+            did_word(3, 0x7EA, 0xD200, "Module 2"),
+            did_word(4, 0x7EB, 0xD200, "Module 3"),
+            did_word(5, 0x7EC, 0xD200, "Module 4"),
+            did_word(6, 0x7ED, 0xD200, "Module 5"),
+        };
+        static const ecuio_channel_decl_t channels[] = {
+            {0x7E8, 0x7E0, 0, 0}, {0x7E9, 0x7E1, 0, 0}, {0x7EA, 0x7E2, 0, 0},
+            {0x7EB, 0x7E3, 0, 0}, {0x7EC, 0x7E4, 0, 0}, {0x7ED, 0x7E5, 0, 0}};
+        static ecuio_signal_set_t set{};
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 6;
+        set.defs = defs;
+        set.channel_count = 6;
+        set.channels = channels;
+        ecuio_validation_t why{};
+        EXPECT_EQ(ecuio_profile_register(kName, &set, &why), ECUIO_OK)
+            << "code " << why.code << " at " << why.index;
+    }
+    ~SixModules() { EXPECT_EQ(ecuio_profile_unregister(kName), ECUIO_OK); }
+    SixModules(const SixModules&) = delete;
+    SixModules& operator=(const SixModules&) = delete;
+    static constexpr const char* kName = "pacing-six";
+};
+
+} // namespace
+
+/* The model's channels are the session's modules, every one: six modules
+ * are each asked and answered, on every adapter's model, and each signal
+ * is in the tally. The session's info lists four of them. */
+TEST(PacingTest, TheModelAsksEveryModuleOfTheSession)
+{
+    const SixModules registered;
+    for (const pacing::adapter kind :
+         {pacing::adapter::j2534, pacing::adapter::socketcan,
+          pacing::adapter::elm327}) {
+        pacing::bench_config cfg = one_pid(kind);
+        if (kind == pacing::adapter::elm327) {
+            cfg.model = pacing::elm327_bluetooth();
+        }
+        cfg.profile = SixModules::kName;
+        cfg.params.identify = false;
+        cfg.params.diagnose = false;
+        cfg.picks.clear();
+        cfg.seconds = 10;
+        const pacing::bench_result r = run(cfg);
+        ASSERT_EQ(r.asked.size(), 6u) << "adapter " << static_cast<int>(kind);
+        for (size_t c = 0; c < r.asked.size(); ++c) {
+            EXPECT_GT(r.asked[c], 10u) << "channel " << c;
+            EXPECT_GT(r.answered[c], 10u) << "channel " << c;
+            EXPECT_LE(r.asked[c] - r.answered[c], 1u) << "channel " << c;
+        }
+        EXPECT_EQ(r.timeouts, 0u);
+        EXPECT_EQ(cli::summary_figures(r.tally, {}).signals, 6u);
+    }
+}
+
+/* A DID whose count digit ended its reply at the module's 7F 22 78 is
+ * taken back as the worker takes it (learn_reply_length): asked again at
+ * the prompt, and with no digit from then on. Left out, the request would
+ * wait out the engine's pending wait (5 s) before its next ask. */
+TEST(PacingTest, AnElm327TakesBackAPendedDid)
+{
+    pacing::bench_config cfg = one_pid_elm(pacing::elm327_bluetooth());
+    cfg.profile = "uds-generic&did=7E9:D101:u8";
+    cfg.sim_keys = "modules=2&faults=pending:1@7E9";
+    cfg.params.identify = false;
+    cfg.params.diagnose = false;
+    cfg.picks.clear();
+    cfg.seconds = 10;
+    const pacing::bench_result r = run(cfg);
+    ASSERT_GE(r.sent_us.size(), 2u);
+    EXPECT_LT(r.sent_us[1] - r.sent_us[0], 100000)
+        << "the pended DID waited " << (r.sent_us[1] - r.sent_us[0]) << " us";
 }

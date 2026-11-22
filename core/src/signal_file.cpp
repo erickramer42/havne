@@ -22,6 +22,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -43,10 +44,13 @@ struct entry {
     bool replaces = false; /* it stands in a base def's place */
 };
 
-/* The names a file's expressions read: its signals as read so far */
+/* The names a file's expressions read: its signals as read so far, each
+ * found by its key's place */
 struct entries_scope final : expr_scope {
-    entries_scope(const std::vector<entry>& all, const ecuio_signal_set_t* obd2)
-        : entries(all)
+    entries_scope(const std::vector<entry>& all,
+                  const std::unordered_map<std::string, size_t>& places,
+                  const ecuio_signal_set_t* obd2)
+        : entries(all), at_key(places)
     {
         base = obd2;
     }
@@ -54,15 +58,11 @@ struct entries_scope final : expr_scope {
     bool find(const std::string& key, uint16_t* id,
               expr_kind* kind) const override
     {
-        const entry* e = nullptr;
-        for (const entry& x : entries) {
-            if (x.key == key) {
-                e = &x;
-            }
-        }
-        if (e == nullptr) {
+        const auto at = at_key.find(key);
+        if (at == at_key.end()) {
             return false;
         }
+        const entry* e = &entries[at->second];
         *id = e->id;
         *kind = e->kind == "computed"                     ? expr_kind::computed
                 : (e->kind == "text" || e->kind == "hex") ? expr_kind::text
@@ -71,6 +71,7 @@ struct entries_scope final : expr_scope {
     }
 
     const std::vector<entry>& entries;
+    const std::unordered_map<std::string, size_t>& at_key;
 };
 
 /* A signal's "expr" compiled, a refusal placed at the member */
@@ -219,6 +220,7 @@ void build(const parts& in, ecuio_signal_file& f)
     /* First every signal's key and kind, so an expression can read a
      * signal listed after it */
     std::vector<entry> entries;
+    std::unordered_map<std::string, size_t> at_key; /* a key's place */
     for (const Value* sp : list) {
         const Value& s = *sp;
         expect(s, Type::object, "a signal");
@@ -232,10 +234,8 @@ void build(const parts& in, ecuio_signal_file& f)
         if (!key_ok(e.key)) {
             refuse(*key, "key " + q(e.key) + " takes 1 to 31 of a-z, 0-9 and _");
         }
-        for (const entry& x : entries) {
-            if (x.key == e.key) {
-                refuse(*key, "key " + q(e.key) + " is given twice");
-            }
+        if (!at_key.emplace(e.key, entries.size()).second) {
+            refuse(*key, "key " + q(e.key) + " is given twice");
         }
         e.kind = "number";
         if (const Value* kind = s.find("kind")) {
@@ -299,7 +299,8 @@ void build(const parts& in, ecuio_signal_file& f)
     }
 
     f.defs.resize(first_own + entries.size());
-    const entries_scope scope(entries, base);
+    const entries_scope scope(entries, at_key, base);
+    std::unordered_map<std::string, size_t> first_named; /* a name's first */
     std::vector<std::pair<const entry*, std::vector<std::string>>> programs;
     for (size_t i = 0; i < entries.size(); ++i) {
         const entry& e = entries[i];
@@ -338,12 +339,12 @@ void build(const parts& in, ecuio_signal_file& f)
         }
         copy_text(d.name, sizeof d.name, text_of(*name_v, 1, 31, what + "'s name"));
         no_formula(*name_v, what + "'s name");
-        for (size_t j = 0; j < i; ++j) {
-            if (entries[j].name == entries[i].name) {
-                refuse(*name_v, what + " has the name " + q(entries[i].name) +
-                                    ", which signal " + q(entries[j].key) +
-                                    " has too: a name names one signal");
-            }
+        const auto named = first_named.emplace(entries[i].name, i);
+        if (!named.second) {
+            refuse(*name_v, what + " has the name " + q(entries[i].name) +
+                                ", which signal " +
+                                q(entries[named.first->second].key) +
+                                " has too: a name names one signal");
         }
         if (const Value* unit = s.find("unit")) {
             copy_text(d.unit, sizeof d.unit, text_of(*unit, 0, 15, what + "'s unit"));

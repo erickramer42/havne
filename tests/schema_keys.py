@@ -12,8 +12,9 @@
 # all fail, so a key added on either side alone fails, but for an OPEN
 # object, whose loader checks no keys on purpose. The loaders' word
 # lists that a schema spells as an enum (kinds, groups, services, byte
-# orders, extends, tiers) are compared too, and a schema's request count
-# with profile.h's ECUIO_PROFILE_MAX_REQUESTS.
+# orders, extends, tiers) are compared too, a schema's request count
+# with profile.h's ECUIO_MODULE_MAX_REQUESTS, and its ECU count with
+# signals.h's ECUIO_MAX_CHANNELS.
 
 import json
 import os
@@ -326,12 +327,38 @@ def main():
             failures.append("signal-file.schema.json states no request bound "
                             "(\"at most N requests\"): find it again")
 
+    # A schema's ECU bound ("at most N ECUs" in words, the ecus list's
+    # maxItems) is signals.h's for a set, the base set's counted
+    with open(os.path.join(root, "core/include/ecuio/signals.h"), encoding="utf-8") as f:
+        channels = re.search(r"#define ECUIO_MAX_CHANNELS (\d+)", f.read())
+    if channels is None:
+        failures.append("signals.h defines no ECUIO_MAX_CHANNELS: find it again")
+    else:
+        want = channels.group(1)
+        stated = False
+        for s in SCHEMAS:
+            for text in strings_of(schemas[s]):
+                for n in re.findall(r"at most (?:ECUIO_MAX_CHANNELS "
+                                    r"\(signals\.h, )?(\d+)\)? ECUs\b", text):
+                    stated = stated or s == "signal-file"
+                    if n != want:
+                        failures.append(f"{s}.schema.json says {n} ECUs, "
+                                        f"signals.h's ECUIO_MAX_CHANNELS is {want}")
+        if not stated:
+            failures.append("signal-file.schema.json states no ECU bound "
+                            "(\"at most N ECUs\"): find it again")
+        most = pointer(schemas["signal-file"], "/$defs/ecus").get("maxItems")
+        if str(most) != want:
+            failures.append(f"signal-file.schema.json#/$defs/ecus takes {most} "
+                            f"ECUs, signals.h's ECUIO_MAX_CHANNELS is {want}")
+
     for f in failures:
         print("FAIL  " + f)
     if failures:
         return 1
     print(f"ok  {len(calls)} only_keys calls, each its schema object's keys; "
-          f"{len(words) + len(LISTS) + 1} word lists")
+          f"{len(words) + len(LISTS) + 1} word lists; the request and ECU "
+          f"bounds")
     return 0
 
 

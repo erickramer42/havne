@@ -77,11 +77,16 @@ void markDone()
     ASSERT_TRUE(store.setMigrated());
 }
 
-// One start's removal, with a plugin store of its own
-Removal removal(const OldState& old)
+// One start's removal, with a plugin store of its own. recorded: the
+// book's copies no vehicle names have their records already (this
+// version's move says so), false for a book v0.8.0's move wrote
+Removal removal(const OldState& old, bool recorded = true)
 {
     PluginStore store;
     QSettings prefs(old.prefsPath(), QSettings::IniFormat);
+    if (recorded) {
+        prefs.setValue(QStringLiteral("vehicles/unnamedRecorded"), true);
+    }
     return StoreMigration::removeOld(prefs, store);
 }
 
@@ -97,26 +102,42 @@ QStringList namesIn(const QString& folder)
     return QDir(folder).entryList(QDir::Files, QDir::Name);
 }
 
-// Copies named a, b, c, d (by their own hashes) and an old book; a's
-// record is a vehicle's with kept false, b's the book's own with kept
-// false, c's kept (its bytes in plugins/unmigrated too), d no one's
-struct Four {
-    QString a, b, c, d;
+// A copy of a signal file that moved: a plugin made from its bytes
+QString keepMoved(const OldState& old, const QString& name)
+{
+    const QByteArray bytes = signalFile(name);
+    PluginStore store;
+    const QVariantMap made = store.wrap(bytes, {});
+    EXPECT_TRUE(made.value(QStringLiteral("ok")).toBool())
+        << made.value(QStringLiteral("words")).toString().toStdString();
+    return old.keep(bytes);
+}
+
+// Copies named a to e (by their own hashes) and an old book; a's record
+// is a vehicle's with kept false, b's the book's own with kept false,
+// c's kept (its bytes in plugins/unmigrated too), d no one's, e moved
+struct Five {
+    QString a, b, c, d, e;
 };
 
-Four stageFour(const OldState& old)
+Five stageFive(const OldState& old)
 {
-    Four f;
+    Five f;
     f.a = old.keep("a's bytes");
     f.b = old.keep("b's bytes");
     f.c = old.keep("c's bytes");
     f.d = old.keep("d's bytes");
+    f.e = keepMoved(old, QStringLiteral("E"));
     writeBytes(keptPath(f.c), "c's bytes");
     old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
     old.set(kBook, book2({record(f.a, false), record(f.c, true)},
                          {record(f.b, false)}));
     return f;
 }
+
+const QString kLeftOther1 =
+    QStringLiteral("Other signal files left in the earlier version's "
+                   "folder: 1");
 
 // Every bridge call that imports, keeps, saves or removes in the stores,
 // each once and each answered ok; what it saves goes to out
@@ -170,7 +191,8 @@ void runEveryStoreCall(SessionBridge& bridge, const QString& out,
 
 /* Two starts after an update from before v0.8.0: the first moves the
  * files and leaves the earlier version's data; the second removes it,
- * keeping the copy that couldn't be moved, and its Save still writes it */
+ * keeping the copy that couldn't be moved and the copy no vehicle names,
+ * whose bytes are nowhere else, and Save still writes each */
 TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
 {
     OldState old;
@@ -219,11 +241,11 @@ TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
         EXPECT_EQ(bridge.migrateStores(prefs),
                   (QStringList{kListRemoved,
                                QStringLiteral("The earlier version's signal "
-                                              "files removed: 2"),
+                                              "files removed: 1"),
                                QStringLiteral("Signal files that weren't "
                                               "moved, kept in the earlier "
                                               "version's folder for Save: "
-                                              "1")}));
+                                              "2")}));
         QTemporaryDir out;
         ASSERT_TRUE(out.isValid());
         const QString to = out.path() + QStringLiteral("/big.json");
@@ -232,25 +254,34 @@ TEST(BridgeTest, OneStoreRemovalComesAtTheStartAfterTheMove)
         EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
             << saved.value(QStringLiteral("words")).toString().toStdString();
         EXPECT_EQ(QFileInfo(to).size(), ECUIO_PLUGIN_PACKAGE_MAX + 1);
+        const QString looseTo = out.path() + QStringLiteral("/loose.json");
+        const QVariantMap looseSaved =
+            bridge.saveUnmigratedFile(loose, QUrl::fromLocalFile(looseTo));
+        EXPECT_TRUE(looseSaved.value(QStringLiteral("ok")).toBool())
+            << looseSaved.value(QStringLiteral("words"))
+                   .toString()
+                   .toStdString();
+        EXPECT_EQ(readBytes(looseTo), signalFile(QStringLiteral("Loose")));
     }
     EXPECT_FALSE(old.has(kOldBook));
-    EXPECT_EQ(namesIn(old.signalsRoot()),
-              (QStringList{big + QStringLiteral(".json"),
-                           QStringLiteral("not-a-hash.json"),
-                           QStringLiteral("notes.txt")}))
-        << "the moved copy and " << loose.left(12).toStdString() << " go";
+    QStringList left{
+        big + QStringLiteral(".json"), loose + QStringLiteral(".json"),
+        QStringLiteral("not-a-hash.json"), QStringLiteral("notes.txt")};
+    left.sort();
+    EXPECT_EQ(namesIn(old.signalsRoot()), left) << "the moved copy goes";
     EXPECT_FALSE(old.book().isEmpty()) << "the new book stays";
 }
 
 /* A record with kept false spares its copy whether a vehicle lists it or
  * the book's own list does; a kept record's old copy goes (its bytes are
- * in plugins/unmigrated), and so does a copy no record names. A copy is
- * judged by its name alone: a's bytes no longer hash to it */
+ * in plugins/unmigrated), and so does a moved copy (a plugin was made
+ * from it); a copy no record names, with no plugin made from it, stays.
+ * A copy is judged by its name alone: a's bytes no longer hash to it */
 TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    const Four f = stageFour(old);
+    const Five f = stageFive(old);
     writeBytes(old.copyOf(f.a), "a, edited by hand since");
     markDone();
     const QByteArray cKept = readBytes(keptPath(f.c));
@@ -259,13 +290,16 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
     EXPECT_TRUE(r.oldBook);
     EXPECT_EQ(r.removed, 2);
     EXPECT_EQ(r.spared, 2);
+    EXPECT_EQ(r.left, 1);
     EXPECT_EQ(r.stuck, 0);
     EXPECT_FALSE(old.has(kOldBook));
     QStringList left{f.a + QStringLiteral(".json"),
-                     f.b + QStringLiteral(".json")};
+                     f.b + QStringLiteral(".json"),
+                     f.d + QStringLiteral(".json")};
     left.sort();
     EXPECT_EQ(namesIn(old.signalsRoot()), left);
     EXPECT_EQ(readBytes(old.copyOf(f.a)), "a, edited by hand since");
+    EXPECT_EQ(readBytes(old.copyOf(f.d)), "d's bytes");
     EXPECT_EQ(StoreMigration::unmigrated(), QStringList{f.c});
     EXPECT_EQ(readBytes(keptPath(f.c)), cKept);
     EXPECT_EQ(r.lines,
@@ -274,19 +308,162 @@ TEST(BridgeTest, OneStoreRemovalSparesTheCopiesOfAVehiclesAndTheBooksRecords)
                                           "removed: 2"),
                            QStringLiteral("Signal files that weren't moved, "
                                           "kept in the earlier version's "
-                                          "folder for Save: 2")}));
+                                          "folder for Save: 2"),
+                           kLeftOther1}));
 }
 
-/* With nothing spared and nothing else there, the folder goes with its
- * last copy; a second start then has nothing to do and says nothing */
+/* A book that records no file that didn't move, with the mark set (an
+ * earlier version's move, which recorded none, or a book written by hand)
+ * takes no copy whose bytes are nowhere else: a copy with no plugin made
+ * from it stays through two starts, and only the first says so */
+TEST(BridgeTest, OneStoreRemovalNeverTakesACopyOnTheBooksWordAlone)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString stray = old.keep("stray's bytes");
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({}, {}));
+    markDone();
+
+    const Removal first = removal(old);
+    EXPECT_EQ(first.removed, 1);
+    EXPECT_EQ(first.left, 1);
+    EXPECT_EQ(first.lines,
+              (QStringList{kListRemoved,
+                           QStringLiteral("The earlier version's signal files "
+                                          "removed: 1"),
+                           kLeftOther1}));
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
+    const Removal second = removal(old);
+    EXPECT_EQ(second.removed, 0);
+    EXPECT_EQ(second.left, 1);
+    EXPECT_TRUE(second.lines.isEmpty());
+    EXPECT_EQ(namesIn(old.signalsRoot()),
+              QStringList{stray + QStringLiteral(".json")});
+    EXPECT_EQ(readBytes(old.copyOf(stray)), "stray's bytes");
+}
+
+/* A copy edited since its wrap or its keep holds bytes neither the
+ * plugin nor plugins/unmigrated has: it stays, counted with the copies
+ * left, and the unedited ones go */
+TEST(BridgeTest, OneStoreRemovalKeepsACopyEditedSinceItWasMoved)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    const QString edited = keepMoved(old, QStringLiteral("Edited"));
+    const QString kept = old.keep("kept's bytes");
+    writeBytes(keptPath(kept), "kept's bytes");
+    writeBytes(old.copyOf(edited), "edited by hand since the wrap");
+    old.set(kBook, book2({record(kept, true)}, {}));
+    markDone();
+
+    const Removal r = removal(old);
+    EXPECT_EQ(r.removed, 2);
+    EXPECT_EQ(r.left, 1);
+    EXPECT_EQ(namesIn(old.signalsRoot()),
+              QStringList{edited + QStringLiteral(".json")});
+    EXPECT_EQ(readBytes(old.copyOf(edited)), "edited by hand since the wrap");
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
+}
+
+/* A copy goes with the bytes kept for it only while the kept file is the
+ * very bytes: a kept file cut short or damaged (a short read at the move)
+ * keeps the copy, as does a copy edited since the keep */
+TEST(BridgeTest, OneStoreRemovalKeepsACopyWhoseKeptFileIsNotItsBytes)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString cut = old.keep("cut's whole bytes");
+    const QString edited = old.keep("edited's whole bytes");
+    const QString whole = old.keep("whole's bytes");
+    const QString same = old.keep("same size bytes!");
+    writeBytes(keptPath(same), "SAME SIZE BYTES!");
+    writeBytes(keptPath(cut), "cut's who");
+    writeBytes(keptPath(edited), "edited's whole bytes");
+    writeBytes(old.copyOf(edited), "edited since the keep");
+    writeBytes(keptPath(whole), "whole's bytes");
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({record(cut, true), record(edited, true),
+                          record(whole, true), record(same, true)},
+                         {}));
+    markDone();
+
+    // A kept file that doesn't hash to its name isn't served to Save
+    QString words;
+    EXPECT_TRUE(StoreMigration::unmigratedBytes(cut, &words).isEmpty());
+    EXPECT_FALSE(words.isEmpty());
+    EXPECT_EQ(StoreMigration::unmigratedBytes(whole, &words),
+              QByteArray("whole's bytes"));
+
+    const Removal r = removal(old);
+    EXPECT_EQ(r.removed, 1);
+    EXPECT_EQ(r.left, 3);
+    QStringList left{cut + QStringLiteral(".json"),
+                     edited + QStringLiteral(".json"),
+                     same + QStringLiteral(".json")};
+    left.sort();
+    EXPECT_EQ(namesIn(old.signalsRoot()), left);
+    EXPECT_EQ(readBytes(old.copyOf(cut)), "cut's whole bytes");
+    EXPECT_EQ(readBytes(old.copyOf(edited)), "edited since the keep");
+    EXPECT_EQ(readBytes(old.copyOf(same)), "same size bytes!");
+}
+
+/* A start after v0.8.0's move, which recorded no copy no vehicle names:
+ * each such copy gets a record once, so the page lists it and the removal
+ * spares it. A record the user removes afterwards isn't made again */
+TEST(BridgeTest, OneStoreRemovalRecordsTheCopiesAV080MoveLeftUnnamed)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString stray = old.keep("stray's bytes");
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    // A vehicle's record names this copy (kept false); a kept file holds
+    // that one's bytes with no record: neither gets a record of its own
+    const QString named = old.keep("named's bytes");
+    const QString keptOnly = old.keep("kept only's bytes");
+    writeBytes(keptPath(keptOnly), "kept only's bytes");
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({record(named, false)}, {}));
+    markDone();
+
+    const Removal first = removal(old, false);
+    EXPECT_EQ(first.removed, 2);
+    EXPECT_EQ(first.spared, 2);
+    EXPECT_EQ(first.left, 0);
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(keptOnly)));
+    EXPECT_EQ(readBytes(old.copyOf(stray)), "stray's bytes");
+    const QJsonArray listed =
+        old.book().value(QStringLiteral("unmigrated")).toArray();
+    ASSERT_EQ(listed.size(), 1) << "one record only: not named's, not kept's";
+    EXPECT_EQ(listed.at(0).toObject().value(QStringLiteral("sha256")),
+              QJsonValue(stray));
+    EXPECT_EQ(listed.at(0).toObject().value(QStringLiteral("kept")),
+              QJsonValue(false));
+
+    // The page's Remove, then the next start: not recorded again
+    old.set(kBook, book2({record(named, false)}, {}));
+    const Removal later = removal(old, false);
+    EXPECT_EQ(later.left, 1);
+    EXPECT_TRUE(old.book().value(QStringLiteral("unmigrated")).toArray()
+                    .isEmpty());
+    EXPECT_EQ(readBytes(old.copyOf(stray)), "stray's bytes");
+}
+
+/* With every copy's bytes elsewhere and nothing else there, the folder
+ * goes with its last copy; a second start then has nothing to do and
+ * says nothing */
 TEST(BridgeTest, OneStoreRemovalTakesTheFolderWithItsLastCopy)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    old.keep("one");
-    old.keep("two");
+    keepMoved(old, QStringLiteral("One"));
+    const QString two = old.keep("two");
+    writeBytes(keptPath(two), "two");
     old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
-    old.set(kBook, book2({}, {}));
+    old.set(kBook, book2({record(two, true)}, {}));
     markDone();
 
     const Removal r = removal(old);
@@ -299,9 +476,9 @@ TEST(BridgeTest, OneStoreRemovalTakesTheFolderWithItsLastCopy)
 }
 
 /* A second start with a spared copy left changes nothing and says
- * nothing; once its record is removed (the page's Remove), the next start
- * takes its copy and the folder */
-TEST(BridgeTest, OneStoreRemovalTakesACopyOnceItsRecordIsRemoved)
+ * nothing; once its record is removed (the page's Remove), its bytes are
+ * still only in the old folder, so the next start leaves it there */
+TEST(BridgeTest, OneStoreRemovalKeepsACopyOnceItsRecordIsRemoved)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
@@ -318,8 +495,40 @@ TEST(BridgeTest, OneStoreRemovalTakesACopyOnceItsRecordIsRemoved)
 
     old.set(kBook, book2({}, {}));
     const Removal after = removal(old);
-    EXPECT_EQ(after.removed, 1);
-    EXPECT_FALSE(QFileInfo::exists(old.signalsRoot()));
+    EXPECT_EQ(after.removed, 0);
+    EXPECT_EQ(after.left, 1);
+    EXPECT_TRUE(after.lines.isEmpty());
+    EXPECT_EQ(filesUnder(old.signalsRoot()), kept);
+}
+
+/* An old book the move couldn't read isn't carried: its key stays, whole,
+ * while the copies are judged as ever; a book it read goes */
+TEST(BridgeTest, OneStoreRemovalLeavesAnOldBookTheMoveCouldntRead)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    const QString text = QStringLiteral("{\"list\": [broken");
+    old.set(kOldBook, text);
+    old.set(kBook, book2({}, {}));
+    markDone();
+
+    const Removal r = removal(old);
+    EXPECT_FALSE(r.oldBook);
+    EXPECT_TRUE(r.oldBookLeft);
+    EXPECT_EQ(old.text(kOldBook), text);
+    EXPECT_EQ(r.removed, 1);
+    EXPECT_FALSE(QFileInfo::exists(old.copyOf(moved)));
+    EXPECT_EQ(r.lines,
+              (QStringList{QStringLiteral("The earlier version's signal "
+                                          "files removed: 1"),
+                           QStringLiteral("The earlier version's vehicle "
+                                          "list couldn't be read and stays "
+                                          "where it is")}));
+    EXPECT_EQ(old.text(kOldBook), text) << "and at every start after";
+    const Removal again = removal(old);
+    EXPECT_TRUE(again.oldBookLeft);
+    EXPECT_TRUE(again.lines.isEmpty()) << "nothing was done, so nothing said";
 }
 
 /* Nothing is touched without the mark, or without a book this version
@@ -371,7 +580,7 @@ TEST(BridgeTest, OneStoreRemovalStoppedAfterEachStepEndsTheSame)
                         bool* bookLeft) {
         OldState old;
         ASSERT_TRUE(old.valid());
-        stageFour(old);
+        stageFive(old);
         markDone();
         if (stop != Step::None) {
             StoreMigration::stopAfterForTesting(stop, n);
@@ -410,7 +619,7 @@ TEST(BridgeTest, OneStoreRemovalWithPreferencesThatCantBeWrittenDeletesNothing)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    stageFour(old);
+    stageFive(old);
     markDone();
     const auto before = filesUnder(old.signalsRoot());
     const QFile::Permissions was = QFile::permissions(old.prefsPath());
@@ -437,6 +646,107 @@ TEST(BridgeTest, OneStoreRemovalWithPreferencesThatCantBeWrittenDeletesNothing)
     // reads the file and removes it then. The copies go either way
     const Removal later = removal(old);
     EXPECT_EQ(later.removed, 2);
+}
+
+/* The records recordUnnamed makes are written out first: when that fails
+ * nothing is deleted, the old book stays, and the mark isn't on disk, so
+ * the next start tries again */
+TEST(BridgeTest, OneStoreRemovalRecordsNothingWithPreferencesThatCantBeWritten)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString stray = old.keep("stray's bytes");
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({}, {}));
+    markDone();
+    const QFile::Permissions was = QFile::permissions(old.prefsPath());
+    ASSERT_TRUE(QFile::setPermissions(old.prefsPath(),
+                                      QFile::ReadOwner | QFile::ReadUser));
+    if (QFileInfo(old.prefsPath()).isWritable()) {
+        QFile::setPermissions(old.prefsPath(), was);
+        GTEST_SKIP() << "this account writes a read-only file";
+    }
+
+    const Removal r = removal(old, false);
+    EXPECT_FALSE(r.oldBook);
+    EXPECT_EQ(r.removed, 0);
+    EXPECT_EQ(r.lines,
+              QStringList{QStringLiteral("The vehicle list couldn't be "
+                                         "saved: the removal is tried again "
+                                         "at the next start")});
+    EXPECT_TRUE(QFileInfo::exists(old.copyOf(stray)));
+    EXPECT_TRUE(QFileInfo::exists(old.copyOf(moved)));
+    const QByteArray onDisk = readBytes(old.prefsPath());
+    EXPECT_TRUE(onDisk.contains("document"));
+    EXPECT_FALSE(onDisk.contains("unnamedRecorded"));
+    ASSERT_TRUE(QFile::setPermissions(old.prefsPath(), was));
+}
+
+/* With no copy to record the mark alone is written, and its failure stops
+ * the removal the same way */
+TEST(BridgeTest, OneStoreRemovalStopsWhenTheMarkCantBeWritten)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QString moved = keepMoved(old, QStringLiteral("Moved"));
+    old.set(kOldBook, QStringLiteral("{\"list\":[]}"));
+    old.set(kBook, book2({}, {}));
+    markDone();
+    const QFile::Permissions was = QFile::permissions(old.prefsPath());
+    ASSERT_TRUE(QFile::setPermissions(old.prefsPath(),
+                                      QFile::ReadOwner | QFile::ReadUser));
+    if (QFileInfo(old.prefsPath()).isWritable()) {
+        QFile::setPermissions(old.prefsPath(), was);
+        GTEST_SKIP() << "this account writes a read-only file";
+    }
+
+    const Removal r = removal(old, false);
+    EXPECT_EQ(r.removed, 0);
+    EXPECT_FALSE(r.oldBook);
+    EXPECT_EQ(r.lines,
+              QStringList{QStringLiteral("The vehicle list couldn't be "
+                                         "saved: the removal is tried again "
+                                         "at the next start")});
+    EXPECT_TRUE(QFileInfo::exists(old.copyOf(moved)));
+    EXPECT_FALSE(readBytes(old.prefsPath()).contains("unnamedRecorded"));
+    ASSERT_TRUE(QFile::setPermissions(old.prefsPath(), was));
+}
+
+/* The move itself sets the mark, so a record the user removes from the
+ * page isn't made again at the start that removes the earlier data */
+TEST(BridgeTest, OneStoreRemovalAfterTheMoveMakesNoRecordsOfItsOwn)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    stageTwoVehicles(old);
+    const QString stray = old.keep("stray's bytes");
+    const Report r = old.start();
+    ASSERT_TRUE(r.marked) << said(r);
+    EXPECT_TRUE(QSettings(old.prefsPath(), QSettings::IniFormat)
+                    .value(QStringLiteral("vehicles/unnamedRecorded"))
+                    .toBool());
+
+    // The page's Remove of the stray's record and kept bytes
+    QJsonObject book = old.book();
+    book.remove(QStringLiteral("unmigrated"));
+    QJsonArray list = book.value(QStringLiteral("list")).toArray();
+    for (int i = 0; i < list.size(); ++i) {
+        QJsonObject entry = list.at(i).toObject();
+        entry.remove(QStringLiteral("unmigrated"));
+        list.replace(i, entry);
+    }
+    book.insert(QStringLiteral("list"), list);
+    old.set(kBook,
+            QString::fromUtf8(QJsonDocument(book).toJson(
+                QJsonDocument::Compact)));
+    StoreMigration::removeUnmigrated(stray);
+
+    PluginStore store;
+    QSettings prefs(old.prefsPath(), QSettings::IniFormat);
+    StoreMigration::removeOld(prefs, store);
+    EXPECT_FALSE(old.book().contains(QStringLiteral("unmigrated")));
+    EXPECT_TRUE(QFileInfo::exists(old.copyOf(stray)));
 }
 
 /* A copy stays while its bytes are nowhere else: a record with no kept
@@ -498,7 +808,7 @@ TEST(BridgeTest, OneStoreRemovalStopsWhileTheOldBookIsReadStill)
 {
     OldState old;
     ASSERT_TRUE(old.valid());
-    stageFour(old);
+    stageFive(old);
     markDone();
     {
         QSettings orgWide(old.path() + QStringLiteral("/Havne.ini"),

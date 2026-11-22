@@ -7,6 +7,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Label {
+    textFormat: Text.PlainText
     color: Theme.text
     font.pixelSize: Theme.fontEmphasis
     font.weight: Font.DemiBold

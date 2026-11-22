@@ -5,6 +5,12 @@
 
 #include "open_handles.h"
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+
 /* Out of memory at each of an attach's allocations in turn, on a
  * session of six modules: the attach answers OK or OUT_OF_MEMORY and
  * throws nothing, and a refused recorder attaches at the next try with
@@ -138,6 +144,12 @@ TEST(RecorderTest, OutOfMemoryAnywhereInAnOpenIsAnsweredNotThrown)
                 ++refused;
                 EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
                 EXPECT_EQ(rec, nullptr) << "at " << n;
+                /* The root is the caller's; nothing the open made in it
+                 * stays, so no list shows a recording that won't open */
+                std::error_code ec;
+                const fs::path made = fs::u8path(dir);
+                EXPECT_TRUE(!fs::exists(made, ec) || fs::is_empty(made, ec))
+                    << "a refused open left its folder at " << n;
                 continue;
             }
             ASSERT_NE(rec, nullptr);
@@ -159,6 +171,41 @@ TEST(RecorderTest, OutOfMemoryAnywhereInAnOpenIsAnsweredNotThrown)
         EXPECT_EQ(open_handles(), handles) << "every file closed";
     }
 }
+
+#ifndef _WIN32
+/* A file the open can't make once its folder exists (the process left
+ * one descriptor, which frames.csv takes): RECORDING_FAILED in words, and
+ * the file it made and the folder are removed */
+TEST(RecorderTest, AFileThatCantBeMadeLeavesNoFolder)
+{
+    Root root;
+    const std::string dir = root.utf8() + "/r";
+    ASSERT_TRUE(fs::create_directories(fs::u8path(dir)));
+    ecuio_record_options_t o{};
+    o.root_utf8 = dir.c_str();
+    rlimit was{};
+    ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &was), 0);
+    const int lowest = ::open("/dev/null", O_RDONLY);
+    ASSERT_GE(lowest, 0);
+    ::close(lowest);
+    rlimit one = was;
+    one.rlim_cur = static_cast<rlim_t>(lowest) + 1;
+    ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &one), 0);
+    ecuio_recorder_t* rec = nullptr;
+    const ecuio_status_t rc = ecuio_recorder_open(&o, &rec);
+    const std::string why = ecuio_last_error_detail();
+    ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &was), 0);
+    EXPECT_EQ(rc, ECUIO_ERR_RECORDING_FAILED);
+    EXPECT_EQ(rec, nullptr);
+    EXPECT_NE(why.find("can't create the recording's files"), std::string::npos)
+        << why;
+    std::error_code ec;
+    EXPECT_TRUE(fs::is_empty(fs::u8path(dir), ec)) << "the folder stays";
+    if (rec != nullptr) {
+        (void)ecuio_recorder_close(rec, "the test's end");
+    }
+}
+#endif
 
 /* Recorders attach and close one after another while the session
  * streams, each attach and close answering OK: the lifetime under the

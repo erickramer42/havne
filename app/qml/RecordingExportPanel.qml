@@ -243,6 +243,7 @@ ColumnLayout {
         contentItem: RowLayout {
             spacing: Theme.spacing
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.leftMargin: Theme.spacing
                 elide: Text.ElideRight
@@ -250,6 +251,7 @@ ColumnLayout {
                 text: intervalRow.text
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "intervalSize"
                 Layout.rightMargin: Theme.spacing
                 color: Theme.textDim
@@ -260,6 +262,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.text
@@ -299,6 +302,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportNote"
         visible: panel.note !== ""
         Layout.fillWidth: true
@@ -334,6 +338,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportNoValues"
         visible: !panel.hasValues
         Layout.fillWidth: true
@@ -361,6 +366,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
@@ -420,6 +426,7 @@ ColumnLayout {
                 onTextEdited: panel.customText = text
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "exportCustomProblem"
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -429,6 +436,7 @@ ColumnLayout {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "exportSizeProblem"
             visible: panel.sizeProblem !== ""
             Layout.fillWidth: true
@@ -440,6 +448,7 @@ ColumnLayout {
 
     // The columns: the log's own, or the signals ticked in the viewer
     Label {
+        textFormat: Text.PlainText
         objectName: "exportColumnsLabel"
         visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
         text: qsTr("Signals:")
@@ -464,6 +473,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "exportDecodedNote"
         visible: panel.format === "csv" && panel.hasValues && panel.view.decodedWith !== ""
         Layout.fillWidth: true
@@ -481,6 +491,7 @@ ColumnLayout {
         onToggled: panel.raw = checked
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "exportRawHint"
         visible: Theme.developerMode
         Layout.fillWidth: true
@@ -490,6 +501,7 @@ ColumnLayout {
         text: qsTr("Scrubbed, the file leaves the vehicle's identification out; raw keeps it.")
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "exportRawWarning"
         visible: panel.rawOn
         Layout.fillWidth: true

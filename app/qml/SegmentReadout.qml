@@ -84,6 +84,7 @@ GaugeBase {
     readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width)
 
     Text {
+        textFormat: Text.PlainText
         id: title
         objectName: "readoutTitle"
         Accessible.ignored: true
@@ -97,6 +98,7 @@ GaugeBase {
         visible: !gauge.noteAlone
     }
     Text {
+        textFormat: Text.PlainText
         objectName: "gaugeNote"
         Accessible.ignored: true
         anchors { left: gauge.noteAlone ? parent.left : title.right
@@ -176,6 +178,7 @@ GaugeBase {
         spacing: 4
         opacity: gauge.stale ? 0.45 : 1.0
         Text {
+            textFormat: Text.PlainText
             objectName: "unit"
             Accessible.ignored: true
             // Kept laid out without a value, so the digits keep their size

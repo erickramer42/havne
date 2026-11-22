@@ -197,6 +197,7 @@ Item {
                         }
                     }
                     contentItem: Text {
+                        textFormat: Text.PlainText
                         id: label
                         text: tabButton.text
                         elide: Text.ElideRight

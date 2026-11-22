@@ -22,6 +22,8 @@
 //                so a request with the digit 1 ends after the first
 //                one, and the answer never prints (an adapter that
 //                doesn't wait past a pending reply)
+//   no_prompt    a request's reply lines print and its prompt never does
+//                (an adapter that goes quiet after a line)
 //   reply_delay_ms  each request's reply and prompt this long after it
 //   input_stops  a byte from the host while a request's reply is still
 //                due stops it, as the datasheet's adapter does: what's
@@ -107,6 +109,7 @@ struct knobs {
     uint32_t multi_frame_prompt_ms = 0;
     const char* banner_in_reply = nullptr;
     bool stop_resets = false;
+    bool no_prompt = false;
 };
 
 } // namespace fake_elm327

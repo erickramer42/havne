@@ -97,10 +97,21 @@ ColumnLayout {
             out.pullEnd = pullEnd
         return out
     }
-    // A pull's end chosen: asked for at once, with the levels typed
+    // A pull's end chosen: asked for at once, with the levels typed. It
+    // takes hold only once the fields are judged, so a bad number leaves the
+    // end that is in force selected
     function choosePullEnd(word) {
+        const before = pullEnd
         pullEnd = word
-        apply()
+        const typed = typedRules()
+        if (typed === null)
+            pullEnd = before
+        else
+            applyRequested(typed)
+    }
+    // A refusal by core: the end shown goes back to the one in force
+    function keepEnd() {
+        pullEnd = rules.pullEnd === "top-speed" ? "top-speed" : "lift"
     }
     function apply() {
         const typed = typedRules()
@@ -138,6 +149,7 @@ ColumnLayout {
                                      : Math.min(grid.width, 200)
         spacing: 2
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: cell.modelData.name + " (" + (cell.modelData.unit === "speed" ? panel.speedUnit : cell.modelData.unit) + ")"
             color: Theme.textDim
@@ -200,6 +212,7 @@ ColumnLayout {
     signal bandsToggled()
 
     Label {
+        textFormat: Text.PlainText
         objectName: "stretchesProblem"
         visible: text !== ""
         Layout.fillWidth: true
@@ -214,6 +227,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: 2
         Label {
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: qsTr("A pull ends")
             color: Theme.textDim
@@ -278,6 +292,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "stretchesHint"
         Layout.fillWidth: true
         wrapMode: Text.WordWrap

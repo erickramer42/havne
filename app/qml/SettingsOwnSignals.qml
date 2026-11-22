@@ -19,6 +19,7 @@ ColumnLayout {
 
     // The vehicle's own signals (ADR-0051's form)
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsTitle"
         visible: root.host.pickedVehicle !== null
         text: qsTr("Your own signals")
@@ -37,6 +38,7 @@ ColumnLayout {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "ownSignalText"
                 text: qsTr("%1: %2").arg(ownRow.modelData.name,
                                          SignalForm.describe(root.host.ownFile, ownRow.modelData))
@@ -73,6 +75,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "ownSignalsNote"
         visible: text !== ""
         text: root.host.ownPart.formNote

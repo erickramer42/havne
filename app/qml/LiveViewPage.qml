@@ -373,7 +373,8 @@ Page {
         // (the first vehicle's did), so the hint goes here too
         case "quiet":    return qsTr("Vehicle not responding: quiet bus; check the ignition")
         case "requests": return qsTr("Requests failing: check the vehicle connection and ignition")
-        case "fault":    return qsTr("Adapter fault: %1 episode(s), retrying with backoff").arg(episodes)
+        case "fault":    return episodes === 1 ? qsTr("Adapter fault: 1 episode, retrying with backoff")
+                                               : qsTr("Adapter fault: %1 episodes, retrying with backoff").arg(episodes)
         // A replay's file changed under it (ADR-0023): nothing more will come
         case "stopped":  return qsTr("Replay stopped: the recording changed after it was opened")
         default:         return qsTr("Link degraded (error %1)").arg(errorCode)
@@ -425,6 +426,7 @@ Page {
             color: Qt.alpha(Theme.linkColor(Bridge.linkState), 0.15)
 
             Label {
+                textFormat: Text.PlainText
                 objectName: "linkBannerText"
                 anchors.centerIn: parent
                 text: root.bannerText(Bridge.linkState, Bridge.errorEpisodes, Bridge.linkErrorCode)
@@ -441,6 +443,7 @@ Page {
             spacing: Theme.spacing
 
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 text: root.statusText()
@@ -456,6 +459,7 @@ Page {
         }
         // The first pause's hint, once: a paused chart isn't a recording
         Label {
+            textFormat: Text.PlainText
             objectName: "pauseHint"
             visible: root.paused && root.hintShown
             Layout.fillWidth: true
@@ -593,6 +597,7 @@ Page {
                         opacity: swatch.drawn ? 1.0 : 0.5
                     }
                     Label {
+                        textFormat: Text.PlainText
                         id: nameLabel
                         objectName: "nameLabel"
                         Accessible.ignored: true
@@ -614,6 +619,7 @@ Page {
                         text: signalDelegate.refused
                     }
                     Label {
+                        textFormat: Text.PlainText
                         id: valueLabel
                         objectName: "valueLabel"
                         Accessible.ignored: true
@@ -699,6 +705,7 @@ Page {
         // What the focus leaves unasked (ADR-0056 section 2): a tick asks a
         // row, except under a log, whose signals stay as it started
         Label {
+            textFormat: Text.PlainText
             id: unaskedNote
             objectName: "unaskedNote"
             visible: Bridge.connected && Bridge.signalModel.unaskedCount > 0
@@ -733,6 +740,7 @@ Page {
             // The caption gives way under 360 px: with it the row's least
             // width is past the narrowest phone's
             Label {
+                textFormat: Text.PlainText
                 visible: !windowRow.tight && root.width >= 360
                 text: qsTr("Window")
                 color: Theme.textDim

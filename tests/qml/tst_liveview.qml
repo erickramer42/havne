@@ -658,7 +658,7 @@ LiveViewKit {
             { tag: "requests", state: "requests", episodes: 1, code: 10,
               text: "Requests failing: check the vehicle connection and ignition" },
             { tag: "fault", state: "fault", episodes: 3, code: 0,
-              text: "Adapter fault: 3 episode(s), retrying with backoff" },
+              text: "Adapter fault: 3 episodes, retrying with backoff" },
             { tag: "stopped", state: "stopped", episodes: 1, code: 16,
               text: "Replay stopped: the recording changed after it was opened" },
             { tag: "degraded", state: "degraded", episodes: 0, code: 42,

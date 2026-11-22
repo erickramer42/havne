@@ -27,7 +27,6 @@ app/recordingview.cpp	finish	135	-
 app/recordingview_asks.cpp	answerAsks	159	72
 app/recordingview_conditions.cpp	pairConditions	156	60
 app/signallistmodel.cpp	sliced	-	43
-app/storemigration.cpp	moveFiles	84	-
 cli/clear_run.h	run_clear	138	56
 cli/cmd_check.cpp	run_conditions_check	117	-
 cli/cmd_health.cpp	run_health_session	117	-

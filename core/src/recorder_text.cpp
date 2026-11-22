@@ -504,7 +504,7 @@ bool make_recording_folder(const std::string& root, std::time_t at,
         path += tail;
         bool taken = false;
         if (make_leaf(path, &taken, why)) {
-            *leaf = path;
+            leaf->swap(path); /* a copy could throw, the folder made */
             if (from != nullptr) {
                 *from = n + 1;
             }

@@ -299,6 +299,17 @@ TEST(BridgeTest, OneStoreMigrationANewInstallIsMarkedAndMakesNoPlugin)
         << said(s);
     EXPECT_EQ(copies().size(), 1) << "only the file a vehicle names moved";
     EXPECT_EQ(filesUnder(strays.signalsRoot()), before);
+    /* Each copy no vehicle names has a record of the book's own, kept
+     * false: its bytes are only in the old folder */
+    const QJsonArray own =
+        strays.book().value(QStringLiteral("unmigrated")).toArray();
+    ASSERT_EQ(own.size(), 2) << strays.text(kBook).toStdString();
+    for (const auto& v : own) {
+        EXPECT_EQ(v.toObject().value(QStringLiteral("kept")),
+                  QJsonValue(false));
+        EXPECT_EQ(v.toObject().value(QStringLiteral("words")).toString(),
+                  QStringLiteral("No vehicle lists it"));
+    }
 }
 
 /* The dashboards' promise: a moved file's rows keep their references,

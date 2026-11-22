@@ -267,7 +267,10 @@ public:
         QSettings prefs(prefsPath(), QSettings::IniFormat);
         QMap<QString, QVariant> out;
         for (const QString& key : prefs.allKeys()) {
-            if (key != kBook && key != kUri && key != kRecentUris) {
+            // The move's own keys: the book, and the mark that says every
+            // copy no vehicle names has its record
+            if (key != kBook && key != kUri && key != kRecentUris &&
+                key != QStringLiteral("vehicles/unnamedRecorded")) {
                 out.insert(key, prefs.value(key));
             }
         }
@@ -346,15 +349,21 @@ inline QString corpusText(const QString& name)
     return QString::fromUtf8(readBytes(corpus(name)));
 }
 
-// The corpus's signal files kept as the old store keeps them
-inline void keepCorpusSignals(const OldState& old)
+// The corpus's signal files kept as the old store keeps them; with a
+// book, only those it names, since a copy no vehicle names gets a record
+// of the book's own
+inline void keepCorpusSignals(const OldState& old,
+                              const QString& book = QString())
 {
     const QDir dir(corpus(QStringLiteral("signals")));
     const QStringList names =
         dir.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
     ASSERT_EQ(names.size(), 3);
     for (const QString& name : names) {
-        old.keep(readBytes(dir.filePath(name)));
+        const QByteArray bytes = readBytes(dir.filePath(name));
+        if (book.isEmpty() || book.contains(sha256Of(bytes))) {
+            old.keep(bytes);
+        }
     }
 }
 

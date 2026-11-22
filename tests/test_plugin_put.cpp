@@ -135,6 +135,35 @@ TEST(PluginWrapTest, APutWithNoVariantNamedTakesTheFilesNameAsItsId)
     EXPECT_EQ(variants_of(same.get()), Strings{"base"});
 }
 
+// A variant whose id is a Windows device name keeps the id, and its data
+// file takes the next number, so the package laid out as a folder opens
+// no device; a plugin already holding such a path still loads and puts
+TEST(PluginWrapTest, ADataFileNeverTakesAWindowsDeviceName)
+{
+    ecuio_plugin_wrap_options_t o = options();
+    o.variant = "aux";
+    const std::string wrapped = ok(wrap(file_a(), &o));
+    EXPECT_EQ(files_of(wrapped), Strings{"data/aux-2.json"});
+    const std::string one = ok(wrap(file_a()));
+    const std::string named = ok(
+        put(one, nullptr, file("Aux", "S", kPcm, sig("egt", "F40E", "pcm"))));
+    EXPECT_EQ(files_of(named), (Strings{"data/base.json", "data/aux-2.json"}));
+    Plugin p = load(named);
+    ASSERT_TRUE(p);
+    EXPECT_EQ(variants_of(p.get()), (Strings{"base", "aux"}));
+    EXPECT_EQ(files_of(ok(put(one, "com1", file_b()))),
+              (Strings{"data/base.json", "data/com1-2.json"}));
+
+    const std::string held =
+        packed(kPcm, R"({"id": "aux", "files": ["data/aux.json"]})",
+               "\"data/aux.json\": " + data(sig("oil", "F40D", "pcm")));
+    ASSERT_TRUE(load(held));
+    const std::string grown = ok(put(held, "track", file_b()));
+    EXPECT_EQ(files_of(grown), (Strings{"data/aux.json", "data/track.json"}));
+    EXPECT_EQ(files_of(ok(put(held, "aux", file_b()))),
+              Strings{"data/aux-2.json"});
+}
+
 // A data file's own source names its variant in a recording's copy; a
 // variant whose files have none keeps the manifest's
 TEST(PluginWrapTest, ADataFilesOwnSourceNamesItsVariant)

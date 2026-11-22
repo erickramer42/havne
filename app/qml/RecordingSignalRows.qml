@@ -89,12 +89,14 @@ ListView {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
+                        textFormat: Text.PlainText
                         text: signalRow.modelData.name
                         color: Theme.text
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "cursorValue"
                         text: root.host.textsPart.atText(signalRow.at, signalRow.modelData)
                         Layout.maximumWidth: Math.round(signalRow.width * (root.host.compareAligned ? 0.3 : 0.5))
@@ -106,6 +108,7 @@ ListView {
                 }
                 // On a phone B and the change have a line of their own
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "cursorSpanLine"
                     visible: root.host.phoneShape && root.host.hasSpan
                     text: visible ? root.host.textsPart.spanCaption(signalRow.modelData) : ""
@@ -120,6 +123,7 @@ ListView {
             }
             // On the desktop, two more columns
             Label {
+                textFormat: Text.PlainText
                 objectName: "cursorBValue"
                 visible: !root.host.phoneShape && root.host.hasSpan
                 text: visible ? root.host.textsPart.atText(root.host.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
@@ -131,6 +135,7 @@ ListView {
                 font.features: Theme.valueFeatures
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "cursorDelta"
                 visible: !root.host.phoneShape && root.host.hasSpan
                 text: visible && !signalRow.modelData.isText
@@ -158,6 +163,7 @@ ListView {
             }
             // The compared recording's, at the cursor
             Label {
+                textFormat: Text.PlainText
                 objectName: "compareValue"
                 readonly property var at: root.host.compareReadout[signalRow.signalIndex]
                 visible: root.host.compareAligned

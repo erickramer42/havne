@@ -76,6 +76,7 @@ ColumnLayout {
         spacing: Theme.spacing
         Layout.fillWidth: true
         Label {
+            textFormat: Text.PlainText
             objectName: "conditionsTitle"
             Layout.fillWidth: true
             text: qsTr("Conditions")
@@ -93,6 +94,7 @@ ColumnLayout {
     }
 
     Label {
+        textFormat: Text.PlainText
         objectName: "conditionsCut"
         visible: text !== ""
         Layout.fillWidth: true
@@ -160,6 +162,7 @@ ColumnLayout {
                     }
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "conditionTime"
                     Layout.row: 0
                     Layout.column: 1
@@ -169,6 +172,7 @@ ColumnLayout {
                     font.features: Theme.valueFeatures
                 }
                 Label {
+                    textFormat: Text.PlainText
                     objectName: "conditionName"
                     Layout.row: 0
                     Layout.column: 2
@@ -186,6 +190,7 @@ ColumnLayout {
                     Layout.fillWidth: Theme.compact
                     spacing: Theme.spacing
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "conditionLevel"
                         visible: text !== ""
                         text: panel.levelWord(entry.modelData)
@@ -193,6 +198,7 @@ ColumnLayout {
                         font.pixelSize: Theme.fontCaption
                     }
                     Label {
+                        textFormat: Text.PlainText
                         objectName: "conditionLength"
                         text: panel.lengthOf(entry.modelData)
                         color: Theme.textDim

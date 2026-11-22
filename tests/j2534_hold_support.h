@@ -82,7 +82,7 @@ struct Bus {
             const ecuio_reply r = ecuio_engine_on_frame(
                 &e, due[i].c, due[i].bytes.data(),
                 static_cast<uint16_t>(due[i].bytes.size()), now, nullptr);
-            j2534_hold_answered(hold, due[i].c);
+            j2534_hold_answered(hold, &e, due[i].c);
             if (r != ecuio_reply::pending &&
                 exchanges[due[i].exchange].ended_us == INT64_MAX) {
                 exchanges[due[i].exchange].ended_us = now;

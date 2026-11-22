@@ -1153,3 +1153,26 @@ back-off clause stays as the fallback for a loss the hold doesn't cover.
   module loses next to nothing, the first keeps about 0.64 of its rate) is
   the pacing model's. Known Issue #42 stays open until a car run confirms
   it.
+
+### The order is per signal (2026-11-20)
+
+The channels that wait for the bus are ranked by the age of each channel's
+next fast row (the time since that row was last written), not by turns,
+so a module with more rows takes more turns and each signal is asked
+about as often as every other. Channels whose last write was a Single
+Frame go first; a Single Frame channel whose reply outlasts its channel's
+floor takes one extra turn for each segmented exchange, so a big Single
+Frame module keeps up with the segmented ones. A row waits at most for the
+Single Frames in flight, one extra pass and each older row once. Whether a
+row's first ask shares the bus is judged by its defs and, for a Service 01
+PID, by J1979's length, until a reply shows its frames. On the pacing
+model's four-module shape through the VX, equal turns gave 102.8 values a
+second with the slowest signal's median at 1,573 ms; the order gives 137.4
+and 721 ms, and the first laps lose no reply. The figures are the model's;
+no car run has measured them.
+
+## Appendix: notes from the review pass (2026-11-20)
+
+- **Section 9, "Keys stay stable":** of two defs at one address the earlier in the set's order keeps the address key, whichever was written first; the other goes by its author's key (or `id:<n>`). A signal placed ahead of another at its address takes the key, and a vehicle's ticks and later recordings follow it. `signals.h` states the rule; `SignalKeysTest.TheEarlierOfTwoAtOneAddressKeepsTheAddressKey` pins it both ways.
+- **Step 2's appendix, "The check":** a check's reply is timed only at a row a focus once kept. The check takes no row of the timing pool, since its turn goes around a table past the pool's size and would spend the pool on rows nobody picked.
+- **The hold, absent modules:** under the hold an absent module holds the bus only for its first ask's wait, 100 ms once if that ask reads long: four present modules beside 14 absent ones answer 92% of their own count in the first 3 s when the absent ones' rows are short, 40% when they read long (the hold's test bus, `J2534HoldTest.AbsentModulesHoldNoOne`; 40% and 1% before). A module asleep at connect is judged by its defs again from its first frame after the silence; that waking reply can cost each other module one Single Frame, once (3 lost against 24 before, three present modules beside one of 20 long rows waking at 5 s).

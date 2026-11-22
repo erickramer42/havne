@@ -26,6 +26,7 @@ ColumnLayout {
     spacing: 4
 
     Label {
+        textFormat: Text.PlainText
         objectName: "plugpage_heading"
         Layout.fillWidth: true
         Layout.minimumWidth: 0
@@ -47,6 +48,7 @@ ColumnLayout {
             Layout.maximumWidth: part.barWidth
             spacing: 8
             Label {
+                textFormat: Text.PlainText
                 objectName: "plugpage_name_" + group.index
                 // A long name stays inside the bar: a Flow lets a child run past its own width
                 width: Math.min(implicitWidth, group.width)

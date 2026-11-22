@@ -795,3 +795,5 @@ add, so a user doesn't build it one gauge at a time.
 > checks a conversation part and binds no module, so such a plugin is data
 > only there ([ADR-0066](0066-conversation-tier-and-write-gates.md)'s note
 > of the same date).
+
+Amended 2026-11-20: a path naming a Windows device (`CON`, `NUL`, `COM1` and the rest, in any case, with any extension, or a part ending in a dot) is refused only where a folder's file is read from disk. A packed plugin's paths are names inside its text and load whatever they are, and the wrap and the put never write one: a data file whose name would be a device is numbered (`data/aux-2.json`).

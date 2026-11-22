@@ -79,6 +79,7 @@ GaugeCard {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 font.pixelSize: Theme.fontBody
                 font.bold: true
@@ -114,6 +115,7 @@ GaugeCard {
             filterButtonShown: false
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "signalNone"
             visible: signalCard.shownCount === 0
             Layout.fillWidth: true

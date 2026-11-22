@@ -363,7 +363,9 @@ TEST_F(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
 }
 
 /* Passive mode reads again at once after a frame, so a burst of 16 is
- * delivered together rather than one per pass with a wait between. */
+ * delivered together rather than one per pass with a wait between. One
+ * idle wait per frame would take 16 x 100 ms, so the ceiling is half of
+ * that: loose for a loaded machine, still under the wait's total. */
 TEST_F(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
 {
     ASSERT_NO_FATAL_FAILURE(start_session("?profile=raw&filter=0x7E8"));
@@ -377,7 +379,7 @@ TEST_F(J2534HealthTest, PassiveModeDrainsABurstWithoutWaiting)
     ASSERT_TRUE(wait_for_frames(16, 3000));
     const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0).count();
-    EXPECT_LT(took, 250) << "the burst was read one frame per pass";
+    EXPECT_LT(took, 800) << "the burst was read one frame per pass";
     EXPECT_EQ(frames.load(), 16);
 }
 

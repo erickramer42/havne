@@ -38,6 +38,7 @@ AbstractButton {
         border.color: seg.visualFocus ? Theme.text : Theme.outline
     }
     contentItem: Text {
+        textFormat: Text.PlainText
         id: segLabel
         text: seg.text
         font.pixelSize: seg.labelSize

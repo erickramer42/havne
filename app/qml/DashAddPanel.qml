@@ -25,6 +25,7 @@ GaugeCard {
         RowLayout {
             Layout.fillWidth: true
             Label {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 font.pixelSize: Theme.fontBody
                 font.bold: true

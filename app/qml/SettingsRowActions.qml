@@ -239,11 +239,17 @@ Item {
     // { sha256, name, words, kept, loose }
     readonly property var unmigratedRows:
         (host.pickedVehicle !== null && host.pickedVehicle.unmigrated !== undefined
-         ? host.pickedVehicle.unmigrated.map(r => ({ sha256: r.sha256, name: r.name, words: r.words,
+         ? host.pickedVehicle.unmigrated.map(r => ({ sha256: r.sha256, name: unmigratedName(r.name), words: r.words,
                                                 kept: r.kept !== false, loose: false })) : [])
         .concat(host.vehicles.unmigrated !== undefined
-                ? host.vehicles.unmigrated.map(r => ({ sha256: r.sha256, name: r.name, words: r.words,
+                ? host.vehicles.unmigrated.map(r => ({ sha256: r.sha256, name: unmigratedName(r.name), words: r.words,
                                                   kept: r.kept !== false, loose: true })) : [])
+
+    // A record may carry no name (a copy no vehicle lists): the row says so
+    // in words instead of leading with a lone colon
+    function unmigratedName(name) {
+        return typeof name === "string" && name.trim() !== "" ? name : qsTr("A signal file")
+    }
 
     function unmigratedText(r) {
         return qsTr("%1: %2").arg(r.name, r.words)

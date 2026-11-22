@@ -26,6 +26,7 @@ AbstractButton {
         }
     }
     contentItem: Label {
+        textFormat: Text.PlainText
         text: control.label
         leftPadding: 16
         color: control.active ? Theme.text : Theme.textDim

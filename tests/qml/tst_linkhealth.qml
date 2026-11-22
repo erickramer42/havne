@@ -154,7 +154,7 @@ TestCase {
         connect(fakeUri("?profile=raw&filter=0x7E8"))
         tryCompare(Bridge, "linkState", "fault", 5000)
         compare(Bridge.errorEpisodes, 1, "one episode while the failure lasts")
-        checkSurfaces(main, "fault", "Adapter fault: 1 episode(s), retrying with backoff")
+        checkSurfaces(main, "fault", "Adapter fault: 1 episode, retrying with backoff")
         verify(activityLog(main).includes("Link: adapter fault (1 episode(s))"), "fault log line")
     }
 

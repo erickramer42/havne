@@ -79,6 +79,7 @@ ColumnLayout {
             // How many rows the part in view has, and when it has more than
             // the table holds, where the table begins
             Label {
+                textFormat: Text.PlainText
                 objectName: "framesWords"
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0

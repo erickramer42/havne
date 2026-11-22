@@ -460,8 +460,8 @@ second from the engine ECU, 60 s each:
 
 `PacingTest` holds D1, D2, D6, D9 and D10 within 10% of the car and D3
 within 5% (the car's own D3 and D8 differ by 2.4%). Every pinned run
-asked one module, so each is also checked to be the same run with
-`?hold=0`.
+asked one module, so each VX run is also checked to be the same run with
+`?hold=0`; the ELM327 model never reads the hold, so its runs aren't.
 
 What the model doesn't cover:
 
@@ -510,6 +510,31 @@ without the hold, as each segmented reply waits out the other module's.
 Since the model loses more than the car, the prediction overstates what
 the hold wins for 0x7E9; its cost to 0x7E8 doesn't depend on the loss. A
 car run with the hold replaces both figures.
+
+**The hold's order, per signal (the model, 2026-11-20; no car run):** with
+the modules sharing the bus by signal (each row's age ranks its channel,
+Single Frames first), the pacing bench's model (the simulated car, `bench_pacing`) through the
+VX gives, over 70 s at seed 1 (seeds 1-3 agree within 1%); these figures
+are the model's, not a car's:
+
+| Shape | Values a second | Worst signal's P50 | P99 | Lost replies |
+|---|---|---|---|---|
+| Four modules, unequal | 137.4 | 721 ms | 753 ms | none |
+| Four modules, mixed | 153.5 | 655 ms | 684 ms | none |
+
+Against equal turns (a turn for each waiting channel in rotation): 102.8
+and 119.0 values a second, the worst signal's P50 at 1,573 and 1,425 ms,
+and 6 and 12 replies lost, all at the start. Each row's first answer
+comes by 0.9 s and 1.0 s. `bench_pacing`'s "unequal modules" rows are
+these figures.
+
+Beside absent modules (the hold's test bus, `J2534HoldTest.AbsentModulesHoldNoOne`): four present modules beside 14 absent ones answer 92% of their own count in the first 3 s when the absent ones' rows are short and 40% when they read long (the absent module holds the bus once, for its first ask's wait of 100 ms); before, 40% and 1%.
+
+v0.8.0's Dashboard stall as a whole scenario (`tests/test_pacing_stall.cpp`, 2026-11-21, the model's draw is fixed so a run repeats bit for bit): four modules through the MX+ model, every value's P50 106.5 ms and worst 120.0 ms (bounds 150 and 200 ms), RPM 106.5 ms against 73.7 ms without the transmission's DID (1.45x, bound 1.7x). The J2534 hold over four modules: the engine's rows 81.9 ms, the transmission's 26.6 ms and the segmented module's 53.2 ms against a share of 66.4 ms, worst 206.9 ms, nothing lost. With turns by channel the Dashboard's P50 reads 163.8 ms and the spread 3.1x; with `?hold=0` the engine's rows read 360-655 ms and 1,107 replies are lost under the segments.
+
+### The signal-file loader at 16,384 signals
+
+`PluginTest.AVariantHoldsMoreSignalsThanOneFileMay` takes 0.43-0.45 s (desktop, Release), 1.46-1.81 s before the loader indexed a file's keys and first names. A reverse chain of 16,384 computed signals is refused in 31 ms, 1.22-1.30 s before the depths were settled over a queue of reads.
 
 ### Connect cost: a surrogate per session
 

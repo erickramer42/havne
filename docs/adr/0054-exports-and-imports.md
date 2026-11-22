@@ -612,6 +612,8 @@ scrubbed text value left out instead; no `signals.csv` and a bad row),
 fixture, exported and read back by Python's `csv` module row for row,
 twice to the same bytes, and a range).
 
+> **2026-11-21: the CSV exports start with a byte order mark.** Both user CSVs (the long one and the wide one) begin with the three bytes EF BB BF, so Excel reads them as UTF-8 and shows the units (`%`, `°C`) whole; the long file's comment line follows the mark. A reader skips the mark before anything else, a comment check included: Havne's own readers do (`csv_reader.h`), and a script reads an export with encoding `utf-8-sig`. pandas with `skiprows=1` still works on the long file (the mark is on the skipped line), and `comment="#"` was never advised. A reader's note: base R's `read.csv` keeps the mark in the wide file's first column name (U+FEFF before "Time (ms)") unless `fileEncoding = "UTF-8-BOM"` is given; readr strips it. The folder export's copied files are unchanged. Tested by `ExportTest.EachUserCsvStartsWithAByteOrderMark`.
+
 ## Appendix: the folder export as built (2026-11-06)
 
 `ECUIO_EXPORT_FOLDER` writes a scrubbed copy of a recording's folder,

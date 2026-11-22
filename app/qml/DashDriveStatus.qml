@@ -31,12 +31,14 @@ Item {
             color: Theme.linkColor(Bridge.linkState)
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusWord"
             font.pixelSize: Theme.fontCaption
             color: Theme.text
             text: Theme.linkShortLabel(Bridge.linkState)
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusAddress"
             Layout.fillWidth: true
             Layout.minimumWidth: 0
@@ -46,6 +48,7 @@ Item {
             text: qsTr("· %1").arg(SessionLabel.address(Bridge.uriLabel))
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusRun"
             visible: Bridge.logActive || Bridge.recordingActive || driveStatus.host.drivePart.driveLogEnded
             font.pixelSize: Theme.fontCaption
@@ -56,6 +59,7 @@ Item {
                 : driveStatus.host.drivePart.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusTime"
             visible: Bridge.logActive
             font.family: Theme.valueFamily
@@ -65,6 +69,7 @@ Item {
             text: driveStatus.host.driveLogTime
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "driveStatusDetail"
             readonly property string detail:
                 Bridge.logActive ? driveStatus.host.driveLogSize

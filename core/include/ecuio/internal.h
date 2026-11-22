@@ -192,6 +192,11 @@ void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
 void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
                                   uint32_t* monitor_check_ms);
 
+/* TEST-ONLY: adds to the slept count the ELM327 worker reads, as a sleep
+ * of the machine would; for the process, never taken back (the count
+ * never decreases). The public clock's own count is untouched. */
+void ecuio_elm327_test_add_slept(uint64_t us);
+
 /* TEST-ONLY: how often a session that asks only its picks, with nothing
  * picked and its link down, asks one request to see whether an ECU
  * answers (ms; request_setup.h's ecuio_unpicked_pass); 0 restores 5 s.

@@ -141,6 +141,18 @@ SettingsKit {
         compare(logSpy.count, 1, "the Log asked for")
     }
 
+    // A refusal quotes what core was given, and an adapter's reply: drawn as
+    // text, never as markup (an <img> in markup loads a file: URL's host with
+    // no interceptor asked), so a tag in the address shows as typed
+    function test_aRefusalDrawsItsWordsAsPlainText() {
+        const page = createPage()
+        page.connectFromPart.requestConnect("mock://demo?diagnose=<b>x</b>")
+        const label = find(page, "errorLabel")
+        tryVerify(() => label.visible, 5000, "the refusal")
+        verify(label.text.includes("<b>x</b>"), label.text)
+        compare(label.textFormat, Text.PlainText)
+    }
+
     // The connect lists offer the addresses Connection offers, no others:
     // both read the same rows, so the URI, the title and the kind agree
     function test_theConnectListsOfferConnectionsAddresses() {

@@ -160,6 +160,7 @@ Rectangle {
                 cutout: Theme.alertDangerFill
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "alertBandLevel"
                 Accessible.ignored: true
                 text: band.shown ? band.levelWord(band.shownRow.level) : ""
@@ -168,6 +169,7 @@ Rectangle {
                 font.weight: Font.DemiBold
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "alertBandName"
                 Accessible.ignored: true
                 Layout.fillWidth: true
@@ -178,6 +180,7 @@ Rectangle {
                 font.pixelSize: Theme.fontBody
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "alertBandValue"
                 Accessible.ignored: true
                 visible: text !== ""
@@ -188,6 +191,7 @@ Rectangle {
                 font.features: Theme.valueFeatures
             }
             Label {
+                textFormat: Text.PlainText
                 objectName: "alertBandMore"
                 Accessible.ignored: true
                 visible: band.more > 0
@@ -197,6 +201,7 @@ Rectangle {
             }
         }
         Label {
+            textFormat: Text.PlainText
             objectName: "alertBandStale"
             Accessible.ignored: true
             Layout.fillWidth: true

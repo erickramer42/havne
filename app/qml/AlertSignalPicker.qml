@@ -42,6 +42,7 @@ ColumnLayout {
         filterButtonShown: false
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "alertSignalNone"
         visible: picker.shownRows.length === 0
         Layout.fillWidth: true

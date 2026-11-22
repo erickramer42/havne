@@ -488,6 +488,155 @@ TEST_F(Elm327SessionTest, NoPromptWithinThePromptLimitIsAHardFailure)
         << log;
 }
 
+/* A sleep of the machine inside a reply's wait is said in the wire log,
+ * with its length, in place of the 5 s line (the limit here is 2 s). A
+ * sleep before the command was typed is no sleep in its wait. Part 2's
+ * request is typed under `silent` (the fake counts it before it looks at
+ * the knob) before the sleep is added, inside the 2 s limit; the sleep's
+ * timeout is the episode that ends the link, so no later request's own
+ * quiet line follows it. */
+TEST_F(Elm327SessionTest, ASleepInsideAReplysWaitIsSaidInTheLog)
+{
+    const LogDir logs("sleep");
+    {
+        ecuio_elm327_test_add_slept(30000000);
+        Session s;
+        ASSERT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const ShortTimeouts timeouts(2000, 0);
+
+        set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+        ASSERT_TRUE(wait_for(
+            [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; },
+            10000));
+        set_knobs([](fake_elm327::knobs& k) { k.silent = false; });
+        ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 15000));
+
+        uint32_t seen = 0;
+        fake_elm327::with([&](fake_elm327::adapter& a) {
+            seen = a.requests;
+            a.k.silent = true;
+        });
+        ASSERT_TRUE(wait_for(
+            [&] {
+                return on_fake<bool>(
+                    [&](fake_elm327::adapter& a) { return a.requests > seen; });
+            },
+            5000));
+        ecuio_elm327_test_add_slept(90400000);
+        uint32_t episodes = 0;
+        ASSERT_TRUE(wait_for(
+            [&] {
+                (void)s.state(&episodes);
+                return episodes >= 2;
+            },
+            10000));
+    }
+    const std::string log = logs.only_log();
+    EXPECT_NE(log.find("] no line and no prompt for 2 s ("), std::string::npos)
+        << log;
+    const size_t said = log.find("] the machine slept 90.4 s with ");
+    ASSERT_NE(said, std::string::npos) << log;
+    EXPECT_NE(log.find(" out: its reply is lost", said), std::string::npos)
+        << log;
+    EXPECT_EQ(log.find("the machine slept 30"), std::string::npos) << log;
+    EXPECT_EQ(log.find("the machine slept 120"), std::string::npos) << log;
+    EXPECT_EQ(log.find("no line and no prompt for 2 s (01", said),
+              std::string::npos)
+        << log;
+}
+
+/* The wire log of a session whose request, typed under arm's knobs with
+ * a limit of limit_ms, has add_us of sleep added to the machine's count
+ * once it is out; end's knobs follow the add. Returns the log once the
+ * wait has ended the link. */
+static std::string log_of_a_sleep_in_a_wait(const char* name, uint64_t add_us,
+                                            uint32_t limit_ms,
+                                            void (*arm)(fake_elm327::knobs&),
+                                            void (*end)(fake_elm327::knobs&))
+{
+    const LogDir logs(name);
+    {
+        Session s;
+        EXPECT_EQ(s.create(uri("?poll=0x0C")), ECUIO_OK);
+        s.start();
+        EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+        const ShortTimeouts timeouts(limit_ms, 0);
+        uint32_t seen = 0;
+        fake_elm327::with([&](fake_elm327::adapter& a) {
+            seen = a.requests;
+            arm(a.k);
+        });
+        EXPECT_TRUE(wait_for(
+            [&] {
+                return on_fake<bool>(
+                    [&](fake_elm327::adapter& a) { return a.requests > seen; });
+            },
+            5000));
+        ecuio_elm327_test_add_slept(add_us);
+        set_knobs(end);
+        uint32_t episodes = 0;
+        EXPECT_TRUE(wait_for(
+            [&] {
+                (void)s.state(&episodes);
+                return episodes >= 1;
+            },
+            15000));
+        set_knobs([](fake_elm327::knobs& k) { k = fake_elm327::knobs{}; });
+    }
+    return logs.only_log();
+}
+
+/* The sleep's threshold is a second: 0.9 s inside a wait is no sleep, 1.2 s
+ * is one, said with its tenth */
+TEST_F(Elm327SessionTest, ASleepIsSaidFromASecond)
+{
+    const auto silent = [](fake_elm327::knobs& k) { k.silent = true; };
+    const auto none = [](fake_elm327::knobs&) {};
+    const std::string under =
+        log_of_a_sleep_in_a_wait("sleep-under", 900000, 2000, silent, none);
+    EXPECT_NE(under.find("] no line and no prompt for 2 s ("),
+              std::string::npos)
+        << under;
+    EXPECT_EQ(under.find("the machine slept"), std::string::npos) << under;
+    const std::string over =
+        log_of_a_sleep_in_a_wait("sleep-over", 1200000, 2000, silent, none);
+    EXPECT_NE(over.find("] the machine slept 1.2 s with "), std::string::npos)
+        << over;
+}
+
+/* The baseline is the send, not the last line: a sleep after the send and
+ * before a line, then silence after the line, is still the sleep */
+TEST_F(Elm327SessionTest, ASleepBeforeALineThenSilenceIsSaidAsTheSleep)
+{
+    const std::string log = log_of_a_sleep_in_a_wait(
+        "sleep-line", 90400000, 2000,
+        [](fake_elm327::knobs& k) {
+            k.no_prompt = true;
+            k.reply_delay_ms = 1000;
+        },
+        [](fake_elm327::knobs&) {});
+    EXPECT_NE(log.find("] the machine slept 90.4 s with "), std::string::npos)
+        << log;
+    EXPECT_EQ(log.find("] no line and no prompt for 2 s (01"),
+              std::string::npos)
+        << log;
+}
+
+/* A read that fails on the wake says the sleep too, not only the port */
+TEST_F(Elm327SessionTest, AReadFailingOnTheWakeSaysTheSleep)
+{
+    const std::string log = log_of_a_sleep_in_a_wait(
+        "sleep-read", 90400000, 10000,
+        [](fake_elm327::knobs& k) { k.silent = true; },
+        [](fake_elm327::knobs& k) { k.dropped = true; });
+    EXPECT_NE(log.find("] the machine slept 90.4 s with "), std::string::npos)
+        << log;
+    EXPECT_NE(log.find(" out: the port failed on the wake"), std::string::npos)
+        << log;
+}
+
 /* A session that asks nothing runs the setup, then AT MA and nothing
  * else; the channel's messages arrive whole, multi-frame too, flagged
  * reassembled, and a line the monitor marks or another ID's frame is no

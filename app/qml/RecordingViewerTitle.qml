@@ -27,6 +27,7 @@ RowLayout {
         onClicked: root.host.openPart.backToList()
     }
     Label {
+        textFormat: Text.PlainText
         objectName: "openedTitle"
         text: root.host.openedTitle
         color: Theme.text

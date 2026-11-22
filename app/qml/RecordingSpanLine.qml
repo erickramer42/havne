@@ -18,6 +18,7 @@ RowLayout {
     Layout.fillWidth: true
     spacing: 6
     Label {
+        textFormat: Text.PlainText
         objectName: "spanText"
         Layout.fillWidth: true
         horizontalAlignment: root.host.phoneShape ? Text.AlignLeft : Text.AlignRight

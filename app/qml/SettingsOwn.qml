@@ -22,13 +22,14 @@ Item {
     property string readOnceFor: ""
 
     // The form and the page's notes are the picked vehicle's: a pick,
-    // New, Duplicate, Forget or a car recognized starts them afresh, and a
-    // question asked about the last one goes with it
+    // New, Duplicate or Forget starts them afresh, and a question asked
+    // about the last one goes with it
     readonly property string pickedId: host.pickedVehicle !== null ? host.pickedVehicle.id : ""
     onPickedIdChanged: {
         host.confirming = ""
         host.importPart.discardImport()   // a file waiting was read for the last vehicle
         host.rowActionsPart.openRow = ""
+        vinPickNote = ""
         clearForm()
         dropAnotherVehiclesProfile()
     }
@@ -38,10 +39,12 @@ Item {
     // never decodes with the last vehicle's signals and remembers them as
     // this one's. A vehicle with a connection of its own then sets the
     // field (pickVehicle); a session's URI is left as it is until the
-    // session ends, since a VIN may pick another vehicle while it runs
+    // session ends, and a session's start ends the VIN's offer
     onIdleChanged: {
         if (idle)
             dropAnotherVehiclesProfile()
+        else
+            vinPickNote = ""
     }
 
     function dropAnotherVehiclesProfile() {
@@ -275,8 +278,8 @@ Item {
                                                   Bridge.signalModel.unplottedKeys()))
     }
 
-    // Said beside the vehicles while the car's VIN, not the user, made
-    // the pick (VehicleBook.pickNote); "" once the user picks
+    // Said beside the vehicles while the car's VIN names a vehicle the
+    // user hasn't picked (VehicleBook.pickNote); "" once the user picks
     property string vinPickNote: ""
 
     // The VIN settled which vehicle this is (ADR-0027 section 4)
@@ -291,14 +294,6 @@ Item {
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         host.saveVehicles(r.doc)
         vinPickNote = VehicleBook.pickNote(r)
-        if (r.outcome === "new" && host.plottedApplied) {
-            // This session's ticks are the new vehicle's; what the one
-            // picked before kept for other sets stays its own
-            Bridge.signalModel.dropCarriedChoices()
-            rememberPlotting()
-        }
-        else if (r.outcome === "switched" && host.plottedApplied)
-            Bridge.signalModel.setPlotChoices(host.pickedVehicle.plotted, host.pickedVehicle.unplotted)
         Bridge.logEvent(VehicleBook.logLine(r))
     }
 

@@ -47,10 +47,15 @@ public:
     // A file's bytes in place of the kept one: { ok, words, conditions,
     // name, aside }. Refused, with core's words and nothing written, for a
     // file core refuses or one past ECUIO_CONDITION_FILE_MAX_BYTES; refused
-    // with the write's words, the old file kept, when it can't be written.
+    // with the write's words, the old file kept, when it can't be written (a
+    // file moved aside first is named in them: it is then the only copy).
     // A file load couldn't read or take for its size is first moved to
     // conditions.json.bad-N, whose name aside carries ("" when none moved)
     QVariantMap save(const QByteArray& bytes);
+
+    // Fails the next save's write once, after any move aside, as a full
+    // disk would: for tests only
+    void failNextWriteForTesting() { m_failWrite = true; }
 
     // The kept file's bytes ("" with none) and its set (nullptr with none)
     const QByteArray& bytes() const { return m_bytes; }
@@ -66,6 +71,7 @@ private:
     // load). false when it can't be moved
     bool moveAside(QString* to) const;
 
+    bool m_failWrite = false;
     bool m_unreadable = false; // the file is there, and load couldn't take it
     QByteArray m_bytes;
     ConditionSetPtr m_set;

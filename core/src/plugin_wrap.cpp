@@ -143,8 +143,8 @@ void check_packed(const char* packed, size_t length, const char* prefix)
     ecuio_plugin_free(p);
     if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
         throw refusal{"the plugin has the conversation tier, which a put or "
-                      "a drop doesn't carry over: change its folder and pack "
-                      "it again"};
+                      "a drop doesn't carry over: change the variant in the "
+                      "plugin's folder, which Havne loads as it stands"};
     }
 }
 
@@ -168,6 +168,20 @@ bool loads(const std::string& text, std::string* why)
                ? words.substr(colon + 2)
                : words;
     return false;
+}
+
+/* data/<variant>.json, numbered from -2 while files holds it or it names
+ * a Windows device: the package laid out as a folder, the form a plugin
+ * is edited in, would open the device */
+std::string data_path(const std::string& variant, const Value* files)
+{
+    std::string path = "data/" + variant + ".json";
+    for (unsigned n = 2; ecuio_plugin_rules::names_a_device(path) ||
+                         (files != nullptr && files->find(path) != nullptr);
+         ++n) {
+        path = "data/" + variant + "-" + std::to_string(n) + ".json";
+    }
+    return path;
 }
 
 /* name as user.<slug>'s slug, cut to cap bytes with no '-' at its end */
@@ -308,7 +322,7 @@ std::string wrapped(const char* file, size_t length,
     if (in.find("ecus") != nullptr) {
         add(doc, "ecus", take(in, "ecus"));
     }
-    const std::string path = "data/" + variant + ".json";
+    const std::string path = data_path(variant, nullptr);
     Value entry = empty_of(Type::object);
     add(entry, "id", text_value(variant));
     Value listed = empty_of(Type::array);
@@ -687,10 +701,7 @@ std::string put(const char* packed, size_t length, const char* variant_given,
     merge.run();
     *notes = merge.notes();
 
-    std::string path = "data/" + variant + ".json";
-    for (unsigned n = 2; p.files().find(path) != nullptr; ++n) {
-        path = "data/" + variant + "-" + std::to_string(n) + ".json";
-    }
+    const std::string path = data_path(variant, &p.files());
     add(p.files(), path, std::move(in));
     Value listed = empty_of(Type::array);
     listed.items.push_back(text_value(path));

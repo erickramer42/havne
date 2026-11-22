@@ -20,6 +20,7 @@ ColumnLayout {
     property bool logExplains: false
 
     Label {
+        textFormat: Text.PlainText
         objectName: "sessionStatus"
         text: Bridge.connected
               ? qsTr("Connected: %1").arg(Bridge.currentUri)
@@ -94,6 +95,7 @@ ColumnLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
         Label {
+            textFormat: Text.PlainText
             id: errorLabel
             objectName: "errorLabel"
             visible: false
