@@ -24,6 +24,7 @@
 #include "request_engine_walk.h"
 #include "request_engine_diag.h"
 #include "request_engine_session.h"
+#include "request_engine_quiet.h"
 #include "request_engine_send.h"
 #include "request_engine_reply.h"
 
@@ -111,6 +112,12 @@
  * so every pick has been asked, and the next one starts no sooner than
  * that long after this one started. A sweep that took longer waits for
  * nothing. Only the rotation waits: the walk, identification, the
- * diagnostics, a clear and the scan go out in the gap. */
+ * diagnostics, a clear and the scan go out in the gap.
+ *
+ * A module that has stopped answering (ADR-0065's appendix of
+ * 2026-11-21, request_engine_quiet.h) is quiet: while another module
+ * answers, it is asked one row on a backoff up to 5 s and its lists
+ * settle unanswered unasked, so its waits cost the others nothing on an
+ * adapter that asks one module at a time. Any frame from it ends that. */
 
 #endif /* ECUIO_REQUEST_ENGINE_H */

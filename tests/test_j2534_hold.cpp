@@ -679,9 +679,20 @@ TEST(J2534HoldTest, AChannelIsSilentFromItsSecondWaitInARow)
     EXPECT_EQ(hold.misses[0], 2u) << "and again";
     for (uint32_t m = 0; m <= 17; ++m) {
         hold.misses[0] = m;
-        EXPECT_EQ(j2534_hold_silent(hold, 0), m >= 2 && m != 8 && m != 16)
+        EXPECT_EQ(j2534_hold_silent(hold, &e, 0), m >= 2 && m != 8 && m != 16)
             << m << " in a row";
     }
+    /* a quiet module's first four steps are probes; from the fifth, its
+     * 5 s cap, it is silent again */
+    hold.misses[0] = 3;
+    e.chans[0].quiet = true;
+    for (uint32_t asks = 0; asks <= ECUIO_ENGINE_QUIET_STEP_COUNT; ++asks) {
+        e.chans[0].quiet_asks = asks;
+        EXPECT_EQ(j2534_hold_silent(hold, &e, 0), asks == 0 || asks >= 5)
+            << asks << " steps asked";
+    }
+    e.chans[0].quiet = false;
+    e.chans[0].quiet_asks = 0;
     for (int how = 0; how < 2; ++how) {
         hold.misses[0] = 2;
         ecuio_engine_sent(&e, 0, 0, true, 200 * kMs);

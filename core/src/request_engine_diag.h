@@ -181,6 +181,9 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_diag_item& it = ch.diag_items[ch.diag_index];
     ecuio_channel_diagnostics_t& d = ch.diag;
+    /* a quiet module's step unanswered again changes no report */
+    const bool same =
+        it.outcome == ECUIO_DIAG_UNANSWERED && outcome == ECUIO_DIAG_UNANSWERED;
     ch.diagnosing = false;
     it.outcome = outcome;
     it.nrc = nrc;
@@ -205,7 +208,7 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     if (ch.diag_pending == 0) {
         d.flags |= ECUIO_DIAG_COMPLETE;
     }
-    ++d.generation;
+    d.generation += same ? 0u : 1u;
 }
 
 /* Lists the first items on a channel holding none, and marks its

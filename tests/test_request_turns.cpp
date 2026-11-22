@@ -90,14 +90,15 @@ TEST(RequestTurnsTest, ATurnUnderOneFramePacksAsksEachRow)
     }
 }
 
-/* The test car's four-channel pick: 0x7E8's walk comes after a DID, a
- * silent module's two rows and a refusing module's row, each exchange
- * 110 ms. It reaches the last bitmap, since its second starts at its
- * first bitmap and the walk keeps the turn, and its PIDs then pack. */
+/* The test car's four channels: 0x7E8's walk comes after seven DIDs, a
+ * silent module's two waits (quiet from then) and a refusing module's
+ * row, each exchange 110 ms, so past the probe's second. It reaches the
+ * last bitmap, since its second starts at its first bitmap and the walk
+ * keeps the turn, and its PIDs then pack. */
 TEST(RequestTurnsTest, TheWalkReachesTheLastBitmapWithFourChannels)
 {
     auto a = adapter(4);
-    dids(&a->e, 0, 1);       /* 0x7E9 */
+    dids(&a->e, 0, 7);       /* 0x7E9 */
     dids(&a->e, 1, 8, 0x10); /* 0x769, silent */
     dids(&a->e, 2, 1, 0x20); /* 0x72E, refuses */
     /* 0x7E8 */
@@ -157,7 +158,7 @@ TEST(RequestTurnsTest, AWalkKeepsTheTurnPastTheTurnsSecond)
         if (c == 1) {
             return {};
         }
-        return (silent && q[0] == 0x01) ? Bytes{} : answer(q);
+        return (silent && q == Bytes{0x01, 0x00}) ? Bytes{} : answer(q);
     };
     ecuio_engine_probe(&a->e);
     a->asks(1);

@@ -5,6 +5,8 @@
 
 #include "j2534_hold_support.h"
 
+#include <algorithm>
+
 using namespace j2534_hold_test;
 
 namespace {
@@ -38,7 +40,7 @@ struct Count {
     size_t first_3s = 0; /* the present modules' rows answered */
     size_t lost = 0;
     size_t lost_after_wake = 0;
-    size_t lost_settled = 0; /* from a second after the wake */
+    size_t lost_settled = 0; /* from a second after its first frame */
 };
 
 void add_rows(Bus& b, const Shape& s)
@@ -81,11 +83,17 @@ Count run(const Shape& s, int64_t until_us = 3000 * kMs)
     };
     size_t at_wake = 0;
     size_t at_settled = 0;
+    int64_t heard_us = INT64_MAX; /* a module that slept, at its first frame */
     while (b.now < until_us) {
+        for (uint32_t c = s.present; c < s.present + s.absent; ++c) {
+            heard_us =
+                b.e.chans[c].heard && heard_us == INT64_MAX ? b.now : heard_us;
+        }
         if (s.wake_us != 0 && b.now < s.wake_us) {
             at_wake = b.lost;
         }
-        if (s.wake_us != 0 && b.now < s.wake_us + 1000 * kMs) {
+        if (s.wake_us != 0 &&
+            (heard_us == INT64_MAX || b.now - heard_us < 1000 * kMs)) {
             at_settled = b.lost;
         }
         b.pass();
@@ -132,12 +140,12 @@ TEST(J2534HoldTest, AFirstAskThatReadsLongCostsNoReplyAtConnect)
     EXPECT_EQ(c.lost, 0u);
 }
 
-/* A module of long rows asleep at connect, every row's wait run out, then
- * awake at 5 s: its first frame after so long a silence takes back its
- * rows' waits run out, so each row's first answer is judged by its defs
- * again and goes alone. The waking reply itself, judged one frame, can
- * cost each other module one Single Frame, once (3 here; 24 with the
- * waits run out kept), and nothing after */
+/* A module of long rows asleep at connect, quiet after its first waits,
+ * then awake at 5 s and read at its next step: its first frame after so
+ * long a silence takes back its rows' waits run out, so each row's first
+ * answer is judged by its defs again and goes alone. The waking reply
+ * itself, judged one frame, can cost each other module one Single Frame,
+ * once (3 here), and nothing from a second after it */
 TEST(J2534HoldTest, AModuleAwakeAfterASilenceIsJudgedByItsDefsAgain)
 {
     Shape s{3, 1, 20, true};
@@ -245,4 +253,75 @@ TEST(J2534HoldTest, ARowAModuleNeverAnswersHoldsTheBusOnce)
         ASSERT_GT(plain, 100u);
         EXPECT_GE(held, plain * 95 / 100) << held << " against " << plain;
     }
+}
+
+namespace {
+
+/* Three modules of 20 long rows (three frames each) beside a fourth of 20
+ * one-frame rows, under the hold with the VX's loss: the fourth answers
+ * until sleep_us (0: never), then is silent until wake_us, then answers
+ * every request. The time from its wake to its first frame. */
+int64_t wake_delay(int64_t sleep_us, int64_t wake_us)
+{
+    Bus b;
+    EXPECT_TRUE(ecuio_engine_init(&b.e, 4));
+    b.e.gap_us = 5 * kMs;
+    for (uint32_t c = 0; c < 4; ++c) {
+        for (uint32_t k = 0; k < 20; ++k) {
+            const uint8_t did[3] = {0x22, static_cast<uint8_t>(0x10 + c),
+                                    static_cast<uint8_t>(k)};
+            EXPECT_EQ(ecuio_engine_add(&b.e, c, did, 3),
+                      ecuio_engine_add_result::added);
+            b.e.requests[b.e.count - 1].long_defs = c < 3 ? 1 : 0;
+        }
+    }
+    b.lose = true;
+    b.reply_of = [&b, sleep_us, wake_us](uint32_t c, const ecuio_request& q) {
+        if (c == 3 && b.now >= sleep_us && b.now < wake_us) {
+            return Bytes{};
+        }
+        return did_reply(q, c < 3 ? 17u : 2u);
+    };
+    while (b.now < wake_us + 120000 * kMs) {
+        b.pass();
+        if (b.now >= wake_us && b.e.chans[3].heard &&
+            b.e.chans[3].heard_us >= wake_us) {
+            return b.e.chans[3].heard_us - wake_us;
+        }
+    }
+    return INT64_MAX;
+}
+
+/* The worst wake_delay for wakes 2.5 s apart from first_us to 95 s */
+int64_t worst_wake(int64_t sleep_us, int64_t first_us)
+{
+    int64_t worst = 0;
+    for (int64_t w = first_us; w <= 95000 * kMs; w += 2500 * kMs) {
+        worst = std::max(worst, wake_delay(sleep_us, w));
+    }
+    return worst;
+}
+
+} // namespace
+
+/* A module heard and then asleep beside long replies (the ignition-off
+ * shape) is quiet; each of its steps is a probe under the hold, so it is
+ * read at its next step after it wakes, up to 5 s, however long it slept.
+ * Without the probe past its first four steps, the 5 s steps' one-frame
+ * replies were lost under the others' and only the hold's own probe, once
+ * in 40 s, read it (37.9 s). */
+TEST(J2534HoldTest, AModuleHeardWakingLateIsReadAtItsNextStep)
+{
+    const int64_t worst = worst_wake(1000 * kMs, 5000 * kMs);
+    EXPECT_LE(worst, 5500 * kMs) << worst / kMs << " ms";
+}
+
+/* A module asleep from the connect, never heard, is an absent module to
+ * the hold past its first four steps: its later steps hold no one, so a
+ * late wake is read by the hold's own probe, every eighth wait, up to
+ * 40 s (an absent module costs 707's pin nothing) */
+TEST(J2534HoldTest, AModuleNeverHeardWakingLateIsReadByTheHoldsProbe)
+{
+    const int64_t worst = worst_wake(0, 5000 * kMs);
+    EXPECT_LE(worst, 41000 * kMs) << worst / kMs << " ms";
 }

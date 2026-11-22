@@ -141,12 +141,25 @@ inline bool j2534_hold_on_bus(const ecuio_request_engine* e, uint32_t k)
            ch.deadline_us - ch.sent_us <= ECUIO_ENGINE_WAIT_US;
 }
 
+/* Whether channel ch of e is asking a quiet module's step as a probe
+ * (request_engine_quiet.h), so a waking module's first answer isn't lost:
+ * every step of one heard before (it can wake), the first four of one
+ * never heard (an absent module holds no one past them) */
+inline bool j2534_hold_quiet_probe(const ecuio_engine_channel& ch)
+{
+    return ch.quiet && ch.quiet_asks > 0 &&
+           (ch.heard || ch.quiet_asks < ECUIO_ENGINE_QUIET_STEP_COUNT);
+}
+
 /* Whether channel k is silent: its waits run out in a row from the
- * second, but for the request after every eighth */
-inline bool j2534_hold_silent(const j2534_hold& h, uint32_t k)
+ * second, but for the request after every eighth and a quiet module's
+ * probes */
+inline bool j2534_hold_silent(const j2534_hold& h,
+                              const ecuio_request_engine* e, uint32_t k)
 {
     const uint32_t m = h.misses[k];
-    return m >= J2534_HOLD_SILENT_MISSES && m % J2534_HOLD_PROBE_EVERY != 0;
+    return m >= J2534_HOLD_SILENT_MISSES && m % J2534_HOLD_PROBE_EVERY != 0 &&
+           !j2534_hold_quiet_probe(e->chans[k]);
 }
 
 /* Whether channel k's request r holds the others as segmented: the
@@ -167,7 +180,7 @@ inline bool j2534_hold_other_out(const j2534_hold& h,
                                  bool segmented)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
-        if (k != c && !j2534_hold_silent(h, k) && j2534_hold_on_bus(e, k) &&
+        if (k != c && !j2534_hold_silent(h, e, k) && j2534_hold_on_bus(e, k) &&
             (!segmented || j2534_hold_long(h, e, k, e->chans[k].outstanding))) {
             return true;
         }
@@ -408,7 +421,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         return ECUIO_ENGINE_NONE;
     }
     const int32_t r = ecuio_engine_due(e, c, now_us);
-    if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, c) ||
+    if (r == ECUIO_ENGINE_NONE || j2534_hold_silent(h, e, c) ||
         !j2534_hold_long(h, e, c, r) ||
         !(j2534_hold_other_out(h, e, c, false) ||
           j2534_hold_other_row(h, e, c))) {

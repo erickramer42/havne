@@ -14,6 +14,7 @@
 #include "request_engine_walk.h"
 #include "request_engine_diag.h"
 #include "request_engine_session.h"
+#include "request_engine_quiet.h"
 
 /* After the driver's write of request r on channel c, at now_us: a sent
  * request waits for its reply until the wait ends; one that wasn't sent
@@ -70,7 +71,8 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
  * clear's request that times out is unanswered. A table row that times
  * out never answered counts one frame from then (reply_segmented), until
  * an answer, a late one too (ecuio_engine_late_frames), teaches it, or a
- * recovery or its module's waking takes it back (ran_out). */
+ * recovery or its module's waking takes it back (ran_out). Each wait
+ * counts toward the channel's quiet run, a pack's rows each. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -81,6 +83,7 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     const int32_t out = ch.outstanding;
     const bool once = out == ECUIO_ENGINE_ONCE;
     const bool pack = out == ECUIO_ENGINE_PACK;
+    ecuio_engine_quiet_expired(e, c, pack ? ch.pack_count : 1u, now_us);
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
     if (!once) {
@@ -399,14 +402,17 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
 }
 
 /* The driver's call for a frame received on channel c:
- * ecuio_engine_take_frame, and the channel's ECU is answering, whatever
- * the frame answered. */
+ * ecuio_engine_take_frame, and the channel's ECU is answering and heard,
+ * whatever the frame answered, which ends a quiet state */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
 {
     e->answering |= 1u << c;
-    return ecuio_engine_take_frame(e, c, data, len, now_us, out_nrc);
+    const ecuio_reply r =
+        ecuio_engine_take_frame(e, c, data, len, now_us, out_nrc);
+    ecuio_engine_quiet_heard(e, c, now_us);
+    return r;
 }
 
 #endif

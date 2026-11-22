@@ -13,7 +13,9 @@
 // summary figures, the same on every machine and in milliseconds.
 //
 // The engine reads no clock: the loop hands it the simulated time, so
-// nothing in core changes. The models mirror their workers' calls (the
+// nothing in core changes. The channels are every module of the session
+// (its module tables: the info lists four at most), in the session's
+// order or channel_order's. The models mirror their workers' calls (the
 // J2534 worker's pass, SocketCAN's one request awaiting its echo, the
 // ELM327 worker's turn and its one command to the prompt); each constant
 // is the adapter's, calibrated against the car.
@@ -206,17 +208,18 @@ inline std::vector<uint8_t> test_car_pids()
 
 // The session's channels put in order's order by reply ID, the ones it
 // doesn't name after them as they stood
-inline void order_channels(ecuio_session_info_t& info,
+inline void order_channels(std::vector<uint32_t>& rx_ids,
+                           std::vector<uint32_t>& tx_ids,
                            const std::vector<uint32_t>& order)
 {
-    uint32_t at = 0;
+    size_t at = 0;
     for (uint32_t rx : order) {
-        for (uint32_t k = at; k < info.channel_count; ++k) {
-            if (info.rx_ids[k] == rx) {
-                std::rotate(info.rx_ids + at, info.rx_ids + k,
-                            info.rx_ids + k + 1);
-                std::rotate(info.tx_ids + at, info.tx_ids + k,
-                            info.tx_ids + k + 1);
+        for (size_t k = at; k < rx_ids.size(); ++k) {
+            if (rx_ids[k] == rx) {
+                std::rotate(rx_ids.begin() + at, rx_ids.begin() + k,
+                            rx_ids.begin() + k + 1);
+                std::rotate(tx_ids.begin() + at, tx_ids.begin() + k,
+                            tx_ids.begin() + k + 1);
                 ++at;
                 break;
             }
@@ -278,6 +281,7 @@ private:
         uint8_t pid = 0;
         bool prompted = false;
         bool cut = false;         /* a reply still under way at the prompt */
+        bool pending = false;     /* a 7F xx 78 line among its lines */
         uint32_t frames_left = 0; /* its Consecutive Frames still to come */
     };
 
@@ -327,6 +331,8 @@ private:
 
     bench_config m_cfg;
     ecuio_session_t* m_session = nullptr;
+    std::vector<uint32_t> m_rx; /* each channel's reply ID: every module */
+    std::vector<uint32_t> m_tx; /* and its request ID */
     ecuio_sim_t* m_sim = nullptr;
     std::unique_ptr<ecuio_request_engine> m_engine;
     j2534_hold m_hold; /* J2534: the worker's hold, holding no row before
@@ -365,14 +371,15 @@ inline bool bench::open(std::string* why)
         return false;
     }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(m_session);
-    order_channels(m_session->info, m_cfg.channel_order);
+    m_rx = m_session->module_rx;
+    m_tx = m_session->module_tx;
+    order_channels(m_rx, m_tx, m_cfg.channel_order);
     m_engine = std::make_unique<ecuio_request_engine>();
     bool probe = false;
     bool identify = false;
-    if (ecuio_build_requests(m_session, set, m_cfg.params,
-                             m_session->info.rx_ids, m_session->info.tx_ids,
-                             m_session->info.channel_count, m_engine.get(),
-                             &probe, &identify) != ECUIO_OK) {
+    if (ecuio_build_requests(m_session, set, m_cfg.params, m_rx.data(),
+                             m_tx.data(), static_cast<uint32_t>(m_rx.size()),
+                             m_engine.get(), &probe, &identify) != ECUIO_OK) {
         *why = std::string("requests: ") + ecuio_last_error_detail();
         return false;
     }
@@ -403,8 +410,7 @@ inline bool bench::open(std::string* why)
         return false;
     }
     for (uint32_t c = 0; c < m_engine->chan_count; ++c) {
-        m_rng.push_back(
-            sim_timing_rng(m_cfg.timing.seed, m_session->info.rx_ids[c]));
+        m_rng.push_back(sim_timing_rng(m_cfg.timing.seed, m_rx[c]));
     }
     m_result.tally = cli::SummaryTally(set, m_cfg.picks);
     m_result.asked.assign(m_engine->chan_count, 0);
@@ -521,7 +527,7 @@ inline void bench::send(uint32_t c, int32_t r, int64_t now)
         e->chans[c].talk, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
     flight f;
     f.chan = c;
-    f.can_id = m_session->info.tx_ids[c];
+    f.can_id = m_tx[c];
     f.data.assign(pdu, pdu + len);
     f.row = r;
     m_flights.push_back(std::move(f));
@@ -622,7 +628,7 @@ inline void bench::on_deliver(const event& ev)
 {
     const flight& f = m_flights[ev.slot];
     uint32_t c = 0;
-    while (c < m_engine->chan_count && m_session->info.rx_ids[c] != f.can_id) {
+    while (c < m_engine->chan_count && m_rx[c] != f.can_id) {
         ++c;
     }
     if (c < m_engine->chan_count) {
@@ -704,7 +710,7 @@ inline void bench::ask_elm327(uint32_t c, int32_t r, int64_t now)
 {
     ecuio_request_engine* e = m_engine.get();
     const adapter_model& m = m_cfg.model;
-    const uint32_t tx = m_session->info.tx_ids[c];
+    const uint32_t tx = m_tx[c];
     if (!m_header_set || m_header_tx != tx) {
         char cmds[2][24];
         const size_t n = elm327_format_header(tx, tx > 0x7FFu, cmds);
@@ -760,6 +766,8 @@ inline void bench::line_elm327(uint32_t slot, int64_t end)
     m_line_free = std::max(end, m_line_free) + chars * m.char_us;
     f.line_at = m_line_free + m.link_us;
     ++m_cmd.lines;
+    m_cmd.pending = m_cmd.pending || (f.data.size() == 3 && f.data[0] == 0x7F &&
+                                      f.data[2] == 0x78);
     const bool last = f.next == f.frames;
     if (f.frames > 1 && m.late_prompt_us > 0) {
         if (last) {
@@ -792,10 +800,11 @@ inline void bench::prompt_at(int64_t from_adapter, uint32_t chars)
 }
 
 // ask()'s end: a cut reply holds its channel while the ECU sends the
-// rest; a one-DID request whose digit cut it is taken back and its DID
-// asked with none from then on, a Service 01 PID's leaves the digit; then
-// the next pass. The worker's retry of a DID after NO DATA isn't modeled:
-// the simulated car answers it.
+// rest; a one-DID request whose digit ended the reply before its answer (a
+// cut, or the ECU's 7F 22 78) is taken back and its DID asked with none
+// from then on, a Service 01 PID's leaves the digit; then the next pass.
+// The worker's retry of a DID after NO DATA isn't modeled: the simulated
+// car answers it.
 inline void bench::on_prompt(const event& ev)
 {
     const command q = m_cmd;
@@ -805,7 +814,7 @@ inline void bench::on_prompt(const event& ev)
         const int64_t hold = int64_t{q.frames_left} * 10000 + 50000;
         m_hold_until[q.chan] = ev.at + std::min<int64_t>(hold, 1000000);
     }
-    if (q.cut && q.count > 0 && q.did_ask &&
+    if ((q.cut || q.pending) && q.count > 0 && q.did_ask &&
         e->chans[q.chan].outstanding == q.row) {
         elm327_long_did_set(*m_long_dids, q.did);
         ecuio_engine_sent(e, q.chan, q.row, false, ev.at);
