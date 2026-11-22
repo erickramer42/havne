@@ -32,9 +32,12 @@ const store_key kOtherKey{kCar, kRxLong, 0x03};
 constexpr uint32_t kSteps = 10; /* each thread's attempts */
 
 /* A second step started from inside the first's save */
+enum class other_step : uint8_t { ended, unlocked, counts };
 store_owner* g_owner = nullptr;
+other_step g_step = other_step::ended;
 std::thread g_other;
 store_io g_other_io = store_io::refused;
+store_entry g_counted;
 std::string g_other_why;
 std::atomic<bool> g_other_done{false};
 std::atomic<bool> g_other_at_lock{false};
@@ -50,8 +53,15 @@ void other_reaches_the_lock()
 void step_from_another_thread()
 {
     g_other = std::thread([] {
-        g_other_io =
-            g_owner->ended(kOtherKey, true, false, kUtc, nullptr, &g_other_why);
+        if (g_step == other_step::ended) {
+            g_other_io = g_owner->ended(kOtherKey, true, false, kUtc, nullptr,
+                                        &g_other_why);
+        } else if (g_step == other_step::unlocked) {
+            g_other_io = g_owner->unlocked(kOtherKey, nullptr, &g_other_why);
+        } else {
+            g_counted = g_owner->counts(kKey);
+            g_other_io = store_io::ok;
+        }
         g_other_done.store(true);
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -269,16 +279,18 @@ TEST(SecurityStoreTest, TwoThreadsStepThroughOneOwner)
     EXPECT_EQ(loaded(f, kOtherKey).failed, kSteps);
 }
 
-/* A step waits for another's save to end: the second never reaches the
- * file's lock, nor ends, while the first holds its file written and not
- * yet in place, then takes its turn */
-TEST(SecurityStoreTest, AnOwnersStepWaitsForAnothersSave)
+namespace {
+
+/* A mark's save, and the second step from inside it */
+void a_step_during_a_save(other_step step)
 {
     Folder f;
     store_ref r;
     std::string why;
     ASSERT_EQ(store_open(f.file(), &r, &why), store_io::ok) << why;
     g_owner = r.get();
+    g_step = step;
+    g_counted = store_entry{};
     g_other_io = store_io::refused;
     g_other_done.store(false);
     g_other_at_lock.store(false);
@@ -297,7 +309,26 @@ TEST(SecurityStoreTest, AnOwnersStepWaitsForAnothersSave)
     EXPECT_FALSE(g_done_while_saving.load());
     EXPECT_EQ(g_other_io, store_io::ok) << g_other_why;
     EXPECT_EQ(loaded(f, kKey).failed, 1u) << "the first's mark";
-    EXPECT_EQ(loaded(f, kOtherKey).failed, 1u) << "the second's end";
+    EXPECT_EQ(loaded(f, kOtherKey).failed, step == other_step::ended ? 1u : 0u)
+        << "the second's end";
+    if (step == other_step::counts) {
+        EXPECT_EQ(g_counted.pending_utc, kUtc) << "read after the save";
+    }
+}
+
+} // namespace
+
+/* A step waits for another's save to end: the second (an end, a right
+ * key, a look at the counts) never reaches the file's lock, nor ends,
+ * while the first holds its file written and not yet in place, then
+ * takes its turn */
+TEST(SecurityStoreTest, AnOwnersStepWaitsForAnothersSave)
+{
+    for (const other_step step :
+         {other_step::ended, other_step::unlocked, other_step::counts}) {
+        SCOPED_TRACE(static_cast<int>(step));
+        a_step_during_a_save(step);
+    }
 }
 
 /* Out of memory at each allocation of an open, then of a mark: an open
