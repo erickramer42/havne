@@ -164,8 +164,9 @@ inline bool ecuio_engine_session_fill(ecuio_request_engine* e, uint32_t c,
 }
 
 /* Channel c's session entry, when due at now_us: 10 <session> to enter,
- * and again once S3 has passed with nothing sent (the session lost). Into
- * the one-shot; true when it went there. */
+ * and again once ECUIO_ENGINE_S3_LATE_US has passed with nothing sent
+ * (the session counted lost: a request now may land past S3). Into the
+ * one-shot; true when it went there. */
 inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
                                            int64_t now_us)
 {
@@ -174,7 +175,7 @@ inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
         return false;
     }
     if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
-        now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US) {
+        now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_LATE_US) {
         ecuio_engine_session_step(ch,
                                   ECUIO_SESSION_STATE_ENTERING); /* lapsed */
         ecuio_engine_count16(ch.session_lost);

@@ -157,3 +157,44 @@ TEST(RequestTurnsTest, AKeepAliveWithNothingElseGivesWayToADueRow)
         EXPECT_EQ(a->e.chans[c].session_lost, 0u) << "channel " << c;
     }
 }
+
+/* Channel 0's row held the adapter 4.7 s (a 7F 22 78 and its answer)
+ * just after channel 1's last request: channel 1's session is then urgent
+ * and its last request S3 less a quarter second ago or more, so a request
+ * might reach its module after the module's S3 ran out, and one back in
+ * default answers 3E 00 as well. Its next request is 10 03, its rows
+ * only after the entry, and the session counts lost */
+TEST(RequestTurnsTest,
+     APendingReplyPastTheUrgentTimeLeavesNoSessionKeptByMistake)
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 4);
+    dids(&a->e, 1, 4, 0x40);
+    ASSERT_TRUE(ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    Adapter* self = a.get();
+    uint32_t last = 0;
+    int64_t held_at = -1;
+    a->ecus = [self, &last, &held_at](uint32_t c, const Bytes& q) {
+        self->exchange_us = 90 * kMs;
+        if (held_at < 0 && self->now > 10000 * kMs && c == 0 && last == 1 &&
+            q[0] == 0x22) {
+            held_at = self->now;
+            self->exchange_us = 4700 * kMs;
+        }
+        last = c;
+        return in_session(q);
+    };
+    a->until(20000 * kMs);
+    ASSERT_GE(held_at, 0);
+    const Sent* next = nullptr;
+    for (const Sent& x : a->sent) {
+        if (next == nullptr && x.c == 1 && x.at_us > held_at) {
+            next = &x;
+        }
+    }
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->bytes, (Bytes{0x10, 0x03}));
+    EXPECT_EQ(a->e.chans[1].session_lost, 1u);
+    EXPECT_EQ(a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(a->e.chans[0].session_lost, 0u);
+}

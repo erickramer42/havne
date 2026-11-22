@@ -126,6 +126,9 @@ static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US >
 static_assert(ECUIO_KEY_WINDOW_SESSION_US <=
                   ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US,
               "a key's window is over before the session gate opens");
+static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US <
+                  ECUIO_ENGINE_S3_LATE_US,
+              "the session gate opens while a keep-alive still keeps it");
 
 inline bool j2534_hold_applies(const j2534_hold& h,
                                const ecuio_request_engine* e)
