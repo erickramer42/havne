@@ -57,8 +57,10 @@
 # --changed [base] picks the steps from what changed since base (default
 # the merge-base with origin/dev), uncommitted and untracked files
 # included, by scripts/verify_scope.py's table: docs and markdown only run
-# nothing, QML only runs build and QmlTest.*, and anything else, or a
-# change it can't read, is the full run.
+# nothing, QML only runs build and QmlTest.*, a change the table maps to
+# areas (core/src's families, cli/, app/'s C++, a test file) runs the suites
+# that read those areas, and anything else, or a change it can't read, is
+# the full run. The x86 steps run when core or the surrogate changed.
 #
 # Anything less than the full run prints what it skipped and ends with a
 # "not a full verify" line, and says whether clang-tidy applies. A full
@@ -153,6 +155,8 @@ classify() {
             reason) plan_reason=$value ;;
             tidy) tidy=$value ;;
             tidy_why) tidy_why=$value ;;
+            regex) plan_regex=$value ;;
+            cross) plan_cross=$value ;;
         esac
     done <<< "$out"
     [ -n "$plan" ]
@@ -176,6 +180,8 @@ do_main=1
 scope=""
 plan=""
 plan_reason=""
+plan_regex=""
+plan_cross=""
 tidy=""
 tidy_why=""
 add_scope() { scope="${scope:+$scope, }$1"; }
@@ -199,6 +205,11 @@ if [ "$changed" = 1 ]; then
         qml)
             do_win32=0; do_cross=0
             regex='^QmlTest\.'
+            add_scope "$plan_reason"
+            ;;
+        areas)
+            regex=$plan_regex
+            if [ "$plan_cross" != yes ]; then do_win32=0; do_cross=0; fi
             add_scope "$plan_reason"
             ;;
     esac
@@ -243,6 +254,7 @@ tidy_line() {
 
 if [ "$changed" = 1 ]; then
     if [ "$plan" = full ]; then note scope "full run: $plan_reason"
+    elif [ "$plan" = areas ]; then note scope "areas: $plan_reason"
     else note scope "$plan: $plan_reason"; fi
 elif [ -n "$scope" ]; then
     note scope "$scope"

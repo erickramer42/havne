@@ -11,7 +11,11 @@
 #   python3 scripts/verify_scope.py suite Bridge,Qml,c_abi
 #   python3 scripts/verify_scope.py selftest
 #
-# classify prints plan=full|qml|none, reason=, tidy=yes|no and tidy_why=.
+# classify prints plan=full|areas|qml|none, reason=, tidy=yes|no and tidy_why=,
+# and for plan=areas also regex= (the ctest -R that runs the areas' suites) and
+# cross=yes|no (whether the x86 steps apply). Areas are the table below: a
+# path in core/src, cli/, app/ or a test file maps to the groups of suites that
+# read its output; a path the table doesn't name takes the full run.
 # suite prints the regex, then one line per name: the name, a tab and that
 # name's own regex, which verify.sh uses to refuse a name matching nothing.
 
@@ -22,7 +26,8 @@ import sys
 FULL = "full"
 QML = "qml"
 NONE = "none"
-RANK = {NONE: 0, QML: 1, FULL: 2}
+AREAS = "areas"
+RANK = {NONE: 0, QML: 1, AREAS: 2, FULL: 3}
 
 CPP = (".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inc")
 TIDY_CONFIG = (".clang-tidy", ".github/clang-tidy-requirements.txt")
@@ -47,24 +52,167 @@ def classify_path(path):
     return FULL
 
 
+
+# Suite groups: the first pattern a ctest suite name (the text before the first
+# dot) matches names its group; a name matching none is "engine", so a new
+# suite is run by every area that runs the engine.
+GROUPS = [
+    ("pkg", r"(Python|Wheel|Example|Notices|Sbom|Docs|Tidy|VerifyScope|Golden|RecordingCompare"
+            r"|AbiReport|ApiCheck|PlainTextPin|VpicWmi|DtcTitles|Required|Exports|SchemaKeys"
+            r"|SchemaFixtures|ProbeNotes|CtestIncludeNames|DiscoveryTimeout)\w*|c_abi\w*"),
+    ("elm", r"(Elm327|SerialPorts|CliElm327)\w*"),
+    ("j2534", r"(J2534\w*|FakeFixture)"),
+    ("can", r"(SocketCan|IsoTp|Vcan|SimBus|SimCarBus|CliCan)\w*"),
+    ("sandbox", r"(Sandbox|Wasm|Wamr|Vendored)\w*"),
+    ("bridge", r"(BridgeTest|RecordingViewTest|RecordingExportTest|ViewerFramesTest"
+               r"|ReadOnceTest|FrameFilterTest|ObdbImportTest)"),
+    ("cli", r"Cli\w*"),
+    ("qml", r"QmlTest"),
+    ("files", r"(Recorder|ArmedRecorder|Recording\w*|Export\w*|CsvExport|FolderExport|Scrub\w*"
+              r"|FramesRead|Import\w*|Csv\w*|Candump|CheckRules|Health\w*)Test"),
+    ("signals", r"(Signal\w*|Computed\w*|Condition\w*|Plugin\w*|Base64|Json)Test"),
+]
+# every group but pkg: what a change to the engine can reach (pkg's suites read
+# the public ABI and the packages, which a public header or a build file changes)
+INNER = ["engine", "files", "signals", "elm", "j2534", "can", "bridge", "cli", "qml"]
+
+# (path pattern, areas) in order, first match wins; an area is (groups, qml)
+# where qml is "all", "none" or a word that a QmlTest's file must mention
+def area(groups, qml="none", cross=False):
+    return {"groups": groups, "qml": qml, "cross": cross}
+
+
+ENGINE_WIDE = area(INNER, "all", True)
+AREA_TABLE = [
+    (r"core/src/elm327_|core/src/serial_ports\.", area(["elm", "bridge"], "elm327", True)),
+    (r"core/src/j2534_|core/src/surrogate_log_names\.h|surrogate/[^/]*$",
+     area(["j2534", "bridge"], "j2534", True)),
+    (r"core/src/socketcan_", area(["can"], "none", True)),
+    (r"core/src/(recording|recorder|export|import|csv|candump|pcapng|frames|frame_rows|scrub|health"
+     r"|folder_files|dtc_titles)", area(["files", "bridge", "cli"], "all", True)),
+    (r"core/src/(signal|computed|condition|plugin|json|base64)", area(["signals", "files", "bridge", "cli"], "all", True)),
+    (r"core/src/(wasm_|guest_abi)", area(["sandbox", "signals", "bridge"], "none", True)),
+    (r"core/src/(request_|obd2|uds_|pid_support|sim|mock_|isotp|frame_decoder|frame_reassembly|talk_seam"
+     r"|security_|tier2|profile_|diagnostics|vin|health|host_clock|queue|pull_queue|precise_wait)",
+     ENGINE_WIDE),
+    (r"core/include/ecuio/internal\.h", ENGINE_WIDE),
+    (r"cli/[^/]*\.(cpp|h)$", area(["cli"], "none", False)),
+    (r"app/[^/]*\.(cpp|h|mm)$", area(["bridge", "qml"], "all", False)),
+    (r"tests/test_elm327", area(["elm"])),
+    (r"tests/test_cli_elm327|tests/fake_elm327", area(["elm", "bridge"])),
+    (r"tests/(test_j2534|fake_j2534)", area(["j2534"])),
+    (r"tests/test_(socketcan|vcan)", area(["can"])),
+    (r"tests/test_bridge|tests/test_(one_store|store_)", area(["bridge"])),
+    (r"tests/(test_cli|cli_[a-z0-9_]+\.(py|sh|cmake))", area(["cli"])),
+    (r"tests/test_(sandbox|wamr|wasm)", area(["sandbox"])),
+    (r"tests/test_(signal|computed|condition|plugin)", area(["signals"])),
+    (r"tests/test_(recording|recorder|armed|export|csv|import|candump|frames_read|health|scrub)",
+     area(["files"])),
+    (r"tests/test_(obd2|pacing|request|sim_|session_control|security|key_window|engine_talk|scan_retry|tier2|pick_only)",
+     area(["engine"])),
+]
+
+
+def area_of(path):
+    """The area a path maps to, or None (a path the table doesn't name)"""
+    for pattern, spec in AREA_TABLE:
+        if re.match(pattern, path):
+            return spec
+    return None
+
+
+def read(root, rel):
+    with open(os.path.join(root, rel), encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def suite_universe(root):
+    """The ctest suite names the tree registers, read from the test sources"""
+    names = set()
+    tests = os.path.join(root, "tests")
+    for fn in os.listdir(tests):
+        if fn.startswith("test_") and fn.endswith(".cpp"):
+            names.update(re.findall(r"^\s*TEST(?:_F|_P)?\(\s*(\w+)\s*,", read(root, "tests/" + fn), re.M))
+    cm = read(root, "tests/CMakeLists.txt")
+    names.update(re.findall(r"add_test\(\s*NAME\s+(\w+)[.\s$]", cm))
+    names.add("QmlTest")
+    return names
+
+
+def group_of(name):
+    for group, pattern in GROUPS:
+        if re.fullmatch(pattern, name):
+            return group
+    return "engine"
+
+
+def qml_files(root, word):
+    """The QmlTest names (file stems) whose file mentions word"""
+    d = os.path.join(root, "tests", "qml")
+    return sorted(fn[4:-4] for fn in os.listdir(d) if fn.startswith("tst_") and fn.endswith(".qml")
+                  and word.lower() in read(root, "tests/qml/" + fn).lower())
+
+
+def areas_regex(root, specs):
+    """(ctest -R regex, suite count, needs cross) for the union of the areas"""
+    groups, qml_all, words, cross = set(), False, set(), False
+    for spec in specs:
+        groups.update(spec["groups"])
+        cross = cross or spec["cross"]
+        if spec["qml"] == "all":
+            qml_all = True
+        elif spec["qml"] != "none":
+            words.add(spec["qml"])
+    suites = sorted(n for n in suite_universe(root) if group_of(n) in groups and n != "QmlTest"
+                    and not n.startswith("c_abi"))
+    # lower-case names are whole tests, not suites (c_abi, c_abi_shared)
+    whole = sorted(n for n in suite_universe(root) if group_of(n) in groups and n.startswith("c_abi"))
+    parts = []
+    if suites:
+        parts.append("(" + "|".join(suites) + r")\.")
+    if whole:
+        parts.append("(" + "|".join(whole) + ")$")
+    qml = sorted({s for w in words for s in qml_files(root, w)})
+    if "qml" in groups or qml_all:
+        parts.append(r"QmlTest\.")
+    elif qml:
+        parts.append(r"QmlTest\.(" + "|".join(qml) + ")")
+    return "^(" + "|".join(parts) + ")", cross
+
+
 def plural(count, noun):
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
-def plan(paths):
-    """(plan, reason) for the changed paths"""
+def plan(paths, root=None):
+    """(plan, reason, regex, cross) for the changed paths; regex and cross are for AREAS"""
     if not paths:
-        return NONE, "nothing changed"
+        return NONE, "nothing changed", "", False
     kinds = [classify_path(p) for p in paths]
     worst = max(kinds, key=RANK.get)
     if worst == NONE:
-        return NONE, "only docs and markdown changed (" + plural(len(paths), "file") + ")"
+        return NONE, "only docs and markdown changed (" + plural(len(paths), "file") + ")", "", False
     if worst == QML:
-        return QML, "only QML changed, or QML and docs (" + plural(len(paths), "file") + ")"
+        return QML, "only QML changed, or QML and docs (" + plural(len(paths), "file") + ")", "", False
     first = next(p for p, k in zip(paths, kinds) if k == FULL)
     if is_build_file(first):
-        return FULL, first + " changes the build"
-    return FULL, first + " is outside the table of docs and QML"
+        return FULL, first + " changes the build", "", False
+    if any(is_build_file(p) for p in paths):
+        return FULL, next(p for p in paths if is_build_file(p)) + " changes the build", "", False
+    specs = []
+    for p, k in zip(paths, kinds):
+        if k == FULL:
+            spec = area_of(p)
+            if spec is None:
+                return FULL, p + " is outside the table of areas", "", False
+            specs.append(spec)
+        elif k == QML:
+            specs.append(area(["qml"], "all"))
+    try:
+        regex, cross = areas_regex(root or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."), specs)
+    except OSError:
+        return FULL, "the suites can't be read from the tests", "", False
+    return AREAS, "areas of " + plural(len(paths), "changed file"), regex, cross
 
 
 def tidy(paths):
@@ -76,13 +224,14 @@ def tidy(paths):
     return "no", "no C++ changed"
 
 
-def classify_text(text):
+def classify_text(text, root=None):
     # By line feed alone: splitlines() also splits on what a path may hold
     lines = (line.rstrip("\r") for line in text.split("\n"))
     paths = list(dict.fromkeys(line for line in lines if line))
-    kind, reason = plan(paths)
+    kind, reason, regex, cross = plan(paths, root)
     applies, why = tidy(paths)
-    return f"plan={kind}\nreason={reason}\ntidy={applies}\ntidy_why={why}\n"
+    extra = f"regex={regex}\ncross={'yes' if cross else 'no'}\n" if kind == AREAS else ""
+    return f"plan={kind}\nreason={reason}\n{extra}tidy={applies}\ntidy_why={why}\n"
 
 
 def suite_name(name):
@@ -156,10 +305,45 @@ def selftest():
     check("docs then QML then C++", plan(["docs/a.md", "app/qml/A.qml", "core/a.cpp"])[0], FULL)
     check("C++ first", plan(["core/a.cpp", "docs/a.md"])[0], FULL)
     check("full names its path", plan(["docs/a.md", "core/a.cpp"])[1],
-          "core/a.cpp is outside the table of docs and QML")
+          "core/a.cpp is outside the table of areas")
     check("a build file says so", plan(["app/CMakeLists.txt"])[1], "app/CMakeLists.txt changes the build")
     check("one file", plan(["docs/a.md"])[1], "only docs and markdown changed (1 file)")
     check("two files", plan(["docs/a.md", "b.md"])[1], "only docs and markdown changed (2 files)")
+
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    universe = suite_universe(root)
+    for name in ["CoreTest", "BridgeTest", "Elm327SessionTest", "QmlTest", "CliGoldenTest", "c_abi"]:
+        check("universe has " + name, name in universe, True)
+
+    def areas(*paths):
+        kind, _, regex, cross = plan(list(paths), root)
+        return kind, regex, cross
+
+    kind, regex, cross = areas("core/src/elm327_worker.cpp")
+    check("elm327 is areas", kind, AREAS)
+    check("elm327 runs its suites", bool(re.search(regex, "Elm327SessionTest.X")), True)
+    check("elm327 runs the bridge", bool(re.search(regex, "BridgeTest.X")), True)
+    check("elm327 skips j2534", bool(re.search(regex, "J2534HealthTest.X")), False)
+    check("elm327 skips python", bool(re.search(regex, "PythonTest.x")), False)
+    check("elm327 takes the cross-arch steps", cross, True)
+    check("elm327 takes only the QML that names it", bool(re.search(regex, "QmlTest.dashboard")), False)
+    kind, regex, cross = areas("cli/cmd_log.cpp")
+    check("cli is areas without cross", (kind, cross), (AREAS, False))
+    check("cli runs the cli", bool(re.search(regex, "CliLogRunTest.x")), True)
+    check("cli skips the bridge", bool(re.search(regex, "BridgeTest.x")), False)
+    kind, regex, cross = areas("core/src/request_engine.h")
+    check("the engine runs the bridge and QML", all(re.search(regex, n) for n in
+          ["BridgeTest.x", "QmlTest.home", "Elm327SessionTest.x", "RequestEngineTest.x"]), True)
+    check("the engine skips python and the sandbox", any(re.search(regex, n) for n in
+          ["PythonTest.x", "SandboxTest.x", "c_abi"]), False)
+    check("a public header is full", areas("core/include/ecuio/core.h")[0], FULL)
+    check("an unlisted core file is full", areas("core/src/core.cpp")[0], FULL)
+    check("an unlisted test file is full", areas("tests/fake_ecu.h")[0], FULL)
+    check("one unlisted path makes it full", areas("cli/cmd_log.cpp", "core/src/core.cpp")[0], FULL)
+    check("a build file makes it full", areas("cli/cmd_log.cpp", "cli/CMakeLists.txt")[0], FULL)
+    kind, regex, cross = areas("app/sessionbridge.cpp", "app/qml/A.qml")
+    check("app C++ with QML", (kind, cross, bool(re.search(regex, "QmlTest.home"))), (AREAS, False, True))
+    check("the QML words come from the files", bool(qml_files(root, "elm327")), True)
 
     for paths, want in [
         (["docs/a.md"], "no"),
