@@ -365,8 +365,9 @@ in the keep-alive time only `3E 00` went out and no value updated, while
 the link read OK (the pacing model; no car run).
 
 - **Any request keeps the session:** a request restarts S3 (section 2),
-  so a channel with a row due sends the row, and tester present goes only
-  when nothing else is due (`ecuio_engine_due` asks it last).
+  so a channel with a row due sends the row, and tester present goes
+  when nothing else is due (`ecuio_engine_due` asks it last) or, under the
+  J2534 hold, at its gate before S3 (below).
   `keepalive_ms` says how soon tester present fills a quiet gap, not how
   often it goes.
 - **Urgent:** a session is urgent at once while its entry is due, and once
