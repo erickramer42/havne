@@ -56,6 +56,9 @@ const std::string kKeepAlive = std::string("elm327://") + kPort +
                                "&keepalive_ms=500&identify=0&diagnose=0"
                                "&gap=100";
 
+/* A plain talk the engine ECU answers in one frame, in any session: a
+ * guest's read (core's own 10 03 and 3E 00 are no talk) */
+const Bytes kRead = {0x22, 0x1E, 0x1C};
 const Bytes kGated = {0x22, 0xD2, 0x10};
 const Bytes kGatedData = {0x62, 0xD2, 0x10, 0x4B, 0x2D};
 
@@ -317,7 +320,7 @@ TEST_F(Elm327TalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
     ASSERT_TRUE(talk(key, 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer);
     EXPECT_EQ(e.end, 0);
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered);
     EXPECT_EQ(typed_after("2701").rfind("3E00", 0), 0u)
         << typed_after("2701") << " was typed after the seed";
@@ -381,7 +384,7 @@ TEST_F(Elm327TalkTest, SevenBytesAreTypedAndEightNever)
     EXPECT_EQ(e.offer, kTooLong) << "an ELM327 sends one frame";
     EXPECT_EQ(e.end, 0);
     /* the session goes on, and nothing of the eight was typed */
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered);
     for (const std::string& c : typed()) {
         EXPECT_NE(c.rfind("22D301D302D303D", 0), 0u) << c;
@@ -403,7 +406,7 @@ TEST_F(Elm327TalkTest, NothingOutsideTheCeilingIsTyped)
     }
     ASSERT_TRUE(talk(key_for(0x01), 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer) << "a key with no seed before it";
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered) << "the session is none the worse";
     for (const std::string& c : typed()) {
         if (c.rfind("AT", 0) == 0 || c.rfind("ST", 0) == 0) {

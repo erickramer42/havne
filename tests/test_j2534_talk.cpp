@@ -119,6 +119,9 @@ Bytes long_read()
     return pdu;
 }
 
+/* A plain talk the engine ECU answers in one frame, in any session: a
+ * guest's read (core's own 10 03 and 3E 00 are no talk) */
+const Bytes kRead = {0x22, 0x1E, 0x1C};
 const Bytes kGated = {0x22, 0xD2, 0x10};
 const Bytes kGatedData = {0x62, 0xD2, 0x10, 0x4B, 0x2D};
 
@@ -450,7 +453,7 @@ TEST_F(J2534TalkTest, NothingOutsideTheCeilingIsWritten)
     }
     ASSERT_TRUE(talk(key_for(0x01), 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer) << "a key with no seed before it";
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered) << "the session is none the worse";
     fake_control::Write w;
     for (uint32_t i = 0; fake_control::recorded_write(page, i, &w); ++i) {
@@ -467,7 +470,7 @@ TEST_F(J2534TalkTest, AWriteTheAdapterRefusesSettlesItUnsentAndItIsNotSentAgain)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(kQuery));
     Ended e;
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     ASSERT_EQ(e.end, kAnswered);
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", "7"));
     ASSERT_TRUE(talk(long_read(), 2, kPlain, &e));
@@ -475,7 +478,7 @@ TEST_F(J2534TalkTest, AWriteTheAdapterRefusesSettlesItUnsentAndItIsNotSentAgain)
     EXPECT_EQ(e.end, kUnsent);
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", nullptr));
     /* Writes go again: the session's own requests do, the talk doesn't */
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e, 0, 15000));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e, 0, 15000));
     EXPECT_EQ(e.end, kAnswered);
     EXPECT_TRUE(writes_of({0x2C, 0x01}).empty())
         << "a talk is never sent twice, nor once late";
