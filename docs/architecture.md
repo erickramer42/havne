@@ -454,7 +454,9 @@ values. Each part links to the doc that holds its detail.
   lock, which the 100 ms tick swaps out. Everything else runs on the GUI thread. It
   links QtCore, Gui and Network (no QML), so `test_bridge` exercises it
   headless, with the stores beside it (`app/pluginstore.h`,
-  `app/storemigration.h`). The bounds and the coalescing:
+  `app/storemigration.h`). Its state, stateless statics and data-only
+  test seams are its base classes in `app/bridgestate.h`,
+  `app/bridgeformats.h` and `app/bridgeseams.h`. The bounds and the coalescing:
   [ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md),
   [ADR-0005](adr/0005-coalesced-signal-updates.md); the costs:
   [performance.md](performance.md).
