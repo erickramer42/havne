@@ -2,12 +2,13 @@
 // Testing: UNIT: SandboxTest (test_sandbox); fuzz_wasm_module
 //
 // The sandbox a conversation plugin's code runs in (ADR-0066 sections
-// 2.1 and 2.2): one instance of a WebAssembly module in WAMR's classic
-// interpreter, with nothing reachable but its own memory.
+// 2.1 and 2.2): instances of a WebAssembly module in WAMR's classic
+// interpreter, each with nothing reachable but its own memory.
 //
-// - A module is judged by wasm_check.h, then by the runtime, when the
-//   instance is made, on the caller's thread: a refusal or a lack of
-//   memory is an answer there, never on a worker.
+// - A module is judged by wasm_check.h, then loaded by the runtime, once
+//   for a session's plugin; each ECU it talks to is an instance of it.
+//   Both are made on the caller's thread: a refusal or a lack of memory
+//   is an answer there, never on a worker.
 // - A call runs one export under a budget of work: one unit for each
 //   instruction, and for what an instruction makes the runtime do beyond
 //   it (each byte of a block scanned for its end, each record walked for
@@ -17,18 +18,26 @@
 //   call's time whatever the module does. The budget is read between
 //   instructions, so a call runs past it by one instruction's work at
 //   most. The longest is a br_table's walk of every such record in the
-//   module, and an instance's making bound caps how many a module holds:
+//   module, and a module's load bound caps how many it holds:
 //   under a millisecond on a desktop core. A call allocates nothing: the
 //   memory is a fixed size and the stacks were made with the instance.
 // - A call that doesn't return (the budget ran out, a trap) ends the
 //   instance: every later call answers `dead` without running anything.
 //   WAMR's state after a stopped call is not one to call into again.
-// - Each instance has a module of its own, so two instances share no
-//   runtime state and may be called from two threads at once. One
-//   instance is called from one thread at a time.
+// - The instances of one module share its loaded code and nothing else:
+//   each has its own memory, globals, table and stacks. They are called
+//   from one thread at a time between them (a session's worker), since
+//   with the thread manager off nothing upstream tests two threads in one
+//   module's instances. None is made or freed while another of its
+//   module is being called: a session makes them all before its worker's
+//   first call and frees them after its last. Instances of two modules
+//   may be called from two threads at once.
 // - Everything the runtime takes, a module's memory included, comes
-//   through a counting allocator: each instance's making is bounded, and
-//   all of them together.
+//   through a counting allocator: a module's load and an instance's
+//   making are each bounded, and everything alive together. The last
+//   bound is the process's: one session's module and an instance for each
+//   of its most ECUs fit it, and a second session's plugin past what is
+//   left is OUT_OF_MEMORY at its attach.
 
 #ifndef ECUIO_WASM_SANDBOX_H
 #define ECUIO_WASM_SANDBOX_H
@@ -48,9 +57,14 @@ namespace ecuio_wasm {
 constexpr uint32_t BUDGET_DEFAULT = 1000000;
 /* A module's operand and call stack, made with the instance */
 constexpr uint32_t STACK_BYTES = 64 * 1024;
-/* What making one instance may take from the runtime's allocator, and
- * what every instance alive may hold together */
-constexpr size_t INSTANCE_BYTES_MAX = 8u << 20;
+/* What loading one module may take from the runtime's allocator, what
+ * making one instance of it may take, and what everything alive in the
+ * process may hold together (wasm_sandbox.cpp asserts one session's
+ * whole fits). An instance's making takes its memory and stacks and some
+ * bytes for each function and table element, so its bound, not the
+ * load's, caps a module of many pages. */
+constexpr size_t MODULE_BYTES_MAX = 4u << 20;
+constexpr size_t INSTANCE_BYTES_MAX = 7u << 18; /* 1.75 MiB */
 constexpr size_t RUNTIME_BYTES_MAX = 64u << 20;
 /* Arguments a call passes */
 constexpr uint32_t ARGS_MAX = 4;
@@ -69,25 +83,46 @@ struct call_result {
     uint32_t value = 0;
 };
 
+class loaded;
 class instance;
 
-/* Makes an instance of the module in bytes (copied): judged by
- * check_module with wants, loaded, instantiated. OK with *out set;
+/* Loads the module in bytes (copied): judged by check_module with wants,
+ * then by the runtime, its wanted exports found. OK with *out set;
  * ECUIO_ERR_LOAD_FAILED with why (REFUSAL_MAX bytes) saying what the
- * check or the runtime refused; ECUIO_ERR_OUT_OF_MEMORY when its making
- * passed INSTANCE_BYTES_MAX or the runtime RUNTIME_BYTES_MAX, or the
+ * check or the runtime refused; ECUIO_ERR_OUT_OF_MEMORY when the load
+ * passed MODULE_BYTES_MAX or the runtime RUNTIME_BYTES_MAX, or the
  * process had none; ECUIO_ERR_INVALID_ARGUMENT for a wanted type a call
  * can't carry (i32 parameters, at most ARGS_MAX, and no result or one
  * i32), whatever the module. Nothing is thrown. Any thread, one maker at
  * a time inside. */
+ecuio_status_t load_module(const uint8_t* bytes, size_t n,
+                           const wanted_export* wants, size_t want_count,
+                           loaded** out, char* why) noexcept;
+
+/* Lets go of the loader's hold (NULL is fine): the module is unloaded
+ * with its last instance. Any thread. */
+void free_module(loaded* m) noexcept;
+
+/* Makes an instance of m: instantiated with its memory and stack. OK
+ * with *out set, holding m; ECUIO_ERR_LOAD_FAILED with the runtime's
+ * words in why; ECUIO_ERR_OUT_OF_MEMORY when its making passed
+ * INSTANCE_BYTES_MAX or the runtime RUNTIME_BYTES_MAX, or the process had
+ * none. Nothing is thrown. Any thread while no instance of m is being
+ * called, one maker at a time inside. */
+ecuio_status_t make_instance(loaded* m, instance** out, char* why) noexcept;
+
+/* A module of its own and one instance of it: load_module, make_instance,
+ * then the loader's hold let go. Its answers are theirs. */
 ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
                              const wanted_export* wants, size_t want_count,
                              instance** out, char* why) noexcept;
 
-/* Ends an instance (NULL is fine). Any thread, never during a call. */
+/* Ends an instance (NULL is fine), and its module with it when nothing
+ * else holds that. Any thread while no instance of its module is being
+ * called. */
 void free_instance(instance* i) noexcept;
 
-/* Calls wanted export `index` (its place in make_instance's wants) with
+/* Calls wanted export `index` (its place in load_module's wants) with
  * arg_count i32 arguments (at most ARGS_MAX) under `budget` units of
  * work (at least 1). Allocates nothing. */
 call_result call_instance(instance* i, size_t index, const uint32_t* args,

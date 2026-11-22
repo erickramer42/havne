@@ -1371,6 +1371,17 @@ don't say:
    the thread manager off, nothing upstream tests two threads calling
    instances of one module). Sharing a module later is internal: no ABI
    and no plugin changes.
+
+   > **Amended 2026-11-22:** a module is loaded once for a session's
+   > plugin and each ECU is an instance of it (`load_module`, then
+   > `make_instance` for each). The instances share the loaded code and
+   > nothing else: each has its own memory, globals, table and stacks
+   > (`SandboxTest.TwoInstancesOfOneModuleShareNoMemoryOrGlobal`). One
+   > module's instances are called from one thread between them (the
+   > session's worker), and none is made or freed while another of its
+   > module is being called. Instances of two modules may be called from
+   > two threads at once.
+
 6. **No `memory` export is required, and exported `malloc` and `free` are
    not refused.** The host reads the memory through the instance. WAMR
    runs a module's exported `malloc` and `free` (with no limit) only when
@@ -1395,6 +1406,25 @@ don't say:
    module of about 55,000 functions on a 64-bit build and about 80,000 on
    a 32-bit one: what a making costs differs by pointer width. A session's
    32 ECUs of 16 pages each fit the 64 MiB.
+
+   > **Amended 2026-11-22:** the bound is split, so that a module and an
+   > instance for each of a session's 32 ECUs fit the 64 MiB with 4 MiB
+   > left (`wasm_sandbox.cpp` asserts it): loading a module may take 4
+   > MiB (`MODULE_BYTES_MAX`) and making one instance of it 1.75 MiB
+   > (`INSTANCE_BYTES_MAX`). Measured 2026-11-22, MSVC Release: a load
+   > costs about 101 bytes for each function on x64 and 73 on x86; an
+   > instance about 48 and 28 more beside its pages, its stack and the
+   > runtime's share (135,000 bytes in all at one page on x64, 1,118,040
+   > at 16). The most functions a module may hold are 35,416 at one page
+   > and 14,936 at 16 on x64, 57,440 and 25,669 on x86
+   > (`SandboxTest.ThirtyTwoInstancesOfTheModuleWithTheMostFunctionsAnswer`
+   > finds them by bisection): an instance's bound, not the load's, caps
+   > a module of many pages. A module past them is OUT_OF_MEMORY at its
+   > load or at its first instance. A table's elements cost each
+   > instance too. The 64 MiB is the process's, not a session's: a
+   > second session's plugin past what is left is OUT_OF_MEMORY at its
+   > attach.
+
 9. **Nothing a module does prints.** WAMR writes its warnings to standard
    output whatever `WASM_ENABLE_LOG` says (to the system log on Android),
    so core sets its log level to fatal at the runtime's start, and the
@@ -1608,6 +1638,11 @@ don't say:
     (250,000 is out of memory), 0.63 ms. Under a millisecond, so the check
     takes no cap on them. The phone's figure is owed when a front end reaches the sandbox.
 
+    > **Amended 2026-11-22:** the records are the loaded module's, so a
+    > module's load bound caps them (4 MiB, item 8's note), not an
+    > instance's making. The figures above were measured under the
+    > single 8 MiB bound, which held more: they stand as an upper bound.
+
 24. **`git apply` inside a work tree skips paths outside it, with exit
     0.** `scripts/vendor_wamr.sh` clones into a temp folder; with `TMPDIR`
     under a checkout, the apply took the patch as that repository's,
@@ -1668,6 +1703,13 @@ don't say:
     an ELM327 sends a single frame, so there a talk is 7 bytes at most and
     a longer one is refused as too long before anything is typed. Until
     the conversation tier exists the only caller is a test seam.
+
+    > **Amended 2026-11-22:** the door holds a plain talk to the guest's
+    > own list (`19`, `22` and `2C` inside the ceiling), so a plain
+    > `10 03`, `3E 00` or `2A` is refused: the session and its
+    > keep-alive are core's own step. A seed or a key is judged by the
+    > whole ceiling, then by its kind (`ecuio_talk_inside_ceiling`,
+    > `request_talk.h`).
 
 28. **Format 2 and the conversation tier at load as built** (section 2.8,
     `plugin.h`; `core/src/plugin_conversation.cpp`, `core/src/base64.h`,

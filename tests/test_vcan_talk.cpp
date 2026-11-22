@@ -280,6 +280,10 @@ public:
     Unproven& operator=(const Unproven&) = delete;
 };
 
+/* A plain talk the engine ECU answers in one frame, in any session: a
+ * guest's read (core's own 10 03 and 3E 00 are no talk) */
+const Bytes kRead = {0x22, 0x1E, 0x1C};
+
 /* One module, no session to enter and nothing asked but its rotation */
 const char* const kOneModule =
     "?profile=uds-generic&did=D200:u16&identify=0&diagnose=0";
@@ -600,11 +604,11 @@ TEST_F(SocketCanTalkTest, ALongRequestWithNoFlowControlIsUnsentAndTheNextGoes)
     }
     EXPECT_EQ(first_frames, 1u) << "and the request is not sent again";
     /* a request of one frame: sent, and unanswered */
-    ASSERT_TRUE(talk(s, {0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(s, kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kUnanswered);
     /* An ECU comes: the sender is free, and a long request goes whole */
     vcan_bus::Ecu ecu;
-    ASSERT_TRUE(talk(s, {0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(s, kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered);
     (void)drain(bus);
     ASSERT_TRUE(talk(s, request, 2, kPlain, &e));
@@ -946,7 +950,7 @@ TEST_F(SocketCanTalkTest, NothingOutsideTheCeilingReachesTheBus)
     EXPECT_EQ(e.offer, kRefusedOffer) << "a window past the session's own";
     ASSERT_TRUE(talk(s, key_for(0x01), 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer) << "a key with no seed before it";
-    ASSERT_TRUE(talk(s, {0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(s, kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered) << "the session is none the worse";
     for (const BusFrame& f : drain(bus)) {
         if (f.id != vcan_bus::kRequest || (f.data[0] & 0xF0) == 0x30) {
