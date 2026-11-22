@@ -651,10 +651,14 @@ Page {
                         // keeps its room
                         // and, on a row too narrow for its cap beside the
                         // box, the swatch and the name's least, what is left
+                        // Each neighbor's fractional width rounds up in the
+                        // layout, so the room left rounds down
                         Layout.maximumWidth: Math.max(0, Math.min(
                             Math.round(signalDelegate.width * 0.6),
-                            signalDelegate.width - 24 - plotBox.width - swatch.width
-                            - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
+                            Math.floor(signalDelegate.width - 24 - Math.ceil(plotBox.width)
+                                       - Math.ceil(swatch.width)
+                                       - Math.ceil(nameLabel.Layout.minimumWidth)
+                                       - 3 * rowLayout.spacing)))
                         elide: Text.ElideRight
                         color: signalDelegate.alertLevel === 2 ? Theme.textOnAlertDanger
                                : signalDelegate.alertLevel === 1 ? Theme.textOnAlertWarn
