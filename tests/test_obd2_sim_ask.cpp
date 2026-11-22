@@ -471,6 +471,24 @@ TEST(SimAskTest, TheEngineNodeHasAnExtendedSessionAndTheModuleHasNone)
         << "the functional ID entered nothing";
 }
 
+// S3's value, written as a number (the other cases add ECUIO_SIM_S3_US, which
+// a changed constant moves with them): 5 s of silence lapses the session
+TEST(SimAskTest, TheExtendedSessionHoldsJustUnderFiveSecondsAndLapsesAtFive)
+{
+    const Bytes refused{0x7F, 0x22, 0x31};
+    const Bytes d200{0x62, 0xD2, 0x00, 0x1A, 0x2C};
+    const auto probe = [&](int64_t silence_us) {
+        Unbound u("mock://ask?values=canned&modules=2");
+        EXPECT_NE(u.sim, nullptr);
+        const auto e = sim_ask(u.sim, 0x7E0, {0x10, 0x03}, 0);
+        EXPECT_EQ(e.size(), 1u);
+        const auto r = sim_ask(u.sim, 0x7E0, {0x22, 0xD2, 0x00}, silence_us);
+        return r.empty() ? Bytes{} : reply_bytes(r[0]);
+    };
+    EXPECT_EQ(probe(4999000), d200) << "just under 5 s";
+    EXPECT_EQ(probe(5000000), refused) << "5 s";
+}
+
 // A profile's nodes have no extended session
 TEST(SimAskTest, AProfilesNodesHaveNoExtendedSession)
 {
