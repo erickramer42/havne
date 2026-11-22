@@ -24,7 +24,7 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
-    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
+    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp test_core_merge.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
     test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
     test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
@@ -109,7 +109,7 @@ app_enable_warnings(bench_recording)
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
     test_signal_file_format3.cpp test_plugin_format3.cpp test_signal_needs.cpp
-    test_signal_merged_text.cpp
+    test_signal_merged_text.cpp test_signal_merge.cpp test_signal_merge_bounds.cpp
     test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp

@@ -125,6 +125,76 @@ static int merged_text_from_c(void)
     return 0;
 }
 
+typedef char
+    abi_options_size_check[(sizeof(ecuio_merge_options_t) == 32) ? 1 : -1];
+typedef char abi_options_reserved_check
+    [(offsetof(ecuio_merge_options_t, reserved) == 8) ? 1 : -1];
+
+/* Another file's signal at kNamed's address */
+static const char kLater[] =
+    "{\"havne_signals\":3,\"name\":\"L\",\"source\":{\"name\":\"l\"},"
+    "\"ecus\":[{\"id\":\"trans\",\"rx\":\"7E9\"}],"
+    "\"signals\":[{\"key\":\"b\",\"name\":\"B\",\"read\":{\"service\":\"22\","
+    "\"number\":\"D100\"},\"field\":{\"byte\":0}}]}";
+
+static int merge_from_c(void)
+{
+    ecuio_signal_file_t* files[2] = {NULL, NULL};
+    const ecuio_signal_file_t* parts[2];
+    ecuio_signal_file_t* merged = NULL;
+    ecuio_merge_options_t options;
+    ecuio_signal_note_t note;
+    int failed = 0;
+
+    if (ECUIO_MERGE_BASE_OBD2 != 0x1u || ECUIO_NOTE_REPLACED_BY_ADDRESS != 1u ||
+        ECUIO_NOTE_REPLACED_BY_KEY != 2u || ECUIO_NOTE_KEY_TAKEN != 3u ||
+        ECUIO_NOTE_BESIDE_BASE != 4u || ECUIO_NOTE_MODULE_RENAMED != 5u ||
+        ECUIO_NOTE_MODULE_LEFT_OUT != 6u || ECUIO_NOTE_PART_LEFT_OUT != 7u ||
+        ECUIO_NOTE_SIGNAL_LEFT_OUT != 8u) {
+        printf("FAIL: a constant of the merge moved\n");
+        return 1;
+    }
+    if (ecuio_signal_file_load(kNamed, sizeof kNamed - 1, &files[0]) !=
+            ECUIO_OK ||
+        ecuio_signal_file_load(kLater, sizeof kLater - 1, &files[1]) !=
+            ECUIO_OK) {
+        printf("FAIL: the parts from C: %s\n", ecuio_last_error_detail());
+        return 1;
+    }
+    parts[0] = files[0];
+    parts[1] = files[1];
+    memset(&options, 0, sizeof options);
+    options.struct_size = sizeof options;
+    memset(&note, 0, sizeof note);
+    note.struct_size = sizeof note;
+    if (ecuio_signal_file_merge(parts, 2, &options, &merged) != ECUIO_OK ||
+        ecuio_signal_file_part_count(merged) != 2u ||
+        ecuio_signal_file_find(merged, "a") == NULL ||
+        ecuio_signal_file_find(merged, "a") !=
+            ecuio_signal_file_find(merged, "b") ||
+        ecuio_signal_file_note_count(merged) != 1u ||
+        ecuio_signal_file_note(merged, 0, &note) != ECUIO_OK ||
+        note.kind != ECUIO_NOTE_REPLACED_BY_ADDRESS || note.part != 1u ||
+        note.other_part != 0u || note.def != 0u) {
+        printf("FAIL: a merge from C: %s\n", ecuio_last_error_detail());
+        failed = 1;
+    }
+    ecuio_signal_file_free(merged);
+    merged = NULL;
+    options.flags = 0x80u;
+    if (!failed && (ecuio_signal_file_merge(parts, 2, &options, &merged) !=
+                        ECUIO_ERR_INVALID_ARGUMENT ||
+                    merged != NULL ||
+                    ecuio_signal_file_merge(parts, 2, NULL, NULL) !=
+                        ECUIO_ERR_NULL_ARGUMENT)) {
+        printf("FAIL: the merge's refusals from C\n");
+        failed = 1;
+    }
+    ecuio_signal_file_free(files[0]);
+    ecuio_signal_file_free(files[1]);
+    return failed;
+}
+
 int main(void)
 {
     ecuio_signal_file_t* file = NULL;
@@ -183,7 +253,7 @@ int main(void)
         return 1;
     }
     ecuio_signal_file_free(file);
-    if (merged_text_from_c() != 0) {
+    if (merged_text_from_c() != 0 || merge_from_c() != 0) {
         return 1;
     }
     printf("c_abi_merge: ok\n");

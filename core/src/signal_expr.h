@@ -29,9 +29,10 @@ inline constexpr uint32_t kGrammarFormat = 2;
 enum class expr_kind { number, computed, text };
 
 /* Why a key find doesn't have is not read: no signal has it, the file
- * needs it from another ("needs"), or it is a signal of the file's left
- * out while a need of it is unmet */
-enum class absent { unknown, needed, waiting };
+ * needs it from another ("needs"), it is a signal of the file's left
+ * out while a need of it is unmet, or (in a merged set) its part needs
+ * it and no part gives it */
+enum class absent { unknown, needed, waiting, unmet };
 
 /* The signals an expression can read by key, and base, the obd2 set when
  * "obd2.<key>" names its defs, else NULL */

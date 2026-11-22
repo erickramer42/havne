@@ -162,6 +162,8 @@ private:
         case absent::waiting:
             return ", which is left out until another file gives what it "
                    "reads: check it against the set the files make together";
+        case absent::unmet:
+            return ", which its part needs and no part gives";
         default:
             return ", which no signal is";
         }
