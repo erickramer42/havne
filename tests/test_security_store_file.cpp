@@ -1,7 +1,8 @@
 // File/layer: tests/test_security_store_file.cpp | test_core, Qt-free
 // Testing: UNIT: SecurityStoreTest (security_store.{h,cpp}: the file read,
 //          written whole and replaced, a file that can't be opened, a
-//          second writer's entries kept, in a folder of the case's own)
+//          second writer's entries kept, an ended mark kept ended, an
+//          earlier call's Windows code, in a folder of the case's own)
 
 #include "security_store.h"
 
@@ -14,15 +15,19 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <share.h>
 #include <windows.h>
 #endif
 
@@ -661,6 +666,55 @@ TEST(SecurityStoreTest, AFileThatCantBeOpenedIsRefusedNeverTakenAsEmpty)
     ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
     expect_same(back, kept);
 }
+
+#ifdef _WIN32
+/* A failure of the C library's own leaves Windows' code of an earlier
+ * call: with no stream free, after a call that found no file, the store
+ * there isn't "no such file". A name Windows refuses (one holding "<") is
+ * refused, never an empty store. */
+TEST(SecurityStoreTest, AnEarlierCallsWindowsCodeIsNoEmptyStore)
+{
+    Folder f;
+    store kept;
+    kept.entries.push_back(entry(kRx, 0x01, 3, kUtc));
+    std::string why;
+    const std::string path = f.file();
+    ASSERT_EQ(store_save(path, &kept, &why), store_io::ok) << why;
+    const std::wstring wide = (f.path / kName).wstring();
+    std::vector<FILE*> streams;
+    streams.reserve(16384);
+    while (streams.size() < 16384) {
+        FILE* taken = _wfsopen(wide.c_str(), L"rb", _SH_DENYNO);
+        if (taken == nullptr) {
+            break;
+        }
+        streams.push_back(taken);
+    }
+    const int none_free = errno;
+    store s;
+    s.entries.push_back(entry(kRx, 0x03, 1, kUtc));
+    why.clear();
+    _set_doserrno(ERROR_FILE_NOT_FOUND);
+    const store_io io = store_load(path, &s, &why);
+    for (FILE* taken : streams) {
+        std::fclose(taken);
+    }
+    ASSERT_EQ(none_free, EMFILE) << "every stream taken";
+    EXPECT_EQ(io, store_io::refused);
+    EXPECT_TRUE(s.entries.empty());
+    EXPECT_EQ(why.rfind("the security store can't be opened: ", 0), 0u) << why;
+
+    const std::string refused = (f.path / "a<b.json").generic_u8string();
+    store odd;
+    EXPECT_EQ(store_load(refused, &odd, &why), store_io::refused);
+    EXPECT_EQ(why.rfind("the security store can't be opened: ", 0), 0u) << why;
+    EXPECT_EQ(store_save(refused, &kept, &why), store_io::refused);
+    EXPECT_EQ(why.rfind("the security store can't be written: ", 0), 0u) << why;
+    store back;
+    ASSERT_EQ(store_load(path, &back, &why), store_io::ok) << why;
+    expect_same(back, kept);
+}
+#endif
 
 /* One owner for a path is the rule, and a second writer's entries are
  * still kept. A save that finds the file isn't what its store last read

@@ -151,8 +151,9 @@ inline FILE* open_file(const std::string& utf8, bool write, std::string* why)
 /* A file that is there, opened to read. nullptr with *none true when
  * there is no such file (its name, or a folder on the way to it, isn't
  * there), else with *none false and *why: it is there, or may be, and
- * can't be opened. Windows judges by its own code: the C library reads
- * an unreachable share as no such file too. */
+ * can't be opened. Windows judges by its own code beside errno: the C
+ * library reads an unreachable share as no such file too, and a failure
+ * of its own (no stream free) leaves the code of an earlier call. */
 inline FILE* open_existing(const std::string& utf8, bool* none,
                            std::string* why)
 {
@@ -168,7 +169,8 @@ inline FILE* open_existing(const std::string& utf8, bool* none,
         const int err = errno;
         unsigned long code = 0;
         _get_doserrno(&code);
-        *none = code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND;
+        *none = err == ENOENT &&
+                (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND);
         if (!*none) {
             *why = errno_words(err);
         }
