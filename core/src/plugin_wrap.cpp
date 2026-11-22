@@ -10,6 +10,7 @@
 
 #include "ecuio/plugin.h"
 #include "ecuio/signal_sets.h"
+#include "ecu_join.h"
 #include "error_detail.h"
 #include "json.h"
 #include "least_core.h"
@@ -29,6 +30,10 @@
 
 namespace {
 
+using ecuio_ecus::address;
+using ecuio_ecus::ecu;
+using ecuio_ecus::ecus_of;
+using ecuio_ecus::fallback_of;
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
@@ -338,47 +343,6 @@ std::string wrapped(const char* file, size_t length,
     return ecuio_json::write(doc);
 }
 
-/* An ECU by its addresses: two ids at one rx and tx are one module */
-struct address {
-    uint32_t rx = 0;
-    uint32_t tx = 0;
-
-    bool operator==(const address& o) const { return rx == o.rx && tx == o.tx; }
-};
-
-struct ecu {
-    std::string id;
-    address addr;
-};
-
-std::vector<ecu> ecus_of(const Value* list)
-{
-    std::vector<ecu> out;
-    if (list != nullptr) {
-        for (const Value& e : list->items) {
-            ecu x;
-            x.id = e.find("id")->text;
-            ecuio_sf::ecu_addresses(e, &x.addr.rx, &x.addr.tx);
-            out.push_back(std::move(x));
-        }
-    }
-    return out;
-}
-
-/* What a signal naming no ECU reads: the manifest's first, or with none
- * the first that the set a file extends asks */
-address fallback_of(const std::vector<ecu>& ecus)
-{
-    if (!ecus.empty()) {
-        return ecus.front().addr;
-    }
-    const ecuio_channel_decl_t& c = ecuio_obd2_signal_set()->channels[0];
-    address a;
-    a.rx = c.rx_id;
-    a.tx = c.tx_id;
-    return a;
-}
-
 /* A signal that reads a reply and names no ECU */
 bool unnamed(const Value& signal)
 {
@@ -523,11 +487,12 @@ struct package {
 };
 
 /* A put's work on the manifest's ECUs and the signals that name them */
-class ecu_merge
+class ecu_merge : private ecuio_ecus::joined
 {
 public:
+    /* have_ is the manifest's ECUs, then those added */
     ecu_merge(package& p, Value& file)
-        : p_(p), file_(file), have_(ecus_of(at(p.doc, "ecus")))
+        : joined(ecus_of(at(p.doc, "ecus"))), p_(p), file_(file)
     {}
 
     void run()
@@ -611,38 +576,6 @@ public:
     }
 
 private:
-    const ecu* at_address(const address& a) const
-    {
-        for (const ecu& e : have_) {
-            if (e.addr == a) {
-                return &e;
-            }
-        }
-        return nullptr;
-    }
-
-    bool taken(const std::string& id) const
-    {
-        for (const ecu& e : have_) {
-            if (e.id == id) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /* "<id>_2", "_3" and on, the id cut so an ECU id's 31 bytes hold it */
-    std::string free_id(const std::string& id) const
-    {
-        for (unsigned n = 2;; ++n) {
-            const std::string tail = "_" + std::to_string(n);
-            const std::string candidate = id.substr(0, 31 - tail.size()) + tail;
-            if (!taken(candidate)) {
-                return candidate;
-            }
-        }
-    }
-
     void append(Value entry, const std::string& id, const address& a)
     {
         added_.push_back(std::move(entry));
@@ -673,7 +606,6 @@ private:
 
     package& p_;
     Value& file_;
-    std::vector<ecu> have_;    /* the manifest's, then those added */
     std::vector<Value> added_; /* joined to the manifest at the end */
     std::vector<std::string> notes_;
 };
