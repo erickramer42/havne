@@ -520,35 +520,6 @@ Page {
     // view rests
     readonly property int settleMs: 150
     readonly property real handleDropPx: 4
-    // What the row says for no pull: a recording with neither a throttle nor
-    // an engine-load signal has nothing a pull is judged by, whatever the
-    // levels, and the row says so. A phone's row must stay one line at any
-    // font, so it keeps the plain words and the reason is the label's spoken
-    // name (jumpStatusSpoken)
-    readonly property string noPullWhy: recording.pullsLackSignals
-        ? qsTr("No pull found (no throttle or load signal)") : qsTr("No pull found")
-    readonly property string noPullText: Theme.compact ? qsTr("No pull found") : noPullWhy
-    // The Jump row's line: where the last jump went while the cursor is
-    // still at its start, else how many of each were found
-    readonly property string jumpStatus: {
-        if (stretchFailed)
-            return qsTr("Its stretches couldn't be read")
-        if (stretchList === null)
-            return qsTr("Looking for stretches…")
-        const list = jumpIndex >= 0 ? comparePart.stretchesOf(jumpKind) : []
-        const at = jumpIndex >= 0 ? list[jumpIndex] : undefined
-        if (at !== undefined && hasCursor && Math.abs(cursorMs - at.fromMs) < 0.5)
-            return qsTr("%1 %2 of %3 · %4").arg(jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
-                       .arg(jumpIndex + 1).arg(list.length).arg(formatPart.timeText(at.fromMs, true))
-        const pulls = comparePart.stretchesOf("pull").length
-        const cruises = comparePart.stretchesOf("cruise").length
-        return (pulls === 0 ? noPullText
-                            : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
-               + (cruises === 0 ? qsTr("No cruise found")
-                                : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))
-    }
-    // What a screen reader says for the status: the reason in full
-    readonly property string jumpStatusSpoken: jumpStatus.replace(noPullText, noPullWhy)
     // RecordingView.findings and markers copied once at each change, with
     // the fields the chart's paint reads: the bridge map rule
     property var chartFindings: recording.findings.map(f => ({ kind: f.kind, atMs: f.atMs,
@@ -831,8 +802,8 @@ Page {
             parent: Theme.compact ? jumpBelow : jumpAbove
             visible: chartFrame.visible
             Layout.fillWidth: true
-            status: root.jumpStatus
-            statusSpoken: root.jumpStatusSpoken
+            status: root.textsPart.jumpStatus
+            statusSpoken: root.textsPart.jumpStatusSpoken
             canPreviousPull: comparePart.previousStretch("pull") >= 0
             canNextPull: comparePart.nextStretch("pull") >= 0
             canPreviousCruise: comparePart.previousStretch("cruise") >= 0

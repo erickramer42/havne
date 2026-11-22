@@ -46,4 +46,33 @@ Item {
         return s.isText ? qsTr("B %1").arg(part.atText(part.host.readoutTo[s.index], s))
                         : qsTr("B %1 · Δ %2").arg(part.atText(part.host.readoutTo[s.index], s)).arg(part.statChange(stat))
     }
+    // What the row says for no pull: a recording with neither a throttle nor
+    // an engine-load signal has nothing a pull is judged by, whatever the
+    // levels, and the row says so. A phone's row must stay one line at any
+    // font, so it keeps the plain words and the reason is the label's spoken
+    // name (jumpStatusSpoken)
+    readonly property string noPullWhy: part.host.recording.pullsLackSignals
+        ? qsTr("No pull found (no throttle or load signal)") : qsTr("No pull found")
+    readonly property string noPullText: Theme.compact ? qsTr("No pull found") : noPullWhy
+    // The Jump row's line: where the last jump went while the cursor is
+    // still at its start, else how many of each were found
+    readonly property string jumpStatus: {
+        if (part.host.stretchFailed)
+            return qsTr("Its stretches couldn't be read")
+        if (part.host.stretchList === null)
+            return qsTr("Looking for stretches…")
+        const list = part.host.jumpIndex >= 0 ? part.host.comparePart.stretchesOf(part.host.jumpKind) : []
+        const at = part.host.jumpIndex >= 0 ? list[part.host.jumpIndex] : undefined
+        if (at !== undefined && part.host.hasCursor && Math.abs(part.host.cursorMs - at.fromMs) < 0.5)
+            return qsTr("%1 %2 of %3 · %4").arg(part.host.jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
+                       .arg(part.host.jumpIndex + 1).arg(list.length).arg(part.host.formatPart.timeText(at.fromMs, true))
+        const pulls = part.host.comparePart.stretchesOf("pull").length
+        const cruises = part.host.comparePart.stretchesOf("cruise").length
+        return (pulls === 0 ? noPullText
+                            : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
+               + (cruises === 0 ? qsTr("No cruise found")
+                                : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))
+    }
+    // What a screen reader says for the status: the reason in full
+    readonly property string jumpStatusSpoken: jumpStatus.replace(noPullText, noPullWhy)
 }
