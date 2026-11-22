@@ -1889,7 +1889,10 @@ endif()
 # consumer would hit. It is the only target that compiles headers as C:
 # ISO C11 without compiler extensions, and -pedantic where the compiler
 # has it, so a GNU-only construct in a header warns.
-set(C_ABI_SOURCES test_c_abi.c test_c_abi_layout.c test_c_abi_conditions.c test_c_abi_signalfile.c test_c_abi_plugin.c)
+set(C_ABI_SOURCES test_c_abi.c test_c_abi_layout.c test_c_abi_conditions.c
+    test_c_abi_core.c test_c_abi_signalfile.c test_c_abi_plugin.c
+    test_c_abi_diag.c test_c_abi_recording.c test_c_abi_exchange.c
+    test_c_abi_frames.c)
 add_executable(test_c_abi ${C_ABI_SOURCES})
 set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
 app_enable_warnings(test_c_abi)
