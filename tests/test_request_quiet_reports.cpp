@@ -98,9 +98,25 @@ TEST(RequestQuietTest, AWakeLeavesARefusedSessionInDefault)
     EXPECT_EQ(p->a->e.chans[1].session_step, ECUIO_SESSION_STATE_REFUSED);
 }
 
-/* A module quiet while its session reads entered (silent for less than
- * tester present's run) wakes into the same session: no 10 03, no loss.
- * One that reset would answer 7F xx 7F, and that re-enters. */
+/* The wake's re-entry moves the channel's generation, so the report
+ * shows the session entering at once */
+TEST(RequestQuietTest, AWakeThatEntersTheSessionAgainMovesTheGeneration)
+{
+    auto p = in_session_pair();
+    to_quiet(*p->a);
+    const ecuio_engine_channel& ch = p->a->e.chans[1];
+    ASSERT_EQ(ch.session_step, ECUIO_SESSION_STATE_UNANSWERED);
+    const uint32_t g = ch.generation;
+    const Bytes stray = {0x7F, 0x22, 0x7F};
+    (void)ecuio_engine_on_frame(&p->a->e, 1, stray.data(),
+                                static_cast<uint16_t>(stray.size()), p->a->now,
+                                nullptr);
+    EXPECT_EQ(ch.session_step, ECUIO_SESSION_STATE_ENTERING);
+    EXPECT_EQ(ch.generation, g + 1);
+}
+
+/* A module quiet while its session reads entered, heard again within S3,
+ * wakes into the same session: no 10 03, no loss */
 TEST(RequestQuietTest, AWakeKeepsAnEnteredSession)
 {
     auto p = in_session_pair();
@@ -111,12 +127,61 @@ TEST(RequestQuietTest, AWakeKeepsAnEnteredSession)
     to_quiet(*p->a);
     ASSERT_EQ(p->a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
     const int64_t woke = p->a->now;
+    ASSERT_LT(woke + 1000 * kMs - p->a->e.chans[1].heard_us, ECUIO_ENGINE_S3_US)
+        << "its next step falls within S3";
     p->awake = true;
     p->a->until(woke + 10000 * kMs);
     EXPECT_FALSE(p->a->e.chans[1].quiet);
     EXPECT_EQ(entries_asked(*p->a), 1u);
     EXPECT_EQ(p->a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(p->a->e.chans[1].session_lost, 0u);
+}
+
+/* A module that resets (a crank brown-out) while its session reads
+ * entered, silent past S3, wakes in default and answers each
+ * extended-only DID 7F 22 7F. Out of step that re-enters nothing, so
+ * the wake enters the session again (one loss) and its readings return. */
+TEST(RequestQuietTest, AModuleWakingPastS3InDefaultIsEnteredAgain)
+{
+    auto extended = std::make_shared<bool>(false);
+    auto answered = std::make_shared<int>(0);
+    auto p = in_session_pair([extended, answered](const Bytes& q) {
+        if (q.size() == 2 && q[0] == 0x10) {
+            *extended = true;
+            return in_session(q);
+        }
+        if (q.size() == 3 && q[0] == 0x22 && !*extended) {
+            return Bytes{0x7F, 0x22, 0x7F};
+        }
+        *answered += q[0] == 0x22 ? 1 : 0;
+        return in_session(q);
+    });
+    p->awake = true;
+    p->a->until(2000 * kMs);
+    ASSERT_EQ(p->a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    p->awake = false;
+    *extended = false;
+    const ecuio_engine_channel& ch = p->a->e.chans[1];
+    for (int i = 0; i < 100000 && !(ch.quiet && p->a->now - ch.heard_us >=
+                                                    ECUIO_ENGINE_S3_US);
+         ++i) {
+        p->a->pass();
+    }
+    ASSERT_TRUE(ch.quiet);
+    ASSERT_EQ(ch.session_step, ECUIO_SESSION_STATE_ENTERED)
+        << "the quiet steps outrun tester present";
+    const int64_t woke = p->a->now;
+    *answered = 0;
+    p->awake = true;
+    p->a->until(woke + 10000 * kMs);
+    const std::vector<Bytes> after = asked_from(*p->a, woke);
+    ASSERT_GE(after.size(), 2u);
+    EXPECT_EQ(after[0][0], 0x22) << "the step's row wakes it";
+    EXPECT_EQ(after[1], (Bytes{0x10, 0x03}));
+    EXPECT_EQ(ch.session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(ch.session_entries, 2u);
+    EXPECT_EQ(ch.session_lost, 1u);
+    EXPECT_GT(*answered, 0) << "its readings answered again";
 }
 
 namespace {
@@ -193,6 +258,23 @@ TEST(RequestQuietTest,
     EXPECT_FALSE(a->e.chans[1].diag_again);
     a->until(a->now + 1000 * kMs);
     EXPECT_NE(a->e.chans[1].diag.flags & ECUIO_DIAG_COMPLETE, 0u);
+}
+
+/* Read again pressed while the step's item is out, then the module wakes
+ * and answers it: the read still starts over at the item's settle */
+TEST(RequestQuietTest, AReadAgainWaitingOnTheStepsItemStartsOverWhenItAnswers)
+{
+    auto a = quiet_reports();
+    to_step_item_out(*a);
+    ecuio_engine_diagnose_again(&a->e);
+    ASSERT_TRUE(a->e.chans[1].diag_again);
+    const Bytes r = diag_answer(a->e.chans[1].once);
+    (void)ecuio_engine_on_frame(
+        &a->e, 1, r.data(), static_cast<uint16_t>(r.size()), a->now, nullptr);
+    const ecuio_engine_channel& ch = a->e.chans[1];
+    EXPECT_FALSE(ch.diag_again);
+    EXPECT_EQ(ch.diag.flags & ECUIO_DIAG_COMPLETE, 0u) << "a new read";
+    EXPECT_GT(ch.diag_pending, 0u) << "its items listed again";
 }
 
 /* A clear at the report's generation while the step's item is

@@ -38,9 +38,11 @@
 //      channel: its rotation is asked again whole, its rows' waits run out
 //      are judged by their defs again (ecuio_engine_forget_ran_out), the
 //      items settled unasked are asked again (ecuio_engine_ask_again) and
-//      a session whose 10 03 went unanswered is entered again. An entered
-//      session stands: a module that reset says so with 7F xx 7F, and a
-//      needless 10 03 would lock an unlocked level again.
+//      a session whose 10 03 went unanswered is entered again, as is an
+//      entered one after a silence of S3 or more: its session has lapsed
+//      or it reset, and a 7F xx 7F out of step re-enters nothing. One
+//      heard again within S3 stands: a needless 10 03 would lock an
+//      unlocked level again.
 //      ecuio_engine_rescan ends it on every channel.
 
 #ifndef ECUIO_REQUEST_ENGINE_QUIET_H
@@ -266,11 +268,12 @@ inline void ecuio_engine_quiet_settle(ecuio_request_engine* e, uint32_t c)
  * ended, and a quiet channel back in its rotation, its rows' waits run
  * out judged by their defs again (it was asleep, not leaving them
  * unanswered), the items settled while it was held asked again and an
- * unanswered session entered again */
+ * unanswered session, or an entered one silent for S3, entered again */
 inline void ecuio_engine_quiet_heard(ecuio_request_engine* e, uint32_t c,
                                      int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    const int64_t silent_us = now_us - ch.heard_us;
     ch.heard = true;
     ch.heard_us = now_us;
     ch.quiet_run = 0;
@@ -279,7 +282,13 @@ inline void ecuio_engine_quiet_heard(ecuio_request_engine* e, uint32_t c,
     }
     ch.quiet = false;
     ecuio_engine_forget_ran_out(e, c);
-    if (e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_UNANSWERED) {
+    const bool lapsed = ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+                        silent_us >= ECUIO_ENGINE_S3_US;
+    if (e->session != 0 &&
+        (ch.session_step == ECUIO_SESSION_STATE_UNANSWERED || lapsed)) {
+        if (lapsed) {
+            ecuio_engine_count16(ch.session_lost); /* as rescan counts it */
+        }
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
         ++ch.generation;
     }
