@@ -500,7 +500,7 @@ MERGED_SET = [
 
 # A format 2 plugin with the conversation tier (ADR-0066). The module is
 # the least one the guest ABI takes: its six exports, each returning a
-# constant, and one page of memory (fuzz/seeds.py's wasm_module() wrote it)
+# constant, and one page of memory (fuzz/seeds_wasm.py's wasm_module() wrote it)
 MODULE_B64 = ("AGFzbQEAAAABDgNgAAF/YAJ/fwF/YAAAAwcGAAABAAECBQQBAQEBB0IGCWVjdWlvX2FiaQAADGVj"
               "dWlvX2J1ZmZlcgABBWJlZ2luAAIMbmV4dF9yZXF1ZXN0AAMGYWNjZXB0AAQDZW5kAAUKHgYEAEEB"
               "CwUAQYAICwQAQQALBABBAAsEAEEACwIACw==")
