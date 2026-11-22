@@ -480,7 +480,18 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
     try {
         std::string json(bytes != nullptr ? bytes : "", length);
         recorder->signals_sha = ecuio_sha256::hex_of(json.data(), json.size());
-        recorder->signals_plugin = one_line(plugin);
+        /* One header line for each line of plugin */
+        std::string lines;
+        for (const char* at = plugin; *at != '\0';) {
+            const char* end = strchr(at, '\n');
+            const std::string one(at, end != nullptr ? end : at + strlen(at));
+            if (!one.empty()) {
+                lines += ecuio_recording_rows::kPluginKey +
+                         one_line(one.c_str()) + "\n";
+            }
+            at += one.size() + (end != nullptr ? 1 : 0);
+        }
+        recorder->signals_plugin = std::move(lines);
         recorder->signals_json = std::move(json);
     } catch (...) {
         recorder->signals_sha.clear();

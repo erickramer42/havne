@@ -547,3 +547,136 @@ TEST(RecorderTest, ALineBreakInANameOrUnitIsASpace)
               std::string::npos)
         << events;
 }
+
+/* A merged set's recording (ADR-0065 section 9): the merged text as
+ * signals.json, past a written file's megabyte too, and a plugin line
+ * for each part that is a plugin's variant, in merge order, none for a
+ * file loaded alone. A replay through the copy decodes the same values
+ * under the same profile, a replaced key still finds its signal, and a
+ * scrubbed copy of the folder keeps every plugin line. */
+TEST(RecorderTest, AMergedSetsRecordingNamesEachPartsPlugin)
+{
+    const auto count_of = [](const std::string& text, const char* what) {
+        size_t n = 0;
+        for (size_t at = text.find(what); at != std::string::npos;
+             at = text.find(what, at + 1)) {
+            ++n;
+        }
+        return n;
+    };
+    ExamplePlugin p;
+    ASSERT_NE(p.plugin, nullptr);
+    /* A file of the user's own after the plugin's two variants: its signal
+     * reads the address of the plugin's trans_temp, and its notes take
+     * the set past a megabyte */
+    const std::string own =
+        R"({"havne_signals":3,"name":"Own","source":{"name":"Havne's tests"},)"
+        R"("ecus":[{"id":"trans","rx":"7E9"}],"signals":[{"key":"fluid",)"
+        R"("name":"Fluid","read":{"service":"22","number":"F410"},)"
+        R"("field":{"byte":0,"bits":16},"notes":")" +
+        std::string(1100000, 'n') + R"("}]})";
+    ecuio_signal_file_t* mine = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load_with(own.data(), own.size(),
+                                          ECUIO_SIGNAL_FILE_LOAD_SET, &mine),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_file_t* parts[] = {
+        ecuio_plugin_variant_file(p.plugin, 0), p.file(), mine};
+    ecuio_signal_file_t* merged = nullptr;
+    ASSERT_EQ(ecuio_signal_file_merge(parts, 3, nullptr, &merged), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string profile = ecuio_signal_file_profile(merged);
+    ASSERT_EQ(ecuio_profile_register(profile.c_str(),
+                                     ecuio_signal_file_set(merged), nullptr),
+              ECUIO_OK);
+
+    Root root;
+    std::string first;
+    {
+        FileRecording rec(root, "mock://merged?profile=" + profile, merged);
+        ASSERT_EQ(rec.attached, ECUIO_OK) << ecuio_last_error_detail();
+        for (int i = 0; i < 20; ++i) {
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x10\x1F", 4) +
+                         static_cast<char>(0x40 + i));
+            dispatch(rec.session, 0x7E9,
+                     std::string("\x62\xF4\x11", 3) + static_cast<char>(i % 8));
+        }
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        first = rec.folder;
+    }
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(merged, &length);
+    const std::string json = read_bytes(fs::u8path(first) / "signals.json");
+    EXPECT_EQ(json, std::string(text, length));
+    EXPECT_GT(json.size(), size_t{ECUIO_SIGNAL_FILE_MAX_BYTES});
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+    const std::string log = read_text(fs::u8path(first) / "events.log");
+    EXPECT_NE(log.find("\nprofile  " + profile +
+                       "\nsignal file  signals.json," + sha +
+                       "\nplugin  example-sim,1.0.0,base"
+                       "\nplugin  example-sim,1.0.0,my2019\n"),
+              std::string::npos)
+        << log.substr(0, 600);
+    EXPECT_EQ(count_of(log, "\nplugin  "), 2u) << "none for the file alone";
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv")
+                  .find(",7E9:62F410:3.0:16,8000,"),
+              std::string::npos)
+        << "the last part's signal, at scale 1";
+
+    /* The copy read back is the same set under the same profile */
+    ecuio_signal_file_t* copy = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load_with(json.data(), json.size(),
+                                          ECUIO_SIGNAL_FILE_LOAD_SET, &copy),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(profile, ecuio_signal_file_profile(copy));
+    ASSERT_NE(ecuio_signal_file_find(copy, "trans_temp"), nullptr);
+    EXPECT_EQ(ecuio_signal_file_find(copy, "trans_temp"),
+              ecuio_signal_file_find(copy, "fluid"))
+        << "the key the plugin gave the signal still finds it";
+    ASSERT_EQ(ecuio_profile_register(profile.c_str(),
+                                     ecuio_signal_file_set(copy), nullptr),
+              ECUIO_OK);
+    std::string second;
+    {
+        FileRecording rec(
+            root, "replay://" + first + "?speed=max&profile=" + profile, copy);
+        ASSERT_EQ(rec.attached, ECUIO_OK) << ecuio_last_error_detail();
+        ASSERT_EQ(ecuio_session_start(rec.session), ECUIO_OK);
+        ASSERT_TRUE(eventually(
+            [&] {
+                ecuio_recorder_state_t st{};
+                ecuio_recorder_get_state(rec.recorder, &st);
+                return st.frame_rows >= 40;
+            },
+            10000));
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        second = rec.folder;
+    }
+    const std::vector<std::string> a =
+        decoded_rows(fs::u8path(first) / "signals.csv");
+    ASSERT_GE(a.size(), 40u);
+    EXPECT_EQ(a, decoded_rows(fs::u8path(second) / "signals.csv"));
+    EXPECT_EQ(read_bytes(fs::u8path(second) / "signals.json"), json);
+    EXPECT_EQ(count_of(read_text(fs::u8path(second) / "events.log"),
+                       "\nplugin  example-sim,1.0.0,"),
+              2u);
+
+    /* A scrubbed copy of the folder keeps both lines */
+    const std::string shared = (root.path / "shared").u8string();
+    ecuio_export_options_t o{};
+    o.format = ECUIO_EXPORT_FOLDER;
+    o.folder_utf8 = first.c_str();
+    o.out_path_utf8 = shared.c_str();
+    ecuio_export_report_t report{};
+    ASSERT_EQ(ecuio_export(&o, &report), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(count_of(read_text(fs::u8path(shared) / "events.log"),
+                       "\nplugin  example-sim,1.0.0,"),
+              2u);
+
+    EXPECT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
+    ecuio_signal_file_free(copy);
+    ecuio_signal_file_free(merged);
+    ecuio_signal_file_free(mine);
+}

@@ -138,10 +138,7 @@ void header_top(const ecuio_session_t* session,
                   ecuio_recording_rows::kSignalFileName + "," +
                   recorder->signals_sha + "\n";
     }
-    if (!recorder->signals_plugin.empty()) {
-        header += std::string(ecuio_recording_rows::kPluginKey) +
-                  recorder->signals_plugin + "\n";
-    }
+    header += recorder->signals_plugin;
     /* The conditions line goes here once the set is read under the
      * locks, into room kept now */
     b.conditions_at = header.size();
@@ -538,9 +535,23 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
     if (s != ECUIO_OK) {
         return s;
     }
+    /* A merged set names each part that is a plugin's variant, in merge
+     * order (ADR-0065 section 9); a variant's file names its own */
+    std::string plugins;
+    try {
+        plugins = file->plugin;
+        for (const ecuio_signal_file::part& p : file->parts) {
+            if (p.has_plugin) {
+                plugins += (plugins.empty() ? "" : "\n") + p.plugin_id + "," +
+                           p.plugin_version + "," + p.plugin_variant;
+            }
+        }
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     const std::string& bytes = ecuio_sf::bytes_of(*file);
     s = ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
-                                    bytes.size(), file->plugin.c_str());
+                                    bytes.size(), plugins.c_str());
     if (s == ECUIO_OK) {
         recorder->signal_keys = std::move(keys);
     }
