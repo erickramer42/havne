@@ -28,12 +28,16 @@
 //   each has its own memory, globals, table and stacks. They are called
 //   from one thread at a time between them (a session's worker), since
 //   with the thread manager off nothing upstream tests two threads in one
-//   module's instances. Instances of two modules may be called from two
-//   threads at once.
+//   module's instances. None is made or freed while another of its
+//   module is being called: a session makes them all before its worker's
+//   first call and frees them after its last. Instances of two modules
+//   may be called from two threads at once.
 // - Everything the runtime takes, a module's memory included, comes
 //   through a counting allocator: a module's load and an instance's
-//   making are each bounded, and everything alive together, so a
-//   session's module and an instance for each of its most ECUs fit.
+//   making are each bounded, and everything alive together. The last
+//   bound is the process's: one session's module and an instance for each
+//   of its most ECUs fit it, and a second session's plugin past what is
+//   left is OUT_OF_MEMORY at its attach.
 
 #ifndef ECUIO_WASM_SANDBOX_H
 #define ECUIO_WASM_SANDBOX_H
@@ -54,8 +58,11 @@ constexpr uint32_t BUDGET_DEFAULT = 1000000;
 /* A module's operand and call stack, made with the instance */
 constexpr uint32_t STACK_BYTES = 64 * 1024;
 /* What loading one module may take from the runtime's allocator, what
- * making one instance of it may take, and what everything alive may hold
- * together (wasm_sandbox.cpp asserts a session's whole fits) */
+ * making one instance of it may take, and what everything alive in the
+ * process may hold together (wasm_sandbox.cpp asserts one session's
+ * whole fits). An instance's making takes its memory and stacks and some
+ * bytes for each function and table element, so its bound, not the
+ * load's, caps a module of many pages. */
 constexpr size_t MODULE_BYTES_MAX = 4u << 20;
 constexpr size_t INSTANCE_BYTES_MAX = 7u << 18; /* 1.75 MiB */
 constexpr size_t RUNTIME_BYTES_MAX = 64u << 20;
@@ -100,7 +107,8 @@ void free_module(loaded* m) noexcept;
  * with *out set, holding m; ECUIO_ERR_LOAD_FAILED with the runtime's
  * words in why; ECUIO_ERR_OUT_OF_MEMORY when its making passed
  * INSTANCE_BYTES_MAX or the runtime RUNTIME_BYTES_MAX, or the process had
- * none. Nothing is thrown. Any thread, one maker at a time inside. */
+ * none. Nothing is thrown. Any thread while no instance of m is being
+ * called, one maker at a time inside. */
 ecuio_status_t make_instance(loaded* m, instance** out, char* why) noexcept;
 
 /* A module of its own and one instance of it: load_module, make_instance,
@@ -110,7 +118,8 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
                              instance** out, char* why) noexcept;
 
 /* Ends an instance (NULL is fine), and its module with it when nothing
- * else holds that. Any thread, never during a call. */
+ * else holds that. Any thread while no instance of its module is being
+ * called. */
 void free_instance(instance* i) noexcept;
 
 /* Calls wanted export `index` (its place in load_module's wants) with

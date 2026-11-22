@@ -675,10 +675,11 @@ uint32_t most_functions(uint32_t pages)
     return lo;
 }
 
-/* The costliest module a session can bind, by either bound: its load and
- * an instance for each of a session's most ECUs fit the runtime's bound
- * together, and every instance answers */
-TEST(SandboxTest, ThirtyTwoInstancesOfTheCostliestModuleAnswer)
+/* The module with the most functions a session can bind, by either
+ * bound: its load and an instance for each of a session's most ECUs fit
+ * the runtime's bound together, and every instance answers. It has no
+ * table, whose elements cost each instance too. */
+TEST(SandboxTest, ThirtyTwoInstancesOfTheModuleWithTheMostFunctionsAnswer)
 {
     warm();
     const size_t before = ecuio_wasm::runtime_bytes_in_use();
