@@ -142,6 +142,9 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_scan_entry& s = e->scan[ch.scan_index];
+    /* a quiet module's step unanswered again changes no report */
+    const bool same =
+        s.outcome == ECUIO_SCAN_UNANSWERED && outcome == ECUIO_SCAN_UNANSWERED;
     ch.scanning = false;
     s.outcome = outcome;
     s.nrc = nrc;
@@ -154,7 +157,7 @@ inline void ecuio_engine_scan_settle(ecuio_request_engine* e, uint32_t c,
             ecuio_engine_scan_retry(e, c);
         }
     }
-    ++ch.generation;
+    ch.generation += same ? 0u : 1u;
 }
 
 /* A positive reply on channel c naming a scanned DID whose wait ended

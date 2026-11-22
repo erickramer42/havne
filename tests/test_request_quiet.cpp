@@ -6,6 +6,8 @@
 
 #include "request_turns_support.h"
 
+#include "ecuio/signal_sets.h"
+
 #include <algorithm>
 
 using namespace request_turns_test;
@@ -479,6 +481,52 @@ TEST(RequestQuietTest, AHeardModuleWithNoRowsAsksAtEveryStep)
         found += a->e.scan[i].outcome == ECUIO_SCAN_FOUND ? 1 : 0;
     }
     EXPECT_EQ(found, 60u);
+}
+
+/* An item a quiet module's step asks and that goes unanswered again moves
+ * no report's generation, so havne-cli prints no identity or diagnostics
+ * line again: an absent module's first four steps (identification and
+ * diagnostics), then a heard module's steps through its scan */
+TEST(RequestQuietTest, AnItemUnansweredAgainMovesNoReport)
+{
+    auto a = rowless([](uint32_t, const Bytes&) { return Bytes{}; });
+    ecuio_engine_diagnose(&a->e, ecuio_obd2_signal_set());
+    for (int i = 0; i < 100000 && times_of(*a, 1).size() < 3; ++i) {
+        a->pass();
+    }
+    ASSERT_EQ(times_of(*a, 1).size(), 3u) << "the first step's item out";
+    const uint32_t ident = a->e.chans[1].ident_generation;
+    const uint32_t diag = a->e.chans[1].diag.generation;
+    EXPECT_GT(ident, 0u) << "a first unanswered settle moves it";
+    EXPECT_GT(diag, 0u) << "a first unanswered settle moves it";
+    a->until(60000 * kMs);
+    EXPECT_EQ(times_of(*a, 1).size(), 2u + 4u);
+    EXPECT_EQ(a->e.chans[1].ident_generation, ident);
+    EXPECT_EQ(a->e.chans[1].diag.generation, diag);
+
+    auto b = rowless([](uint32_t, const Bytes& q) {
+        return (q[0] == 0x22 && q[1] == 0x40) ? Bytes{} : answer(q);
+    });
+    for (uint16_t k = 0; k < 60; ++k) {
+        ASSERT_TRUE(ecuio_engine_scan_add(&b->e, 1, 0x4000 + k));
+    }
+    for (int i = 0; i < 100000 && !b->e.chans[1].quiet; ++i) {
+        b->pass();
+    }
+    size_t scanned = 0;
+    for (const Sent& s : b->sent) {
+        scanned +=
+            (s.c == 1 && s.bytes[0] == 0x22 && s.bytes[1] == 0x40) ? 1 : 0;
+    }
+    ASSERT_GT(scanned, 0u);
+    EXPECT_GE(b->e.chans[1].generation, scanned)
+        << "each first unanswered settle moves it";
+    b->until(15000 * kMs);
+    ASSERT_TRUE(b->e.chans[1].quiet);
+    const uint32_t scan = b->e.chans[1].generation;
+    b->until(40000 * kMs);
+    EXPECT_GE(asked_between(*b, 1, 15000 * kMs, 40000 * kMs), 4u);
+    EXPECT_EQ(b->e.chans[1].generation, scan);
 }
 
 /* Past twenty quiet channels side by side (a whole-car profile in

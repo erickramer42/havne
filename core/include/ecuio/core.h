@@ -662,8 +662,8 @@ typedef struct ecuio_identity_item {
 typedef struct ecuio_channel_identity {
     uint32_t flags;           /* ECUIO_IDENTITY_* */
     uint32_t rx_id;           /* the channel's receive ID: its ECU */
-    uint32_t generation;      /* changes with every item settled; 0 until
-                                 one has been */
+    uint32_t generation;      /* changes with every item settled, but one
+                                 unanswered again; 0 until one has been */
     uint32_t items;           /* entries of list in use; 0 when the session
                                  identifies nothing (?identify=0, ?poll=,
                                  a passive session) */
@@ -852,8 +852,8 @@ typedef struct ecuio_freeze_value {
 typedef struct ecuio_channel_diagnostics {
     uint32_t flags;           /* ECUIO_DIAG_* */
     uint32_t rx_id;           /* the channel's receive ID: its ECU */
-    uint32_t generation;      /* changes with every item settled; 0 until
-                                 one has been */
+    uint32_t generation;      /* changes with every item settled, but one
+                                 unanswered again; 0 until one has been */
     uint8_t readiness;        /* 01 01's outcome (ECUIO_DIAG_UNASKED ..) */
     uint8_t readiness_nrc;
     uint8_t dtc_count;        /* PID 01's A6-A0: the confirmed codes */
