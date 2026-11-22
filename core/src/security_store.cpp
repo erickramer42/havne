@@ -331,11 +331,89 @@ file_read read_file(const std::string& path, std::string* bytes,
     return file_read::read;
 }
 
-/* s's entries into *merged, and the file's own with them when the file
- * isn't what s last read or wrote: each of the file's kept, and where
- * both hold one the larger count, the later second and the later mark.
- * refused with *words when the file there can't be read or doesn't read:
- * it is never written over unread. */
+/* e's key with zero counts */
+store_entry none_of(const store_entry& e)
+{
+    store_entry none;
+    none.vehicle = e.vehicle;
+    none.rx = e.rx;
+    none.level = e.level;
+    return none;
+}
+
+/* The entry of e's key in list, or none_of(e) */
+store_entry same_key_in(const std::vector<store_entry>& list,
+                        const store_entry& e)
+{
+    for (const store_entry& in : list) {
+        if (in.vehicle == e.vehicle && in.rx == e.rx && in.level == e.level) {
+            return in;
+        }
+    }
+    return none_of(e);
+}
+
+/* A count merged: the changed side's (mine where neither changed); where
+ * both rose, the failures each side counted since its base */
+uint32_t merged_failed(uint32_t mine_was, uint32_t mine, uint32_t file_was,
+                       uint32_t theirs)
+{
+    if (theirs == file_was || mine == mine_was) {
+        return theirs == file_was ? mine : theirs;
+    }
+    if (mine > mine_was && theirs > file_was) {
+        const uint64_t both = uint64_t{theirs} + (mine - mine_was);
+        return both > kStoreMaxFailed ? kStoreMaxFailed
+                                      : static_cast<uint32_t>(both);
+    }
+    return (std::max)(mine, theirs);
+}
+
+/* A second merged: the changed side's, the later where both changed */
+int64_t merged_second(int64_t mine_was, int64_t mine, int64_t file_was,
+                      int64_t theirs)
+{
+    if (theirs == file_was || mine == mine_was) {
+        return theirs == file_was ? mine : theirs;
+    }
+    return (std::max)(mine, theirs);
+}
+
+bool same_counts(const store_entry& a, const store_entry& b)
+{
+    return a.failed == b.failed && a.last_utc == b.last_utc &&
+           a.pending_utc == b.pending_utc;
+}
+
+/* mine against mine_was (the store's as its last read or write left it),
+ * theirs against file_was (the file's then, marks in place): a load
+ * counts a mark, so the two bases differ there. An entry one side
+ * changed is that side's whole, so a counted mark another's attempt then
+ * ended is taken back. */
+void merge_into(store_entry& mine, const store_entry& mine_was,
+                const store_entry& file_was, const store_entry& theirs)
+{
+    if (same_counts(theirs, file_was)) {
+        return;
+    }
+    if (same_counts(mine, mine_was)) {
+        mine.failed = theirs.failed;
+        mine.last_utc = theirs.last_utc;
+        mine.pending_utc = theirs.pending_utc;
+        return;
+    }
+    mine.failed = merged_failed(mine_was.failed, mine.failed, file_was.failed,
+                                theirs.failed);
+    mine.last_utc = merged_second(mine_was.last_utc, mine.last_utc,
+                                  file_was.last_utc, theirs.last_utc);
+    mine.pending_utc = merged_second(mine_was.pending_utc, mine.pending_utc,
+                                     file_was.pending_utc, theirs.pending_utc);
+}
+
+/* s's entries into *merged, merged with the file's (merge_into) when the
+ * file isn't what s last read or wrote; an entry a side lacks has zero
+ * counts. refused with *words when the file there can't be read or
+ * doesn't read: it is never written over unread. */
 store_io merged_entries(const std::string& path, const store& s,
                         std::vector<store_entry>* merged, std::string* words)
 {
@@ -358,15 +436,26 @@ store_io merged_entries(const std::string& path, const store& s,
     if (read != store_io::ok) {
         return read;
     }
+    /* on_disk was read or written, or is "" (no file then): "" is refused
+     * and leaves was empty, the right base; only out of memory stops here */
+    std::vector<store_entry> was;
+    std::string ignored;
+    if (read_entries(s.on_disk.data(), s.on_disk.size(), &was, &ignored) ==
+        store_io::out_of_memory) {
+        return store_io::out_of_memory;
+    }
+    const size_t mine = merged->size();
+    for (size_t k = 0; k < mine; ++k) {
+        store_entry& m = (*merged)[k];
+        merge_into(m, same_key_in(s.base, m), same_key_in(was, m),
+                   same_key_in(theirs, m));
+    }
     for (const store_entry& t : theirs) {
-        store_entry* mine = find_in(*merged, t.vehicle, t.rx, t.level);
-        if (mine == nullptr) {
-            merged->push_back(t);
-            continue;
+        if (find_in(*merged, t.vehicle, t.rx, t.level) == nullptr) {
+            store_entry m = none_of(t);
+            merge_into(m, same_key_in(s.base, t), same_key_in(was, t), t);
+            merged->push_back(m);
         }
-        mine->failed = (std::max)(mine->failed, t.failed);
-        mine->last_utc = (std::max)(mine->last_utc, t.last_utc);
-        mine->pending_utc = (std::max)(mine->pending_utc, t.pending_utc);
     }
     return store_io::ok;
 }
@@ -410,6 +499,22 @@ bool write_beside(const std::string& path, const std::string& text, int fail,
         *why = "the disk is full or the file can't be flushed";
     }
     return ok;
+}
+
+/* The store's lock into *lock; false with *why, the save's refusal */
+bool lock_store(const std::string& path, ecuio_files::file_lock* lock,
+                std::string* why)
+{
+    const int seam = store_test_lock_wait_ms.load();
+    std::string words;
+    const ecuio_files::lock_got got = ecuio_files::lock_file(
+        path + ".lock", seam != 0 ? seam : kStoreLockWaitMs, lock, &words);
+    if (got == ecuio_files::lock_got::busy) {
+        *why = "another program is using the security store";
+    } else if (got == ecuio_files::lock_got::failed) {
+        *why = "the security store can't be written: " + words;
+    }
+    return got == ecuio_files::lock_got::locked;
 }
 
 } // namespace
@@ -510,6 +615,7 @@ store_io store_load(const std::string& path, store* out, std::string* why)
 {
     out->entries.clear();
     out->on_disk.clear();
+    out->base.clear();
     try {
         std::string bytes;
         std::string words;
@@ -528,6 +634,7 @@ store_io store_load(const std::string& path, store* out, std::string* why)
             const store_io read =
                 store_read(bytes.data(), bytes.size(), out, &words);
             if (read == store_io::ok) {
+                out->base = out->entries;
                 out->on_disk = std::move(bytes);
             }
             if (read != store_io::refused) {
@@ -541,6 +648,7 @@ store_io store_load(const std::string& path, store* out, std::string* why)
     } catch (const std::bad_alloc&) {
         out->entries.clear();
         out->on_disk.clear();
+        out->base.clear();
         return store_io::out_of_memory;
     }
 }
@@ -548,10 +656,29 @@ store_io store_load(const std::string& path, store* out, std::string* why)
 store_io store_save(const std::string& path, store* s, std::string* why)
 {
     std::string name; /* this write's own file, while there is one */
+    std::vector<store_entry> merged;
+    std::vector<store_entry> base; /* merged's copy, made before the rename */
+    std::string text;
+    bool renamed = false;
+    bool kept = false;
+    /* Once the new file stands, *s is what it holds, even when the save
+     * then fails: its next save would merge its own file back otherwise */
+    const auto keep = [&] {
+        if (renamed && !kept) {
+            s->entries = std::move(merged);
+            s->base = std::move(base);
+            s->on_disk = std::move(text);
+            kept = true;
+        }
+    };
     try {
         const int fail = store_test_fail_at.exchange(0);
+        /* Held from the read to the replace, so no other save comes between */
+        ecuio_files::file_lock lock;
+        if (!lock_store(path, &lock, why)) {
+            return store_io::refused;
+        }
         std::string words;
-        std::vector<store_entry> merged;
         const store_io look = merged_entries(path, *s, &merged, &words);
         if (look == store_io::out_of_memory) {
             return look;
@@ -567,33 +694,39 @@ store_io store_save(const std::string& path, store* s, std::string* why)
             *why = "the security store is full";
             return store_io::refused;
         }
-        std::string text = text_of_entries(merged);
+        text = text_of_entries(merged);
+        base = merged;
         if (!write_beside(path, text, fail, &name, &words)) {
             *why = "the security store can't be written: " + words;
             return store_io::refused;
         }
+        if (void (*hook)() = store_test_before_replace.exchange(nullptr)) {
+            hook();
+        }
         if (fail == 3) {
             words = "the disk is full";
         }
-        const bool replaced =
-            fail != 3 && ecuio_files::replace_with(name, path, &words);
-        if (!replaced) {
-            /* None of this name is left when the rename went through and
-             * its folder's flush then failed */
+        bool replaced = fail != 3 &&
+                        ecuio_files::replace_with(name, path, &words, &renamed);
+        if (fail == 4 && replaced) {
+            replaced = false;
+            words = "its folder can't be flushed";
+        }
+        if (!renamed) {
             ecuio_files::remove_file(name);
         }
         name.clear();
+        keep();
         if (!replaced) {
             *why = "the security store can't be written: " + words;
             return store_io::refused;
         }
-        s->entries = std::move(merged);
-        s->on_disk = std::move(text);
         return store_io::ok;
     } catch (const std::bad_alloc&) {
-        if (!name.empty()) {
+        if (!renamed && !name.empty()) {
             ecuio_files::remove_file(name);
         }
+        keep();
         return store_io::out_of_memory;
     }
 }

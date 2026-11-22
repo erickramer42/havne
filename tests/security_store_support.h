@@ -1,7 +1,7 @@
 // File/layer: tests/security_store_support.h | test-only, C++17, Qt-free
-// Testing: what SecurityStoreTest's two files share (test_core): a folder
-//          of the case's own, an entry and a store's text made short, and
-//          the rows of a refusal
+// Testing: what SecurityStoreTest's files share (test_core): a folder of
+//          the case's own, an entry and a store's text made short, and the
+//          rows of a refusal
 
 #ifndef ECUIO_TESTS_SECURITY_STORE_SUPPORT_H
 #define ECUIO_TESTS_SECURITY_STORE_SUPPORT_H
@@ -33,6 +33,7 @@ constexpr uint32_t kRx = 0x7E8;
 constexpr uint32_t kRxLong = 0x18DAF110;
 constexpr int64_t kUtc = 1795132800;
 constexpr char kName[] = "security-store.json";
+constexpr char kLockName[] = "security-store.json.lock";
 
 /* One folder for a case: temp_name is one name for a case, so a second
  * Folder in it would clear the first */
@@ -71,13 +72,13 @@ struct Folder {
         s << f.rdbuf();
         return s.str();
     }
+    /* The folder's names but the locks a save leaves beside its store */
     size_t entries() const
     {
         size_t n = 0;
         std::error_code ec;
         for (const auto& e : fs::directory_iterator(path, ec)) {
-            (void)e;
-            ++n;
+            n += e.path().extension() == ".lock" ? 0 : 1;
         }
         return n;
     }
