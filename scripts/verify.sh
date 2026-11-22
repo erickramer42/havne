@@ -57,8 +57,14 @@
 # --changed [base] picks the steps from what changed since base (default
 # the merge-base with origin/dev), uncommitted and untracked files
 # included, by scripts/verify_scope.py's table: docs and markdown only run
-# nothing, QML only runs build and QmlTest.*, and anything else, or a
-# change it can't read, is the full run.
+# nothing, QML only runs build and QmlTest.* (only the files that read a
+# changed tests/qml file, when that is all that changed), a change the table
+# maps to areas (core/src's families, cli/, app/'s C++, a test file) runs the
+# suites that read those areas, and anything else, or a change it can't
+# read, is the full run. The x86 steps run when core or the surrogate changed.
+#
+# --changed with --build-only or --tests-only runs one half of its plan, the
+# two halves Testing/verify-turn.sh runs apart (the build outside its lock).
 #
 # Anything less than the full run prints what it skipped and ends with a
 # "not a full verify" line, and says whether clang-tidy applies. A full
@@ -111,9 +117,8 @@ fi
 if [ -n "$regex" ] && [ "$have_suite" = 1 ]; then
     usage_error "-R and --suite both pick the tests: use one"
 fi
-if [ "$changed" = 1 ] && { [ "$tests_only" = 1 ] || [ "$build_only" = 1 ] || [ "$cross" = 0 ] \
-        || [ -n "$regex" ] || [ "$have_suite" = 1 ]; }; then
-    usage_error "--changed picks the steps itself: it takes only a base, --no-devices and --dry-run"
+if [ "$changed" = 1 ] && { [ "$cross" = 0 ] || [ -n "$regex" ] || [ "$have_suite" = 1 ]; }; then
+    usage_error "--changed picks the steps itself: it takes only a base, --build-only, --tests-only, --no-devices and --dry-run"
 fi
 
 if [ "$cross_only" = 1 ] && { [ "$tests_only" = 1 ] || [ "$build_only" = 1 ] || [ "$cross" = 0 ] \
@@ -153,6 +158,8 @@ classify() {
             reason) plan_reason=$value ;;
             tidy) tidy=$value ;;
             tidy_why) tidy_why=$value ;;
+            regex) plan_regex=$value ;;
+            cross) plan_cross=$value ;;
         esac
     done <<< "$out"
     [ -n "$plan" ]
@@ -176,6 +183,8 @@ do_main=1
 scope=""
 plan=""
 plan_reason=""
+plan_regex=""
+plan_cross=""
 tidy=""
 tidy_why=""
 add_scope() { scope="${scope:+$scope, }$1"; }
@@ -198,7 +207,12 @@ if [ "$changed" = 1 ]; then
             ;;
         qml)
             do_win32=0; do_cross=0
-            regex='^QmlTest\.'
+            regex=${plan_regex:-'^QmlTest\.'}
+            add_scope "$plan_reason"
+            ;;
+        areas)
+            regex=$plan_regex
+            if [ "$plan_cross" != yes ]; then do_win32=0; do_cross=0; fi
             add_scope "$plan_reason"
             ;;
     esac
@@ -243,6 +257,7 @@ tidy_line() {
 
 if [ "$changed" = 1 ]; then
     if [ "$plan" = full ]; then note scope "full run: $plan_reason"
+    elif [ "$plan" = areas ]; then note scope "areas: $plan_reason"
     else note scope "$plan: $plan_reason"; fi
 elif [ -n "$scope" ]; then
     note scope "$scope"
@@ -252,7 +267,7 @@ if [ "$dry" = 1 ]; then
     run_or_skip() { if [ "$2" = 1 ]; then note "$1" "run${3:+: $3}"; else note "$1" skip; fi; }
     [ "$have_win32" = 1 ] && run_or_skip win32 "$do_win32"
     run_or_skip build "$do_build"
-    run_or_skip ctest "$do_main" "${regex:-the whole suite}"
+    run_or_skip ctest "$((do_main * do_tests))" "${regex:-the whole suite}"
     [ "$have_win32" = 1 ] && run_or_skip cross-arch "$do_cross"
     { [ -n "$scope" ] || [ "$changed" = 1 ]; } && tidy_line
     [ -n "$scope" ] && note skipped "${skipped:-nothing}"

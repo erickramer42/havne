@@ -369,6 +369,193 @@ void ask_channels(ecuio_j2534_transport* t, ecuio_request_engine& e,
         });
 }
 
+/* The worker's locals, in the order the loop declared them */
+struct worker_state {
+    ecuio_request_engine& e;
+    const bool requests;
+    /* A requesting worker's waits end on time, not on Windows' 15.6 ms
+     * step (precise_wait.h): the floor between requests is the engine's */
+    ecuio_precise_wait precise;
+    link_health h;
+    ecuio_unpicked_check unpicked_check;
+    uint32_t published[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t diag_seen = 0;
+    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    int64_t timing_at = 0;
+    /* made after attach's ecuio_engine_init: its chosen rows are this
+     * table's, and it ends with the worker */
+    j2534_hold hold;
+
+    explicit worker_state(ecuio_j2534_transport* t)
+        : e(t->engine), requests(e.count > 0 || e.scan_count > 0),
+          precise(requests),
+          h(t->session->last_error, t->session->error_count,
+            t->session->record_link.get(), t->session, t->epoch,
+            &t->clock.last_us, &t->clock.last_host_us)
+    {
+        hold.on = t->hold;
+    }
+};
+
+/* What read_pass leaves for the steps after it */
+struct read_step {
+    read_outcome o;
+    bool timer_only = false;
+    uint32_t timeout_ms = 0;
+    std::chrono::steady_clock::time_point start;
+    bool stopped = false;
+};
+
+void begin_worker(ecuio_j2534_transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = w.e;
+    const bool requests = w.requests;
+    if (requests && t->probe) {
+        ecuio_engine_probe(&e);
+    }
+    if (requests) {
+        /* A focus set before start applies from the first request */
+        ecuio_take_focus(t->session, &e, w.focus_seen);
+    }
+}
+
+void pass_start(ecuio_j2534_transport* t, worker_state& w)
+{
+    link_judge_waiting(w.h);
+    if (w.requests) {
+        ecuio_key_windows_judge(&w.e, w.h);
+        ask_channels(t, w.e, w.h, w.hold);
+    }
+}
+
+read_step read_pass(ecuio_j2534_transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = w.e;
+    const bool requests = w.requests;
+    read_step rs;
+    read_outcome& o = rs.o;
+    /* With nothing due on any channel (a scan that found nothing
+     * and polls nothing, a probe that dropped every request) no
+     * request can time out, so the session reads as a passive one
+     * does: empty reads count toward quiet, which can't tell an
+     * ECU that went away from one with nothing left to answer. */
+    const int64_t next_us =
+        requests ? j2534_hold_next_event_us(w.hold, &e, engine_now_us(t))
+                 : INT64_MAX;
+    const bool asking = next_us != INT64_MAX;
+    /* Every reply in and only a floor (or a focus's sweep) to wait
+     * for: the worker's own timer, no vendor read, which the VX holds
+     * about 10 ms past a short timeout
+     * (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). Frames
+     * that come meanwhile wait in the adapter for the next read. */
+    rs.timer_only = requests && asking && next_us > 0 &&
+                    w.h.backoff_ms == 0 && !ecuio_engine_awaiting(&e);
+    rs.timeout_ms = read_timeout_ms(next_us);
+    rs.start = std::chrono::steady_clock::now();
+    if (rs.timer_only) {
+        const int64_t slice_us = int64_t{J2534_READ_SLICE_MS} * 1000;
+        if (w.precise.sleep_until(
+                rs.start + std::chrono::microseconds(
+                               next_us < slice_us ? next_us : slice_us),
+                t->stop_requested)) {
+            rs.stopped = true;
+            return rs;
+        }
+    } else {
+        o = pump_one(t, rs.timeout_ms);
+        if (requests && o.matched) {
+            /* the refresh interval on the adapter's clock (ADR-0042) */
+            e.stamp_set = true;
+            e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
+            e.stamp_breaks = t->clock.host_steps;
+            (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
+                                        engine_now_us(t), nullptr);
+            j2534_hold_answered(w.hold, &e, o.chan);
+        }
+        const bool unpicked = !asking && ecuio_engine_unpicked(&e);
+        update_health(w.h, o, !asking && !unpicked);
+        if (unpicked && !hard_read(o)) {
+            ecuio_unpicked_pass(&e, w.h, w.unpicked_check, engine_now_us(t));
+        }
+    }
+    return rs;
+}
+
+void after_read(ecuio_j2534_transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = w.e;
+    const bool requests = w.requests;
+    if (w.h.recovered) {
+        w.h.recovered = false;
+        j2534_hold_recovered(w.hold);
+        if (requests && t->probe) {
+            ecuio_engine_probe(&e);
+        }
+        if (requests) {
+            /* the scan's and identification's unanswered requests */
+            ecuio_engine_rescan(&e);
+        }
+    }
+}
+
+void serve_session(ecuio_j2534_transport* t, worker_state& w)
+{
+    ecuio_request_engine& e = w.e;
+    const bool requests = w.requests;
+    if (requests) {
+        ecuio_take_diag_request(t->session, &e, w.diag_seen);
+        ecuio_take_clear_requests(t->session, &e, w.clear_seen);
+        ecuio_take_test_talk(t->session, &e, engine_now_us(t));
+        ecuio_take_focus(t->session, &e, w.focus_seen);
+    }
+    for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
+        ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
+                              w.published[c]);
+        ecuio_publish_identity(t->session, e, c, t->chans[c].rx_id,
+                               w.published_identity[c]);
+        ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
+                                  w.published_diagnostics[c]);
+    }
+    ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t),
+                         w.timing_at, false);
+}
+
+/* True when the stop was seen while waiting */
+bool pass_wait(ecuio_j2534_transport* t, worker_state& w, const read_step& rs)
+{
+    if (w.h.backoff_ms > 0) {
+        if (backoff_sleep(t, w.h.backoff_ms)) {
+            return true;
+        }
+        w.h.backoff_ms = link_backoff_next(w.h.backoff_ms);
+    } else if (!rs.o.got && !rs.timer_only) {
+        /* An empty read waits out its timeout, even from a vendor
+         * that returns at once, so the loop never spins: on time
+         * (precise_wait.h), since that timeout is the way to the
+         * engine's next event. In waits of 20 ms at most with the
+         * stop looked at between them: idle, the timeout is 100 ms,
+         * and a close would otherwise wait it out. */
+        if (w.precise.sleep_until(rs.start +
+                                      std::chrono::milliseconds(rs.timeout_ms),
+                                  t->stop_requested)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void end_worker(ecuio_j2534_transport* t, worker_state& w)
+{
+    if (w.requests) {
+        leave_sessions(t, w.h);
+    }
+    ecuio_publish_timing(t->session, w.e, nullptr, engine_now_us(t),
+                         w.timing_at, true);
+}
+
 } // namespace
 
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
@@ -398,137 +585,21 @@ void ask_channels(ecuio_j2534_transport* t, ecuio_request_engine& e,
  * while dead is the point: retrying a dead device at full rate is not. */
 void ecuio_j2534::j2534_worker(ecuio_j2534_transport* t)
 {
-    ecuio_request_engine& e = t->engine;
-    const bool requests = e.count > 0 || e.scan_count > 0;
-    /* A requesting worker's waits end on time, not on Windows' 15.6 ms
-     * step (precise_wait.h): the floor between requests is the engine's */
-    ecuio_precise_wait precise(requests);
-    link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get(), t->session, t->epoch,
-                  &t->clock.last_us, &t->clock.last_host_us);
-    ecuio_unpicked_check unpicked_check;
-    uint32_t published[ECUIO_MAX_CHANNELS] = {};
-    uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
-    uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
-    uint32_t diag_seen = 0;
-    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
-    ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
-    int64_t timing_at = 0;
-    /* made after attach's ecuio_engine_init: its chosen rows are this
-     * table's, and it ends with the worker */
-    j2534_hold hold;
-    hold.on = t->hold;
-    if (requests && t->probe) {
-        ecuio_engine_probe(&e);
-    }
-    if (requests) {
-        /* A focus set before start applies from the first request */
-        ecuio_take_focus(t->session, &e, focus_seen);
-    }
-
+    worker_state w(t);
+    begin_worker(t, w);
     while (!t->stop_requested.load()) {
-        link_judge_waiting(h);
-        if (requests) {
-            ecuio_key_windows_judge(&e, h);
-            ask_channels(t, e, h, hold);
+        pass_start(t, w);
+        const read_step rs = read_pass(t, w);
+        if (rs.stopped) {
+            break;
         }
-
-        /* With nothing due on any channel (a scan that found nothing
-         * and polls nothing, a probe that dropped every request) no
-         * request can time out, so the session reads as a passive one
-         * does: empty reads count toward quiet, which can't tell an
-         * ECU that went away from one with nothing left to answer. */
-        const int64_t next_us =
-            requests ? j2534_hold_next_event_us(hold, &e, engine_now_us(t))
-                     : INT64_MAX;
-        const bool asking = next_us != INT64_MAX;
-        /* Every reply in and only a floor (or a focus's sweep) to wait
-         * for: the worker's own timer, no vendor read, which the VX holds
-         * about 10 ms past a short timeout
-         * (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). Frames
-         * that come meanwhile wait in the adapter for the next read. */
-        const bool timer_only = requests && asking && next_us > 0 &&
-                                h.backoff_ms == 0 && !ecuio_engine_awaiting(&e);
-        const uint32_t timeout_ms = read_timeout_ms(next_us);
-        const auto read_start = std::chrono::steady_clock::now();
-        read_outcome o;
-        if (timer_only) {
-            const int64_t slice_us = int64_t{J2534_READ_SLICE_MS} * 1000;
-            if (precise.sleep_until(
-                    read_start + std::chrono::microseconds(
-                                     next_us < slice_us ? next_us : slice_us),
-                    t->stop_requested)) {
-                break;
-            }
-        } else {
-            o = pump_one(t, timeout_ms);
-            if (requests && o.matched) {
-                /* the refresh interval on the adapter's clock (ADR-0042) */
-                e.stamp_set = true;
-                e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
-                e.stamp_breaks = t->clock.host_steps;
-                (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
-                                            engine_now_us(t), nullptr);
-                j2534_hold_answered(hold, &e, o.chan);
-            }
-            const bool unpicked = !asking && ecuio_engine_unpicked(&e);
-            update_health(h, o, !asking && !unpicked);
-            if (unpicked && !hard_read(o)) {
-                ecuio_unpicked_pass(&e, h, unpicked_check, engine_now_us(t));
-            }
-        }
-        if (h.recovered) {
-            h.recovered = false;
-            j2534_hold_recovered(hold);
-            if (requests && t->probe) {
-                ecuio_engine_probe(&e);
-            }
-            if (requests) {
-                /* the scan's and identification's unanswered requests */
-                ecuio_engine_rescan(&e);
-            }
-        }
-        if (requests) {
-            ecuio_take_diag_request(t->session, &e, diag_seen);
-            ecuio_take_clear_requests(t->session, &e, clear_seen);
-            ecuio_take_test_talk(t->session, &e, engine_now_us(t));
-            ecuio_take_focus(t->session, &e, focus_seen);
-        }
-        for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
-            ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
-                                  published[c]);
-            ecuio_publish_identity(t->session, e, c, t->chans[c].rx_id,
-                                   published_identity[c]);
-            ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
-                                      published_diagnostics[c]);
-        }
-        ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t),
-                             timing_at, false);
-
-        if (h.backoff_ms > 0) {
-            if (backoff_sleep(t, h.backoff_ms)) {
-                break;
-            }
-            h.backoff_ms = link_backoff_next(h.backoff_ms);
-        } else if (!o.got && !timer_only) {
-            /* An empty read waits out its timeout, even from a vendor
-             * that returns at once, so the loop never spins: on time
-             * (precise_wait.h), since that timeout is the way to the
-             * engine's next event. In waits of 20 ms at most with the
-             * stop looked at between them: idle, the timeout is 100 ms,
-             * and a close would otherwise wait it out. */
-            if (precise.sleep_until(read_start +
-                                        std::chrono::milliseconds(timeout_ms),
-                                    t->stop_requested)) {
-                break;
-            }
+        after_read(t, w);
+        serve_session(t, w);
+        if (pass_wait(t, w, rs)) {
+            break;
         }
     }
-    if (requests) {
-        leave_sessions(t, h);
-    }
-    ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t), timing_at,
-                         true);
+    end_worker(t, w);
 }
 
 #endif /* _WIN32 */
