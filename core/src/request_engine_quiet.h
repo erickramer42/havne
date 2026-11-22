@@ -36,8 +36,11 @@
 //      reports complete.
 //   5. Any frame from it ends the quiet state, as a rescan would for its
 //      channel: its rotation is asked again whole, its rows' waits run out
-//      are judged by their defs again (ecuio_engine_forget_ran_out) and the
-//      items settled unasked are asked again (ecuio_engine_ask_again).
+//      are judged by their defs again (ecuio_engine_forget_ran_out), the
+//      items settled unasked are asked again (ecuio_engine_ask_again) and
+//      a session whose 10 03 went unanswered is entered again. An entered
+//      session stands: a module that reset says so with 7F xx 7F, and a
+//      needless 10 03 would lock an unlocked level again.
 //      ecuio_engine_rescan ends it on every channel.
 
 #ifndef ECUIO_REQUEST_ENGINE_QUIET_H
@@ -262,7 +265,8 @@ inline void ecuio_engine_quiet_settle(ecuio_request_engine* e, uint32_t c)
 /* A frame from channel c at now_us (rules 1 and 5): heard, its run
  * ended, and a quiet channel back in its rotation, its rows' waits run
  * out judged by their defs again (it was asleep, not leaving them
- * unanswered) and the items settled while it was held asked again */
+ * unanswered), the items settled while it was held asked again and an
+ * unanswered session entered again */
 inline void ecuio_engine_quiet_heard(ecuio_request_engine* e, uint32_t c,
                                      int64_t now_us)
 {
@@ -275,6 +279,10 @@ inline void ecuio_engine_quiet_heard(ecuio_request_engine* e, uint32_t c,
     }
     ch.quiet = false;
     ecuio_engine_forget_ran_out(e, c);
+    if (e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_UNANSWERED) {
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
+        ++ch.generation;
+    }
     if (ch.quiet_settled) {
         ch.quiet_settled = false;
         ecuio_engine_ask_again(e, c);
