@@ -292,8 +292,15 @@ tree, untracked files included, with its merge-base with `origin/dev`
 | What changed | What runs |
 |---|---|
 | Only `docs/` and markdown | Nothing |
-| Only `.qml` files in `app/qml/` and `tests/qml/`, with or without docs | `build`, then `QmlTest.*` |
+| Only `.qml` files in `app/qml/` and `tests/qml/`, with or without docs | `build`, then `QmlTest.*`; when every file is under `tests/qml`, only the `QmlTest` of each `tst_` file changed or derived from a changed kit |
+| A path in `core/src`, `cli/`, `app/`'s C++ or a test file | `build`, then the suites of the groups that read it |
 | Anything else, a build file among them, or a change it can't read | The full run |
+
+The table lives in `scripts/verify_scope.py`. A new suite needs no entry
+(a name no group matches is `engine`, run wherever the engine runs); a new
+group or path family needs a row and a case in the file's selftest. A kit's
+tests are found by `<Kit> {` in a `tst_` file, and a `tests/qml` file that is
+neither a `tst_` file nor a `*Kit.qml` runs all of QmlTest.
 
 Any run less than the full one lists what it skipped, says whether
 clang-tidy applies (it doesn't when no C++ or build file changed) and
