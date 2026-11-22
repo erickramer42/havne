@@ -1,7 +1,9 @@
 // File/layer: tests/test_security_store_file.cpp | test_core, Qt-free
 // Testing: UNIT: SecurityStoreTest (security_store.{h,cpp}: the file read,
 //          written whole and replaced, a file that can't be opened, a
-//          second writer's entries kept, in a folder of the case's own)
+//          second writer's entries merged three ways, an ended mark kept
+//          ended, an earlier call's Windows code, in a folder of the
+//          case's own)
 
 #include "security_store.h"
 
@@ -14,15 +16,19 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <share.h>
 #include <windows.h>
 #endif
 
@@ -489,7 +495,9 @@ TEST(SecurityStoreTest, ReplaceWithPutsOneFileOverAnother)
     put("a", "new");
     put("b", "old");
     std::string why;
-    ASSERT_TRUE(ecuio_files::replace_with(a, b, &why)) << why;
+    bool renamed = false;
+    ASSERT_TRUE(ecuio_files::replace_with(a, b, &why, &renamed)) << why;
+    EXPECT_TRUE(renamed);
     EXPECT_EQ(get("b"), "new");
     EXPECT_FALSE(fs::exists(f.path / "a"));
     put("a", "newer");
@@ -497,13 +505,18 @@ TEST(SecurityStoreTest, ReplaceWithPutsOneFileOverAnother)
     fs::remove(f.path / "b", ec);
     ASSERT_TRUE(ecuio_files::replace_with(a, b, &why)) << why << ": over none";
     EXPECT_EQ(get("b"), "newer");
-    EXPECT_FALSE(ecuio_files::replace_with(a, b, &why)) << "nothing to move";
+    EXPECT_FALSE(ecuio_files::replace_with(a, b, &why, &renamed))
+        << "nothing to move";
+    EXPECT_FALSE(renamed);
     EXPECT_FALSE(why.empty());
     EXPECT_EQ(get("b"), "newer") << "what was there stands";
     put("a", "kept");
     fs::create_directories(f.path / "dir" / "inside", ec);
     const std::string dir = (f.path / "dir").generic_u8string();
-    EXPECT_FALSE(ecuio_files::replace_with(a, dir, &why)) << "a folder";
+    renamed = true;
+    EXPECT_FALSE(ecuio_files::replace_with(a, dir, &why, &renamed))
+        << "a folder";
+    EXPECT_FALSE(renamed);
     EXPECT_EQ(get("a"), "kept") << "the file stays where it was";
     EXPECT_TRUE(fs::exists(f.path / "dir" / "inside"));
 }
@@ -513,7 +526,7 @@ TEST(SecurityStoreTest, ReplaceWithPutsOneFileOverAnother)
  * and its store as they were or the new file whole, never a partial, and
  * no handle stays open. A save runs twice: with the file as its store
  * left it, and with a file it finds changed and merges (the store's
- * entries are the larger, so both write the same text) */
+ * base is the file's entries, so both write the same text) */
 TEST(SecurityStoreTest, OutOfMemoryAnywhereLeavesTheStoreWhole)
 {
     Folder f;
@@ -655,10 +668,61 @@ TEST(SecurityStoreTest, AFileThatCantBeOpenedIsRefusedNeverTakenAsEmpty)
     expect_same(back, kept);
 }
 
+#ifdef _WIN32
+/* A failure of the C library's own leaves Windows' code of an earlier
+ * call: with no stream free, after a call that found no file, the store
+ * there isn't "no such file". A name Windows refuses (one holding "<") is
+ * refused, never an empty store. */
+TEST(SecurityStoreTest, AnEarlierCallsWindowsCodeIsNoEmptyStore)
+{
+    Folder f;
+    store kept;
+    kept.entries.push_back(entry(kRx, 0x01, 3, kUtc));
+    std::string why;
+    const std::string path = f.file();
+    ASSERT_EQ(store_save(path, &kept, &why), store_io::ok) << why;
+    const std::wstring wide = (f.path / kName).wstring();
+    std::vector<FILE*> streams;
+    streams.reserve(16384);
+    while (streams.size() < 16384) {
+        FILE* taken = _wfsopen(wide.c_str(), L"rb", _SH_DENYNO);
+        if (taken == nullptr) {
+            break;
+        }
+        streams.push_back(taken);
+    }
+    const int none_free = errno;
+    store s;
+    s.entries.push_back(entry(kRx, 0x03, 1, kUtc));
+    why.clear();
+    _set_doserrno(ERROR_FILE_NOT_FOUND);
+    const store_io io = store_load(path, &s, &why);
+    for (FILE* taken : streams) {
+        std::fclose(taken);
+    }
+    ASSERT_EQ(none_free, EMFILE) << "every stream taken";
+    EXPECT_EQ(io, store_io::refused);
+    EXPECT_TRUE(s.entries.empty());
+    EXPECT_EQ(why.rfind("the security store can't be opened: ", 0), 0u) << why;
+
+    const std::string refused = (f.path / "a<b.json").generic_u8string();
+    store odd;
+    EXPECT_EQ(store_load(refused, &odd, &why), store_io::refused);
+    EXPECT_EQ(why.rfind("the security store can't be opened: ", 0), 0u) << why;
+    EXPECT_EQ(store_save(refused, &kept, &why), store_io::refused);
+    EXPECT_EQ(why.rfind("the security store can't be written: ", 0), 0u) << why;
+    store back;
+    ASSERT_EQ(store_load(path, &back, &why), store_io::ok) << why;
+    expect_same(back, kept);
+}
+#endif
+
 /* One owner for a path is the rule, and a second writer's entries are
  * still kept. A save that finds the file isn't what its store last read
- * or wrote merges: each of the file's entries is kept, and where both
- * hold one, the larger count, the later second and the later mark stand */
+ * or wrote merges: each of the file's entries is kept, an entry only one
+ * side changed is that side's, and where both changed one, a count or
+ * second only one changed is that side's and the later second and the
+ * later mark stand */
 TEST(SecurityStoreTest, ASaveKeepsWhatAnotherWriterWrote)
 {
     Folder f;
@@ -709,12 +773,90 @@ TEST(SecurityStoreTest, ASaveKeepsWhatAnotherWriterWrote)
     ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
     EXPECT_EQ(store_find(back, kCar, kRx, 0x01), nullptr);
     EXPECT_EQ(back.entries.size(), 3u);
-    /* a, behind now, still holds that entry, and its save brings the
-     * count back: too high for b's right key, never too low */
+    /* a, behind now, never changed that entry since its own write: b's
+     * right key stands */
     ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
-    EXPECT_EQ(store_find(a, kCar, kRx, 0x01)->failed, 2u);
-    EXPECT_EQ(a.entries.size(), 4u);
+    EXPECT_EQ(store_find(a, kCar, kRx, 0x01)->failed, 0u);
+    EXPECT_EQ(store_find(a, kCar, kRx, 0x01)->last_utc, 0);
     EXPECT_EQ(f.read(), store_text(a));
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x01), nullptr);
+}
+
+/* A merge's base is the store's entries as its last read or write left
+ * them: a mark only carried through another store's file stays ended, a
+ * loaded mark the other's attempt then ends well is taken back, and two
+ * stores' failures on one level are both counted */
+TEST(SecurityStoreTest, AMergeKeepsWhatEachSideChangedSinceItsBase)
+{
+    Folder f;
+    std::string why;
+    store a;
+    store b;
+    store back;
+    /* a's mark, then b's own step carries it into b's file */
+    store_attempt_began(*store_entry_for(a, kCar, kRx, 0x01), kUtc);
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    store_attempt_began(*store_entry_for(b, kCar, kRx, 0x03), kUtc + 1);
+    ASSERT_EQ(store_save(f.file(), &b, &why), store_io::ok) << why;
+    ASSERT_EQ(store_find(b, kCar, kRx, 0x01)->pending_utc, kUtc);
+    store_attempt_ended(*store_find(a, kCar, kRx, 0x01), false, false,
+                        kUtc + 2);
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(a, kCar, kRx, 0x01)->pending_utc, 0);
+    EXPECT_EQ(store_find(a, kCar, kRx, 0x03)->pending_utc, kUtc + 1);
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x01), nullptr)
+        << "no failure that never happened";
+
+    /* b's attempt fails; then b loads while a holds a mark, so b counts
+     * it, and a's attempt ends well before b's next save */
+    store_attempt_ended(*store_find(b, kCar, kRx, 0x03), true, false, kUtc + 2);
+    ASSERT_EQ(store_save(f.file(), &b, &why), store_io::ok) << why;
+    store_attempt_began(*store_entry_for(a, kCar, kRx, 0x05), kUtc + 3);
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    ASSERT_EQ(store_load(f.file(), &b, &why), store_io::ok) << why;
+    ASSERT_EQ(store_find(b, kCar, kRx, 0x05)->failed, 1u);
+    store_attempt_ended(*store_find(a, kCar, kRx, 0x05), false, false,
+                        kUtc + 4);
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    store_entry* other = store_entry_for(b, kCar, kRx, 0x07);
+    store_attempt_began(*other, kUtc + 5);
+    store_attempt_ended(*other, true, false, kUtc + 6);
+    ASSERT_EQ(store_save(f.file(), &b, &why), store_io::ok) << why;
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x05), nullptr) << "taken back";
+    ASSERT_NE(store_find(back, kCar, kRx, 0x03), nullptr);
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x03)->failed, 1u);
+
+    /* Each counts a failure on one level from the same file */
+    ASSERT_EQ(store_load(f.file(), &a, &why), store_io::ok) << why;
+    ASSERT_EQ(store_load(f.file(), &b, &why), store_io::ok) << why;
+    for (store* s : {&a, &b}) {
+        store_entry* e = store_entry_for(*s, kCar, kRx, 0x03);
+        store_attempt_began(*e, kUtc + 10);
+        store_attempt_ended(*e, true, false, kUtc + 11);
+        ASSERT_EQ(store_save(f.file(), s, &why), store_io::ok) << why;
+    }
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x03)->failed, 3u)
+        << "b's one before, and one each since";
+
+    /* b loads a's mark and counts it, a changes another level, b's own
+     * attempt on the marked level fails, and a's never ends (a crash):
+     * a's attempt and b's count once each */
+    store_attempt_began(*store_entry_for(a, kCar, kRx, 0x09), kUtc + 20);
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    ASSERT_EQ(store_load(f.file(), &b, &why), store_io::ok) << why;
+    store_unlocked(*store_find(a, kCar, kRx, 0x07));
+    ASSERT_EQ(store_save(f.file(), &a, &why), store_io::ok) << why;
+    store_entry* marked = store_find(b, kCar, kRx, 0x09);
+    store_attempt_began(*marked, kUtc + 30);
+    store_attempt_ended(*marked, true, false, kUtc + 31);
+    ASSERT_EQ(store_save(f.file(), &b, &why), store_io::ok) << why;
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x09)->failed, 2u);
+    EXPECT_EQ(store_find(back, kCar, kRx, 0x07), nullptr) << "a's right key";
 }
 
 /* A file that changed under a store and doesn't read is never written
@@ -778,4 +920,41 @@ TEST(SecurityStoreTest, AChangedFileIsNeverWrittenOverUnread)
     fs::remove(f.path / kName, ec);
     ASSERT_EQ(store_save(f.file(), &fresh, &why), store_io::ok) << why;
     EXPECT_EQ(f.read(), two);
+}
+
+/* A save refused after its new file stood (the folder's flush failing
+ * after the rename, POSIX) leaves the store holding that file: its next
+ * save is its own, so neither an ended mark nor a right key's zero is
+ * undone by its own file coming back through a merge */
+TEST(SecurityStoreTest, AnEndedMarkNeverComesBackThroughAMerge)
+{
+    Folder f;
+    store s;
+    s.entries.push_back(entry(kRx, 0x01, 2, kUtc));
+    s.entries.push_back(entry(kRx, 0x03, 0, 0));
+    std::string why;
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+
+    store_attempt_began(*store_find(s, kCar, kRx, 0x01), kUtc + 5);
+    store_find(s, kCar, kRx, 0x03)->failed = 4;
+    store_test_fail_at.store(4);
+    EXPECT_EQ(store_save(f.file(), &s, &why), store_io::refused);
+    EXPECT_EQ(why, "the security store can't be written: its folder can't be "
+                   "flushed");
+    EXPECT_NE(f.read().find("\"pending_utc\": 1795132805"), std::string::npos)
+        << "the new file stands";
+    EXPECT_EQ(s.on_disk, f.read()) << "and the store holds it";
+    EXPECT_FALSE(partial_left(f.path, kName));
+
+    /* The attempt ends without a failure, and level 3's right key comes */
+    store_attempt_ended(*store_find(s, kCar, kRx, 0x01), false, false,
+                        kUtc + 6);
+    store_unlocked(*store_find(s, kCar, kRx, 0x03));
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+    store back;
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    ASSERT_EQ(back.entries.size(), 1u) << "level 3's count is gone";
+    EXPECT_EQ(back.entries[0].level, 0x01);
+    EXPECT_EQ(back.entries[0].failed, 2u) << "no mark came back to count";
+    EXPECT_EQ(back.entries[0].last_utc, kUtc);
 }

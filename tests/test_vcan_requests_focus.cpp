@@ -12,6 +12,109 @@ void hold_on_error(const ecuio_frame_t* f, void* user_data)
     }
 }
 
+/* A callback that parks the worker on each error frame it dispatches
+ * until the test lets it go (the ECU's thread queues what the worker
+ * reads next while it is parked) */
+struct BurstGate {
+    std::mutex m;
+    std::condition_variable cv;
+    int parked = 0;
+    int released = 0;
+
+    static void on_frame(const ecuio_frame_t* f, void* user)
+    {
+        if ((f->flags & ECUIO_FRAME_FLAG_ERROR) == 0) {
+            return;
+        }
+        auto* g = static_cast<BurstGate*>(user);
+        std::unique_lock<std::mutex> lock(g->m);
+        const int mine = ++g->parked;
+        g->cv.notify_all();
+        g->cv.wait_for(lock, 5s, [&] { return g->released >= mine; });
+    }
+    bool wait_parked(int n)
+    {
+        std::unique_lock<std::mutex> lock(m);
+        return cv.wait_for(lock, 5s, [&] { return parked >= n; });
+    }
+    void release()
+    {
+        std::lock_guard<std::mutex> lock(m);
+        ++released;
+        cv.notify_all();
+    }
+};
+
+/* The VIN's First Frame and Consecutive Frames with a whole read burst of
+ * frames between them, all read in the worker's one pass: the worker is
+ * parked on an error frame (the primer), then on one in each batch of 50
+ * (the next batch queued while it is parked, so the socket's queue never
+ * holds more than a batch and a few), and the burst's last frames are
+ * the fillers queued behind the final gate. The Consecutive Frames go
+ * after them, while the worker is parked on the final gate for 200 ms, so
+ * they are still in the socket when the next pass begins.
+ * kBurst is socketcan_transport.h's kReadBurst */
+bool send_vin_past_a_burst(int fd, BurstGate& g, const char* vin,
+                           std::chrono::steady_clock::time_point* first,
+                           bool* segmented, bool* on_time)
+{
+    constexpr int kBurst = 256;
+    constexpr int kGates = 5;
+    constexpr int kBatch = 50;
+    constexpr int kTrailing = 12;
+    static_assert(1 + kGates * kBatch + kTrailing > kBurst, "past the burst");
+    const std::vector<uint8_t> warning = {
+        0, CAN_ERR_CRTL_RX_WARNING, 0, 0, 0, 0, 0, 0};
+    const std::vector<uint8_t> filler = {0xFF, 0, 0, 0, 0, 0, 0, 0};
+    if (!put(fd, CAN_ERR_FLAG | CAN_ERR_CRTL, warning) || !g.wait_parked(1)) {
+        return false;
+    }
+    /* Response pending: the request's wait is 5 s, not the 100 ms that
+     * would end it at the top of the next pass, before any read */
+    (void)put(fd, vcan_bus::kReply, {0x03, 0x7F, 0x09, 0x78, 0, 0, 0, 0});
+    (void)put(fd, vcan_bus::kReply,
+              {0x10, 0x14, 0x49, 0x02, 0x01, uint8_t(vin[0]), uint8_t(vin[1]),
+               uint8_t(vin[2])});
+    *first = std::chrono::steady_clock::now();
+    for (int k = 1; k <= kGates; ++k) {
+        for (int i = k == 1 ? 1 : 0; i < kBatch - 1; ++i) {
+            (void)put(fd, vcan_bus::kRequest, filler);
+        }
+        (void)put(fd, CAN_ERR_FLAG | CAN_ERR_CRTL, warning);
+        g.release();
+        if (!g.wait_parked(k + 1)) {
+            return false;
+        }
+    }
+    for (int i = 0; i < kTrailing; ++i) {
+        (void)put(fd, vcan_bus::kRequest, filler);
+    }
+    can_frame f;
+    bool flowed = false;
+    const auto end = std::chrono::steady_clock::now() + 1s;
+    while (!flowed && std::chrono::steady_clock::now() < end) {
+        flowed = vcan_bus::read_for(fd, &f, sizeof f, 20) ==
+                     static_cast<long>(sizeof f) &&
+                 f.can_id == vcan_bus::kRequest && (f.data[0] & 0xF0) == 0x30;
+    }
+    if (!flowed) {
+        return false;
+    }
+    std::vector<uint8_t> cf1 = {0x21}, cf2 = {0x22};
+    for (int k = 3; k < 10; ++k) {
+        cf1.push_back(uint8_t(vin[k]));
+    }
+    for (int k = 10; k < 17; ++k) {
+        cf2.push_back(uint8_t(vin[k]));
+    }
+    *segmented =
+        put(fd, vcan_bus::kReply, cf1) && put(fd, vcan_bus::kReply, cf2);
+    *on_time = std::chrono::steady_clock::now() - *first <= 100ms;
+    std::this_thread::sleep_for(200ms);
+    g.release();
+    return true;
+}
+
 /* N_Cr is the gap between frames on the bus, not between their reads:
  * the VIN's First Frame, then an error frame the session's callback
  * holds the worker on, while the ECU sends its Consecutive Frames 10 ms
@@ -38,7 +141,7 @@ struct HeldWorkerRun {
     std::string text;
 };
 
-HeldWorkerRun run_held_worker()
+HeldWorkerRun run_held_worker(BurstGate* gate = nullptr)
 {
     HeldWorkerRun r;
     vcan_bus::Fd bus = vcan_bus::open_raw();
@@ -51,6 +154,11 @@ HeldWorkerRun run_held_worker()
     std::atomic<bool> on_time{false};
     vcan_bus::Fd listener = vcan_bus::open_raw();
     EXPECT_TRUE(listener.ok());
+    /* Only the VIN's frames: the fillers would fill its queue */
+    const can_filter reply_only{vcan_bus::kReply, CAN_SFF_MASK};
+    EXPECT_EQ(setsockopt(listener.get(), SOL_CAN_RAW, CAN_RAW_FILTER,
+                         &reply_only, sizeof reply_only),
+              0);
     const int stamps = 1;
     EXPECT_EQ(setsockopt(listener.get(), SOL_SOCKET, SO_TIMESTAMPNS, &stamps,
                          sizeof stamps),
@@ -78,6 +186,15 @@ HeldWorkerRun run_held_worker()
                     continue;
                 }
                 vin_sent = true;
+                if (gate != nullptr) {
+                    auto first = std::chrono::steady_clock::now();
+                    bool seg = false, ontime = false;
+                    (void)send_vin_past_a_burst(bus.get(), *gate, vin, &first,
+                                                &seg, &ontime);
+                    segmented = seg;
+                    on_time = ontime;
+                    continue;
+                }
                 (void)put(bus.get(), vcan_bus::kReply,
                           {0x10, 0x14, 0x49, 0x02, 0x01, uint8_t(vin[0]),
                            uint8_t(vin[1]), uint8_t(vin[2])});
@@ -121,7 +238,10 @@ HeldWorkerRun run_held_worker()
     });
     std::atomic<bool> held{false};
     {
-        Session s("?profile=obd2&probe=0&diagnose=0", hold_on_error, &held);
+        Session s("?profile=obd2&probe=0&diagnose=0",
+                  gate != nullptr ? BurstGate::on_frame : hold_on_error,
+                  gate != nullptr ? static_cast<void*>(gate)
+                                  : static_cast<void*>(&held));
         EXPECT_EQ(s.status(), ECUIO_OK) << s.detail();
         ecuio_channel_identity_t id{};
         EXPECT_TRUE(wait_for(
@@ -189,6 +309,27 @@ TEST_F(SocketCanRequestTest, AReplyOnTimeSurvivesAWorkerHeldUpMidMessage)
         r = run_held_worker();
     }
     EXPECT_TRUE(r.held) << "the worker was never held";
+    EXPECT_TRUE(r.segmented) << "the Consecutive Frames never went";
+    ASSERT_TRUE(r.on_time) << "the ECU's thread was late in three runs";
+    ASSERT_TRUE(r.in_order) << "the bus reordered the VIN in three runs";
+    EXPECT_EQ(r.outcome, ECUIO_IDENTITY_ANSWERED);
+    EXPECT_EQ(r.text, fake_ecu::kVin);
+}
+
+/* The VIN's frames are on time on the bus, but a read burst's worth of
+ * frames come between its First Frame and its Consecutive Frames, and the
+ * worker is held 200 ms before the pass that reads them: the pass ends on
+ * the burst, so the Consecutive Frames are in the socket when the next
+ * pass begins. That pass reads them before it expires the waits, against
+ * the newest frame's receive time; expiring first, at the host's time,
+ * would end a message the bus carried on time */
+TEST_F(SocketCanRequestTest, AReplyInTheSocketWhenThePassBeginsIsOnTime)
+{
+    HeldWorkerRun r;
+    for (int run = 0; run < 3 && !(r.on_time && r.in_order); ++run) {
+        BurstGate gate;
+        r = run_held_worker(&gate);
+    }
     EXPECT_TRUE(r.segmented) << "the Consecutive Frames never went";
     ASSERT_TRUE(r.on_time) << "the ECU's thread was late in three runs";
     ASSERT_TRUE(r.in_order) << "the bus reordered the VIN in three runs";

@@ -147,13 +147,13 @@ void SessionBridge::readDiagnostics()
     }
 }
 
-bool SessionBridge::clearTarget(const ecuio_channel_diagnostics_t& report)
+bool BridgeFormats::clearTarget(const ecuio_channel_diagnostics_t& report)
 {
     return (report.flags & ECUIO_DIAG_COMPLETE) != 0 &&
            (report.flags & ECUIO_DIAG_CLEARING) == 0;
 }
 
-bool SessionBridge::nothingStored(const ecuio_channel_diagnostics_t& r)
+bool BridgeFormats::nothingStored(const ecuio_channel_diagnostics_t& r)
 {
     const auto empty = [&r](uint32_t list) {
         return r.lists[list].outcome == ECUIO_DIAG_ANSWERED &&
@@ -369,7 +369,7 @@ void SessionBridge::cancelClearMoving()
 }
 
 QByteArray
-SessionBridge::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
+BridgeFormats::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
                                    uint32_t count)
 {
     QByteArray out;
@@ -404,7 +404,7 @@ QString SessionBridge::vinKey(const QString& salt) const
             .toHex());
 }
 
-QString SessionBridge::vinSummary(const QString& vin, int latestModelYear)
+QString BridgeFormats::vinSummary(const QString& vin, int latestModelYear)
 {
     const QByteArray text = vin.toLatin1();
     ecuio_vin_info_t v{};

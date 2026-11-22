@@ -44,10 +44,13 @@
 #include "ecuio/recording.h"
 #include "ecuio/conditions.h"
 #include "latencystats.h"
+#include "bridgeformats.h"
+#include "bridgeseams.h"
+#include "bridgestate.h"
 
 class QSettings;
 
-class SessionBridge : public QObject
+class SessionBridge : public QObject, public BridgeFormats, public BridgeSeams
 {
     Q_OBJECT
     Q_PROPERTY(QString coreVersion READ coreVersion CONSTANT)
@@ -458,12 +461,6 @@ public:
     // snapshot: call it again on unitSystemChanged, a signal file's change
     // and a connect.
     Q_INVOKABLE QVariantList profileSignals(const QString& uri) const;
-    // The profile a session on uri decodes through, as core picks it at
-    // ecuio_session_create: the last profile= (1 to
-    // ECUIO_PROFILE_NAME_MAX bytes), else the scheme's default. "" for
-    // a scheme this platform's core doesn't take, a malformed query or
-    // a bad profile= value. Static, so tests need no session.
-    static QString profileOfUri(const QString& uri);
     // The signal file whose set set is: a plugin variant's or a replay's
     // own signals.json; nullptr for any other set
     const ecuio_signal_file_t* fileOfSet(const ecuio_signal_set_t* set) const;
@@ -492,22 +489,6 @@ public:
     // onConditions on the calling thread, as core's worker calls it
     void dispatchConditionsForTesting(const ecuio_condition_event_t* events,
                                       uint32_t count);
-    // The generation of the session's last attach, as core counts them
-    uint32_t conditionsGenerationForTesting() const
-    {
-        return m_conditionsGeneration;
-    }
-    // The next n attaches refused where core's call is made; during, when
-    // given, runs there first, as the worker's callback can meanwhile
-    void failConditionsAttachesForTesting(int n,
-                                          std::function<void()> during = {})
-    {
-        m_failAttaches = n;
-        m_duringFailedAttach = std::move(during);
-    }
-    // The alert tones asked, and a later time for the tone's 5 s
-    const AlertTone& alertToneForTesting() const { return m_tone; }
-    void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
 
     ConditionModel* conditionModel() const { return m_conditionModel; }
     QString conditionsPending() const { return m_conditionsPending; }
@@ -537,40 +518,10 @@ public:
     void reloadSavedConditionsForTesting();
     // alertLevels' level for one def, 0 for none
     Q_INVOKABLE int alertLevelOf(int defId) const;
-    // The samples one window can hold, from the next connect
-    void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
-    static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
-    ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
     QString linkState() const;
-    static QString linkStateForError(int32_t errorCode);  /* code -> state string; static so tests need no session */
     /* A direct-load DLL or replay path cut to its last name, a Bluetooth address to its last two octets */
     Q_INVOKABLE static QString uriLabelFor(const QString& uri);
-    static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
-    static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */
-    static QString channelSupportText(const ecuio_channel_support_t& support);  /* its "ECU 0x…:" lines */
-    // A module's session change (ADR-0060): "ECU 0x7E8: reading in the
-    // extended session (50 03)" and the like; "" for none to tell
-    static QString channelSessionText(const ecuio_channel_support_t& support);
-    // At Disconnect, for a module that entered the extended session; ""
-    // otherwise
-    static QString sessionReturnedText(const ecuio_channel_support_t& support);
-    // Live's "Refused: <name> (7F <service> <code>)"
-    static QString refusalText(uint8_t service, uint8_t nrc);
-    // The negative reply alone: "7F 22 31"
-    static QString refusalCode(uint8_t service, uint8_t nrc);
-    // refusedUnnamed's words for each ECU's ID and its refusals past the list
-    static QString
-    refusedUnnamedText(const std::vector<std::pair<uint32_t, uint32_t>>& more);
-    static QString channelIdentityText(const ecuio_channel_identity_t& identity);  /* its "ECU 0x… identity:" lines */
-    static QString channelDiagnosticsText(const ecuio_channel_diagnostics_t& diagnostics);  /* its "ECU 0x… diagnostics:" lines */
-    // its "ECU 0x... clear:" lines (ADR-0038), speeds in the unit system
-    static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics,
-                                    uint32_t units);
-    // A clear's saved reports, as havne-cli writes them (ADR-0031 section 3): a
-    // start line, then one diagnostics line per report
-    static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
-                                          uint32_t count);
 
     // A session's delivery so far: what the worker handed the bridge,
     // what the in-flight cap dropped, and how long each frame took to
@@ -588,10 +539,6 @@ public:
     };
     DeliveryStats deliveryStats() const;
     static QString deliveryText(const DeliveryStats& stats);  /* the activity log's "Delivery:" line */
-    /* The activity log's "Reply timing:" line at a disconnect (ADR-0042);
-     * empty when no request was asked */
-    static QString timingText(const ecuio_session_timing_t& timing,
-                              const std::vector<ecuio_request_timing_t>& rows);
 
     Q_INVOKABLE QString statusString(int statusCode) const;
     Q_INVOKABLE int maxFrameCount() const { return FrameListModel::MaxFrames; }
@@ -642,13 +589,6 @@ public:
     // an empty map when it's gone. folder comes back as given, so it
     // matches the path it was stored as (a vehicle's baseline).
     Q_INVOKABLE QVariantMap recordingRow(const QString& folder) const;
-    // A recording's replay:// URI, decoding under the profile it was
-    // recorded with: the recorded URI's profile= (with its did= under
-    // uds-generic), else its scheme's default (mock:// mock, replay://
-    // raw, an adapter obd2); raw when nothing was recorded. Static, so
-    // tests need no files.
-    static QString replayUriFor(const QString& folder,
-                                const QString& recordedUri);
     int linkErrorCode() const { return m_linkErrorCode; }
     int errorEpisodes() const { return static_cast<int>(m_errorEpisodes); }
     bool logPaused() const { return m_logPaused; }
@@ -717,24 +657,15 @@ public:
     // "" when empty. The list's source and license are the packages'
     // notices and the release notes', not the page's.
     Q_INVOKABLE QString describeDtc(const QString& typed) const;
-    static QString vinSummary(const QString& vin, int latestModelYear);
     // A line in the activity log (and a recording's events.log), for the
     // app's own events: the vehicle lines of ADR-0027 section 4
     Q_INVOKABLE void logEvent(const QString& line) { emit logMessage(line); }
-    // A label as a recording folder takes it: letters, digits, space,
-    // -, _ and ., trimmed, at most 40 characters, no trailing dot
-    static QString folderLabel(const QString& label);
     int unitSystem() const { return static_cast<int>(m_signalModel->unitSystem()); }
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
     int minSweepMs() const { return m_minSweepMs; }
     void setMinSweepMs(int ms); // anything but a choice is ignored
     QVariantList pickGauges() const { return m_pickGauges; }
     void setPickGauges(const QVariantList& cells);
-    // Each cell's first ref the set answers to (a key def's "id:<n>" too),
-    // in the cells' order, each once; file is the set's (fileOfSet)
-    static std::vector<uint16_t> gaugeIds(const ecuio_signal_set_t* set,
-                                          const ecuio_signal_file_t* file,
-                                          const QVariantList& cells);
     QVariantList minSweepChoices() const;
     // A quantity in a decoded unit, as the current unit system shows it:
     // the Dashboard's scale ends and zones are written once, in decoded
@@ -747,24 +678,8 @@ public:
     Q_INVOKABLE double decodedValue(const QString& unit, double shown) const;
     QVariantList diagnostics() const { return m_diagnostics; }
     QStringList clearTargets() const;
-    // A report a clear goes to: its read complete, no clear under way
-    static bool clearTarget(const ecuio_channel_diagnostics_t& report);
     bool clearFindsNothing() const;
     QVariantMap inspection() const;
-    // ecuio_diag_inspect's verdict over reports for modelYear (0: none
-    // known) as the page shows it: verdict, havne-cli's word ("ready",
-    // "not_ready", "mil_on", "year_needed", "not_covered"), "" while a
-    // read is under way or when no ECU answered PID 01; text, one
-    // sentence naming the incomplete monitors; rule, the rule and its
-    // reach. Static, so test_bridge pins it without a session.
-    static QVariantMap
-    inspectionEntry(const ecuio_channel_diagnostics_t* reports, uint32_t count,
-                    uint32_t modelYear);
-    // A report that answered there is nothing to erase: PID 01 with the
-    // light off and no confirmed codes, the stored and pending lists
-    // answered empty, no freeze frame. A refused or unanswered item is
-    // not known to be empty, so it never counts as nothing.
-    static bool nothingStored(const ecuio_channel_diagnostics_t& report);
     // Read again: every ECU's diagnostics asked once more
     // (ecuio_session_read_diagnostics); nothing without a session
     Q_INVOKABLE void readDiagnostics();
@@ -789,32 +704,6 @@ public:
     QStringList clearMoving() const;
     QString clearMovingSpeed() const;
     QString refusedUnnamed() const { return m_refusedUnnamed; }
-    // One ECU's report as the page shows it: ecu ("0x7E8"); asked,
-    // complete; readiness (an outcome: "unasked", "answered", "refused",
-    // "unanswered") and readinessNrc ("7F 01 12" when refused); mil,
-    // dtcCount, compression; lists, three of {key ("stored", "pending",
-    // "permanent"), outcome, nrc, codes (["P0301", ...]), more (codes past
-    // the held ones)}; cycle, PID 41's outcome (those above, or
-    // "unsupported": the ECU's bitmaps leave it out, so it wasn't asked);
-    // monitors, [{id, name, complete, cycleEnabled, cycleComplete}], the
-    // last two this drive cycle's (PID 41) once cycle is "answered";
-    // freeze, {outcome, nrc, stored, code, values: [{name, value, unit,
-    // decimals}]}, each value through the obd2 def that decoded it and the
-    // unit system; clearing, and the last clear's clear ("none", "cleared",
-    // "refused", "unanswered", "engineRunning", "noEngineSpeed",
-    // "reportChanged"), clearNrc ("7F 04 22" when refused, "7F 01 12" when
-    // the engine speed was) and clearRpm. Static, so test_bridge pins it
-    // without a session.
-    static QVariantMap diagnosticsEntry(const ecuio_channel_diagnostics_t& d,
-                                        uint32_t units);
-    // Test seam: where recordings go instead of Documents/Havne/recordings
-    void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
-    // Test seam: the earlier name's recordings, instead of
-    // Documents/<earlierProductName()>/recordings
-    void setEarlierRecordingsRootForTesting(const QString& root)
-    {
-        m_earlierRecordingsRoot = root;
-    }
     // Before every connect, on the GUI thread: readies the link an app-fed
     // stream stands behind (ADR-0028; main() hands it the Bluetooth
     // singleton's prepare) and returns why it can't, "" when it can or
@@ -823,38 +712,6 @@ public:
     void setStreamPreparer(std::function<QString(const QString& uri)> preparer)
     {
         m_streamPreparer = std::move(preparer);
-    }
-    // Test seam: record a replay too, to compare it with its source. The
-    // app never records one: it would copy the recording it plays
-    void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
-    // Armed no longer judges "no condition records" itself, so core's own
-    // refusal at the attach reaches the user
-    void skipArmedJudgmentForTesting(bool on)
-    {
-        m_skipArmedJudgmentForTesting = on;
-    }
-    // Test seam: the next load of the plugin copy with this hash fails
-    void failPluginLoadForTesting(const QString& sha)
-    {
-        m_pluginStore.failLoadForTesting(sha);
-    }
-    // Test seam: the session's recorder, for core's internal.h seams
-    // (a failed write); nullptr with none
-    ecuio_recorder_t* recorderForTesting() const { return m_recorder; }
-    // Test seam: the running session, for a recorder of the test's own
-    // (an attach the session refuses); nullptr with none
-    ecuio_session_t* sessionForTesting() const { return m_session; }
-    // Test seam: how long Read once waits for its reply once the
-    // session starts (3 s)
-    void setReadOnceWaitForTesting(int ms) { m_readOnceWaitMs = ms; }
-    // Test seam: a sleep of this long, added to what core's count says,
-    // for the tick to find (no runner can sleep)
-    void addSleptForTesting(uint64_t us) { m_sleptAddedForTesting += us; }
-    // Test seam: core can't give a recorder's folder whole, so the bridge
-    // reads it as empty
-    void failRecorderFolderForTesting(bool on)
-    {
-        m_failRecorderFolderForTesting = on;
     }
 
 public slots:
@@ -1023,133 +880,11 @@ private:
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
 
-    ecuio_session_t* m_session = nullptr;
-    QString m_currentUri;
-    QString m_adapterVersions;
-
-    std::atomic<bool> m_connected{false};
-    // onFrame's gate: set just before the session starts, so frames sent
-    // before the connect is applied queue instead of vanishing (a replay's
-    // first frame is due the moment it starts); the GUI-thread half still
-    // waits for m_connected, which they reach after the apply
-    std::atomic<bool> m_accepting{false};
-    // Every frame onFrame saw, dropped ones too
-    std::atomic<uint64_t> m_framesDelivered{0};
-    std::atomic<int> m_droppedFrames{0};
-    // Frames flagged ECUIO_FRAME_FLAG_OVERFLOW, counted in onFrame so one
-    // the in-flight cap drops still counts; reported on the tick, the
-    // first time with an activity-log line
-    std::atomic<int> m_overflowFrames{0};
-    int m_reportedOverflow = 0;        // GUI-thread-only
-    int m_currentFrameCount = 0;      // GUI-thread-only (queued invocations)
-    int m_reportedFrameCount = 0;      // what QML was last told, and below
-    int m_reportedNotifyCount = 0;
-    int m_lastReportedDropped = 0;     // GUI-thread-only companion to m_droppedFrames
-    bool m_logPaused = false;          // GUI-thread-only
-    // A replay without loop: its frames, and whether its end is logged
-    uint32_t m_replayFrames = 0;
-    bool m_replayEndLogged = true;
-    // The tick after the end is seen: pollReplayEnd runs after flushValues,
-    // so the last frames' values, queued behind their frames, are in by then
-    bool m_replaySettling = false;
-    bool m_replayFinished = false;
-    // The machine's slept count at the last tick (ADR-0033 section 6), and the
-    // test seam's addition to it
-    uint64_t m_sleptUs = 0;
-    uint64_t m_sleptAddedForTesting = 0;
-    bool m_failRecorderFolderForTesting = false;
-    uint64_t sleptUs() const
-    {
-        return ecuio_clock_slept_us() + m_sleptAddedForTesting;
-    }
-
     FrameListModel* m_frameLog = nullptr;
     FrameIdModel* m_frameIds = nullptr;
     RecordingImport* m_recordingImport = nullptr;
 
     QTimer* m_coalesceTimer = nullptr;
-    // The model's batch for one tick: each signal's window
-    std::vector<SignalListModel::WindowValue> m_stagingBuffer;
-    std::vector<std::pair<uint16_t, QString>> m_stagingTexts;   // the text rows'
-    int m_signalBatchCount = 0;
-
-    // One coalesce window of decoded values, written by onValues on the
-    // worker. Sized at connect and never grown there: a sample past the
-    // limit is counted and goes untimed (a numeric signal's newest,
-    // lowest and highest are kept regardless; the recording is core's).
-    struct ValueStaging {
-        struct Sample {
-            HostClock::time_point arrived;
-            uint32_t def = 0;          // index into the session's set
-            uint32_t textAt = 0;       // a text sample's bytes in text
-            uint32_t textLen = 0;
-            bool isText = false;
-            double value = 0.0;
-        };
-        std::vector<Sample> samples;   // every value, in arrival order
-        std::vector<char> text;        // the text samples' bytes
-        std::vector<double> newest;    // per def: its newest numeric value
-        // per def: the window's lowest and highest, and each value's
-        // frame time in session us
-        std::vector<double> lowest;
-        std::vector<double> highest;
-        std::vector<uint64_t> newestUs;
-        std::vector<uint64_t> lowestUs;
-        std::vector<uint64_t> highestUs;
-        std::vector<int> newestText;   // per def: its newest text sample, or -1
-        std::vector<uint8_t> has;      // per def: a value this window
-        size_t sampleLimit = 0;
-        size_t textLimit = 0;
-        uint32_t dropped = 0;          // samples past a limit this window
-
-        void prepare(size_t defs, size_t samplesMax, size_t textMax);
-        void stage(uint32_t def, HostClock::time_point arrived,
-                   uint64_t frameUs, const ecuio_value_t& v);
-        void reset();
-    };
-    std::mutex m_valuesMutex;           // guards m_valueStaging and m_activeStaging
-    ValueStaging m_valueStaging[2];
-    int m_activeStaging = 0;            // the one onValues writes
-    // The session's set and each signal id's def index: written before
-    // the session starts, read by onValues on the worker
-    const ecuio_signal_set_t* m_valueSet = nullptr;
-    QHash<uint16_t, int> m_defIndexOfId;
-    static constexpr int DefaultValueSampleLimit = 16384;   // per window
-    static constexpr int ValueTextLimit = 256 * 1024;       // bytes per window
-    int m_valueSampleLimit = DefaultValueSampleLimit;
-    quint64 m_valuesDropped = 0;        // this session's, past the limits
-
-    // The conditions. A slot is one condition's window of events: the
-    // newest, and the firings with the first of them, so the worker writes
-    // a fixed slot per condition whatever the bus rate (sized at attach,
-    // never grown on the worker)
-    struct ConditionSlot {
-        bool has = false;
-        uint64_t firings = 0;
-        ecuio_condition_event_t newest{};
-        ecuio_condition_event_t first{}; // the window's first firing
-    };
-    // One attach's slots, twice: the worker writes staging[active] and the
-    // tick swaps them to read the other
-    struct ConditionWindow {
-        std::vector<ConditionSlot> staging[2];
-        int active = 0;
-        uint32_t generation = 0; // the attach whose events it keeps
-    };
-    std::mutex m_conditionsMutex; // guards the windows
-    ConditionWindow m_conditionWindow;
-    // The set before's: the worker's dispatch under way at an attach took
-    // that set, and gives its events after core's call returns
-    ConditionWindow m_conditionWindowBefore;
-    // The one before that, held only while core's call runs: a refusal
-    // makes it the set before's again
-    ConditionWindow m_conditionWindowOlder;
-    // One firing of a tick: when, its row, and which set's rows that is
-    struct ConditionFiring {
-        uint64_t at;
-        int row;
-        ConditionModel::Rows rows;
-    };
     // flushConditions' parts: the set before's firings with each key's tone
     // asked, a line for each firing, and the states core keeps into the model
     void
@@ -1160,37 +895,8 @@ private:
                             const std::vector<ConditionSlot>* full,
                             const std::vector<ConditionSlot>* before) const;
     void applyConditionStates(ecuio_session_t* session);
-    ConditionStore m_conditionStore;
-    ConditionModel* m_conditionModel = nullptr;
-    int m_failAttaches = 0; // failConditionsAttachesForTesting
-    std::function<void()> m_duringFailedAttach;
-    uint32_t m_conditionsGeneration =
-        0; // this session's attaches, core's count
-    std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
-    QString m_conditionsPending;
-    QString m_conditionsProblem;
-    bool m_conditionsFromRecording = false;
-    QVariantMap m_alertLevels;
-    // The tone (ADR-0063 section 9): each condition's last tone on the
-    // host clock, sized at the attach like the slots and kept by key
-    static constexpr uint64_t ToneGapUs = 5000000;
-    static constexpr uint64_t NoTone = UINT64_MAX;
-    AlertTone m_tone;
-    std::vector<uint64_t> m_toneAtUs;
-    // The set before's stamps, for a key the set attached dropped
-    std::vector<uint64_t> m_toneBeforeAtUs;
-    uint64_t m_toneTimeAddedForTesting = 0;
-
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;
-    int m_guiNotifyCount = 0;
-
-    std::atomic<int> m_inFlightFrames{0};   // posted-but-not-yet-processed count
-    std::atomic<bool> m_dropNotifyPending{false};   // at most one queued drop notification
-    static constexpr int MaxInFlightFrames = 1000; // queue backlog bound
-
-    // Async connect support. m_connecting is written only on the GUI thread
-    // (in the async entry and the queued completion), so a plain bool will do.
     QString connectCoreOnly(const QString& uri, ecuio_session_t** out_session);
     // A replay:// URI selecting the profile its recording names (or that
     // copy's own name, rec.<16 hex>), with the recording's signals.json
@@ -1205,41 +911,9 @@ private:
     void logReplayMadeUnder(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
-    std::thread m_connectThread;
-    bool m_connecting = false;
-    // The created, registered, not started session the connect thread
-    // hands back. The queued completion takes it; if the bridge dies
-    // first, the completion is dropped and the destructor destroys it.
-    // Atomic only for the test seam: both owners read it after joining
-    // the connect thread.
-    std::atomic<ecuio_session_t*> m_pendingSession{nullptr};
-    // Async disconnect support, the same shape as connect: the thread
-    // owns the session it tears down, and m_disconnecting is written
-    // only on the GUI thread (in disconnectSession and its completion).
-    std::thread m_disconnectThread;
-    bool m_disconnecting = false;
     void pollLinkHealth();
-    int m_linkErrorCode = ECUIO_OK;
-    uint32_t m_errorEpisodes = 0;
     // What each channel's ECU said it supports, logged once per update
     void pollChannelSupport();
-    uint32_t m_channelCount = 0;
-    uint32_t m_supportGeneration[ECUIO_MAX_CHANNELS] = {};
-    // Each channel's last report, for the signals their ECUs refused
-    ecuio_channel_support_t m_supportReports[ECUIO_MAX_CHANNELS] = {};
-    // What each channel's session line last said (cli::session_due's rule)
-    struct SessionWritten {
-        uint8_t state = 0;
-        uint8_t nrc = 0;
-        uint16_t entries = 0;
-        uint16_t lost = 0;
-        bool written = false;
-    };
-    SessionWritten m_sessionWritten[ECUIO_MAX_CHANNELS] = {};
-    QString m_refusedUnnamed;
-    // The signals core reports their ECU doesn't support, read into
-    // m_unsupportedRead (sized at connect) when a report changes
-    std::vector<uint16_t> m_unsupportedRead;
     // The signals core reports its frames come without (ADR-0039 section 6):
     // read each tick into m_absentRead (sized at connect), handed to the
     // model when they differ from m_absentIds
@@ -1253,100 +927,20 @@ private:
     // Live's "not asked" rows, read each tick into m_unaskedRead (sized at
     // connect), handed to the model when the list changes
     void pollUnaskedSignals();
-    QVariantList m_pickGauges;
-    std::vector<uint16_t> m_pickIds; // the pick set last, [] none
-    bool m_pickSet = false;          // a pick, or the whole set, applied
-    int m_pickMinSweepMs = 0;        // the minimum it was set with
-    bool m_pickPolled = false;       // the URI names poll=
-    bool m_pickDirty = false;        // the ticks, gauges or minimum moved
-    bool m_pickLinePending = false;  // startSession's line, not yet out
-    QString m_pickLine;              // the activity line last written
-    bool m_pickLineCore = false;     // core's recorder writes it itself
-    uint64_t m_pickDropped = 0;      // the reports' drops at the last set
-    std::vector<uint16_t> m_unaskedRead;
-    std::vector<uint16_t> m_unaskedIds;
-    std::vector<uint16_t> m_absentRead;
-    std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
     // Channel 0's VIN into m_vin once core has it in (ECUIO_IDENTITY_VIN)
     void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
-    uint32_t m_identityGeneration[ECUIO_MAX_CHANNELS] = {};
     // What each channel's ECU reported of its diagnostics (ADR-0037),
     // logged once per completed read
     void pollChannelDiagnostics();
-    uint32_t m_diagnosticsGeneration[ECUIO_MAX_CHANNELS] = {};
-    // A clear asked of each channel, its outcome not yet logged
-    bool m_clearAsked[ECUIO_MAX_CHANNELS] = {};
-    // A clear that stopped at the vehicle speed, waiting for the word on
-    // a moving vehicle: the generation it ended on, the speed it read
-    // (UINT32_MAX: none)
-    bool m_clearWaiting[ECUIO_MAX_CHANNELS] = {};
-    uint32_t m_clearWaitGeneration[ECUIO_MAX_CHANNELS] = {};
-    uint32_t m_clearWaitKmh[ECUIO_MAX_CHANNELS] = {};
-    // The file the last clear saved its reports to, as shown
-    QString m_clearSavedTo;
-    // The reports the page shows, as last read, and their entries
-    ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_MAX_CHANNELS] = {};
-    uint32_t m_diagnosticsShownCount = 0;
-    QVariantList m_diagnostics;
     void rebuildDiagnostics();
-    QString m_vin;            // the first channel's, this session; never leaves the bridge
-    QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
-
-    // This session's delivery figures (deliveryStats), GUI thread only
-    LatencyStats m_frameLatency;
-    LatencyStats m_valueLatency;
-    quint64 m_valuesStaged = 0;
-
-    bool m_recording = false;
-    ecuio_recorder_t* m_recorder =
-        nullptr;                       // the session's, until stopRecording
-    QString m_recordingFolder;         // the current or last one, absolute
-    bool m_noting = true;              // logUnnoted clears it for its line
-    int m_markCount = 0;               // the recording's marks, from 0
-    bool m_logActive = false;          // m_recorder is Start log's
-    bool m_armedActive = false;        // m_recorder is Armed's
-    bool m_armedInWindow = false;      // a window is writing (last poll)
-    int m_armedWindows = 0;            // windows seen opened
-    QString m_armedFolder;             // the newest window's folder name
-    QString m_armedWhy;                // armedWhy's last answer
-    QString m_armedFailure;            // a failed write's reason, for the end
-    bool m_skipArmedJudgmentForTesting = false;
-    HostElapsedTimer m_logClock;       // from Start log, sleeps counted
-    qint64 m_logElapsedMs = 0;         // the last log's, once it ends
-    qint64 m_logBytes = 0;             // countLogBytes' last sum
-    QString m_logNotice;               // the header's line about the log
-    int m_minSweepMs = 0;              // a log's and the default pick's
-    QTimer* m_logTimer = nullptr;      // the readout's second
-    QString m_recordingsRoot;          // empty: Documents/Havne/recordings
-    QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
-    bool m_recordReplays = false;      // tests only
-    bool m_setFrameLogging = false;    // the bridge, not the launch, set ECUIO_SUR_LOG_FRAMES
-    std::function<QString(const QString&)>
-        m_streamPreparer; // none: nothing to ready
-    ReadOnce m_readOnce;
-    QByteArray m_obdbPending; // previewObdb's converted file, until kept
-    int m_obdbPendingYear = 0;  // the model year it was converted for
-    QByteArray m_importPending; // readImport's file, until kept or dropped
-    QString m_importKind;       // what it is: "signals" or "obdb"
     QVariantMap previewObdbBytes(const QByteArray& bytes,
                                  const QString& refusal, int modelYear,
                                  const QString& name);
     // A signal file into the plugin store, as a new plugin or a variant
     QVariantMap keepFile(const QByteArray& file, const QString& into,
                          const QString& variant, const QString& vehicle);
-    PluginStore m_pluginStore;
-    // Recordings' own signal files by their hash, each registered under
-    // its rec.<16 hex> profile until the bridge closes, as the store keeps
-    // its files: the registry keeps the set's pointer
-    struct ReplayFile {
-        ecuio_signal_file_t* file = nullptr;
-        QString name;    // the file's "name"
-        QString profile; // rec.<16 hex>
-    };
-    std::map<QString, ReplayFile> m_replayFiles;
-    int m_readOnceWaitMs = 3000;
 };
