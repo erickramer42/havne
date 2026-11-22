@@ -152,16 +152,82 @@ uint8_t group_of(const Value& v, const std::string& what)
                   "emissions, vehicle, electrical, diagnostics or other");
 }
 
+namespace {
+
+/* ecu id's tx: as given, of its rx's width, else the standard's for rx */
+uint32_t tx_of(const Value& e, const std::string& id, uint32_t rx)
+{
+    if (const Value* tx_v = e.find("tx")) {
+        const uint32_t tx = hex_of(*tx_v, 1, 8, "ecu " + q(id) + "'s tx");
+        if (tx == 0 || tx > 0x1FFFFFFFu) {
+            refuse(*tx_v, "ecu " + q(id) + "'s tx is outside 1 to 1FFFFFFF");
+        }
+        if (is_11_bit(tx) != is_11_bit(rx)) {
+            refuse(*tx_v,
+                   "ecu " + q(id) + "'s tx is another width than its rx");
+        }
+        return tx;
+    }
+    const uint32_t tx = standard_tx(rx);
+    if (tx == 0) {
+        char hex[16];
+        std::snprintf(hex, sizeof hex, "%X", static_cast<unsigned>(rx));
+        refuse(e, "ecu " + q(id) + ": rx " + hex + " needs a tx");
+    }
+    return tx;
+}
+
+/* An ECU's "name", "" with none: a label a screen shows for the module */
+std::string name_of(const Value& e, const std::string& id, ecuio_signal_file& f)
+{
+    const Value* name = e.find("name");
+    if (name == nullptr) {
+        return std::string();
+    }
+    ecuio_least::raise(f.least, ecuio_least::kEcuName);
+    const std::string what = "ecu " + q(id) + "'s name";
+    const std::string& text = text_of(*name, 1, 63, what);
+    no_formula(*name, what);
+    return text;
+}
+
+/* A channel for ecu id, of the width the set carries, within its count */
+void add_channel(const Value& e, const std::string& id, uint32_t rx,
+                 uint32_t tx, ecuio_signal_file& f)
+{
+    if (f.channels.size() >= ECUIO_MAX_CHANNELS) {
+        refuse(e, "ecu " + q(id) + " is past the " +
+                      std::to_string(ECUIO_MAX_CHANNELS) +
+                      " ECUs one session reads, the base's counted");
+    }
+    for (const ecuio_channel_decl_t& c : f.channels) {
+        if (is_11_bit(c.rx_id) != is_11_bit(rx)) {
+            refuse(e, "ecu " + q(id) + " is " +
+                          (is_11_bit(rx) ? "11-bit" : "29-bit") + " beside " +
+                          (is_11_bit(rx) ? "29-bit" : "11-bit") +
+                          " IDs: one session carries one width");
+        }
+    }
+    ecuio_channel_decl_t c{};
+    c.rx_id = rx;
+    c.tx_id = tx;
+    f.channels.push_back(c);
+    f.modules.emplace_back();
+}
+
+} // namespace
+
 void read_ecus(const Value* ecus, ecuio_signal_file& f,
                std::vector<std::pair<std::string, uint32_t>>* ids)
 {
+    f.modules.resize(f.channels.size());
     if (ecus == nullptr) {
         return;
     }
     expect(*ecus, Type::array, "\"ecus\"");
     for (const Value& e : ecus->items) {
         expect(e, Type::object, "an ECU");
-        only_keys(e, {"id", "rx", "tx"}, "an ECU");
+        only_keys(e, {"id", "rx", "tx", "name"}, "an ECU");
         const Value* id_v = e.find("id");
         if (id_v == nullptr) {
             refuse(e, "an ECU needs an \"id\"");
@@ -183,32 +249,15 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         if (rx == 0 || rx > 0x1FFFFFFFu) {
             refuse(*rx_v, "ecu " + q(id) + "'s rx is outside 1 to 1FFFFFFF");
         }
-        uint32_t tx = 0;
-        if (const Value* tx_v = e.find("tx")) {
-            tx = hex_of(*tx_v, 1, 8, "ecu " + q(id) + "'s tx");
-            if (tx == 0 || tx > 0x1FFFFFFFu) {
-                refuse(*tx_v, "ecu " + q(id) + "'s tx is outside 1 to 1FFFFFFF");
-            }
-            if (is_11_bit(tx) != is_11_bit(rx)) {
-                refuse(*tx_v, "ecu " + q(id) + "'s tx is another width than its rx");
-            }
-        } else {
-            tx = standard_tx(rx);
-            if (tx == 0) {
-                char hex[16];
-                std::snprintf(hex, sizeof hex, "%X", static_cast<unsigned>(rx));
-                refuse(e, "ecu " + q(id) + ": rx " + hex + " needs a tx");
-            }
+        const uint32_t tx = tx_of(e, id, rx);
+        size_t channel = 0; /* the one at its rx, or the count */
+        while (channel < f.channels.size() && f.channels[channel].rx_id != rx) {
+            ++channel;
         }
-        bool shared = false;
-        for (const ecuio_channel_decl_t& c : f.channels) {
-            if (c.rx_id == rx) {
-                if (c.tx_id != tx) {
-                    refuse(e, "ecu " + q(id) + " shares its rx with another "
-                              "ECU but not its tx");
-                }
-                shared = true;
-            }
+        if (channel < f.channels.size() && f.channels[channel].tx_id != tx) {
+            refuse(e, "ecu " + q(id) +
+                          " shares its rx with another "
+                          "ECU but not its tx");
         }
         for (const auto& known : *ids) {
             if (known.second == rx) {
@@ -216,26 +265,11 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
                               q(known.first));
             }
         }
-        if (!shared) {
-            if (f.channels.size() >= ECUIO_MAX_CHANNELS) {
-                refuse(e, "ecu " + q(id) + " is past the " +
-                              std::to_string(ECUIO_MAX_CHANNELS) +
-                              " ECUs one session reads, the base's counted");
-            }
-            for (const ecuio_channel_decl_t& c : f.channels) {
-                if (is_11_bit(c.rx_id) != is_11_bit(rx)) {
-                    refuse(e, "ecu " + q(id) + " is " +
-                                  (is_11_bit(rx) ? "11-bit" : "29-bit") +
-                                  " beside " +
-                                  (is_11_bit(rx) ? "29-bit" : "11-bit") +
-                                  " IDs: one session carries one width");
-                }
-            }
-            ecuio_channel_decl_t c{};
-            c.rx_id = rx;
-            c.tx_id = tx;
-            f.channels.push_back(c);
+        if (channel == f.channels.size()) {
+            add_channel(e, id, rx, tx, f);
         }
+        f.modules[channel].id = id;
+        f.modules[channel].name = name_of(e, id, f);
         ids->emplace_back(id, rx);
     }
 }

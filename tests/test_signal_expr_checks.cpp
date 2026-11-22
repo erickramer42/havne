@@ -3,6 +3,8 @@
 
 #include "test_signal_expr_support.h"
 
+#include "signal_expr.h" /* core/src: the grammar's format */
+
 TEST(SignalExprTest, ACheckRefusesItsArgumentsApartFromTheExpression)
 {
     File f = load(file_of(2));
@@ -401,5 +403,24 @@ TEST(SignalExprTest, AnAgeBoundOnAStandInIsWordedByTheNameItIsReadBy)
             << name;
         EXPECT_NE(c.detail.find(r.words), std::string::npos) << c.detail;
         EXPECT_EQ(c.out.at, 1u) << name;
+    }
+}
+
+// A check's format is the grammar's, which format 2 changed last: a
+// form's file that uses nothing of a later format is never raised to it
+TEST(SignalExprTest, ACheckAnswersNoFormatPastTheGrammars)
+{
+    EXPECT_EQ(ecuio_sf::kGrammarFormat, 2u);
+    EXPECT_GT(ECUIO_SIGNAL_FILE_FORMAT, ecuio_sf::kGrammarFormat);
+    for (int format = 1; format <= static_cast<int>(ECUIO_SIGNAL_FILE_FORMAT);
+         ++format) {
+        File f = load(file_of(format));
+        ASSERT_TRUE(f) << format << ": " << ecuio_last_error_detail();
+        const Checked plain = check(f.get(), nullptr, "a + b");
+        EXPECT_EQ(plain.status, ECUIO_OK) << plain.detail;
+        EXPECT_EQ(plain.out.format, 1u) << "in a format " << format << " file";
+        const Checked call = check(f.get(), nullptr, "max(a, b)");
+        EXPECT_EQ(call.status, ECUIO_OK) << call.detail;
+        EXPECT_EQ(call.out.format, 2u) << "in a format " << format << " file";
     }
 }

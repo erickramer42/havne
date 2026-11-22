@@ -20,6 +20,11 @@
 
 namespace ecuio_sf {
 
+/* The newest format that changed the grammar: a later format compiles as
+ * it does, and a check of an expression answers no later one, so a file
+ * that uses nothing of a later format is never raised to it */
+inline constexpr uint32_t kGrammarFormat = 2;
+
 /* What a name in an expression is: text covers a hex signal too */
 enum class expr_kind { number, computed, text };
 

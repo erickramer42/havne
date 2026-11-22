@@ -107,7 +107,7 @@ bool aged_by_key(const ecuio_signal_file& f, const file_scope& scope, size_t i,
         }
         std::vector<std::string> names;
         try {
-            ecuio_sf::compile_expr(e.second, scope, ECUIO_SIGNAL_FILE_FORMAT,
+            ecuio_sf::compile_expr(e.second, scope, ecuio_sf::kGrammarFormat,
                                    &names, nullptr);
         } catch (const expr_refused&) {
             return false;
@@ -219,7 +219,7 @@ struct checking {
         std::vector<std::string> names;
         try {
             program = ecuio_sf::compile_expr(
-                text, scope, ECUIO_SIGNAL_FILE_FORMAT, &names, &places);
+                text, scope, ecuio_sf::kGrammarFormat, &names, &places);
         } catch (const expr_refused& r) {
             throw refusal{static_cast<uint32_t>(r.at + 1),
                           "the expression " + r.words};
@@ -362,7 +362,7 @@ void check(const ecuio_signal_file& f, const std::string& key,
     c.base_programs_fit();
     format2 = format2 || c.oldest_format_refuses(text);
     out.format =
-        format2 ? ECUIO_SIGNAL_FILE_FORMAT : ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
+        format2 ? ecuio_sf::kGrammarFormat : ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
     out.depth = c.depth[c.checked];
     out.program = c.program;
 }

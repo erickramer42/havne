@@ -320,7 +320,10 @@ struct expr_case {
     {
         ecuio_computed_t program{};
         std::string detail;
-        const std::string with = at_format(ECUIO_SIGNAL_FILE_FORMAT);
+        /* At the newest grammar, format 2's, and never past the file's
+         * own format otherwise: format 3 reads names and addresses anew */
+        const std::string with = at_format(
+            std::max<uint32_t>(static_cast<uint32_t>(version->whole), 2u));
         if (with.size() > ECUIO_SIGNAL_FILE_MAX_BYTES) {
             return;
         }
@@ -354,7 +357,7 @@ struct expr_case {
         ecuio_computed_t program{};
         std::string detail;
         check(out.format >= ECUIO_SIGNAL_FILE_FORMAT_OLDEST &&
-              out.format <= ECUIO_SIGNAL_FILE_FORMAT);
+              out.format <= 2u);
         check(out.depth >= 1 && out.depth <= ECUIO_COMPUTED_MAX_DEPTH);
         check(ecuio_computed_check(out.program));
         const std::string with = at_format(std::max(format, out.format));

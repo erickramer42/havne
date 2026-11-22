@@ -23,11 +23,20 @@
 #include <vector>
 
 struct ecuio_signal_file {
+    /* A channel as the "ecus" entry that names it gives it: id "" for a
+     * base channel no entry names */
+    struct module {
+        std::string id;
+        std::string name;
+        uint32_t part = ECUIO_SIGNAL_PART_NONE;
+    };
+
     std::string name;
     std::string profile;
     std::string extends; /* "obd2" or "" */
     std::vector<ecuio_signal_def_t> defs;
     std::vector<ecuio_channel_decl_t> channels;
+    std::vector<module> modules; /* one for each channel */
     std::vector<ecuio_enum_entry_t> enums;
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */

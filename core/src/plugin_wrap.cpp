@@ -507,6 +507,7 @@ public:
             const ecu* same = at_address(t.addr);
             if (same != nullptr) {
                 id_here[t.id] = same->id;
+                keep_name(own_list.items[i], same->id);
                 if (same->id != t.id) {
                     notes_.push_back("the file's ecu " + q(t.id) +
                                      " is the plugin's " + q(same->id));
@@ -576,6 +577,21 @@ public:
     }
 
 private:
+    /* The file's name for a module the manifest's entry leaves unnamed */
+    void keep_name(const Value& theirs, const std::string& id)
+    {
+        const Value* name = theirs.find("name");
+        Value* list = at(p_.doc, "ecus");
+        if (name == nullptr || list == nullptr) {
+            return;
+        }
+        for (Value& e : list->items) {
+            if (e.find("id")->text == id && e.find("name") == nullptr) {
+                add(e, "name", *name);
+            }
+        }
+    }
+
     void append(Value entry, const std::string& id, const address& a)
     {
         added_.push_back(std::move(entry));

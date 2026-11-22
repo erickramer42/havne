@@ -657,8 +657,13 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
 #define ECUIO_SIGNAL_SET_MAX_SIGNALS  16384u
 /* The formats this core reads, a file's "havne_signals": the newest and
  * the oldest. Format 2 adds the computed grammar's functions,
- * comparisons and conditional; a format 1 file is held to format 1. */
-#define ECUIO_SIGNAL_FILE_FORMAT        2u
+ * comparisons and conditional; a format 1 file is held to format 1.
+ * Format 3 (ADR-0065 section 9) keeps format 2's grammar and changes
+ * what a file means: a name is a label and may repeat, a signal named as
+ * a base def is a second signal of that name (in formats 1 and 2 it
+ * replaces the base def), and two of the file's own signals at one
+ * address are refused. */
+#define ECUIO_SIGNAL_FILE_FORMAT        3u
 #define ECUIO_SIGNAL_FILE_FORMAT_OLDEST 1u
 
 typedef struct ecuio_signal_file ecuio_signal_file_t;
@@ -753,8 +758,8 @@ typedef struct ecuio_expr_check {
                                  to there: the grammar is ASCII); 0 when
                                  the expression compiles */
     uint32_t format;          /* the oldest "havne_signals" whose loader
-                                 takes it, ECUIO_SIGNAL_FILE_FORMAT_OLDEST
-                                 to ECUIO_SIGNAL_FILE_FORMAT; 0 refused */
+                                 takes it: 1 or 2, since no later format
+                                 changes the grammar; 0 refused */
     uint32_t depth;           /* its chain's levels: 1 reading no computed
                                  signal, to ECUIO_COMPUTED_MAX_DEPTH; 0
                                  refused */
@@ -1075,6 +1080,62 @@ ecuio_status_t ecuio_signal_file_source(const ecuio_signal_file_t* file,
  * reads. */
 const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
                                    size_t* length);
+
+/* ---- A file's modules (ADR-0065 section 9) ---- */
+
+/* No part: a def, a module or a note that belongs to none */
+#define ECUIO_SIGNAL_PART_NONE 0xFFFFFFFFu
+
+/* ecuio_signal_module_t's flags. Values are append-only. BASE: a channel
+ * of the set the file extends that no "ecus" entry of the file names. */
+#define ECUIO_MODULE_BASE 0x1u
+
+/* One module of a file's set, as its "ecus" entry names it */
+typedef struct ecuio_signal_module {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                             out: core's own, the bytes filled */
+    uint32_t flags;       /* ECUIO_MODULE_*; any other bit zero */
+    uint32_t rx_id;       /* the ID it answers on */
+    uint32_t tx_id;       /* the ID it is asked on */
+    uint32_t part;        /* ECUIO_SIGNAL_PART_NONE */
+    uint32_t reserved[5]; /* zero */
+    char id[32];          /* its entry's "id"; "" with ECUIO_MODULE_BASE */
+    char name[64];        /* its entry's "name", a label for a screen; ""
+                             when the entry gives none */
+} ecuio_signal_module_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_module_t) == 136,
+              "ecuio_signal_module_t size is ABI");
+static_assert(offsetof(ecuio_signal_module_t, part) == 16,
+              "module part offset is ABI");
+static_assert(offsetof(ecuio_signal_module_t, id) == 40,
+              "module id offset is ABI");
+static_assert(offsetof(ecuio_signal_module_t, name) == 72,
+              "module name offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_module_t) == 136,
+               "ecuio_signal_module_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, part) == 16,
+               "module part offset is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, id) == 40,
+               "module id offset is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, name) == 72,
+               "module name offset is ABI");
+#endif
+
+/* The module at index among the file's set's channels
+ * (ecuio_signal_file_set's channel_count, the index a session of that
+ * set gives ecuio_session_get_module), into out: its IDs, and the id and
+ * name the file's "ecus" entry gives it (a plugin variant's: the
+ * manifest's entry). ECUIO_ERR_NULL_ARGUMENT for a NULL file or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, out untouched, for an index at or past the
+ * count and for a struct_size under the struct's; each with a line in
+ * ecuio_last_error_detail(). Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_module(const ecuio_signal_file_t* file,
+                                        uint32_t index,
+                                        ecuio_signal_module_t* out);
 
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
