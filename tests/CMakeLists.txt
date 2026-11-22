@@ -107,6 +107,16 @@ target_compile_definitions(bench_recording PRIVATE
 )
 app_enable_warnings(bench_recording)
 
+# --- A car-sized set with no car (ADR-0065 "To measure"): a measurement,
+# not in ctest. Qt-free ---
+add_executable(bench_car bench_car.cpp)
+target_include_directories(bench_car PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(bench_car PRIVATE ecuio-core)
+target_compile_definitions(bench_car PRIVATE
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+)
+app_enable_warnings(bench_car)
+
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
     test_signal_eval.cpp
