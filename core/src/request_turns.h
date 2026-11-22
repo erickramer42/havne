@@ -100,6 +100,9 @@ inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
             const int64_t q = ecuio_engine_quiet_due_us(e, ch);
             at = q > ch.next_send_us ? q : ch.next_send_us;
         }
+    } else if (ch.quiet && ecuio_engine_quiet_asks_items(e, ch)) {
+        const int64_t q = ecuio_engine_quiet_due_us(e, ch);
+        at = q > ch.next_send_us ? q : ch.next_send_us;
     }
     const int64_t s = ecuio_engine_session_next_us(e, ch);
     at = s < at ? s : at;

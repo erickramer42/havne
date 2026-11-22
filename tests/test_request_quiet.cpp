@@ -341,3 +341,272 @@ TEST(RequestQuietTest, SideBySideAQuietChannelAsksOnItsSteps)
     expect_steps(asked1);
     EXPECT_EQ(asked1.size(), 4u + (40000 - 200 - 7500) / 5000);
 }
+
+namespace {
+
+/* Channel c's identification items whose outcome is o */
+size_t items_of(const ecuio_request_engine& e, uint32_t c, uint8_t o)
+{
+    ecuio_channel_identity_t id{};
+    ecuio_engine_identity(&e, c, &id);
+    size_t n = 0;
+    for (uint32_t i = 0; i < id.items; ++i) {
+        n += id.list[i].outcome == o ? 1 : 0;
+    }
+    return n;
+}
+
+/* The engine ECU's 4 rows on channel 0, answered in 30 ms; on channel 1
+ * a module with no rows (nothing picked of it), identification on, that
+ * answers as ecu1 says */
+std::unique_ptr<Adapter> rowless(const Ecus& ecu1)
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 4);
+    a->exchange_us = 30 * kMs;
+    a->ecus = [ecu1](uint32_t c, const Bytes& q) {
+        return c == 0 ? answer(q) : ecu1(c, q);
+    };
+    ecuio_engine_identify(&a->e);
+    return a;
+}
+
+/* Side by side, passes until channel 1 has a request out */
+void to_request_out(SideBySide& b)
+{
+    for (int i = 0; i < 100000 && b.e.chans[1].outstanding == ECUIO_ENGINE_NONE;
+         ++i) {
+        b.until(b.now + 1);
+    }
+}
+
+} // namespace
+
+/* A module with no rows whose first two items go unanswered (a slow wake,
+ * two replies lost) goes quiet; held, it asks one of its settled items at
+ * each step in a row's place, and at its answer every item is asked again */
+TEST(RequestQuietTest, AModuleWithNoRowsAsksAnItemAtEachStep)
+{
+    int lost = 0;
+    auto a = rowless([&lost](uint32_t, const Bytes& q) {
+        if (lost < 2) {
+            ++lost;
+            return Bytes{};
+        }
+        return answer(q);
+    });
+    a->until(60000 * kMs);
+    EXPECT_FALSE(a->e.chans[1].quiet);
+    EXPECT_EQ(items_of(a->e, 1, ECUIO_IDENTITY_UNANSWERED), 0u);
+    EXPECT_EQ(items_of(a->e, 1, ECUIO_IDENTITY_UNASKED), 0u);
+}
+
+/* A module with no rows that never answers Service 09 but answers its
+ * DIDs: its next step asks another service than the last step's, so its
+ * second step's 22 item finds it, and only Service 09's four stay
+ * unanswered */
+TEST(RequestQuietTest, AModuleWithNoRowsAsksAnotherServiceAtItsNextStep)
+{
+    auto a = rowless([](uint32_t, const Bytes& q) {
+        return q[0] == 0x09 ? Bytes{} : answer(q);
+    });
+    a->until(10000 * kMs);
+    EXPECT_FALSE(a->e.chans[1].quiet);
+    EXPECT_EQ(items_of(a->e, 1, ECUIO_IDENTITY_UNANSWERED), 4u);
+    EXPECT_EQ(items_of(a->e, 1, ECUIO_IDENTITY_ANSWERED),
+              size_t{ECUIO_IDENT_COUNT} - 4u);
+}
+
+/* An absent module with no rows costs its first four steps alone: its
+ * report completes unanswered at its second wait, then one item at 0.5,
+ * 1, 2 and 4 s, and nothing more (never heard, it is absent, and nothing
+ * on screen waits on it) */
+TEST(RequestQuietTest, AnAbsentModuleWithNoRowsCostsItsFirstFourSteps)
+{
+    auto a = rowless([](uint32_t, const Bytes&) { return Bytes{}; });
+    a->until(60000 * kMs);
+    EXPECT_EQ(items_of(a->e, 1, ECUIO_IDENTITY_UNANSWERED),
+              size_t{ECUIO_IDENT_COUNT});
+    const std::vector<int64_t> all = times_of(*a, 1);
+    ASSERT_EQ(all.size(), 2u + 4u);
+    const int64_t quiet = all[1] + ECUIO_ENGINE_WAIT_US;
+    /* the first step can wait out a turn of the engine ECU's under way:
+     * its 4 rows taking turns with its own 4 items */
+    EXPECT_GE(all[2] - quiet, kSteps[0]);
+    EXPECT_LE(all[2] - quiet, kSteps[0] + 8 * 30 * kMs);
+    expect_steps(times_of(*a, 1, 2));
+}
+
+/* A module with no rows heard before (its identification answered, its
+ * scan's DIDs not) goes quiet and asks a settled entry at every step, the
+ * 5 s ones too, since it can wake; at its answer the scan is asked again
+ * and every DID found */
+TEST(RequestQuietTest, AHeardModuleWithNoRowsAsksAtEveryStep)
+{
+    bool awake = false;
+    auto a = rowless([&awake](uint32_t, const Bytes& q) {
+        return (q[0] == 0x22 && q[1] == 0x40 && !awake) ? Bytes{} : answer(q);
+    });
+    for (uint16_t k = 0; k < 60; ++k) {
+        ASSERT_TRUE(ecuio_engine_scan_add(&a->e, 1, 0x4000 + k));
+    }
+    a->until(30000 * kMs);
+    ASSERT_TRUE(a->e.chans[1].quiet);
+    EXPECT_GE(asked_between(*a, 1, 20000 * kMs, 30000 * kMs), 2u)
+        << "its 5 s steps";
+    awake = true;
+    a->until(36000 * kMs);
+    EXPECT_FALSE(a->e.chans[1].quiet);
+    size_t found = 0;
+    for (uint32_t i = 0; i < a->e.scan_count; ++i) {
+        found += a->e.scan[i].outcome == ECUIO_SCAN_FOUND ? 1 : 0;
+    }
+    EXPECT_EQ(found, 60u);
+}
+
+/* Past twenty quiet channels side by side (a whole-car profile in
+ * accessory) the 250 ms slots fill and the oldest step goes first, so
+ * each takes its turn: 29 channels go around in 7.25 s and none waits
+ * longer. In channel order alone the last nine were never asked again. */
+TEST(RequestQuietTest, ManyQuietChannelsTakeTheirStepsInTurn)
+{
+    SideBySide b(30);
+    ASSERT_NO_FATAL_FAILURE(b.until(120000 * kMs));
+    for (uint32_t c = 1; c < 30; ++c) {
+        const std::vector<int64_t>& t = b.asked[c];
+        size_t late = 0;
+        int64_t worst = 0;
+        for (size_t i = 1; i < t.size(); ++i) {
+            late += t[i] > 30000 * kMs ? 1 : 0;
+            worst = t[i - 1] > 30000 * kMs ? std::max(worst, t[i] - t[i - 1])
+                                           : worst;
+        }
+        EXPECT_GE(late, 12u) << "channel " << c;
+        EXPECT_LE(worst, 29 * 250 * kMs + 10 * kMs) << "channel " << c;
+    }
+}
+
+/* Any frame from a quiet module ends its quiet state, not only a positive
+ * answer: a refusal of its step's row, a 7F xx 78, or a positive reply
+ * handed over after the row's wait ran out */
+TEST(RequestQuietTest, ARefusalAPendingReplyOrALateAnswerEndsTheQuietState)
+{
+    for (int shape = 0; shape < 3; ++shape) {
+        SideBySide b(2);
+        ASSERT_NO_FATAL_FAILURE(b.until(3000 * kMs));
+        ASSERT_TRUE(b.e.chans[1].quiet);
+        to_request_out(b);
+        ASSERT_NE(b.e.chans[1].outstanding, ECUIO_ENGINE_NONE);
+        const ecuio_request q = b.e.requests[b.e.chans[1].outstanding];
+        Bytes r = {0x7F, 0x22, static_cast<uint8_t>(shape == 0 ? 0x31 : 0x78)};
+        if (shape == 2) {
+            ASSERT_NO_FATAL_FAILURE(b.until(b.e.chans[1].deadline_us + 1));
+            ASSERT_EQ(b.e.chans[1].outstanding, ECUIO_ENGINE_NONE);
+            r = {0x62, q.bytes[1], q.bytes[2], 0x12, 0x34};
+        }
+        (void)ecuio_engine_on_frame(
+            &b.e, 1, r.data(), static_cast<uint16_t>(r.size()), b.now, nullptr);
+        EXPECT_FALSE(b.e.chans[1].quiet) << "shape " << shape;
+    }
+}
+
+/* A pack's wait counts each of its rows toward a heard module's run: 29
+ * Service 01 PIDs in packs of six run out one rotation in a lap of five
+ * packs, so the module is quiet at 2 s with no frame, not after 29 packs'
+ * waits (about 3.6 s) */
+TEST(RequestQuietTest, APacksWaitCountsEachOfItsRows)
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 4);
+    for (uint8_t pid = 0x03; pid < 0x20; ++pid) {
+        add(&a->e, 1, {0x01, pid});
+    }
+    a->e.pack = true;
+    ecuio_engine_probe(&a->e);
+    a->exchange_us = 30 * kMs;
+    bool awake = true;
+    a->ecus = [&awake](uint32_t c, const Bytes& q) {
+        return (c == 0 || awake) ? answer(q) : Bytes{};
+    };
+    a->until(5000 * kMs);
+    awake = false;
+    int64_t last = 0;
+    size_t packs = 0;
+    for (const Sent& s : a->sent) {
+        last = s.c == 1 ? s.at_us : last;
+        packs += (s.c == 1 && s.bytes.size() > 2) ? 1 : 0;
+    }
+    ASSERT_GT(packs, 10u);
+    a->until(last + 6000 * kMs);
+    /* quiet at 2 s, its steps 0.5 and 1 s later */
+    EXPECT_LE(asked_between(*a, 1, last + 2300 * kMs, last + 4000 * kMs), 2u);
+}
+
+/* Held with no rows, a channel's next event and its turn's are its step
+ * too, so a driver waits for it and an ELM327 turn reaches it */
+TEST(RequestQuietTest, AHeldChannelWithNoRowsNextEventIsItsStep)
+{
+    auto a = rowless([](uint32_t, const Bytes&) { return Bytes{}; });
+    const ecuio_engine_channel& ch = a->e.chans[1];
+    for (int i = 0;
+         i < 100000 && !(ch.quiet && ch.outstanding == ECUIO_ENGINE_NONE &&
+                         ecuio_engine_quiet_due_us(&a->e, ch) > a->now);
+         ++i) {
+        a->pass();
+    }
+    ASSERT_TRUE(ecuio_engine_quiet_held(&a->e, ch));
+    const int64_t now = a->now;
+    const int64_t due = ecuio_engine_quiet_due_us(&a->e, ch);
+    ASSERT_GT(due, now);
+    EXPECT_EQ(ecuio_engine_next_event_us(&a->e, now, 1u), due - now);
+    EXPECT_EQ(ecuio_engine_turn_next_us(&a->e, ch), due);
+    EXPECT_EQ(ecuio_engine_due(&a->e, 1, now), ECUIO_ENGINE_NONE);
+}
+
+/* An absent module with no rows past its four steps asks no more and
+ * holds back no other quiet module, though its last step is the oldest:
+ * an absent one with rows before it goes on asking at its 5 s steps */
+TEST(RequestQuietTest, ARowlessModulePastItsStepsHoldsNoOneBack)
+{
+    auto a = adapter(3);
+    dids(&a->e, 0, 4);
+    dids(&a->e, 1, 4, 0x80);
+    a->exchange_us = 30 * kMs;
+    a->ecus = [](uint32_t c, const Bytes& q) {
+        return c == 0 ? answer(q) : Bytes{};
+    };
+    ecuio_engine_identify(&a->e);
+    a->until(60000 * kMs);
+    EXPECT_EQ(times_of(*a, 2).size(), 2u + 4u);
+    EXPECT_GE(asked_between(*a, 1, 30000 * kMs, 60000 * kMs), 5u);
+}
+
+/* Through an ELM327's turns the held channels come together at a lap's
+ * end, so the spacing leaves one ask a lap among them: 14 quiet modules
+ * beside 4 that answer (a lap of about 0.58 s) are asked in turn, the
+ * oldest step first, each about every 14 laps. In channel order alone the
+ * last five were never asked again. */
+TEST(RequestQuietTest, AnElm327sTurnsAskTheQuietModulesInTurn)
+{
+    auto a = adapter(18);
+    for (uint32_t c = 0; c < 18; ++c) {
+        dids(&a->e, c, 4);
+    }
+    a->exchange_us = 30 * kMs;
+    a->ecus = [](uint32_t c, const Bytes& q) {
+        return c < 4 ? answer(q) : Bytes{};
+    };
+    a->until(70000 * kMs);
+    for (uint32_t c = 4; c < 18; ++c) {
+        const std::vector<int64_t> t = times_of(*a, c);
+        size_t late = 0;
+        int64_t worst = 0;
+        for (size_t i = 1; i < t.size(); ++i) {
+            late += t[i] > 15000 * kMs ? 1 : 0;
+            worst = t[i - 1] > 15000 * kMs ? std::max(worst, t[i] - t[i - 1])
+                                           : worst;
+        }
+        EXPECT_GE(late, 5u) << "channel " << c;
+        EXPECT_LE(worst, 9500 * kMs) << "channel " << c;
+    }
+}

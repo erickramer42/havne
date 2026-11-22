@@ -198,6 +198,7 @@ struct ecuio_engine_channel {
      * a pack's rows each; its rows asked while held */
     uint32_t quiet_run = 0;
     uint32_t quiet_asks = 0;
+    uint32_t quiet_item = 0; /* with no rows, where its next item ask starts */
     bool in_step = true;        /* no request has timed out since the last
                                  * positive reply: see ecuio_engine_on_frame */
     bool heard = false; /* a frame came from it since the start or a rescan */

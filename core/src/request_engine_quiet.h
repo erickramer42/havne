@@ -24,10 +24,13 @@
 //      asks, times out and judges its link as it would.
 //   3. Held, its rotation gives one row, never a pack, each time its step
 //      has passed (ECUIO_ENGINE_QUIET_STEPS_US from going quiet, the last
-//      repeating), and two held channels' rows go
-//      ECUIO_ENGINE_QUIET_SPACING_US apart. What isn't held: a session's
-//      request, a key or talk, the walk, a clear, the unpicked check, a
-//      one-shot already in the slot.
+//      repeating); a channel with no rows (nothing picked of it) asks one
+//      of its unanswered items in turn in the row's place, at every step
+//      once heard, at the first four never heard. Held channels ask
+//      ECUIO_ENGINE_QUIET_SPACING_US apart, and none ahead of a later
+//      channel whose step passed first.
+//      What isn't held: a session's request, a key or talk, the walk, a
+//      clear, the unpicked check, a one-shot already in the slot.
 //   4. Held, its unasked identification, diagnostics and scan items settle
 //      unanswered unasked, as each would after its own wait, so the
 //      reports complete.
@@ -81,6 +84,7 @@ inline void ecuio_engine_quiet_expired(ecuio_request_engine* e, uint32_t c,
     }
     ch.quiet = true;
     ch.quiet_asks = 0;
+    ch.quiet_item = 0;
     ch.quiet_next_us = now_us + ECUIO_ENGINE_QUIET_STEPS_US[0];
 }
 
@@ -107,11 +111,98 @@ inline bool ecuio_engine_quiet_held(const ecuio_request_engine* e,
     return false;
 }
 
-/* When held channel ch's next row may go: its step passed, and the
- * spacing since any held channel's last */
+/* Whether channel c's item i went unanswered, its items counted as its
+ * identification list, its diagnostics list (not mid-clear), then the
+ * engine's scan entries */
+inline bool ecuio_engine_quiet_unanswered(const ecuio_request_engine* e,
+                                          uint32_t c, uint32_t i)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (i < ch.ident_count) {
+        return ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED;
+    }
+    i -= ch.ident_count;
+    if (i < ch.diag_count) {
+        return ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+               ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED;
+    }
+    i -= ch.diag_count;
+    return e->scan[i].channel == c &&
+           e->scan[i].outcome == ECUIO_SCAN_UNANSWERED;
+}
+
+/* The service channel c's item i asks, counted as quiet_unanswered does */
+inline uint8_t ecuio_engine_quiet_service(const ecuio_request_engine* e,
+                                          uint32_t c, uint32_t i)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (i < ch.ident_count) {
+        return ch.ident[i].request[0];
+    }
+    i -= ch.ident_count;
+    return i < ch.diag_count ? ch.diag_items[i].request[0] : uint8_t{0x22};
+}
+
+/* Rule 3 for a channel c with no rows: the item its next step asks, the
+ * first unanswered from quiet_item on, around, of another service than
+ * the last step's when there is one (a module may serve 22 and not 09);
+ * -1 with none, and past the first four steps of a channel never heard,
+ * which is absent and has nothing on screen to gain */
+inline int32_t ecuio_engine_quiet_item(const ecuio_request_engine* e,
+                                       uint32_t c)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (!ch.heard && ch.quiet_asks >= ECUIO_ENGINE_QUIET_STEP_COUNT - 1) {
+        return -1;
+    }
+    const uint32_t n = ch.ident_count + ch.diag_count + e->scan_count;
+    const bool after = ch.quiet_item > 0 && ch.quiet_item <= n;
+    const uint8_t last =
+        after ? ecuio_engine_quiet_service(e, c, ch.quiet_item - 1) : 0;
+    int32_t any = -1;
+    for (uint32_t k = 0; k < n; ++k) {
+        const uint32_t i = (ch.quiet_item + k) % n;
+        if (!ecuio_engine_quiet_unanswered(e, c, i)) {
+            continue;
+        }
+        if (!after || ecuio_engine_quiet_service(e, c, i) != last) {
+            return static_cast<int32_t>(i);
+        }
+        any = any < 0 ? static_cast<int32_t>(i) : any;
+    }
+    return any;
+}
+
+/* Whether channel ch, one of e's, is held with no rows and an item to ask */
+inline bool ecuio_engine_quiet_asks_items(const ecuio_request_engine* e,
+                                          const ecuio_engine_channel& ch)
+{
+    return ch.requests == 0 && ecuio_engine_quiet_held(e, ch) &&
+           ecuio_engine_quiet_item(
+               e, static_cast<uint32_t>(&ch - e->chans.data())) >= 0;
+}
+
+/* Whether held channel c asks on its steps: a row, or with none an item */
+inline bool ecuio_engine_quiet_steps(const ecuio_request_engine* e, uint32_t c)
+{
+    return e->chans[c].requests > 0 || ecuio_engine_quiet_item(e, c) >= 0;
+}
+
+/* When held channel ch's next ask may go: its step passed and the spacing
+ * since any held channel's last; INT64_MAX while a later channel's step
+ * passed first. Each worker reaches the channels in their order (an
+ * ELM327's turns, the others' passes), so the oldest goes next and none
+ * starves when the slots are short (an ELM327 lap holds about one) */
 inline int64_t ecuio_engine_quiet_due_us(const ecuio_request_engine* e,
                                          const ecuio_engine_channel& ch)
 {
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const ecuio_engine_channel& o = e->chans[k];
+        if (&o > &ch && o.quiet && o.quiet_next_us < ch.quiet_next_us &&
+            ecuio_engine_quiet_steps(e, k)) {
+            return INT64_MAX;
+        }
+    }
     const int64_t spaced = e->quiet_ask_us + ECUIO_ENGINE_QUIET_SPACING_US;
     return ch.quiet_next_us > spaced ? ch.quiet_next_us : spaced;
 }

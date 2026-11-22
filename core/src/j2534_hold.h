@@ -141,18 +141,19 @@ inline bool j2534_hold_on_bus(const ecuio_request_engine* e, uint32_t k)
            ch.deadline_us - ch.sent_us <= ECUIO_ENGINE_WAIT_US;
 }
 
-/* Whether channel ch of e is asking a quiet module's first steps
- * (request_engine_quiet.h), the ones for a module that missed a lap or
- * woke: asked under the hold as a probe, so its first answer isn't lost */
+/* Whether channel ch of e is asking a quiet module's step as a probe
+ * (request_engine_quiet.h), so a waking module's first answer isn't lost:
+ * every step of one heard before (it can wake), the first four of one
+ * never heard (an absent module holds no one past them) */
 inline bool j2534_hold_quiet_probe(const ecuio_engine_channel& ch)
 {
     return ch.quiet && ch.quiet_asks > 0 &&
-           ch.quiet_asks < ECUIO_ENGINE_QUIET_STEP_COUNT;
+           (ch.heard || ch.quiet_asks < ECUIO_ENGINE_QUIET_STEP_COUNT);
 }
 
 /* Whether channel k is silent: its waits run out in a row from the
  * second, but for the request after every eighth and a quiet module's
- * first steps */
+ * probes */
 inline bool j2534_hold_silent(const j2534_hold& h,
                               const ecuio_request_engine* e, uint32_t k)
 {
