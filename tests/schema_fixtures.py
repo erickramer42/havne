@@ -199,7 +199,14 @@ CASES = [
     ("notes that aren't text", SIGNAL_FILE, ["notes"], 1, False),
     ("a tool's own key", SIGNAL_FILE, S0 + ["x-tool"], {"any": [1]}, True),
     ("extends something other than obd2", SIGNAL_FILE, ["extends"], "uds", False),
-    ("format 3", SIGNAL_FILE, ["havne_signals"], 3, False),
+    ("format 3", SIGNAL_FILE, ["havne_signals"], 3, True),
+    ("format 4", SIGNAL_FILE, ["havne_signals"], 4, False),
+    ("needs in format 1", SIGNAL_FILE, ["needs"], [], False),
+    ("an ECU's name", SIGNAL_FILE, ["ecus", 0, "name"], "Engine", True),
+    ("an ECU's name of 63 bytes", SIGNAL_FILE, ["ecus", 0, "name"], "n" * 63, True),
+    ("an ECU's name of 64 bytes", SIGNAL_FILE, ["ecus", 0, "name"], "n" * 64, False),
+    ("an empty ECU name", SIGNAL_FILE, ["ecus", 0, "name"], "", False),
+    ("an ECU's name that starts a formula", SIGNAL_FILE, ["ecus", 0, "name"], "=1", False),
     ("a $schema key", SIGNAL_FILE, ["$schema"], "signal-file.schema.json", False),
     ("the base packed plugin", PACKED, [], None, True),
     ("an id with a dash first", PACKED, ["id"], "-edge", False),
@@ -392,9 +399,108 @@ FORMAT2 = [
      changed(F2, S3 + ["expr"], "max(rpm_raw, 1)" + " " * 250), False),
 ]
 
+# Format 3 (ADR-0065 section 9): a file that needs another's signal
+F3_NEEDS = changed(SIGNAL_FILE, ["havne_signals"], 3)
+F3_NEEDS["needs"] = ["oil_t"]
+F3_NEEDS["signals"].append({"key": "oil_margin", "name": "Oil margin", "kind": "computed",
+                            "expr": "130 - oil_t"})
+FORMAT3 = [
+    ("a format 3 file with a need an expression reads", SIGNAL_FILE, None, F3_NEEDS, True),
+    ("a need that is no key", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], ["Oil-T"]), False),
+    ("a need given twice", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], ["oil_t", "oil_t"]), False),
+    ("needs that is no list", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["needs"], "oil_t"), False),
+    ("needs in format 2", SIGNAL_FILE, None,
+     changed(F3_NEEDS, ["havne_signals"], 2), False),
+]
+
+# A merged set's written form (ADR-0065 section 9): "parts", each
+# signal's "part" and the keys it "replaced"
+MERGED = changed(SIGNAL_FILE, ["havne_signals"], 3)
+MERGED["source"] = {"name": "A merge of 2 parts"}
+MERGED["parts"] = [
+    {"profile": "plugin.edge.base", "name": "Schema edge plugin", "format": 2,
+     "plugin": {"id": "edge", "version": "1.0.0", "variant": "base"},
+     "source": {"name": "Havne's tests", "license": "CC-BY-SA-4.0"}},
+    {"profile": "user.schema-edge", "name": "Schema edge", "format": 3,
+     "source": {"name": "Written by hand for Havne's tests"}},
+]
+for i, s in enumerate(MERGED["signals"]):
+    s["part"] = 0 if i < 2 else 1
+MERGED["signals"][0]["replaced"] = ["old_rpm"]
+MERGED["ecus"][0]["part"] = 0
+P0 = ["parts", 0]
+F3 = changed(SIGNAL_FILE, ["havne_signals"], 3)
+MERGED_SET = [
+    ("the base merged set", SIGNAL_FILE, None, MERGED, True),
+    ("parts in format 2", SIGNAL_FILE, None, changed(MERGED, ["havne_signals"], 2), False),
+    ("parts that list none", SIGNAL_FILE, None, changed(MERGED, ["parts"], []), False),
+    ("17 parts", SIGNAL_FILE, None,
+     changed(MERGED, ["parts"],
+             [{"profile": "user.p%d" % i, "name": "P", "format": 3, "source": {"name": "s"}}
+              for i in range(17)]), False),
+    ("needs in a merged set", SIGNAL_FILE, None, changed(MERGED, ["needs"], ["oil_t"]), False),
+    ("a part with no profile", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["profile"], DELETE), False),
+    ("a part's profile in capitals", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["profile"], "Plugin.Edge"), False),
+    ("a merged set as a part", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["profile"], "merged.0123456789abcdef"), False),
+    ("a part with no name", SIGNAL_FILE, None, changed(MERGED, P0 + ["name"], DELETE), False),
+    ("a part's name of 64 bytes", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["name"], "n" * 64), False),
+    ("a part of format 4", SIGNAL_FILE, None, changed(MERGED, P0 + ["format"], 4), False),
+    ("a part with no source", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["source"], DELETE), False),
+    ("a part with a key it doesn't take", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["owner"], "me"), False),
+    ("a part with no plugin", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["plugin"], DELETE), True),
+    ("a part's plugin with no variant", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["plugin", "variant"], DELETE), False),
+    ("a part's plugin version of two parts", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["plugin", "version"], "1.0"), False),
+    ("a part's plugin id with a dash first", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["plugin", "id"], "-edge"), False),
+    ("a part's plugin with a key it doesn't take", SIGNAL_FILE, None,
+     changed(MERGED, P0 + ["plugin", "hash"], "00"), False),
+    ("a merged set's source with a url", SIGNAL_FILE, None,
+     changed(MERGED, ["source", "url"], "https://example.org"), False),
+    ("a merged set's source with a license", SIGNAL_FILE, None,
+     changed(MERGED, ["source", "license"], "CC-BY-SA-4.0"), False),
+    ("a merged set's signal with no part", SIGNAL_FILE, None,
+     changed(MERGED, S0 + ["part"], DELETE), False),
+    ("a signal's part of 16", SIGNAL_FILE, None, changed(MERGED, S0 + ["part"], 16), False),
+    ("a signal's part that is text", SIGNAL_FILE, None,
+     changed(MERGED, S0 + ["part"], "0"), False),
+    ("a replaced key that is no key", SIGNAL_FILE, None,
+     changed(MERGED, S0 + ["replaced"], ["Old-RPM"]), False),
+    ("a replaced key given twice", SIGNAL_FILE, None,
+     changed(MERGED, S0 + ["replaced"], ["old_rpm", "old_rpm"]), False),
+    ("replaced that is no list", SIGNAL_FILE, None,
+     changed(MERGED, S0 + ["replaced"], "old_rpm"), False),
+    ("a replaced key on a computed signal", SIGNAL_FILE, None,
+     changed(MERGED, S3 + ["replaced"], ["older"]), True),
+    ("an ECU's part of 16", SIGNAL_FILE, None,
+     changed(MERGED, ["ecus", 0, "part"], 16), False),
+    ("a signal's part in a file with no parts", SIGNAL_FILE, None,
+     changed(F3, S0 + ["part"], 0), False),
+    ("a replaced key in a file with no parts", SIGNAL_FILE, None,
+     changed(F3, S0 + ["replaced"], ["old_rpm"]), False),
+    ("an ECU's part in a file with no parts", SIGNAL_FILE, None,
+     changed(F3, ["ecus", 0, "part"], 0), False),
+    ("a data file's signal with a part", PACKED, F0 + ["signals", 0, "part"], 0, False),
+    ("a data file's signal with a replaced key", PACKED, F0 + ["signals", 0, "replaced"],
+     ["old"], False),
+    ("a data file with parts", PACKED, F0 + ["parts"], MERGED["parts"], False),
+    ("a manifest's ECU with a part", PACKED, ["ecus", 0, "part"], 0, False),
+]
+
 # A format 2 plugin with the conversation tier (ADR-0066). The module is
 # the least one the guest ABI takes: its six exports, each returning a
-# constant, and one page of memory (fuzz/seeds.py's wasm_module() wrote it)
+# constant, and one page of memory (fuzz/seeds_wasm.py's wasm_module() wrote it)
 MODULE_B64 = ("AGFzbQEAAAABDgNgAAF/YAJ/fwF/YAAAAwcGAAABAAECBQQBAQEBB0IGCWVjdWlvX2FiaQAADGVj"
               "dWlvX2J1ZmZlcgABBWJlZ2luAAIMbmV4dF9yZXF1ZXN0AAMGYWNjZXB0AAQDZW5kAAUKHgYEAEEB"
               "CwUAQYAICwQAQQALBABBAAsEAEEACwIACw==")
@@ -663,7 +769,8 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES) + FORMAT2 + CONDITION_CASES + CONVERSATION + PAGES
+        cases = (list(CASES) + FORMAT2 + FORMAT3 + MERGED_SET + CONDITION_CASES +
+                 CONVERSATION + PAGES)
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

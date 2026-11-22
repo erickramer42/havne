@@ -129,7 +129,7 @@ SessionBridge::signalFileTextOfSet(const ecuio_signal_set_t* set) const
     return QByteArray(text, static_cast<qsizetype>(length));
 }
 
-QString SessionBridge::profileOfUri(const QString& uri)
+QString BridgeFormats::profileOfUri(const QString& uri)
 {
     // Core's scheme routing and defaults (core.cpp, ecuio_session_create):
     // case-sensitive prefixes; j2534:// on Windows alone, socketcan:// on

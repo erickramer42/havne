@@ -254,16 +254,19 @@ TEST(RequestTurnsTest, ATurnEndsAfterASecondAndTheNextGoesOn)
     }
 }
 
-/* With the extended session on both channels, channel 1's keep-alive goes
- * out within an exchange of falling due, not at the end of 0's turn */
-TEST(RequestTurnsTest, ADueKeepAliveEndsATurn)
+/* With the extended session on both channels and nothing but its
+ * keep-alive on channel 1, its session never waits on channel 0's turn
+ * once urgent: each of its requests within two exchanges of its urgent
+ * time, the keep-alive at its least */
+TEST(RequestTurnsTest, ADueKeepAliveEndsATurnOnceUrgent)
 {
     auto a = adapter(2);
     dids(&a->e, 0, 40);
     ASSERT_TRUE(
         ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_MIN_US));
     a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
-    a->until(4000 * kMs);
+    a->until(20000 * kMs);
+    const int64_t urgent = ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US;
     int keeps = 0;
     int64_t last = -1;
     for (const Sent& x : a->sent) {
@@ -272,14 +275,13 @@ TEST(RequestTurnsTest, ADueKeepAliveEndsATurn)
         }
         if (last >= 0) {
             /* an entry's answer, an exchange after it, starts the wait */
-            EXPECT_LE(x.at_us - last,
-                      ECUIO_ENGINE_KEEPALIVE_MIN_US + 2 * a->exchange_us)
+            EXPECT_LE(x.at_us - last, urgent + 2 * a->exchange_us)
                 << "channel 1 waited on 0's turn";
         }
         last = x.at_us;
         keeps += x.bytes[0] == 0x3E ? 1 : 0;
     }
-    EXPECT_GE(keeps, 5);
+    EXPECT_GE(keeps, 4);
     EXPECT_EQ(a->e.chans[1].session_lost, 0u);
 }
 
@@ -318,7 +320,9 @@ TEST(RequestTurnsTest, ADueKeepAliveIsAskedNextPastEveryChannelBetween)
 
 /* A channel inside its key's window (request_talk.h) has nothing due
  * until the window ends: its keep-alive, due meanwhile, ends no other
- * channel's turn, and goes out within an exchange of the window's end */
+ * channel's turn. The window ends before its session is urgent, so its
+ * next request, its row standing in, waits for channel 0's turn: within
+ * channel 0's four rows of the window's end */
 TEST(RequestTurnsTest, AChannelInsideItsKeysWindowEndsNoTurnUntilItCloses)
 {
     auto a = adapter(2);
@@ -387,10 +391,10 @@ TEST(RequestTurnsTest, AChannelInsideItsKeysWindowEndsNoTurnUntilItCloses)
         next = a->sent[i].c == 1 ? &a->sent[i] : nullptr;
     }
     ASSERT_NE(next, nullptr);
-    EXPECT_EQ(next->bytes, (Bytes{0x3E, 0x00}));
+    EXPECT_EQ(next->bytes, (Bytes{0x22, 0x1E, 0x40}));
     EXPECT_GE(next->at_us, until);
-    EXPECT_LE(next->at_us, until + 2 * a->exchange_us)
-        << "channel 1's keep-alive ended channel 0's turn";
+    EXPECT_LE(next->at_us, until + 4 * a->exchange_us)
+        << "channel 1 waited past channel 0's turn";
     EXPECT_EQ(a->e.chans[1].session_lost, 0u);
 }
 

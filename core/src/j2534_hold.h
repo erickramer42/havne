@@ -37,11 +37,17 @@
 //
 // What holds no one: a silent channel, whose requests neither hold the
 // others nor keep their chosen requests waiting, or an absent module
-// would cost them its whole wait on every lap; and a request in a pending
+// would cost them its whole wait on every lap; a request in a pending
 // wait (7F xx 78, up to 5 s a time), or the others' data and sessions
-// would stop for it. A channel is silent from its second wait in a row
-// that runs out (j2534_hold_answered and j2534_hold_recovered end the
-// run), so one lost reply leaves it protected; and the request after
+// would stop for it; and a row never answered from its second wait run
+// out (ran_out), but on every eighth, which keeps no chosen request
+// waiting, or a module that leaves some rows unanswered would cost the
+// long rows beside it a wait on every lap. A reply lost once leaves its
+// row protected, and a row a module begins to answer can lose its replies
+// under a chosen segmented reply until its next ask under the hold. A
+// channel is silent from its second wait in a row that runs out
+// (j2534_hold_answered and j2534_hold_recovered end the run), so one lost
+// reply leaves it protected; and the request after
 // every eighth is asked under the hold all the same, so a module that
 // answers late, inside another's segmented reply, is found again. That
 // probe counts as one frame whatever its defs read, and so does every
@@ -126,6 +132,9 @@ static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US >
 static_assert(ECUIO_KEY_WINDOW_SESSION_US <=
                   ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US,
               "a key's window is over before the session gate opens");
+static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US <
+                  ECUIO_ENGINE_S3_LATE_US,
+              "the session gate opens while a keep-alive still keeps it");
 
 inline bool j2534_hold_applies(const j2534_hold& h,
                                const ecuio_request_engine* e)
@@ -173,15 +182,34 @@ inline bool j2534_hold_long(const j2534_hold& h, const ecuio_request_engine* e,
            ecuio_engine_reply_segmented(e, k, r);
 }
 
-/* Whether a channel but c, not silent, has a request on the bus, or
- * (segmented) one whose reply is expected segmented */
+/* Whether channel k, answering (no run of waits run out: a silent one is
+ * j2534_hold_silent's), has a table row out never answered whose wait has
+ * run out J2534_HOLD_SILENT_MISSES times in a row or more, but for every
+ * J2534_HOLD_PROBE_EVERY-th (asked under the hold) */
+inline bool j2534_hold_ran_out(const j2534_hold& h,
+                               const ecuio_request_engine* e, uint32_t k)
+{
+    const int32_t r = e->chans[k].outstanding;
+    if (r < 0 || h.misses[k] >= J2534_HOLD_SILENT_MISSES) {
+        return false;
+    }
+    const uint32_t n = e->requests[r].ran_out;
+    return n >= J2534_HOLD_SILENT_MISSES && n % J2534_HOLD_PROBE_EVERY != 0;
+}
+static_assert(128 % J2534_HOLD_PROBE_EVERY == 0,
+              "a row's count past 255 keeps the probe's rhythm");
+
+/* Whether a channel but c, not silent, has a request on the bus that its
+ * module has answered before, or (segmented) one whose reply is expected
+ * segmented */
 inline bool j2534_hold_other_out(const j2534_hold& h,
                                  const ecuio_request_engine* e, uint32_t c,
                                  bool segmented)
 {
     for (uint32_t k = 0; k < e->chan_count; ++k) {
         if (k != c && !j2534_hold_silent(h, e, k) && j2534_hold_on_bus(e, k) &&
-            (!segmented || j2534_hold_long(h, e, k, e->chans[k].outstanding))) {
+            (segmented ? j2534_hold_long(h, e, k, e->chans[k].outstanding)
+                       : !j2534_hold_ran_out(h, e, k))) {
             return true;
         }
     }
@@ -411,7 +439,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         }
     }
     if (j2534_hold_session_due(e, c, now_us)) {
-        return ecuio_engine_due(e, c, now_us);
+        return ecuio_engine_due_session(e, c, now_us);
     }
     if (j2534_hold_other_out(h, e, c, true) ||
         (!j2534_hold_key_waits(e, c, now_us) &&

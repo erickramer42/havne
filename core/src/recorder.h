@@ -143,9 +143,11 @@ void ecuio_record_timing(ecuio_record_link* link,
  * session, and bytes (length of them) the signal file it came from,
  * which attach checks against the session's set and the writer copies
  * into the folder as signals.json, its SHA-256 on events.log's header
- * (ADR-0051 section 4); plugin, when not "", the variant's
- * "<id>,<version>,<variant>" for the header's plugin line (ADR-0052
- * section 4). ecuio_recorder_signal_file passes a file's; length 0 is a
+ * (ADR-0051 section 4); plugin, when not "", a
+ * "<id>,<version>,<variant>" to a line, each a plugin line of the
+ * header: a variant's one (ADR-0052 section 4), a merged set's one for
+ * each part that is a plugin's variant, in merge order (ADR-0065 section
+ * 9). ecuio_recorder_signal_file passes a file's; length 0 is a
  * set with no file's bytes, checked and not copied.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL recorder or set, or NULL bytes with
  * a length; ECUIO_ERR_INVALID_ARGUMENT once attached, on a second call,

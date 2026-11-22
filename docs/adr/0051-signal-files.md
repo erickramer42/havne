@@ -861,3 +861,38 @@ own ([ADR-0064](0064-one-store.md): an OBDb set is converted, wrapped and
 kept the same way). `SignalStore` is removed from the app (ADR-0064's
 appendix "step 6 as built"); the earlier version's `signals/` folder is
 read once by the move and removed at the next start.
+
+## Note: signal-file format 3 (2026-11-22)
+
+`"havne_signals": 3` is the format of files read together
+([ADR-0065](0065-car-sized-profile.md) section 9; its appendix "step 4
+as built" holds the table of formats 1 and 2 against 3). What that
+changes of this ADR:
+
+- **A base def replaced by name** (the appendix "boost in the obd2 set":
+  a file that extends `obd2` takes the place of a base signal it names)
+  **and one name for each signal** are formats 1 and 2's rules. A format
+  3 file replaces no signal of `obd2`'s: a signal it names as one is a
+  second signal of that name, and `obd2.<key>` in its expressions reads
+  `obd2`'s. Two of its signals may share a name; two at one address are
+  refused.
+- **`needs`** (format 3) lists the keys a file's expressions read from
+  another file. Loaded alone, the signals that read one are left out
+  with a note and the rest load.
+- **An ECU's `name`** (1 to 63 bytes) is taken in a file of any format;
+  a core before 0.9.1 refuses the key.
+- **A merged set** is a format 3 file with `parts`, each signal's `part`
+  and `replaced` keys and an ECU's `part`: written by
+  `ecuio_signal_file_merge`, read by the loader, never imported. Its
+  bounds are those of a variant's merged list (the note "the bounds as
+  they are"), of at most 16 parts.
+- **A recording's signal file** (the appendix of that name) is the
+  merged text for a session on a merged set, and that copy read back
+  has the `merged.` profile it was recorded under, where any other
+  copy's is `user.` and its name.
+- **The JSON Schema** (the appendix of that name) describes formats 1
+  to 3: `needs` and `parts` are refused in a format 1 or 2 file, a file
+  with `parts` takes a merged set's keys and no `needs`, and a file
+  without takes none of them. The loader alone checks a need's rules,
+  one address for one signal, and a merged set's parts, keys and
+  addresses, as the schema's `$comment` lists.

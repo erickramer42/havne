@@ -301,6 +301,12 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
          one_file(kFourPastTheBase, data(sig("oil", "F40D", "e1"), extends)),
          "0.9.0"},
         {"plugin format 2", format2(one_file(kPcm, data(oil))), "0.9.0"},
+        {"signal-file format 3",
+         one_file(kPcm, "{\"havne_signals\": 3, \"signals\": [" + oil + "]}"),
+         "0.9.1"},
+        {"an ECU's name",
+         one_file(R"({"id": "pcm", "rx": "7E8", "name": "Engine"})", data(oil)),
+         "0.9.1"},
         {"a page",
          packed(
              kPcm, R"({"id": "base", "files": ["a.json"]})",
@@ -317,6 +323,14 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
     EXPECT_EQ(least_of_file(file("F", "S", kPcm, oil)), "0.5.0");
     EXPECT_EQ(least_of_file(file("F", "S", kPcm, kGauged)), "0.7.2");
     EXPECT_EQ(least_of_file(file("F", "S", ecus(5), oil)), "0.9.0");
+    EXPECT_EQ(
+        least_of_file(file(
+            "F", "S", R"({"id": "pcm", "rx": "7E8", "name": "Engine"})", oil)),
+        "0.9.1");
+    std::string format3 = file("F", "S", kPcm, oil);
+    format3.replace(format3.find("\"havne_signals\": 1"), 18,
+                    "\"havne_signals\": 3");
+    EXPECT_EQ(least_of_file(format3), "0.9.1");
     EXPECT_EQ(least_of_file(file("F", "S", kFourPastTheBase,
                                  sig("oil", "F40D", "e1"), extends)),
               "0.9.0");

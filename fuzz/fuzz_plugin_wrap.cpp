@@ -96,6 +96,26 @@ answer drop(const std::string& packed, const char* variant)
     return taken(s, out, length);
 }
 
+/* A wrap's or a put's refusal judged by the file's own load (alone_s,
+ * alone_words, alone): the loader's refusal comes back in its words, and
+ * a merged set loads and is refused as one, since one source would stand
+ * for every part's (ADR-0065 section 9). False for any other file */
+bool refused_for_the_file(const answer& a, const ecuio_signal_file_t* alone,
+                          ecuio_status_t alone_s,
+                          const std::string& alone_words)
+{
+    if (alone_s != ECUIO_OK) {
+        check(a.status == alone_s && a.words == alone_words);
+        return true;
+    }
+    if (ecuio_signal_file_part_count(alone) > 0) {
+        check(a.status == ECUIO_ERR_INVALID_ARGUMENT &&
+              a.words.find("is a merged set") != std::string::npos);
+        return true;
+    }
+    return false;
+}
+
 /* The same call again gives the same answer */
 void check_same(const answer& a, const answer& b)
 {
@@ -236,7 +256,7 @@ void put_and_drop(const std::string& packed, uint8_t switches,
     const std::string alone_words = ecuio_last_error_detail();
     std::string after = packed;
     if (added.status == ECUIO_OK) {
-        check(alone_s == ECUIO_OK);
+        check(alone_s == ECUIO_OK && ecuio_signal_file_part_count(alone) == 0);
         const plugin_view now = view_of(added.text);
         check(now.id == before.id && now.name == before.name &&
               now.lineage == before.lineage);
@@ -273,9 +293,8 @@ void put_and_drop(const std::string& packed, uint8_t switches,
                   now.variants.size() == before.variants.size());
         }
         after = added.text;
-    } else if (alone_s != ECUIO_OK) {
-        /* The file's own refusal, in its loader's words */
-        check(added.status == alone_s && added.words == alone_words);
+    } else {
+        refused_for_the_file(added, alone, alone_s, alone_words);
     }
     ecuio_signal_file_free(alone);
 
@@ -383,11 +402,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         ecuio_signal_file_load(first.data(), first.size(), &alone);
     const std::string alone_words = ecuio_last_error_detail();
     if (made.status != ECUIO_OK) {
-        if (alone_s != ECUIO_OK) {
-            check(made.status == alone_s && made.words == alone_words);
-        } else {
-            /* A file that loads wraps, but for one too large or too
-             * deep once it is written out inside a package: only the
+        if (!refused_for_the_file(made, alone, alone_s, alone_words)) {
+            /* Any other file that loads wraps, but for one too large or
+             * too deep once it is written out inside a package: only the
              * words of those two bounds pass, so a variant that reads
              * back as another set stops the run */
             check(made.status == ECUIO_ERR_OUT_OF_MEMORY ||
@@ -397,7 +414,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         ecuio_signal_file_free(alone);
         return 0;
     }
-    check(alone_s == ECUIO_OK);
+    check(alone_s == ECUIO_OK && ecuio_signal_file_part_count(alone) == 0);
     const plugin_view v = view_of(made.text);
     check(v.variants.size() == 1);
     check(v.variants[0].id == ((switches & kVariant) != 0 ? "v2" : "base"));

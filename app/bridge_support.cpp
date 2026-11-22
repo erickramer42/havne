@@ -104,7 +104,7 @@ QString SessionBridge::deliveryText(const DeliveryStats& s)
 // 640 messages, 40 segmented, none dropped, none unusable". Each
 // request's figures are in the recording's latency.csv.
 QString
-SessionBridge::timingText(const ecuio_session_timing_t& t,
+BridgeFormats::timingText(const ecuio_session_timing_t& t,
                           const std::vector<ecuio_request_timing_t>& rows)
 {
     uint32_t asked = 0;
@@ -294,7 +294,7 @@ void SessionBridge::setPickGauges(const QVariantList& cells)
     emit pickGaugesChanged();
 }
 
-std::vector<uint16_t> SessionBridge::gaugeIds(const ecuio_signal_set_t* set,
+std::vector<uint16_t> BridgeFormats::gaugeIds(const ecuio_signal_set_t* set,
                                               const ecuio_signal_file_t* file,
                                               const QVariantList& cells)
 {
@@ -479,12 +479,12 @@ void SessionBridge::pollDefaultPick()
  * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
  * ending brings a new line, which must not read like the last. Static, like
  * sessionInfoText, so test_bridge pins the wording without an adapter. */
-QString SessionBridge::refusalCode(uint8_t service, uint8_t nrc)
+QString BridgeFormats::refusalCode(uint8_t service, uint8_t nrc)
 {
     return QStringLiteral("7F %1 %2").arg(hexByte(service), hexByte(nrc));
 }
 
-QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
+QString BridgeFormats::refusalText(uint8_t service, uint8_t nrc)
 {
     const QString reply = refusalCode(service, nrc);
     const QString name = QString::fromLatin1(cli::nrc_name(nrc));
@@ -492,7 +492,7 @@ QString SessionBridge::refusalText(uint8_t service, uint8_t nrc)
                           : QStringLiteral("Refused: %1 (%2)").arg(name, reply);
 }
 
-QString SessionBridge::refusedUnnamedText(
+QString BridgeFormats::refusedUnnamedText(
     const std::vector<std::pair<uint32_t, uint32_t>>& more)
 {
     QStringList parts;
@@ -505,7 +505,7 @@ QString SessionBridge::refusedUnnamedText(
     return parts.join(QStringLiteral("; "));
 }
 
-QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
+QString BridgeFormats::channelSupportText(const ecuio_channel_support_t& s)
 {
 
     QStringList parts;
@@ -605,7 +605,7 @@ QString SessionBridge::channelSupportText(const ecuio_channel_support_t& s)
 /* A module's session change (ADR-0060), one line per state the CLI's
  * session line reports; the refusal's code by name, as Live's refusals
  * are. Static, so test_bridge pins every state's words. */
-QString SessionBridge::channelSessionText(const ecuio_channel_support_t& s)
+QString BridgeFormats::channelSessionText(const ecuio_channel_support_t& s)
 {
     const QString ecu = QStringLiteral("ECU %1: ").arg(hexId(s.rx_id));
     const QString name = QString::fromLatin1(cli::nrc_name(s.session_nrc));
@@ -651,7 +651,7 @@ QString SessionBridge::channelSessionText(const ecuio_channel_support_t& s)
     }
 }
 
-QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
+QString BridgeFormats::sessionReturnedText(const ecuio_channel_support_t& s)
 {
     if (s.session_asked == 0 || s.session_entries == 0) {
         return QString();

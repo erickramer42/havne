@@ -192,8 +192,9 @@ publish that support already does carries it.
 The simulated ECU's engine node has an extended session and answers
 DIDs D200 to D203 only in it (`7F 22 31` in default), leaves it after
 S3 with no request, answers `3E 00`, and refuses any other
-sub-function `7F 10 12`; its second module (`modules=2`) and a
-profile's nodes have none (`7F 10 12`). The fakes' ECU
+sub-function `7F 10 12`; its second module (`modules=2`) has none
+(`7F 10 12`), nor do a profile's nodes unless `sessions=1` gives them the
+engine node's session (no security access). The fakes' ECU
 (`tests/fake_ecu.h`, which the fake J2534 DLL, the fake ELM327 and the
 vcan ECU answer through) does the same, its modules refusing with a
 knob's code (`ECUIO_FAKE_SESSION_NRC`, default 0x12).
@@ -353,3 +354,78 @@ the appendix of 2026-11-11 gives.
 `SessionControlTest.TheClosesWaitIsTheRequestsDeadlineWithinItsBound`.
 It has run against the simulated bus only: a SocketCAN session that asks
 needs an adapter whose driver offers one-shot mode (BENCH prep #32).
+
+## Appendix: tester present beside the readings (2026-11-22)
+
+Section 2 sends `3E 00` after a quiet `keepalive_ms`. Through an ELM327,
+which asks one module at a time ([ADR-0015](0015-request-engine.md)'s
+appendix of 2026-11-18), a due keep-alive ended the turn holding the
+adapter, so with more modules in the session than a lap's exchanges fit
+in the keep-alive time only `3E 00` went out and no value updated, while
+the link read OK (the pacing model; no car run).
+
+- **Any request keeps the session:** a request restarts S3 (section 2),
+  so a channel with a row due sends the row, and tester present goes
+  when nothing else is due (`ecuio_engine_due` asks it last) or, under the
+  J2534 hold, at its gate before S3 (below).
+  `keepalive_ms` says how soon tester present fills a quiet gap, not how
+  often it goes.
+- **Urgent:** a session is urgent at once while its entry is due, and once
+  entered at `max(keepalive_ms, S3 - 1 s)` after its last request
+  (`ecuio_engine_session_urgent_us`, `ECUIO_ENGINE_S3_MARGIN_US`). Only an
+  urgent session ends another channel's turn (ADR-0015's note of
+  2026-11-22), so a turn stays whole and every module meets its S3 at the
+  hand-over.
+- **A bare keep-alive gives way:** a channel whose only request due is a
+  keep-alive not yet urgent (no rows, a focus that leaves it out, a held
+  quiet channel between its steps) is passed over while another channel
+  has something due, so a picked signal outranks an idle module's tester
+  present.
+- **Too late for S3:** a channel with nothing sent for
+  `ECUIO_ENGINE_S3_LATE_US` (S3 less 250 ms) enters its session again and
+  counts it lost (`session_lost`) in place of `3E 00`. A request that late
+  (one ELM327 exchange through a slow adapter and its link) can reach the
+  module after its S3 ran out, and a module back in the default session
+  answers `3E 00` as well, so tester present would read as a session kept.
+  The J2534 hold's session gate opens 300 ms before S3, before that time
+  (a `static_assert` in `core/src/j2534_hold.h`).
+- **A module that wakes:** a module whose `10 03` went unanswered while
+  it was silent reads in default until a recovery, its extended-only DIDs
+  refused; its first frame after a quiet spell
+  ([ADR-0065](0065-car-sized-profile.md)'s appendix of 2026-11-21) enters
+  the session again. So does one whose session reads entered when that
+  frame comes S3 or more after its last: its session has lapsed or it
+  reset, and a `7F xx 7F` while the channel is out of step (every wait
+  run out) enters nothing again. Heard again within S3 it keeps the
+  session, since a needless `10 03` would lock an unlocked level again.
+- **The hold** ([ADR-0065](0065-car-sized-profile.md)'s appendix of
+  2026-11-18) asks `ecuio_engine_due_session`, the session request alone,
+  at its gate: a row in its place would pass the hold.
+- **The simulated car:** `mock://sim?profile=<name>&sessions=1` gives a
+  profile's modules the extended session (section 7), so the pacing model
+  holds a session on many modules.
+- **The figures** (the pacing model, `?session=03`, modules of four DIDs
+  unless said, the median of the values' intervals and the longest gap):
+  through the MX+, 14 modules at `keepalive_ms` 500 read every 1,164 ms
+  (worst 1,171) where they took 2,884 (worst 5,231); 32 modules of two
+  DIDs at 500 read every 1,311 ms where none had a value in 55 s; 32
+  modules at 2000 read every 2,621 ms (worst 2,646) where they read every
+  2,097 (worst 16,194); a pick of four DIDs beside 31 other modules in the
+  session, about 106 ms. A slow clone's model
+  (uncalibrated) reads 14 modules at 500 every 3,210 ms where nothing
+  came. No session went past S3 or was lost in any shape; J2534 and
+  SocketCAN keep their figures.
+
+`RequestTurnsTest.ARowStandsInForTheKeepAliveOnEveryChannel`,
+`.AStandInKeepsEachTurnWholeUntilItsSessionIsUrgent`,
+`.EverySessionIsKeptWhenTheLapOutlastsS3`, `.AnUrgentSessionEndsAWalk`,
+`.AKeepAliveWithNothingElseGivesWayToADueRow`,
+`.APendingReplyPastTheUrgentTimeLeavesNoSessionKeptByMistake`,
+`SessionControlTest.AKeepAliveTooLateForS3EntersAgain`,
+`RequestQuietTest.AHeldChannelsKeepAliveGivesWayToTheLiveRows`,
+`J2534HoldTest.AHeldChannelsSessionRequestGoesThroughOnlyNearS3`,
+`PacingTest.ASessionIsEnteredOnEachOfSixModules`,
+`.FourteenModulesInTheSessionKeepTheirLapThroughTheMxPlus`,
+`.APickBesideThirteenModulesInTheSessionKeepsItsPaceThroughTheMxPlus`,
+`SimAskTest.TheSessionsKeyGivesAProfilesModulesTheExtendedSession`. No car
+has run it.

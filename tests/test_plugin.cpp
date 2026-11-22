@@ -151,9 +151,9 @@ TEST(PluginTest, ARefusalNamesTheFileAndThePlace)
 
     /* Packed: one file, so the line and column alone */
     const std::string got =
-        packed_refusal(packed(kHead, R"({"havne_signals": 3})"));
+        packed_refusal(packed(kHead, R"({"havne_signals": 4})"));
     EXPECT_EQ(got.rfind("line 1, column ", 0), 0u) << got;
-    EXPECT_NE(got.find("format 3, and this Havne reads formats 1 and 2"),
+    EXPECT_NE(got.find("format 4, and this Havne reads formats 1 to 3"),
               std::string::npos)
         << got;
 }

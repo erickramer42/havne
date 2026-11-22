@@ -797,3 +797,28 @@ add, so a user doesn't build it one gauge at a time.
 > of the same date).
 
 Amended 2026-11-20: a path naming a Windows device (`CON`, `NUL`, `COM1` and the rest, in any case, with any extension, or a part ending in a dot) is refused only where a folder's file is read from disk. A packed plugin's paths are names inside its text and load whatever they are, and the wrap and the put never write one: a data file whose name would be a device is numbered (`data/aux-2.json`).
+
+## Note: what format 3 and the merged set change (2026-11-22)
+
+[ADR-0065](0065-car-sized-profile.md)'s step 4 (its appendix "step 4 as
+built") changes the data tier as follows; the manifest's own format
+number (`havne_plugin`) stays as it is:
+
+- **An ECU's `name`** (1 to 63 bytes) is taken in a manifest of any
+  format, as in a signal file; a plugin that gives one requires core
+  0.9.1.
+- **A variant's written copy** (the appendix "a variant's recording") is
+  of the newest format among the variant's files, and a variant that
+  mixes a format 3 file with format 1 or 2 files is a format 3 set: a
+  format 1 or 2 file's signal named as one of `obd2`'s is refused there,
+  in words that say to give every file format 3.
+- **A data file takes `needs`** (format 3). A key another file of the
+  variant defines is met inside the variant, and the written copy keeps
+  the needs none of its files meets.
+- **A merged set is never a plugin's file.** A data file, a wrap
+  (`ecuio_plugin_wrap`) and a put (`ecuio_plugin_put_variant`) each
+  refuse one, naming the merge of its parts instead: a wrap would move
+  one `source` to the manifest and lose each part's.
+- **A recording of a merged set** writes section 4's `plugin` line once
+  for each part that is a plugin's variant, in merge order, and none for
+  a file read alone.

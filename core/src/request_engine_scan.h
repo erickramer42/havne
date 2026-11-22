@@ -66,6 +66,19 @@ inline void ecuio_engine_row_frames(ecuio_request& q, uint8_t frames)
     q.ran_out = 0;
 }
 
+/* A table row's wait ran out: before any answer it counts one frame and
+ * one more wait run out; past 255 the count goes on from 128, so a
+ * reader's period dividing 128 keeps its rhythm */
+inline void ecuio_engine_row_ran_out(ecuio_request& q)
+{
+    if (q.reply_frames != 0 && q.ran_out == 0) {
+        return;
+    }
+    q.reply_frames = 1;
+    q.ran_out = q.ran_out == UINT8_MAX ? uint8_t{128}
+                                       : static_cast<uint8_t>(q.ran_out + 1);
+}
+
 /* Channel c's rows whose wait ran out before any answer go back to no
  * answer, so their defs judge them again: the module was asleep, not
  * leaving them unanswered */

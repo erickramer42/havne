@@ -60,7 +60,8 @@ constexpr const char* kSignalFileName = "signals.json";
 constexpr size_t kSha256Hex = 64;
 /* "plugin  <id>,<version>,<variant>" after it (ADR-0052 section 4): the
  * plugin variant that decoded the recording, whose merged set the
- * signal file is */
+ * signal file is; one line for each part of a merged set that is a
+ * plugin's variant, in merge order (ADR-0065 section 9) */
 constexpr const char* kPluginKey = "plugin  ";
 /* "conditions  conditions.json,<SHA-256>" after it (ADR-0063 section 8):
  * the set of conditions the session judged, copied beside it */

@@ -24,7 +24,7 @@ endif()
 # --- Core tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
-    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp
+    test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp test_core_merge.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
     test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
     test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
@@ -44,7 +44,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_condition_recording.cpp test_condition_recording_events.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
-    test_security_store_file.cpp)
+    test_security_store_file.cpp test_security_store_lock.cpp
+    test_security_store_owner.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -106,8 +107,20 @@ target_compile_definitions(bench_recording PRIVATE
 )
 app_enable_warnings(bench_recording)
 
+# --- A car-sized set with no car (ADR-0065 "To measure"): a measurement,
+# not in ctest. Qt-free ---
+add_executable(bench_car bench_car.cpp)
+target_include_directories(bench_car PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_link_libraries(bench_car PRIVATE ecuio-core)
+target_compile_definitions(bench_car PRIVATE
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+)
+app_enable_warnings(bench_car)
+
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_file_gauge.cpp test_signal_expr.cpp test_signal_expr_checks.cpp
+    test_signal_file_format3.cpp test_plugin_format3.cpp test_signal_needs.cpp
+    test_signal_merged_text.cpp test_signal_merge.cpp test_signal_merge_bounds.cpp
     test_signal_eval.cpp
     test_signal_keys.cpp
     test_computed_grammar.cpp
@@ -156,11 +169,12 @@ add_executable(test_obd2 test_obd2.cpp
     test_obd2_sim_dids.cpp
     test_obd2_sim_ask.cpp
     test_obd2_focus.cpp
-    test_session_control.cpp
+    test_session_control.cpp test_session_control_late.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
-    test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
-    test_request_quiet.cpp
+    test_request_turns_key.cpp test_request_turns_session.cpp
+    test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
+    test_request_quiet_reports.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp
@@ -1889,7 +1903,11 @@ endif()
 # consumer would hit. It is the only target that compiles headers as C:
 # ISO C11 without compiler extensions, and -pedantic where the compiler
 # has it, so a GNU-only construct in a header warns.
-add_executable(test_c_abi test_c_abi.c)
+set(C_ABI_SOURCES test_c_abi.c test_c_abi_layout.c test_c_abi_conditions.c
+    test_c_abi_core.c test_c_abi_signalfile.c test_c_abi_plugin.c
+    test_c_abi_diag.c test_c_abi_recording.c test_c_abi_exchange.c
+    test_c_abi_frames.c)
+add_executable(test_c_abi ${C_ABI_SOURCES})
 set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
 app_enable_warnings(test_c_abi)
 if(NOT MSVC)
@@ -1907,6 +1925,20 @@ target_link_libraries(test_c_abi PRIVATE
 add_test(NAME c_abi COMMAND test_c_abi)
 set_tests_properties(c_abi PROPERTIES LABELS "abi")
 
+# The structs and calls of a set made of several files (ADR-0065 section
+# 9), in a translation unit of their own: test_c_abi.c is held to its
+# length. Built as test_c_abi is, against the archive and the shared core.
+add_executable(test_c_abi_merge test_c_abi_merge.c)
+set_target_properties(test_c_abi_merge PROPERTIES C_EXTENSIONS OFF)
+app_enable_warnings(test_c_abi_merge)
+if(NOT MSVC)
+    target_compile_options(test_c_abi_merge PRIVATE -pedantic)
+endif()
+target_include_directories(test_c_abi_merge PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+target_link_libraries(test_c_abi_merge PRIVATE ecuio-core)
+add_test(NAME c_abi_merge COMMAND test_c_abi_merge)
+set_tests_properties(c_abi_merge PROPERTIES LABELS "abi")
+
 # The shared core (HAVNE_SHARED_CORE, ADR-0053's appendix "the shared
 # core as built"): test_c_abi.c again, linked against the library rather
 # than the archive, so each call resolves through its export table
@@ -1916,7 +1948,7 @@ set_tests_properties(c_abi PROPERTIES LABELS "abi")
 # everything a header hands out has its release there. Absent, not
 # failing, where the option is off (Android, iOS, a fuzzing tree).
 if(HAVNE_SHARED_CORE)
-    add_executable(test_c_abi_shared test_c_abi.c)
+    add_executable(test_c_abi_shared ${C_ABI_SOURCES})
     set_target_properties(test_c_abi_shared PROPERTIES C_EXTENSIONS OFF)
     app_enable_warnings(test_c_abi_shared)
     if(NOT MSVC)
@@ -1934,6 +1966,23 @@ if(HAVNE_SHARED_CORE)
     endif()
     add_test(NAME c_abi_shared COMMAND test_c_abi_shared)
     set_tests_properties(c_abi_shared PROPERTIES LABELS "abi")
+
+    add_executable(test_c_abi_merge_shared test_c_abi_merge.c)
+    set_target_properties(test_c_abi_merge_shared PROPERTIES C_EXTENSIONS OFF)
+    app_enable_warnings(test_c_abi_merge_shared)
+    if(NOT MSVC)
+        target_compile_options(test_c_abi_merge_shared PRIVATE -pedantic)
+    endif()
+    target_include_directories(test_c_abi_merge_shared PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+    target_link_libraries(test_c_abi_merge_shared PRIVATE ecuio)
+    if(WIN32)
+        add_custom_command(TARGET test_c_abi_merge_shared POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:test_c_abi_merge_shared> $<TARGET_FILE_DIR:test_c_abi_merge_shared>
+            COMMAND_EXPAND_LISTS)
+    endif()
+    add_test(NAME c_abi_merge_shared COMMAND test_c_abi_merge_shared)
+    set_tests_properties(c_abi_merge_shared PROPERTIES LABELS "abi")
 
     if(MSVC)
         # dumpbin ships beside link.exe, in the toolset's own folder (the
@@ -2767,7 +2816,7 @@ find_package(Threads REQUIRED)
 # test_pacing gates the pacing on the model's figures; bench_pacing
 # prints them for docs/performance.md (not in ctest)
 add_executable(test_pacing test_pacing.cpp test_pacing_quiet.cpp
-                           test_pacing_stall.cpp)
+                           test_pacing_session.cpp test_pacing_stall.cpp)
 target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
     ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)

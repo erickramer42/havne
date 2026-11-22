@@ -55,7 +55,7 @@ inline int32_t ecuio_engine_talk_slot(ecuio_engine_channel& ch, uint32_t c)
 }
 
 /* due's lead: true when the floor, a key's window, a one-shot already in,
- * a key, the session or the walk decides, with *r its answer. A key
+ * a key, the session's entry or the walk decides, with *r its answer. A key
  * whose window ended before this turn settles lapsed, and a walk out of
  * budget ends here. No session entry can be due ahead of a key: its
  * window ends with the session's step and inside S3. */
@@ -88,8 +88,8 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
         *r = ECUIO_ENGINE_NONE; /* nothing but the key, not yet offered */
         return true;
     }
-    /* ADR-0060: the session first; while 10 03 is due nothing else goes */
-    if (ecuio_engine_session_due(e, c, now_us)) {
+    /* ADR-0060: the entry first; while 10 03 is due nothing else goes */
+    if (ecuio_engine_session_entry_due(e, c, now_us)) {
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }
@@ -221,7 +221,9 @@ inline bool ecuio_engine_take_scan(ecuio_request_engine* e, uint32_t c)
 
 /* due's ask for held channel c with no rows (request_engine_quiet.h's
  * rule 3): once its step has passed, an unanswered item into the
- * one-shot, its outcome standing until the item settles again */
+ * one-shot, its outcome standing until the item settles again; a
+ * diagnostics item marked diag_step, which Read again and a clear wait
+ * out (ecuio_engine_diagnose_again, ecuio_engine_clear) */
 inline int32_t ecuio_engine_due_quiet_item(ecuio_request_engine* e, uint32_t c,
                                            int64_t now_us)
 {
@@ -236,6 +238,7 @@ inline int32_t ecuio_engine_due_quiet_item(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_take_ident_at(e, c, i);
     } else if (i - ch.ident_count < ch.diag_count) {
         ecuio_engine_take_diag_at(e, c, i - ch.ident_count);
+        ch.diag_step = true; /* a settled report asked again */
     } else {
         ecuio_engine_take_scan_at(e, c, i - ch.ident_count - ch.diag_count);
     }
@@ -327,11 +330,12 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
  * in the one-shot (its write failed), then for a key, and nothing more
- * while a key's window holds the channel; then while its walk has a bitmap
+ * while a key's window holds the channel; then for the session's entry;
+ * then while its walk has a bitmap
  * to ask, then, taking turns with the rotation, for a clear's next
  * request, the next identification item, then the next diagnostics
  * item, then a talk and the next scanned DID in turns, else the next
- * request of its rotation, or ECUIO_ENGINE_NONE while
+ * request of its rotation, else its keep-alive, or ECUIO_ENGINE_NONE while
  * one is outstanding, before the floor, or when there is nothing to
  * send; the rotation's own turn also waits for a focus's next sweep. A
  * walk out of budget ends here. A quiet channel held back
@@ -358,10 +362,33 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     if (r >= 0) {
         return r;
     }
-    if (held && e->chans[c].requests == 0) {
-        return ecuio_engine_due_quiet_item(e, c, now_us);
+    r = held && e->chans[c].requests == 0
+            ? ecuio_engine_due_quiet_item(e, c, now_us)
+            : ecuio_engine_due_rotation(e, c, now_us, held);
+    if (r == ECUIO_ENGINE_NONE && ecuio_engine_keepalive_due(e, c, now_us)) {
+        return ECUIO_ENGINE_ONCE; /* nothing stood in for it */
     }
-    return ecuio_engine_due_rotation(e, c, now_us, held);
+    return r;
+}
+
+/* Channel c's session request alone (the J2534 hold's gate, where a row
+ * in its place would pass the hold): a one-shot already in, else the
+ * entry, else the keep-alive; ECUIO_ENGINE_NONE while one is outstanding,
+ * before the floor or with neither due */
+inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
+                                        int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
+        ch.sessioning || ch.talk.out ||
+        ecuio_engine_session_entry_due(e, c, now_us) ||
+        ecuio_engine_keepalive_due(e, c, now_us)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    return ECUIO_ENGINE_NONE;
 }
 
 /* Whether channel c has anything to send but its rotation: what a

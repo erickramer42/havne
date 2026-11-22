@@ -6,6 +6,8 @@
 #include "j2534_hold_support.h"
 
 #include <algorithm>
+#include <functional>
+#include <vector>
 
 using namespace j2534_hold_test;
 
@@ -303,6 +305,120 @@ int64_t worst_wake(int64_t sleep_us, int64_t first_us)
 }
 
 } // namespace
+
+namespace {
+
+/* Channel 0's `long_rows` rows of three frames beside channel 1's 8
+ * one-frame rows, under the hold with the VX's loss, for 20 s: channel 1
+ * answers its rows for which answers(k, now) holds and nothing to the
+ * rest */
+struct BesideUnanswered {
+    Bus b;
+    BesideUnanswered(uint32_t long_rows,
+                     std::function<bool(unsigned, int64_t)> answers)
+    {
+        EXPECT_TRUE(ecuio_engine_init(&b.e, 2));
+        b.e.gap_us = 5 * kMs;
+        for (uint32_t c = 0; c < 2; ++c) {
+            for (uint32_t k = 0; k < (c == 0 ? long_rows : 8u); ++k) {
+                const uint8_t did[3] = {0x22, static_cast<uint8_t>(0x10 + c),
+                                        static_cast<uint8_t>(k)};
+                EXPECT_EQ(ecuio_engine_add(&b.e, c, did, 3),
+                          ecuio_engine_add_result::added);
+                b.e.requests[b.e.count - 1].long_defs = c == 0 ? 1 : 0;
+            }
+        }
+        b.lose = true;
+        Bus* bus = &b;
+        b.reply_of = [bus, answers](uint32_t c, const ecuio_request& q) {
+            if (c == 0) {
+                return did_reply(q, 17);
+            }
+            return answers(q.bytes[2], bus->now) ? did_reply(q, 2) : Bytes{};
+        };
+        b.until(20000 * kMs);
+    }
+
+    /* The median of channel 0's rows' median intervals from 5 s on */
+    int64_t long_rows_interval() const
+    {
+        std::vector<std::vector<int64_t>> at(256);
+        for (const Exchange& x : b.exchanges) {
+            if (x.c == 0 && x.sent_us >= 5000 * kMs) {
+                at[x.bytes[2]].push_back(x.sent_us);
+            }
+        }
+        std::vector<int64_t> medians;
+        for (const std::vector<int64_t>& t : at) {
+            std::vector<int64_t> gaps;
+            for (size_t i = 1; i < t.size(); ++i) {
+                gaps.push_back(t[i] - t[i - 1]);
+            }
+            if (!gaps.empty()) {
+                std::sort(gaps.begin(), gaps.end());
+                medians.push_back(gaps[gaps.size() / 2]);
+            }
+        }
+        std::sort(medians.begin(), medians.end());
+        return medians.empty() ? INT64_MAX : medians[medians.size() / 2];
+    }
+};
+
+} // namespace
+
+/* A module of 8 rows that answers every second one, beside 8, 20 or 40
+ * long rows: a request on the bus that its module has never answered
+ * (its wait ran out before any answer) holds no chosen request, so the
+ * long rows keep about their pace beside a module that answers all 8,
+ * and no reply is lost */
+TEST(J2534HoldTest, RowsAModuleNeverAnswersHoldNoChosenRequest)
+{
+    for (const uint32_t rows : {8u, 20u, 40u}) {
+        SCOPED_TRACE(rows);
+        const BesideUnanswered all(rows,
+                                   [](unsigned, int64_t) { return true; });
+        const BesideUnanswered half(
+            rows, [](unsigned k, int64_t) { return k % 2 == 0; });
+        const int64_t paced = all.long_rows_interval();
+        ASSERT_NE(paced, INT64_MAX);
+        EXPECT_LE(half.long_rows_interval(), 2 * paced)
+            << half.long_rows_interval() / kMs << " ms against " << paced / kMs;
+        EXPECT_EQ(half.b.lost, 0u);
+    }
+}
+
+/* A row its module begins to answer at 6 s, its wait run out on every
+ * ask before: until its next ask under the hold (one in
+ * J2534_HOLD_PROBE_EVERY) its replies can come under a chosen segmented
+ * reply and be lost; that ask's answer ends its count, so from then it
+ * holds the bus as any row and nothing more is lost */
+TEST(J2534HoldTest, ARowThatStartsAnsweringIsReadByItsNextAskUnderTheHold)
+{
+    static constexpr int64_t wakes = 6000 * kMs;
+    const BesideUnanswered b(20, [](unsigned k, int64_t now) {
+        return k % 2 == 0 || (k == 1 && now >= wakes);
+    });
+    int64_t first = INT64_MAX;
+    uint32_t before = 0;
+    for (const Exchange& x : b.b.exchanges) {
+        if (x.c != 1 || x.bytes[2] != 1 || x.sent_us < wakes) {
+            continue;
+        }
+        if (x.answered && first == INT64_MAX) {
+            first = x.sent_us;
+        }
+        before += first == INT64_MAX ? 1u : 0u;
+    }
+    ASSERT_NE(first, INT64_MAX) << "the row never answered";
+    EXPECT_LE(before, J2534_HOLD_PROBE_EVERY - 1) << "asks lost after 6 s";
+    EXPECT_LE(b.b.lost, J2534_HOLD_PROBE_EVERY - 1);
+    for (const Exchange& x : b.b.exchanges) {
+        if (x.c == 1 && x.bytes[2] == 1 && x.sent_us > first &&
+            x.ended_us != INT64_MAX) {
+            EXPECT_TRUE(x.answered) << "an ask at " << x.sent_us / kMs;
+        }
+    }
+}
 
 /* A module heard and then asleep beside long replies (the ignition-off
  * shape) is quiet; each of its steps is a probe under the hold, so it is

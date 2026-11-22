@@ -134,6 +134,10 @@ struct bench_result {
     cli::SummaryTally tally{nullptr};
     std::vector<int64_t> sent_us;
     std::vector<uint32_t> sent_chan; /* each request's channel */
+    std::vector<uint8_t> sent_sid;   /* and its service */
+    /* each channel's report at the run's end, as its worker publishes it
+     * (the session, ADR-0060's state and counts among the rest) */
+    std::vector<ecuio_channel_support_t> support;
     uint64_t timeouts = 0;
     uint64_t cuts = 0;    /* ELM327: replies the prompt ended early */
     uint64_t headers = 0; /* ELM327: AT SH switches */
@@ -463,6 +467,13 @@ inline bench_result bench::run()
             break;
         }
     }
+    for (uint32_t c = 0; c < m_engine->chan_count; ++c) {
+        uint32_t published = m_engine->chans[c].generation + 1;
+        ecuio_publish_support(m_session, *m_engine, c, m_rx[c], published);
+        ecuio_channel_support_t s{};
+        (void)ecuio_session_get_channel_support(m_session, c, &s);
+        m_result.support.push_back(s);
+    }
     return std::move(m_result);
 }
 
@@ -533,6 +544,7 @@ inline void bench::send(uint32_t c, int32_t r, int64_t now)
     m_flights.push_back(std::move(f));
     m_result.sent_us.push_back(now);
     m_result.sent_chan.push_back(c);
+    m_result.sent_sid.push_back(len > 0 ? pdu[0] : 0);
     ++m_result.asked[c];
     at(now, request, static_cast<uint32_t>(m_flights.size() - 1));
 }

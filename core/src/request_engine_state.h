@@ -53,7 +53,12 @@ constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
 /* Session control (ADR-0060): the one session core enters, the one a
  * close returns to, and tester present. ISO 14229-2's S3 server time is
  * 5 s; tester present goes after a quiet ECUIO_ENGINE_KEEPALIVE_US by
- * default, and a channel quiet for S3 has lost its session. */
+ * default. A session is urgent (an adapter's turns hand over for it) S3
+ * less the margin after its last request, or at the keep-alive's time
+ * when that is later. A channel quiet for ECUIO_ENGINE_S3_LATE_US is
+ * entered again: a request that late (one ELM327 exchange through a slow
+ * adapter and its link) can reach the ECU past its S3, and a module back
+ * in default answers 3E 00 too. */
 constexpr uint8_t ECUIO_SESSION_DEFAULT = 0x01;
 constexpr uint8_t ECUIO_SESSION_EXTENDED = 0x03;
 constexpr uint8_t ECUIO_TESTER_PRESENT = 0x3E;
@@ -62,9 +67,21 @@ constexpr int64_t ECUIO_ENGINE_KEEPALIVE_US = 2000000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MIN_US = 500000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MAX_US = 4500000;
 constexpr int64_t ECUIO_ENGINE_S3_US = 5000000;
-static_assert(ECUIO_KEY_WINDOW_SESSION_US == ECUIO_ENGINE_S3_US - 1000000,
+constexpr int64_t ECUIO_ENGINE_S3_MARGIN_US = 1000000;
+static_assert(ECUIO_KEY_WINDOW_SESSION_US ==
+                  ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US,
               "a key sent inside its window reaches the ECU a second "
               "before S3 runs out");
+static_assert(ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US <=
+                  ECUIO_ENGINE_KEEPALIVE_MAX_US,
+              "an urgent session hands over no later than the longest "
+              "keep-alive's time");
+constexpr int64_t ECUIO_ENGINE_S3_LATE_US = ECUIO_ENGINE_S3_US - 250000;
+static_assert(ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US <
+                      ECUIO_ENGINE_S3_LATE_US &&
+                  ECUIO_ENGINE_KEEPALIVE_MAX_US < ECUIO_ENGINE_S3_LATE_US,
+              "an urgent session and the longest keep-alive go before a "
+              "request would come too late");
 
 /* A channel's session is one of core.h's ECUIO_SESSION_STATE_*; a module
  * that loses it to 7E or 7F ECUIO_SESSION_LOSSES_MAX times within the
@@ -162,9 +179,10 @@ struct ecuio_request {
     uint8_t reply_frames; /* a table row's last answer in CAN frames (a
                              negative one, or a wait run out before any,
                              is one), 0 before any (reply_segmented) */
-    uint8_t ran_out;      /* 1: reply_frames is a wait run out before any
-                             answer, which a recovery or its module's
-                             waking takes back (ecuio_engine_forget_ran_out) */
+    uint8_t ran_out;      /* waits run out in a row before any answer
+                             (reply_frames then 1), 0 once answered; a
+                             recovery or its module's waking takes them
+                             back (ecuio_engine_forget_ran_out) */
     uint8_t long_defs;    /* 1: a def it was enrolled for reads past a
                              Single Frame (ecuio_engine_def_long) */
 };
@@ -251,6 +269,8 @@ struct ecuio_engine_channel {
     uint32_t diag_count = 0;     /* items listed; 0 = not diagnosing */
     uint32_t diag_pending = 0;   /* unasked items */
     bool diagnosing = false;     /* the one-shot is an item */
+    bool diag_step = false;      /* that item is a quiet step's: no read */
+    bool diag_again = false;     /* Read again waits for its settle */
     uint32_t diag_index = 0;     /* the item out, while diagnosing */
     uint8_t freeze_bits[4] = {}; /* 02 00 00's answer: PIDs 01 to 20 */
     ecuio_channel_diagnostics_t diag = {}; /* the report, but rx_id */

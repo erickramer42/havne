@@ -2,7 +2,7 @@
 // Testing: used by test_wasm_check.cpp, test_sandbox.cpp and test_sandbox_budget.cpp
 //
 // A well-formed module and its wanted export, the check's refusal as a
-// string, and an instance that frees itself.
+// string, and a loaded module and an instance that free themselves.
 
 #ifndef ECUIO_TESTS_SANDBOX_CASES_H
 #define ECUIO_TESTS_SANDBOX_CASES_H
@@ -60,17 +60,40 @@ inline std::string refusal(const module& m, const wanted_export* wants = kAdd,
     return refusal(m.build(), wants, count);
 }
 
+/* A loaded module and what its load said; let go at the end */
+struct Loaded {
+    ecuio_wasm::loaded* m = nullptr;
+    ecuio_status_t status = ECUIO_OK;
+    char why[ecuio_wasm::REFUSAL_MAX] = {};
+
+    Loaded(const module& code, const wanted_export* wants, size_t count)
+    {
+        const bytes built = code.build();
+        status = ecuio_wasm::load_module(built.data(), built.size(), wants,
+                                         count, &m, why);
+    }
+    ~Loaded() { ecuio_wasm::free_module(m); }
+    Loaded(const Loaded&) = delete;
+    Loaded& operator=(const Loaded&) = delete;
+};
+
 /* An instance and what its making said; freed at the end */
 struct Made {
     ecuio_wasm::instance* i = nullptr;
     ecuio_status_t status = ECUIO_OK;
     char why[ecuio_wasm::REFUSAL_MAX] = {};
 
+    /* of a module of its own */
     Made(const module& m, const wanted_export* wants, size_t count)
     {
         const bytes code = m.build();
         status = ecuio_wasm::make_instance(code.data(), code.size(), wants,
                                            count, &i, why);
+    }
+    /* of a loaded module */
+    explicit Made(const Loaded& l)
+    {
+        status = ecuio_wasm::make_instance(l.m, &i, why);
     }
     ~Made() { ecuio_wasm::free_instance(i); }
     Made(const Made&) = delete;

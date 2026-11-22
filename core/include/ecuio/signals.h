@@ -657,8 +657,13 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
 #define ECUIO_SIGNAL_SET_MAX_SIGNALS  16384u
 /* The formats this core reads, a file's "havne_signals": the newest and
  * the oldest. Format 2 adds the computed grammar's functions,
- * comparisons and conditional; a format 1 file is held to format 1. */
-#define ECUIO_SIGNAL_FILE_FORMAT        2u
+ * comparisons and conditional; a format 1 file is held to format 1.
+ * Format 3 (ADR-0065 section 9) keeps format 2's grammar and changes
+ * what a file means: a name is a label and may repeat, a signal named as
+ * a base def is a second signal of that name (in formats 1 and 2 it
+ * replaces the base def), and two of the file's own signals at one
+ * address are refused. */
+#define ECUIO_SIGNAL_FILE_FORMAT        3u
 #define ECUIO_SIGNAL_FILE_FORMAT_OLDEST 1u
 
 typedef struct ecuio_signal_file ecuio_signal_file_t;
@@ -699,8 +704,12 @@ const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file)
 
 /* The file's "name", and the profile name it registers under:
  * "user." and the name in lower case, every run of other characters a
- * single '-' ("Daily driver extras" -> "user.daily-driver-extras").
- * Valid until ecuio_signal_file_free; "" for NULL. */
+ * single '-' ("Daily driver extras" -> "user.daily-driver-extras"). A
+ * merged set's is "merged." and 16 hex digits, the start of the SHA-256
+ * of "obd2" and a newline when it extends obd2, then each part's profile
+ * name and a newline, in the parts' order: the same for the same parts
+ * in the same order wherever they are merged, and nothing of what they
+ * hold. Valid until ecuio_signal_file_free; "" for NULL. */
 const char* ecuio_signal_file_name(const ecuio_signal_file_t* file);
 const char* ecuio_signal_file_profile(const ecuio_signal_file_t* file);
 
@@ -710,12 +719,16 @@ const char* ecuio_signal_file_extends(const ecuio_signal_file_t* file);
 
 /* A signal of the file by its "key": its def in the set, or NULL for a
  * key the file doesn't hold or a NULL argument. A base set's signals
- * (extends) have no key here. */
+ * (extends) have no key here. In a merged set a key a later part's
+ * signal took the place of ("replaced") finds the signal that stands
+ * for it. */
 const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file,
                                                  const char* key);
 
 /* The "key" of a def of the file's own: the inverse of
- * ecuio_signal_file_find, by the def's address in the file's set. ""
+ * ecuio_signal_file_find for the def's own key (never one it replaced:
+ * ecuio_signal_file_replaced_keys), by the def's address in the file's
+ * set. ""
  * for a base set's def (extends), a def that isn't the file's (another
  * set's, or a copy), or a NULL argument. Valid until
  * ecuio_signal_file_free. */
@@ -753,8 +766,8 @@ typedef struct ecuio_expr_check {
                                  to there: the grammar is ASCII); 0 when
                                  the expression compiles */
     uint32_t format;          /* the oldest "havne_signals" whose loader
-                                 takes it, ECUIO_SIGNAL_FILE_FORMAT_OLDEST
-                                 to ECUIO_SIGNAL_FILE_FORMAT; 0 refused */
+                                 takes it: 1 or 2, since no later format
+                                 changes the grammar; 0 refused */
     uint32_t depth;           /* its chain's levels: 1 reading no computed
                                  signal, to ECUIO_COMPUTED_MAX_DEPTH; 0
                                  refused */
@@ -806,7 +819,10 @@ _Static_assert(offsetof(ecuio_expr_check_t, program) == 40,
  * a NULL expr with a length. ECUIO_ERR_OUT_OF_MEMORY. A caller zeroes
  * out and sets struct_size first, so at tells the two refusals apart.
  * A plugin variant's file (ecuio_plugin_variant_file) is checked the
- * same.
+ * same. An expression naming a key the file needs from another
+ * (ecuio_signal_file_needs), or a signal left out for one, is refused
+ * in words that say so: it is checked against the set the files make
+ * together.
  *
  * Not judged: the signal's other members (its name, which can put a new
  * signal in a base def's place, its unit, gauge and max_age) and the
@@ -1017,8 +1033,12 @@ ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
 
 /* ecuio_signal_source_t's flags. Values are append-only. SHARE_ALIKE: the
  * license is Creative Commons' share-alike, so whoever passes the signals
- * on keeps the license and this source with them. */
+ * on keeps the license and this source with them. MERGED: the file is a
+ * set made of several parts, and this source says only that: where its
+ * signals come from, and share-alike, are each part's
+ * (ecuio_signal_file_part_source), never the whole file's. */
 #define ECUIO_SOURCE_SHARE_ALIKE 0x1u
+#define ECUIO_SOURCE_MERGED      0x2u
 
 /* A file's "source" as it wrote it: name always, each other text "" when
  * not given (none holds a NUL). A plugin variant's file holds its first
@@ -1075,6 +1095,63 @@ ecuio_status_t ecuio_signal_file_source(const ecuio_signal_file_t* file,
  * reads. */
 const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
                                    size_t* length);
+
+/* ---- A file's modules (ADR-0065 section 9) ---- */
+
+/* No part: a def, a module or a note that belongs to none */
+#define ECUIO_SIGNAL_PART_NONE 0xFFFFFFFFu
+
+/* ecuio_signal_module_t's flags. Values are append-only. BASE: a channel
+ * of the set the file extends that no "ecus" entry of the file names. */
+#define ECUIO_MODULE_BASE 0x1u
+
+/* One module of a file's set, as its "ecus" entry names it */
+typedef struct ecuio_signal_module {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                             out: core's own, the bytes filled */
+    uint32_t flags;       /* ECUIO_MODULE_*; any other bit zero */
+    uint32_t rx_id;       /* the ID it answers on */
+    uint32_t tx_id;       /* the ID it is asked on */
+    uint32_t part;        /* in a merged set, the part whose id stands
+                             for the module; else ECUIO_SIGNAL_PART_NONE */
+    uint32_t reserved[5]; /* zero */
+    char id[32];          /* its entry's "id"; "" with ECUIO_MODULE_BASE */
+    char name[64];        /* its entry's "name", a label for a screen; ""
+                             when the entry gives none */
+} ecuio_signal_module_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_module_t) == 136,
+              "ecuio_signal_module_t size is ABI");
+static_assert(offsetof(ecuio_signal_module_t, part) == 16,
+              "module part offset is ABI");
+static_assert(offsetof(ecuio_signal_module_t, id) == 40,
+              "module id offset is ABI");
+static_assert(offsetof(ecuio_signal_module_t, name) == 72,
+              "module name offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_module_t) == 136,
+               "ecuio_signal_module_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, part) == 16,
+               "module part offset is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, id) == 40,
+               "module id offset is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, name) == 72,
+               "module name offset is ABI");
+#endif
+
+/* The module at index among the file's set's channels
+ * (ecuio_signal_file_set's channel_count, the index a session of that
+ * set gives ecuio_session_get_module), into out: its IDs, and the id and
+ * name the file's "ecus" entry gives it (a plugin variant's: the
+ * manifest's entry). ECUIO_ERR_NULL_ARGUMENT for a NULL file or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, out untouched, for an index at or past the
+ * count and for a struct_size under the struct's; each with a line in
+ * ecuio_last_error_detail(). Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_module(const ecuio_signal_file_t* file,
+                                        uint32_t index,
+                                        ecuio_signal_module_t* out);
 
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
@@ -1173,6 +1250,270 @@ ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
                                      const ecuio_signal_key_t* keys,
                                      uint32_t count, const char* text_utf8,
                                      uint32_t* index);
+
+/* ---- A merged set's parts (ADR-0065 section 9) ----
+ * A set made of several files read together, in the order given: its
+ * written form is a format 3 file with "parts", which names each part,
+ * gives every signal the part it came from and keeps, as a signal's
+ * "replaced", each key a later part's signal took the place of. A file
+ * with no "parts" has none, and every call below says so. */
+
+#define ECUIO_MERGE_MAX_PARTS 16u /* a merged set's most parts */
+
+/* ecuio_signal_part_t's flags. Values are append-only. PLUGIN: the part
+ * is a plugin's variant, and plugin_id, plugin_version and
+ * plugin_variant name it. */
+#define ECUIO_PART_PLUGIN 0x1u
+
+typedef struct ecuio_signal_part {
+    uint32_t struct_size;  /* in: the caller's sizeof, at least this
+                              one's; out: core's own, the bytes filled */
+    uint32_t flags;        /* ECUIO_PART_*; any other bit zero */
+    uint32_t format;       /* the part's own "havne_signals" */
+    uint32_t signal_count; /* its signals in this set: none when every
+                              one was replaced or left out */
+    uint32_t module_count; /* the modules those signals read */
+    uint32_t reserved[5];  /* zero */
+    char profile[64];      /* the profile the part registers under alone */
+    char name[64];         /* the part's own "name" */
+    char plugin_id[32];    /* "" without ECUIO_PART_PLUGIN, as the next two */
+    char plugin_version[16];
+    char plugin_variant[32];
+} ecuio_signal_part_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_part_t) == 248,
+              "ecuio_signal_part_t size is ABI");
+static_assert(offsetof(ecuio_signal_part_t, profile) == 40,
+              "part profile offset is ABI");
+static_assert(offsetof(ecuio_signal_part_t, plugin_id) == 168,
+              "part plugin_id offset is ABI");
+static_assert(offsetof(ecuio_signal_part_t, plugin_variant) == 216,
+              "part plugin_variant offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_part_t) == 248,
+               "ecuio_signal_part_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_part_t, profile) == 40,
+               "part profile offset is ABI");
+_Static_assert(offsetof(ecuio_signal_part_t, plugin_id) == 168,
+               "part plugin_id offset is ABI");
+_Static_assert(offsetof(ecuio_signal_part_t, plugin_variant) == 216,
+               "part plugin_variant offset is ABI");
+#endif
+
+/* How many parts the file is made of: 0 for a file with no "parts" and
+ * for NULL */
+uint32_t ecuio_signal_file_part_count(const ecuio_signal_file_t* file);
+
+/* The part at index, in merge order, into out.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, out untouched, for an index at or past the
+ * count and for a struct_size under the struct's, each with a line in
+ * ecuio_last_error_detail(). Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_part(const ecuio_signal_file_t* file,
+                                      uint32_t index, ecuio_signal_part_t* out);
+
+/* The source of the part at index, as the part's own file gave it, with
+ * its own ECUIO_SOURCE_SHARE_ALIKE: what a front end reads to say which
+ * signals carry a license on. The contract is ecuio_signal_file_part's,
+ * over ecuio_signal_source_t. */
+ecuio_status_t ecuio_signal_file_part_source(const ecuio_signal_file_t* file,
+                                             uint32_t index,
+                                             ecuio_signal_source_t* out);
+
+/* The part a def of the file's set came from, its index.
+ * ECUIO_SIGNAL_PART_NONE for a base set's def (extends), a def of a file
+ * with no "parts", a def that isn't the file's (another set's, or a
+ * copy) and a NULL argument. A signal that replaced another's is its own
+ * part's. */
+uint32_t ecuio_signal_file_def_part(const ecuio_signal_file_t* file,
+                                    const ecuio_signal_def_t* def);
+
+/* The keys def stands for besides its own: those of the signals it took
+ * the place of ("replaced"), which ecuio_signal_file_find still answers
+ * with def. By the serial ports' contract (serial.h): *count is all of
+ * them, the first capacity are copied, and a capacity of 0 with keys
+ * NULL asks for the count; none for a def that replaced nothing or isn't
+ * the file's. ECUIO_ERR_NULL_ARGUMENT for a NULL file, def or count, or
+ * NULL keys with a capacity. Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_replaced_keys(const ecuio_signal_file_t* file,
+                                               const ecuio_signal_def_t* def,
+                                               ecuio_signal_key_t* keys,
+                                               uint32_t capacity,
+                                               uint32_t* count);
+
+/* ---- What a file needs, and what a load left out (ADR-0065 section 9) ----
+ * A format 3 file's "needs" lists keys its expressions read that another
+ * file provides. Loaded alone, each computed signal reading a needed key
+ * is judged whole and then left out of the set with a note, and so is
+ * each signal computed from it; the rest of the file reads as written. */
+
+/* The file's "needs" as written, in their order, by the serial ports'
+ * contract (serial.h): *count is all of them, the first capacity are
+ * copied, each zeroed past its text, and a capacity of 0 with keys NULL
+ * asks for the count. None for a file with no "needs".
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file or count, or NULL keys with a
+ * capacity. Any thread may call it while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_needs(const ecuio_signal_file_t* file,
+                                       ecuio_signal_key_t* keys,
+                                       uint32_t capacity, uint32_t* count);
+
+/* A note's kinds. Values are append-only. A load alone leaves only
+ * SIGNAL_LEFT_OUT; the rest are a merge's (ecuio_signal_file_merge). */
+/* A later part's signal reads an earlier one's address and took its place */
+#define ECUIO_NOTE_REPLACED_BY_ADDRESS 1u
+/* A later part's signal has an earlier one's key and took its place */
+#define ECUIO_NOTE_REPLACED_BY_KEY 2u
+/* A signal's own key was one another kept for a signal it replaced */
+#define ECUIO_NOTE_KEY_TAKEN 3u
+/* A signal its part read in an obd2 signal's place is read beside it:
+ * def is the signal, base_def obd2's */
+#define ECUIO_NOTE_BESIDE_BASE 4u
+/* A part's ECU id was another module's and took a suffix */
+#define ECUIO_NOTE_MODULE_RENAMED 5u
+/* A part's ECU isn't in the set, nor the signals that read it */
+#define ECUIO_NOTE_MODULE_LEFT_OUT 6u
+/* No signal of a part is in the set */
+#define ECUIO_NOTE_PART_LEFT_OUT 7u
+/* A signal isn't in the set */
+#define ECUIO_NOTE_SIGNAL_LEFT_OUT 8u
+
+/* A note's room for its sentence: its bytes, the NUL, the rest zero */
+#define ECUIO_NOTE_TEXT_LEN 384u
+
+/* One thing a load or a merge did that its files didn't say outright,
+ * for a front end to show: a kind to fold the notes by and a sentence in
+ * words, which names each signal with its part */
+typedef struct ecuio_signal_note {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                             out: core's own, the bytes filled */
+    uint32_t kind;        /* ECUIO_NOTE_* */
+    uint32_t part;        /* the part the note is about: the replacing,
+                             taking or left-out signal's, the module's;
+                             ECUIO_SIGNAL_PART_NONE in a file with none */
+    uint32_t other_part;  /* the part of the signal that was replaced or
+                             lost the key; else ECUIO_SIGNAL_PART_NONE */
+    uint32_t def;         /* the def the note is about, its place in the
+                             set: the signal that stands where the note's
+                             was; UINT32_MAX for what isn't in the set */
+    uint32_t count;       /* a left-out module's or part's signals; else 0 */
+    uint32_t base_def;    /* BESIDE_BASE: the obd2 def the note's signal is
+                             read beside, its place in the set; else
+                             UINT32_MAX */
+    uint32_t reserved[3]; /* zero */
+    char text[ECUIO_NOTE_TEXT_LEN]; /* one line, UTF-8, no control
+                                       character */
+} ecuio_signal_note_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_note_t) == 424,
+              "ecuio_signal_note_t size is ABI");
+static_assert(offsetof(ecuio_signal_note_t, def) == 16,
+              "note def offset is ABI");
+static_assert(offsetof(ecuio_signal_note_t, base_def) == 24,
+              "note base_def offset is ABI");
+static_assert(offsetof(ecuio_signal_note_t, text) == 40,
+              "note text offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_note_t) == 424,
+               "ecuio_signal_note_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, def) == 16,
+               "note def offset is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, base_def) == 24,
+               "note base_def offset is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, text) == 40,
+               "note text offset is ABI");
+#endif
+
+/* How many notes the file's load, or the merge that made it, left; 0 for
+ * NULL. A merged set read back from its text has none: the notes are the
+ * merge's, not the set's. */
+uint32_t ecuio_signal_file_note_count(const ecuio_signal_file_t* file);
+
+/* The note at index, in the order the load or the merge made them, into out.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, out untouched, for an index at or past the
+ * count and for a struct_size under the struct's, each with a line in
+ * ecuio_last_error_detail(); ECUIO_ERR_OUT_OF_MEMORY. Any thread may
+ * call it while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_note(const ecuio_signal_file_t* file,
+                                      uint32_t index, ecuio_signal_note_t* out);
+
+/* ---- Signal files merged into one set (ADR-0065 section 9) ---- */
+
+/* ecuio_merge_options_t's flags. Values are append-only. BASE_OBD2: the
+ * set extends obd2 even when no part does. */
+#define ECUIO_MERGE_BASE_OBD2 0x1u
+
+typedef struct ecuio_merge_options {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* ECUIO_MERGE_*; any other bit is refused */
+    uint32_t reserved[6]; /* zero */
+} ecuio_merge_options_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_merge_options_t) == 32,
+              "ecuio_merge_options_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_merge_options_t) == 32,
+               "ecuio_merge_options_t size is ABI");
+#endif
+
+/* Merges count loaded files (1 to ECUIO_MERGE_MAX_PARTS: signal files,
+ * plugin variants' files) into one set, a new file in *out, freed with
+ * ecuio_signal_file_free. It only reads the parts and keeps nothing of
+ * them, so the result outlives them. The set extends obd2 when a part
+ * does or options asks; options NULL asks nothing.
+ *
+ * The parts are read in the order given, a later one over an earlier:
+ * - A signal with an earlier part's signal's key takes its place. So
+ *   does one reading an earlier part's signal's address
+ *   (ecuio_signal_address_key), and it keeps that signal's key beside its
+ *   own (ecuio_signal_file_replaced_keys), so what named the earlier
+ *   signal reads the later. One matching both ways replaces both. Any
+ *   other signal is added at the end. A name replaces nothing, and two
+ *   signals may share one.
+ * - No obd2 signal is replaced: a part's signal at an obd2 signal's
+ *   address, or of its name, is read beside it, and "obd2.<key>" in any
+ *   part's expression reads obd2's.
+ * - ECUs at the same reply and request IDs are one module, under the
+ *   earliest part's id and the earliest name given. An id another module
+ *   holds takes "_2" ("_3" and on). Left out, each with a note: an ECU
+ *   whose reply ID another module answers under another request ID, an
+ *   ECU past ECUIO_MAX_CHANNELS, and a part whose IDs are of the other
+ *   width than the set's.
+ * - A computed signal is compiled against every part's keys, so a key a
+ *   part "needs" is met by the part that defines it. One that then reads
+ *   a key no signal has, a text, or a signal left out, names a computed
+ *   signal in "max_age", sits on a circle or sits past
+ *   ECUIO_COMPUTED_MAX_DEPTH is left out with a note, and so is each
+ *   signal computed from it.
+ *
+ * The result is the set its own text loads to (ecuio_signal_file_text,
+ * read with ECUIO_SIGNAL_FILE_LOAD_SET): a format 3 file with "parts".
+ * Its profile is "merged." and 16 hex digits (ecuio_signal_file_profile),
+ * the same for the same parts in the same order; its name is "N parts
+ * read together"; its notes (ecuio_signal_file_note) say what the merge
+ * replaced, renamed and left out. The same parts give the same bytes.
+ *
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL out, NULL parts with a count, or a
+ * NULL part. ECUIO_ERR_INVALID_ARGUMENT with the reason in
+ * ecuio_last_error_detail(): no part or too many; a part given twice or
+ * two parts of one profile; a part that is itself a merged set; a part
+ * with no text (a variant whose copy doesn't read back); options with a
+ * struct_size under the struct's, an unknown flag or a nonzero reserved
+ * word; no signal left to read; and a bound of the set passed
+ * (ECUIO_SIGNAL_SET_MAX_SIGNALS signals or replaced keys,
+ * ECUIO_SIGNAL_SET_MAX_BYTES of text, ECUIO_SET_MAX_TABLE enum labels,
+ * ECUIO_MODULE_MAX_REQUESTS requests of one module with the base's
+ * counted), each naming its count. ECUIO_ERR_OUT_OF_MEMORY. *out is NULL
+ * on every failure. Any thread may call it while the parts live. */
+ecuio_status_t ecuio_signal_file_merge(const ecuio_signal_file_t* const* parts,
+                                       uint32_t count,
+                                       const ecuio_merge_options_t* options,
+                                       ecuio_signal_file_t** out);
 
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a

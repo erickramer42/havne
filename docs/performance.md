@@ -96,7 +96,9 @@ running (ranges across the runs; milliseconds as median / p99):
   the bench with itself: core's decode at 1,000 defs within 3x its
   cost at 9 (1.26 to 1.94x in four runs on the dev machine,
   2026-11-01), and the looping run under `obd2` at least 0.5 of the
-  same run under `raw`, which decodes nothing (0.69 to 0.76). With the
+  same run under `raw`, which decodes nothing (0.69 to 0.76), each
+  side's best of three passes, since one pass can land in a trough when
+  a shared runner's speed changes within the step. With the
   decode visiting every def instead of the ones the index finds, both
   failed (27x, 0.48), where the 10,000 frames a second floor still
   passed at 229,915.
@@ -110,7 +112,11 @@ running (ranges across the runs; milliseconds as median / p99):
   2026-11-19 to 2026-11-21, each the faster of two pairs, gave a lowest 0.69,
   a tenth percentile 0.76, a median 0.86 and a highest 0.97, and the third pair
   only raises a job's figure, so the floor sits looser than those runs say; the 100x one must write all 7,074 frames and
-  7,061 values with no record dropped. On a shared runner the share
+  7,061 values with no record dropped. When the first three pairs
+  miss the floor, three more run and the best of all six a side is
+  judged: a runner busy for one block doesn't fail it, and a regression,
+  which slows every pair, still does (the summary line says "best of 6"
+  when it happened). On a shared runner the share
   measures the runner as much as the recorder: the writer is a third
   busy thread on two cores, and the bridge's worker rate follows the
   GUI thread's through the in-flight gate (holding the worker to a core
@@ -543,6 +549,69 @@ Modules that answer nothing beside modules that answer (the model, 2026-11-21; n
 ### The signal-file loader at 16,384 signals
 
 `PluginTest.AVariantHoldsMoreSignalsThanOneFileMay` takes 0.43-0.45 s (desktop, Release), 1.46-1.81 s before the loader indexed a file's keys and first names. A reverse chain of 16,384 computed signals is refused in 31 ms, 1.22-1.30 s before the depths were settled over a queue of reads.
+
+### A car-sized set, no car
+
+Result: 4,000 signals over 18 modules hold 502 KB in a session beyond an empty one (125.5 bytes a signal), a pick of 20 is stepped in 241 ns and taken in 0.75 ms, a focus change is 0.79 ms at the median, and the loader takes 20 ms for 4,000 signals and 201 ms for 16,384.
+
+2026-11-22, Windows 11 desktop (x64), MSVC Release, the machine idle (no build, test or verify run in the three runs, whose medians agree within 7%). `build/tests/Release/bench_car.exe` (`tests/bench_car.cpp` and `tests/bench_car_set.h`; target `bench_car`, Qt-free, built with the tests, never run by ctest) with its defaults: 4,000 signals over 18 modules, 7 repetitions after a warm-up. The figures are the model's inputs, from a generated set (made-up DIDs, one signal in ten computed) on `mock://`: no car has measured them. Sizes and bytes are the same on every run; timings below are the middle run's. `bench_car` counts bytes with an `operator new` of its own, prints no timing from a build without NDEBUG unless `--allow-debug` is given, and exits 1 only on a wrong answer.
+
+**Sizes** (`sizeof`, x64; ADR-0065's "To measure", first line):
+
+| State | Bytes | Times 18 modules |
+|---|---|---|
+| Engine channel (`ecuio_engine_channel`) | 2,592 | 46,656 |
+| Support report (`ecuio_channel_support_t`) | 152 | 2,736 |
+| Identity report (`ecuio_channel_identity_t`) | 1,184 | 21,312 |
+| Diagnostics report (`ecuio_channel_diagnostics_t`) | 552 | 9,936 |
+| Health report's module (`ecuio_health::ecu`) | 592 | 10,656 |
+| ISO-TP receive slot (`isotp_rx_slot`) | 4,120 | 74,160 |
+| ISO-TP send state (`isotp_tx`) | 4,136 | 74,448 |
+
+A request row (`ecuio_request`) is 19 bytes; a table of 3,600 rows is 68,400. The J2534 and ELM327 workers' own state sits in their source files and isn't measured here.
+
+**A session's memory** (`ecuio_session_create` and the request build, no worker): an empty session (the default `mock://` profile, no set) holds 153,103 bytes live; the 4,000-signal set holds 655,168 (3,600 request rows over 18 modules), so the set adds 502,065 bytes: 27,893 a module, 125.5 a signal. The peak is 32 bytes above the live figure: the build holds no large temporary. The empty session leaves 160 bytes behind after its destroy.
+
+**Rotation and focus** (on the calling thread, no transport; the engine's work is the same on the worker, the hop is not). A set that derives more than 1,024 requests (this one, 3,600) is pick-only: no row is asked until a focus picks.
+
+| Measure | Result |
+|---|---|
+| A step with nothing picked (no row in the rotation, 3,600 rows passed) | 4,686 ns |
+| A step with a pick of 20 on one module (the 3,580 parked rows passed) | 241 ns |
+| A step over a set the rotation holds whole (1,100 signals, 990 rows, all asked) | 24 ns |
+| `ecuio_session_set_focus`, a pick of 20 | 49 us median, 227 us worst |
+| `ecuio_take_focus`, the pick, the maps refreshed | 754 us median, 1,105 us worst |
+| `ecuio_take_focus`, the pick, the maps current | 754 us median, 1,172 us worst |
+| `ecuio_take_focus`, its end | 398 us median, 721 us worst |
+| One focus change (a new pick of 20 over another, set and taken) | 787 us median, 1,240 us worst |
+
+The median and worst are over 200 calls each. The maps' refresh adds nothing measurable to a take (754 us either way).
+
+**The loader's build** (`ecuio_signal_file_load_with` at a set's bounds, the load alone, the text made first; median and worst of 7):
+
+| Signals | Text | Median | Worst |
+|---|---|---|---|
+| 1,000 | 142,849 bytes | 4.3 ms | 5.9 ms |
+| 4,000 | 575,077 bytes | 19.9 ms | 21.4 ms |
+| 16,384 | 2,366,247 bytes | 200.7 ms | 206.9 ms |
+
+Four times the signals takes 4.6 times as long between 1,000 and 4,000, and 4.1 times the signals takes 10 times as long from 4,000 to 16,384: past 4,000 the cost grows faster than the count. The merge half is not measured here.
+
+**The written copy** (a variant's file as `ecuio_signal_file_text` writes it, two spaces a level): the generated set at 1,000 signals writes 264,776 bytes, 264.8 a signal (about 15,800 signals in the 4 MiB bound at that rate); `example-car`'s `whole` variant writes 15,557 bytes for 171 signals, 91.0 a signal (about 46,100 in 4 MiB).
+
+### The merge of two parts
+
+Result: merging the example car's variant with a second file of a
+thousand signals takes 9.7 ms.
+
+2026-11-22, Windows 11 desktop, MSVC Release, the shared core called
+through ctypes (`ecuio_signal_file_merge`,
+[ADR-0065](adr/0065-car-sized-profile.md) section 9): `plugins/example-car`'s
+variant written as one file (9.9 KB) and a format 3 file of a thousand
+number signals on a module of its own (150 KB), with obd2 under them.
+The median of 30 merges is 9.7 ms (9.3 to 13.6), after 4.2 ms to load
+the two parts; the merged text is 278 KB, and the process's peak commit
+rose 4.5 MiB over the loaded parts.
 
 ### Connect cost: a surrogate per session
 

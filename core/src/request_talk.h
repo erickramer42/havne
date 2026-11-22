@@ -87,7 +87,7 @@ enum class ecuio_talk_end : uint8_t {
 
 /* What a talk is to the key's window */
 enum class ecuio_talk_kind : uint8_t {
-    plain, /* any service but 27: its turn with the scan */
+    plain, /* on the guest's own list: its turn with the scan */
     seed,  /* its turn as plain; sent, it opens the channel's window */
     key,   /* only inside a window, ahead of everything; sent, it ends it */
 };
@@ -168,11 +168,25 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
            q.pdu[1] == static_cast<uint8_t>(w.seed + 1);
 }
 
+/* Whether q is inside tier 2's ceiling for its kind: a plain talk on the
+ * guest's own list (the reads: the session and its keep-alive are core's
+ * own step), a seed or a key anywhere in it (ecuio_talk_kind_fits then
+ * holds it to 27) */
+inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
+{
+    const uint8_t sub = q.len < 2 ? uint8_t{0} : q.pdu[1];
+    return q.kind == ecuio_talk_kind::plain
+               ? ecuio_tier2_guest_may_send(q.pdu[0], sub)
+               : ecuio_tier2_allowed(q.pdu[0], sub);
+}
+
 /* Offers q as the channel's talk at now_us. The door: a request outside
- * tier 2's ceiling is refused here whatever the caller checked, so
- * nothing a plugin's code asks for reaches a transport by another road.
- * A service that splits by sub-function needs its second byte; the echo
- * is 1 to 3 bytes of the request and at least its service's own
+ * tier 2's ceiling for its kind (ecuio_talk_inside_ceiling) is refused
+ * here whatever the caller checked, so nothing a plugin's code asks for
+ * reaches a transport by another road. A service that splits by
+ * sub-function needs its second byte (the guest's list and the kind's
+ * rule refuse one alone too: the check stands should either widen); the
+ * echo is 1 to 3 bytes of the request and at least its service's own
  * (ecuio_talk_echo_min); a seed or a key is what its kind says
  * (ecuio_talk_kind_fits). pdu_max is the bound for this channel on this
  * transport. A taken request is copied: q.pdu is not read after the call
@@ -185,7 +199,7 @@ inline ecuio_talk_offer ecuio_engine_talk(ecuio_engine_talk_state& t,
 {
     if (q.pdu == nullptr || q.len == 0 || q.echo < 1 || q.echo > 3 ||
         q.echo > q.len || (q.len < 2 && ecuio_tier2_splits(q.pdu[0])) ||
-        !ecuio_tier2_allowed(q.pdu[0], q.len < 2 ? uint8_t{0} : q.pdu[1]) ||
+        !ecuio_talk_inside_ceiling(q) ||
         q.echo < ecuio_talk_echo_min(q.pdu[0]) ||
         !ecuio_talk_kind_fits(q, w, now_us)) {
         return ecuio_talk_offer::refused;

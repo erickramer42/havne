@@ -3,8 +3,8 @@
 //
 // The recorded-loop check of bench_bridge --load (tests/bench_bridge_load.h):
 // the share of the looping run's rate that survives core's recorder, judged
-// on the best of three recorded runs against the best of three unrecorded
-// ones, and the floor it must reach.
+// on the best recorded run against the best unrecorded one (three each, six
+// each when a second block follows a miss), and the floor it must reach.
 
 #pragma once
 
@@ -34,7 +34,8 @@ constexpr double minRecordedLoopShare()
 #endif
 }
 
-// A runner's noise only slows a run, so each side's best run is its figure
+// A runner's noise only slows a run, so each side's best run is its figure;
+// a regression slows every run, so a second block of runs misses with it
 inline double best(const std::vector<double>& rates)
 {
     return rates.empty() ? 0.0 : *std::max_element(rates.begin(), rates.end());

@@ -584,6 +584,10 @@ exchange after another, until:
    ([ADR-0060](0060-extended-session-reads.md)), so a lap never runs
    past S3.
 
+   > **Amended 2026-11-22:** only an urgent session ends the turn, and a
+   > bare keep-alive gives way to other channels' rows (the note of
+   > 2026-11-22).
+
 Then the next channel in order with something due takes it; a channel
 the worker holds (a cut reply's rest still coming) is passed over.
 
@@ -634,3 +638,24 @@ Two rules join the turns of the appendix of 2026-11-18.
 > **Amended 2026-11-20:** a key past its window settles `lapsed`, not
 > unsent: it never touched the bus, and `unsent` means a failed write
 > (ADR-0066's appendix of 2026-11-20).
+
+## Note: the turns and the keep-alive (2026-11-22)
+
+Two rules change how the turns of the appendix of 2026-11-18 meet a
+session ([ADR-0060](0060-extended-session-reads.md)'s appendix of
+2026-11-22).
+
+- **Rule 4 waits for urgency:** another channel's session ends the turn
+  only once urgent: its entry due, or its last request
+  `max(keepalive_ms, S3 - 1 s)` ago (`ecuio_engine_session_urgent_us`).
+  Before then any request of that channel keeps its session, so a turn
+  stays whole. The hand-over starts at the first urgent channel, so an
+  urgent keep-alive waits on no channel between.
+- **A bare keep-alive gives way:** the hand-over
+  (`ecuio_engine_turn_pick`) takes two passes: first a channel with
+  anything due but a keep-alive not yet urgent, then one whose bare
+  keep-alive is all it has.
+
+`RequestTurnsTest.AStandInKeepsEachTurnWholeUntilItsSessionIsUrgent`,
+`.ADueKeepAliveEndsATurnOnceUrgent`, `.AnUrgentSessionEndsAWalk`,
+`.AKeepAliveWithNothingElseGivesWayToADueRow` (test_obd2).

@@ -4,6 +4,7 @@
 #include "wasm_sandbox.h"
 
 #include "ecuio/plugin.h"
+#include "ecuio/signals.h" /* ECUIO_MAX_CHANNELS */
 #include "wasm_export.h"
 
 #include <atomic>
@@ -20,6 +21,11 @@ namespace ecuio_wasm {
 /* ADR-0066: a manifest's budget lowers the sandbox's, never raises it */
 static_assert(BUDGET_DEFAULT == ECUIO_PLUGIN_BUDGET_MAX,
               "the sandbox's default budget is the most a manifest takes");
+/* A session's module and an instance for each of its most ECUs, with
+ * room left for the runtime's own start */
+static_assert(MODULE_BYTES_MAX + ECUIO_MAX_CHANNELS * INSTANCE_BYTES_MAX <=
+                  RUNTIME_BYTES_MAX - (4u << 20),
+              "a session's whole plugin fits the runtime's bound");
 
 namespace {
 
@@ -32,8 +38,8 @@ static_assert(kHead >= sizeof(size_t) && kHead % alignof(std::max_align_t) == 0,
 std::atomic<size_t> g_in_use{0};
 std::atomic<uint64_t> g_allocations{0};
 
-/* While an instance is made on this thread: what its making may still
- * take, and whether the allocator refused it anything */
+/* While a module is loaded or an instance made on this thread: what that
+ * may still take, and whether the allocator refused it anything */
 thread_local bool t_scoped = false;
 thread_local size_t t_scope_left = 0;
 thread_local bool t_refused = false;
@@ -116,12 +122,12 @@ void* retake(mem_alloc_usage_t usage, bool, void* p, unsigned int n)
     return q;
 }
 
-/* An instance's making on this thread, bounded */
+/* A load or an instance's making on this thread, bounded */
 struct making {
-    making()
+    explicit making(size_t bound)
     {
         t_scoped = true;
-        t_scope_left = INSTANCE_BYTES_MAX;
+        t_scope_left = bound;
         t_refused = false;
     }
     ~making() { t_scoped = false; }
@@ -164,20 +170,28 @@ bool runtime_up()
 
 } // namespace
 
-class instance
+class loaded
 {
 public:
     uint8_t* code =
         nullptr; /* the module's bytes: the runtime reads them in place */
     wasm_module_t module = nullptr;
+    const char* names[WANTED_MAX] = {}; /* the wanted exports', the module's */
+    uint8_t params[WANTED_MAX] = {};
+    bool has_result[WANTED_MAX] = {};
+    size_t func_count = 0;
+    size_t holds = 1; /* the loader's and each instance's; under makers() */
+};
+
+class instance
+{
+public:
+    loaded* of = nullptr;
     wasm_module_inst_t inst = nullptr;
     wasm_exec_env_t env = nullptr;
     uint8_t* memory = nullptr; /* fixed for the instance's life: no grow */
     uint64_t memory_bytes = 0;
     wasm_function_inst_t funcs[WANTED_MAX] = {};
-    uint8_t params[WANTED_MAX] = {};
-    bool has_result[WANTED_MAX] = {};
-    size_t func_count = 0;
     bool dead = false;
     char trap[REFUSAL_MAX] = {};
 };
@@ -194,8 +208,21 @@ void plain(char* text)
     }
 }
 
-/* Frees what i holds, in the runtime's order; under makers() */
-void unmake(instance* i)
+/* Lets go of one hold on m, unloading it with the last; under makers() */
+void release(loaded* m)
+{
+    if (--m->holds > 0) {
+        return;
+    }
+    if (m->module != nullptr) {
+        wasm_runtime_unload(m->module);
+    }
+    give(Alloc_For_Runtime, m->code);
+    delete m;
+}
+
+/* Frees what i's making made, in the runtime's order; under makers() */
+void unbuild(instance* i)
 {
     if (i->env != nullptr) {
         wasm_runtime_destroy_exec_env(i->env);
@@ -203,11 +230,15 @@ void unmake(instance* i)
     if (i->inst != nullptr) {
         wasm_runtime_deinstantiate(i->inst);
     }
-    if (i->module != nullptr) {
-        wasm_runtime_unload(i->module);
-    }
-    give(Alloc_For_Runtime, i->code);
     delete i;
+}
+
+/* Frees a made instance and its hold on its module; under makers() */
+void unmake(instance* i)
+{
+    loaded* const of = i->of;
+    unbuild(i);
+    release(of);
 }
 
 /* Whether a call can carry a wanted type: i32 parameters, at most
@@ -227,43 +258,68 @@ bool callable(const char* type)
     return colon[1] == '\0' || (colon[1] == 'i' && colon[2] == '\0');
 }
 
-/* The wanted exports as the runtime's functions, with each one's
+/* The wanted exports' names as the module keeps them, with each one's
  * argument count and whether it returns a value */
-bool find_exports(instance* i, const wanted_export* wants, size_t want_count)
+bool name_exports(loaded* m, const wanted_export* wants, size_t want_count)
 {
+    const int32_t exports = wasm_runtime_get_export_count(m->module);
     for (size_t k = 0; k < want_count; ++k) {
-        i->funcs[k] = wasm_runtime_lookup_function(i->inst, wants[k].name);
+        for (int32_t e = 0; e < exports && m->names[k] == nullptr; ++e) {
+            wasm_export_t x;
+            wasm_runtime_get_export_type(m->module, e, &x);
+            if (x.kind == WASM_IMPORT_EXPORT_KIND_FUNC &&
+                std::strcmp(x.name, wants[k].name) == 0) {
+                m->names[k] = x.name;
+            }
+        }
         const char* colon = std::strchr(wants[k].type, ':');
-        if (i->funcs[k] == nullptr) {
+        if (m->names[k] == nullptr) {
             return false;
         }
-        i->params[k] = static_cast<uint8_t>(colon - wants[k].type);
-        i->has_result[k] = colon[1] != '\0';
+        m->params[k] = static_cast<uint8_t>(colon - wants[k].type);
+        m->has_result[k] = colon[1] != '\0';
     }
-    i->func_count = want_count;
+    m->func_count = want_count;
     return true;
 }
 
-/* Loads, instantiates and readies i from bytes; false with the runtime's
- * words in why; under makers(), inside a making */
-bool build(instance* i, const uint8_t* bytes, size_t n,
-           const wanted_export* wants, size_t want_count, char* why)
+/* Loads m from bytes; false with the runtime's words in why; under
+ * makers(), inside a making */
+bool load(loaded* m, const uint8_t* bytes, size_t n, const wanted_export* wants,
+          size_t want_count, char* why)
 {
     char said[96] = {};
-    i->code = static_cast<uint8_t*>(
+    m->code = static_cast<uint8_t*>(
         take(Alloc_For_Runtime, static_cast<unsigned int>(n)));
-    if (i->code == nullptr) {
+    if (m->code == nullptr) {
         return false;
     }
-    std::memcpy(i->code, bytes, n);
-    i->module =
-        wasm_runtime_load(i->code, static_cast<uint32_t>(n), said, sizeof said);
-    if (i->module != nullptr) {
-        /* No heap of the host's in the guest's memory; the memory's size
-         * is the module's own, which the check held to the cap */
-        i->inst = wasm_runtime_instantiate(i->module, STACK_BYTES, 0, said,
-                                           sizeof said);
+    std::memcpy(m->code, bytes, n);
+    m->module =
+        wasm_runtime_load(m->code, static_cast<uint32_t>(n), said, sizeof said);
+    if (m->module == nullptr) {
+        plain(said);
+        std::snprintf(why, REFUSAL_MAX, "the runtime refused the module: %s",
+                      said[0] != '\0' ? said : "no module");
+        return false;
     }
+    if (!name_exports(m, wants, want_count)) {
+        std::snprintf(why, REFUSAL_MAX,
+                      "the runtime refused the module: an export is missing");
+        return false;
+    }
+    return true;
+}
+
+/* Instantiates and readies i from its module; false with the runtime's
+ * words in why; under makers(), inside a making */
+bool build(instance* i, char* why)
+{
+    char said[96] = {};
+    /* No heap of the host's in the guest's memory; the memory's size is
+     * the module's own, which the check held to the cap */
+    i->inst = wasm_runtime_instantiate(i->of->module, STACK_BYTES, 0, said,
+                                       sizeof said);
     if (i->inst != nullptr) {
         i->env = wasm_runtime_create_exec_env(i->inst, STACK_BYTES);
     }
@@ -274,7 +330,12 @@ bool build(instance* i, const uint8_t* bytes, size_t n,
         return false;
     }
     wasm_memory_inst_t memory = wasm_runtime_get_default_memory(i->inst);
-    if (memory == nullptr || !find_exports(i, wants, want_count)) {
+    bool found = memory != nullptr;
+    for (size_t k = 0; found && k < i->of->func_count; ++k) {
+        i->funcs[k] = wasm_runtime_lookup_function(i->inst, i->of->names[k]);
+        found = i->funcs[k] != nullptr;
+    }
+    if (!found) {
         std::snprintf(
             why, REFUSAL_MAX,
             "the runtime refused the module: an export or its memory is "
@@ -287,11 +348,22 @@ bool build(instance* i, const uint8_t* bytes, size_t n,
     return true;
 }
 
+/* A failed load's or making's status: out of memory, its words dropped,
+ * when the allocator refused anything */
+ecuio_status_t failed(char* why)
+{
+    if (t_refused) {
+        why[0] = '\0';
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    return ECUIO_ERR_LOAD_FAILED;
+}
+
 } // namespace
 
-ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
-                             const wanted_export* wants, size_t want_count,
-                             instance** out, char* why) noexcept
+ecuio_status_t load_module(const uint8_t* bytes, size_t n,
+                           const wanted_export* wants, size_t want_count,
+                           loaded** out, char* why) noexcept
 {
     if (out == nullptr || why == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
@@ -325,21 +397,68 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
         return ECUIO_ERR_LOAD_FAILED;
     }
     std::lock_guard<std::mutex> lock(makers());
-    making bounded;
-    instance* i = runtime_up() ? new (std::nothrow) instance : nullptr;
+    making bounded(MODULE_BYTES_MAX);
+    loaded* m = runtime_up() ? new (std::nothrow) loaded : nullptr;
+    if (m == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (!load(m, judged, n, wants, want_count, why)) {
+        release(m);
+        return failed(why);
+    }
+    *out = m;
+    return ECUIO_OK;
+}
+
+void free_module(loaded* m) noexcept
+{
+    if (m == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(makers());
+    release(m);
+}
+
+ecuio_status_t make_instance(loaded* m, instance** out, char* why) noexcept
+{
+    if (m == nullptr || out == nullptr || why == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = nullptr;
+    why[0] = '\0';
+    std::lock_guard<std::mutex> lock(makers());
+    making bounded(INSTANCE_BYTES_MAX);
+    instance* i = new (std::nothrow) instance;
     if (i == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    if (!build(i, judged, n, wants, want_count, why)) {
-        unmake(i);
-        if (t_refused) {
-            why[0] = '\0';
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
-        return ECUIO_ERR_LOAD_FAILED;
+    i->of = m;
+    if (!build(i, why)) {
+        unbuild(i); /* it took no hold */
+        return failed(why);
     }
+    ++m->holds;
     *out = i;
     return ECUIO_OK;
+}
+
+ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
+                             const wanted_export* wants, size_t want_count,
+                             instance** out, char* why) noexcept
+{
+    if (out == nullptr || why == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = nullptr;
+    loaded* m = nullptr;
+    const ecuio_status_t loaded_status =
+        load_module(bytes, n, wants, want_count, &m, why);
+    if (loaded_status != ECUIO_OK) {
+        return loaded_status;
+    }
+    const ecuio_status_t made = make_instance(m, out, why);
+    free_module(m);
+    return made;
 }
 
 void free_instance(instance* i) noexcept
@@ -358,7 +477,7 @@ call_result call_instance(instance* i, size_t index, const uint32_t* args,
     if (i == nullptr || i->dead) {
         return r;
     }
-    if (index >= i->func_count || arg_count != i->params[index] ||
+    if (index >= i->of->func_count || arg_count != i->of->params[index] ||
         (arg_count > 0 && args == nullptr)) {
         r.end = call_end::no_function;
         return r;
@@ -372,7 +491,7 @@ call_result call_instance(instance* i, size_t index, const uint32_t* args,
     wasm_runtime_set_instruction_count_limit(i->env, static_cast<int>(limit));
     if (wasm_runtime_call_wasm(i->env, i->funcs[index], arg_count, cells)) {
         r.end = call_end::returned;
-        r.value = i->has_result[index] ? cells[0] : 0;
+        r.value = i->of->has_result[index] ? cells[0] : 0;
         return r;
     }
     i->dead = true;

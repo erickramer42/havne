@@ -28,7 +28,7 @@ QVariantMap SessionBridge::inspection() const
 }
 
 QVariantMap
-SessionBridge::inspectionEntry(const ecuio_channel_diagnostics_t* reports,
+BridgeFormats::inspectionEntry(const ecuio_channel_diagnostics_t* reports,
                                uint32_t count, uint32_t modelYear)
 {
     QVariantMap m;
@@ -118,7 +118,7 @@ SessionBridge::inspectionEntry(const ecuio_channel_diagnostics_t* reports,
 }
 
 QVariantMap
-SessionBridge::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
+BridgeFormats::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
                                 uint32_t units)
 {
     const auto outcome = [](uint8_t o) {

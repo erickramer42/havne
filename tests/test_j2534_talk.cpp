@@ -119,6 +119,9 @@ Bytes long_read()
     return pdu;
 }
 
+/* A plain talk the engine ECU answers in one frame, in any session: a
+ * guest's read (core's own 10 03 and 3E 00 are no talk) */
+const Bytes kRead = {0x22, 0x1E, 0x1C};
 const Bytes kGated = {0x22, 0xD2, 0x10};
 const Bytes kGatedData = {0x62, 0xD2, 0x10, 0x4B, 0x2D};
 
@@ -336,8 +339,9 @@ TEST_F(J2534TalkTest, NothingIsWrittenBetweenASeedAndItsKey)
 }
 
 /* A key offered after its seed's window is refused at the door, and what
- * the session writes next is tester present, held back meanwhile. */
-TEST_F(J2534TalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
+ * the session writes next is the channel's row, held back meanwhile and
+ * standing in for tester present. */
+TEST_F(J2534TalkTest, AKeyAfterItsWindowIsRefusedAndItsRowFollows)
 {
     ASSERT_NO_FATAL_FAILURE(start_strict(kKeepAlive));
     Ended e;
@@ -347,14 +351,19 @@ TEST_F(J2534TalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
     ASSERT_TRUE(talk(key_for(0x01), 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer);
     EXPECT_EQ(e.end, 0);
-    ASSERT_TRUE(wait_for_reply({0x7E, 0x00})) << writes_text();
     fake_control::Write seed;
     fake_control::Write next;
     const int at = write_index({0x27, 0x01}, &seed);
     ASSERT_GE(at, 0) << writes_text();
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
+    while (!fake_control::recorded_write(page, at + 1, &next) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     ASSERT_TRUE(fake_control::recorded_write(page, at + 1, &next))
         << writes_text();
-    EXPECT_EQ(next.data[4], 0x3E) << writes_text();
+    EXPECT_EQ(next.data[4], 0x22) << writes_text();
     EXPECT_GE(next.us - seed.us, 800000u) << "not before the window's end";
     EXPECT_TRUE(writes_of({0x27, 0x02}).empty()) << writes_text();
 }
@@ -450,7 +459,7 @@ TEST_F(J2534TalkTest, NothingOutsideTheCeilingIsWritten)
     }
     ASSERT_TRUE(talk(key_for(0x01), 2, kKey, &e));
     EXPECT_EQ(e.offer, kRefusedOffer) << "a key with no seed before it";
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered) << "the session is none the worse";
     fake_control::Write w;
     for (uint32_t i = 0; fake_control::recorded_write(page, i, &w); ++i) {
@@ -467,7 +476,7 @@ TEST_F(J2534TalkTest, AWriteTheAdapterRefusesSettlesItUnsentAndItIsNotSentAgain)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(kQuery));
     Ended e;
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e));
     ASSERT_EQ(e.end, kAnswered);
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", "7"));
     ASSERT_TRUE(talk(long_read(), 2, kPlain, &e));
@@ -475,7 +484,7 @@ TEST_F(J2534TalkTest, AWriteTheAdapterRefusesSettlesItUnsentAndItIsNotSentAgain)
     EXPECT_EQ(e.end, kUnsent);
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_WRITE_STATUS", nullptr));
     /* Writes go again: the session's own requests do, the talk doesn't */
-    ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e, 0, 15000));
+    ASSERT_TRUE(talk(kRead, 3, kPlain, &e, 0, 15000));
     EXPECT_EQ(e.end, kAnswered);
     EXPECT_TRUE(writes_of({0x2C, 0x01}).empty())
         << "a talk is never sent twice, nor once late";

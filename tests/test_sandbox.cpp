@@ -1,10 +1,10 @@
 // File/layer: tests/test_sandbox.cpp | UNIT: core/src/wasm_sandbox.h
 // Testing: SandboxTest, Qt-free, every tree (build-win32's x86 core too)
 //
-// An instance's life in the sandbox a plugin's code runs in (ADR-0066
-// section 2.2). Every module is built here by tests/wasm_builder.h, most
-// of them hostile: an endless loop, a memory that grows, a trap of each
-// kind. The check's cases are test_wasm_check.cpp's, and what a budget
+// A module's and its instances' life in the sandbox a plugin's code runs
+// in (ADR-0066 section 2.2). Every module is built here by
+// tests/wasm_builder.h, most of them hostile: an endless loop, a memory
+// that grows, a trap of each kind. The check's cases are test_wasm_check.cpp's, and what a budget
 // counts test_sandbox_budget.cpp's.
 
 #include <gtest/gtest.h>
@@ -12,10 +12,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "ecuio/signals.h" /* ECUIO_MAX_CHANNELS */
 #include "sandbox_cases.h"
 #include "wasm_builder.h"
 #include "wasm_check.h"
@@ -72,20 +74,27 @@ module everything()
     return m;
 }
 
-/* good() with 200,000 more functions that do nothing, of two types:
- * four bytes of module each, so under 1 MiB */
-module costly()
+/* good() of `pages` pages with n more functions that do nothing, of two
+ * types: four bytes of module each */
+module padded(uint32_t n, uint32_t pages = 1)
 {
     module m = good();
+    m.memory_min = pages;
+    m.memory_max = static_cast<int32_t>(pages);
     func empty;  /* () -> () */
     func taking; /* (i32) -> () */
     taking.params = {I32};
-    m.funcs.reserve(200001);
-    for (int k = 0; k < 100000; ++k) {
-        m.funcs.push_back(empty);
-        m.funcs.push_back(taking);
+    m.funcs.reserve(n + 1);
+    for (uint32_t k = 0; k < n; ++k) {
+        m.funcs.push_back(k % 2 == 0 ? empty : taking);
     }
     return m;
+}
+
+/* 200,000 functions: under 1 MiB of module, past what a load may take */
+module costly()
+{
+    return padded(200000);
 }
 
 /* The runtime is up and its start's allocations are behind us */
@@ -351,10 +360,10 @@ TEST(SandboxTest, AModuleTheRuntimeRefusesSaysItsWords)
     EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use(), before);
 }
 
-/* A module under 1 MiB whose making would take more than an instance may:
- * out of memory is the answer, with everything given back. A function
- * costs the runtime least where pointers are 4 bytes, and this many pass
- * the bound there too. */
+/* A module under 1 MiB whose load would take more than a load may: out
+ * of memory is the answer, with everything given back. A function costs
+ * the runtime least where pointers are 4 bytes, and this many pass the
+ * bound there too. */
 TEST(SandboxTest, AModuleTooCostlyToMakeIsOutOfMemory)
 {
     warm();
@@ -432,12 +441,14 @@ TEST(SandboxTest, AWantedTypeACallCantCarryIsRefused)
     EXPECT_EQ(made.call(0, {1, 2, 3, 4}).value, 4u) << "ARGS_MAX is allowed";
 }
 
-/* Two ECUs of one plugin are two instances of the same bytes: what ends
- * one leaves the other as it was */
+/* Two ECUs of one plugin are two instances of one loaded module: what
+ * ends one leaves the other as it was */
 TEST(SandboxTest, ADeadInstanceLeavesAnotherOfItsModuleAnswering)
 {
-    Made a(everything(), kAll, kAllCount);
-    Made b(everything(), kAll, kAllCount);
+    Loaded l(everything(), kAll, kAllCount);
+    ASSERT_EQ(l.status, ECUIO_OK) << l.why;
+    Made a(l);
+    Made b(l);
     ASSERT_EQ(a.status, ECUIO_OK) << a.why;
     ASSERT_EQ(b.status, ECUIO_OK) << b.why;
     EXPECT_EQ(a.call(POKE).end, call_end::returned);
@@ -544,7 +555,8 @@ TEST(SandboxTest, AnInstanceMadeOnOneThreadRunsOnAnother)
         << "the worker's own stack bounds it";
 }
 
-TEST(SandboxTest, TwoInstancesRunAtOnce)
+/* Instances of two modules: two sessions' workers */
+TEST(SandboxTest, TwoInstancesOfTwoModulesRunAtOnce)
 {
     Made a(everything(), kAll, kAllCount);
     Made b(everything(), kAll, kAllCount);
@@ -563,6 +575,137 @@ TEST(SandboxTest, TwoInstancesRunAtOnce)
     second.join();
     EXPECT_EQ(sums[0], 2000u * 2001u / 2u);
     EXPECT_EQ(sums[1], sums[0]);
+}
+
+/* A session loads its plugin's module once and makes an instance of it
+ * for each ECU: the second instance costs no second load, and the module
+ * stays until its last instance goes, whoever lets go first */
+TEST(SandboxTest, AModuleIsLoadedOnceForItsInstances)
+{
+    warm();
+    const size_t before = ecuio_wasm::runtime_bytes_in_use();
+    const bytes code = largest().build();
+    char why[ecuio_wasm::REFUSAL_MAX] = {};
+    ecuio_wasm::loaded* m = nullptr;
+    ASSERT_EQ(ecuio_wasm::load_module(code.data(), code.size(), kAll, kAllCount,
+                                      &m, why),
+              ECUIO_OK)
+        << why;
+    const size_t load = ecuio_wasm::runtime_bytes_in_use() - before;
+    EXPECT_GE(load, code.size()) << "the module's bytes, kept for the runtime";
+    ecuio_wasm::instance* a = nullptr;
+    ecuio_wasm::instance* b = nullptr;
+    ASSERT_EQ(ecuio_wasm::make_instance(m, &a, why), ECUIO_OK) << why;
+    const size_t one = ecuio_wasm::runtime_bytes_in_use() - before - load;
+    EXPECT_GT(one,
+              ecuio_wasm::MEMORY_MAX_PAGES * 65536u + ecuio_wasm::STACK_BYTES);
+    ASSERT_EQ(ecuio_wasm::make_instance(m, &b, why), ECUIO_OK) << why;
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use() - before, load + 2 * one);
+
+    ecuio_wasm::free_module(m); /* the loader lets go first */
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use() - before, load + 2 * one)
+        << "held by its instances";
+    const uint32_t args[2] = {40, 2};
+    EXPECT_EQ(
+        ecuio_wasm::call_instance(a, ADD, args, 2, ecuio_wasm::BUDGET_DEFAULT)
+            .value,
+        42u);
+    ecuio_wasm::free_instance(a);
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use() - before, load + one);
+    EXPECT_EQ(
+        ecuio_wasm::call_instance(b, ADD, args, 2, ecuio_wasm::BUDGET_DEFAULT)
+            .value,
+        42u);
+    ecuio_wasm::free_instance(b);
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use(), before);
+
+    EXPECT_EQ(ecuio_wasm::make_instance(nullptr, &a, why),
+              ECUIO_ERR_NULL_ARGUMENT);
+}
+
+/* The instances of one module share its code alone: each its own memory
+ * and its own globals */
+TEST(SandboxTest, TwoInstancesOfOneModuleShareNoMemoryOrGlobal)
+{
+    module m = everything();
+    m.i32_globals = 1;
+    m.funcs.push_back(plain_func("bump", {GLOBAL_GET, 0, I32_CONST, 1, I32_ADD,
+                                          GLOBAL_SET, 0, GLOBAL_GET, 0}));
+    const wanted_export wants[] = {
+        {"poke", ":"}, {"peek", ":i"}, {"bump", ":i"}};
+    enum : size_t { POKED, PEEKED, BUMPED };
+    Loaded l(m, wants, 3);
+    ASSERT_EQ(l.status, ECUIO_OK) << l.why;
+    Made a(l);
+    Made b(l);
+    ASSERT_EQ(a.status, ECUIO_OK) << a.why;
+    ASSERT_EQ(b.status, ECUIO_OK) << b.why;
+    EXPECT_EQ(a.call(BUMPED).value, 1u);
+    EXPECT_EQ(a.call(BUMPED).value, 2u);
+    EXPECT_EQ(a.call(BUMPED).value, 3u);
+    EXPECT_EQ(b.call(BUMPED).value, 1u) << "the global is each instance's";
+    EXPECT_EQ(a.call(POKED).end, call_end::returned);
+    EXPECT_EQ(a.call(PEEKED).value, 7u);
+    EXPECT_EQ(b.call(PEEKED).value, 0u) << "and the memory";
+    uint8_t* mine = ecuio_wasm::instance_memory(a.i, 0, 4);
+    uint8_t* theirs = ecuio_wasm::instance_memory(b.i, 0, 4);
+    ASSERT_NE(mine, nullptr);
+    ASSERT_NE(theirs, nullptr);
+    EXPECT_NE(mine, theirs);
+}
+
+/* The most functions a module of `pages` pages holds while its load and
+ * one instance of it both fit their bounds: what an instance costs
+ * differs by pointer width, so it is found, not named */
+uint32_t most_functions(uint32_t pages)
+{
+    const auto fits = [pages](uint32_t n) {
+        Loaded l(padded(n, pages), kAdd, 1);
+        Made i(l);
+        return l.status == ECUIO_OK && i.status == ECUIO_OK;
+    };
+    uint32_t lo = 0;        /* fits */
+    uint32_t hi = 1u << 17; /* doesn't */
+    EXPECT_TRUE(fits(lo));
+    EXPECT_FALSE(fits(hi));
+    while (hi - lo > 1) {
+        const uint32_t mid = lo + (hi - lo) / 2;
+        (fits(mid) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+/* The module with the most functions a session can bind, by either
+ * bound: its load and an instance for each of a session's most ECUs fit
+ * the runtime's bound together, and every instance answers. It has no
+ * table, whose elements cost each instance too. */
+TEST(SandboxTest, ThirtyTwoInstancesOfTheModuleWithTheMostFunctionsAnswer)
+{
+    warm();
+    const size_t before = ecuio_wasm::runtime_bytes_in_use();
+    for (const uint32_t pages : {1u, ecuio_wasm::MEMORY_MAX_PAGES}) {
+        const uint32_t n = most_functions(pages);
+        ASSERT_GT(n, 10000u) << pages << " pages";
+        Made past(padded(n + 1, pages), kAdd, 1);
+        EXPECT_EQ(past.status, ECUIO_ERR_OUT_OF_MEMORY) << pages << " pages";
+
+        Loaded l(padded(n, pages), kAdd, 1);
+        ASSERT_EQ(l.status, ECUIO_OK) << l.why;
+        std::vector<std::unique_ptr<Made>> ecus;
+        for (uint32_t c = 0; c < ECUIO_MAX_CHANNELS; ++c) {
+            ecus.push_back(std::make_unique<Made>(l));
+            ASSERT_EQ(ecus.back()->status, ECUIO_OK)
+                << pages << " pages, ECU " << c << ": " << ecus.back()->why;
+        }
+        EXPECT_LE(ecuio_wasm::runtime_bytes_in_use(),
+                  ecuio_wasm::RUNTIME_BYTES_MAX);
+        for (uint32_t c = 0; c < ECUIO_MAX_CHANNELS; ++c) {
+            const ecuio_wasm::call_result sum = ecus[c]->call(0, {40, c});
+            EXPECT_EQ(sum.end, call_end::returned) << c;
+            EXPECT_EQ(sum.value, 40u + c) << c;
+        }
+    }
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use(), before);
 }
 
 } // namespace

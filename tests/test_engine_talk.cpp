@@ -10,9 +10,10 @@ using namespace engine_talk_test;
 TEST(EngineTalkTest, TheDoorIsTheCeilingForEveryServiceAndSubFunction)
 {
     /* Whatever the caller checked: an offer is taken exactly when tier
-     * 2's ceiling allows its first two bytes. Each is offered as what it
-     * can be (a 27 as a seed or, inside a window, a key) with its
-     * service's echo, by a list of the case's own. */
+     * 2's ceiling allows its first two bytes for its kind, a plain talk
+     * by the guest's own list. Each is offered as what it can be (a 27 as
+     * a seed or, inside a window, a key) with its service's echo, by a
+     * list of the case's own. */
     for (unsigned sid = 0; sid < 256; ++sid) {
         for (unsigned sub = 0; sub < 256; ++sub) {
             ecuio_engine_talk_state t;
@@ -31,7 +32,9 @@ TEST(EngineTalkTest, TheDoorIsTheCeilingForEveryServiceAndSubFunction)
             } else {
                 got = door(t, w, pdu, 2, ecuio_talk_kind::key);
             }
-            const bool allowed = ecuio_tier2_allowed(pdu[0], pdu[1]);
+            const bool allowed =
+                sid == 0x27 ? ecuio_tier2_allowed(pdu[0], pdu[1])
+                            : ecuio_tier2_guest_may_send(pdu[0], pdu[1]);
             ASSERT_EQ(got, allowed ? ecuio_talk_offer::taken
                                    : ecuio_talk_offer::refused)
                 << sid << " " << sub;
@@ -47,6 +50,19 @@ TEST(EngineTalkTest, TheDoorIsTheCeilingForEveryServiceAndSubFunction)
         ecuio_key_window w;
         EXPECT_EQ(door(t, w, pdu, 2), ecuio_talk_offer::refused) << int{pdu[0]};
         EXPECT_EQ(door(t, w, pdu, 2, ecuio_talk_kind::seed, kWindow),
+                  ecuio_talk_offer::refused)
+            << int{pdu[0]};
+        EXPECT_FALSE(t.offered);
+    }
+    /* Inside the ceiling and still refused plain: the extended session and
+     * tester present are core's own step, and nothing takes a 2A's
+     * periodic reply */
+    for (const Bytes& pdu :
+         {Bytes{0x10, 0x03}, Bytes{0x3E, 0x00}, Bytes{0x2A, 0x01, 0x10}}) {
+        ecuio_engine_talk_state t;
+        ecuio_key_window w;
+        ASSERT_TRUE(ecuio_tier2_allowed(pdu[0], pdu[1])) << int{pdu[0]};
+        EXPECT_EQ(door(t, w, pdu, ecuio_talk_echo_min(pdu[0])),
                   ecuio_talk_offer::refused)
             << int{pdu[0]};
         EXPECT_FALSE(t.offered);
@@ -115,31 +131,45 @@ TEST(EngineTalkTest, A27IsTakenOnlyAsASeedOrAKey)
 
 TEST(EngineTalkTest, AnOfferNeedsARequestAnEchoAndItsSubFunction)
 {
+    /* Each probe is a guest's own service, so the rule named is the one
+     * that refuses it; its twin beside it is taken */
     const Bytes read = {0x22, 0xD2, 0x10};
-    const Bytes keep = {0x3E, 0x00};
-    ecuio_engine_talk_state t;
-    ecuio_key_window w;
-    const auto ask = [&](const uint8_t* pdu, uint32_t len, uint8_t echo) {
+    const Bytes dtc = {0x19, 0x02};
+    const auto ask = [](const uint8_t* pdu, uint32_t len, uint8_t echo) {
+        ecuio_engine_talk_state t;
+        ecuio_key_window w;
         ecuio_talk_request q;
         q.pdu = pdu;
         q.len = len;
         q.echo = echo;
-        return ecuio_engine_talk(t, w, ECUIO_ENGINE_PDU_MAX, q, 0);
+        const ecuio_talk_offer got =
+            ecuio_engine_talk(t, w, ECUIO_ENGINE_PDU_MAX, q, 0);
+        EXPECT_EQ(t.offered, got == ecuio_talk_offer::taken);
+        return got;
     };
-    EXPECT_EQ(ask(nullptr, 2, 2), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(keep.data(), 0, 2), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(keep.data(), 2, 0), ecuio_talk_offer::refused);
+    const ecuio_talk_offer taken = ecuio_talk_offer::taken;
+    const ecuio_talk_offer refused = ecuio_talk_offer::refused;
+    EXPECT_EQ(ask(dtc.data(), 2, 2), taken);
+    EXPECT_EQ(ask(nullptr, 2, 2), refused);
+    EXPECT_EQ(ask(dtc.data(), 0, 2), refused) << "no request";
+    EXPECT_EQ(ask(dtc.data(), 2, 0), refused) << "echo 0, below 19's own too";
     const uint8_t two[5] = {0x22, 0xD2, 0x10, 0xD3, 0x01};
-    EXPECT_EQ(ask(two, 5, 4), ecuio_talk_offer::refused) << "echo past 3";
-    EXPECT_EQ(ask(keep.data(), 2, 3), ecuio_talk_offer::refused)
-        << "echo past len";
-    /* a service that splits by sub-function, with none: 3E alone would
-     * be judged as 3E 00, 2C alone as 2C 00 */
+    EXPECT_EQ(ask(two, 5, 3), taken);
+    EXPECT_EQ(ask(two, 5, 4), refused) << "echo past 3";
+    EXPECT_EQ(ask(dtc.data(), 2, 3), refused)
+        << "echo past len: the third byte would be another talk's";
+    EXPECT_EQ(ask(read.data(), 2, 3), refused) << "echo past len, a read";
+    /* a service that splits by sub-function, with none: 2C alone would
+     * be judged as 2C 00 (the guest's list refuses that too) */
     const uint8_t define[1] = {0x2C};
-    EXPECT_EQ(ask(keep.data(), 1, 1), ecuio_talk_offer::refused);
-    EXPECT_EQ(ask(define, 1, 1), ecuio_talk_offer::refused);
-    EXPECT_FALSE(t.offered);
-    EXPECT_EQ(ask(read.data(), 3, 3), ecuio_talk_offer::taken);
+    EXPECT_EQ(ask(define, 1, 1), refused);
+    ecuio_engine_talk_state t;
+    ecuio_key_window w;
+    ecuio_talk_request q;
+    q.pdu = read.data();
+    q.len = 3;
+    q.echo = 3;
+    EXPECT_EQ(ecuio_engine_talk(t, w, ECUIO_ENGINE_PDU_MAX, q, 0), taken);
     EXPECT_TRUE(t.offered);
     EXPECT_EQ(Bytes(t.pdu, t.pdu + t.len), read)
         << "the offer keeps the request";
@@ -157,11 +187,8 @@ TEST(EngineTalkTest, AnEchoIsNeverShorterThanItsServicesOwn)
     const Row rows[] = {
         {{0x22, 0xD2, 0x10}, 3, ecuio_talk_kind::plain},
         {{0x22, 0xD2, 0x10, 0xD3, 0x01}, 3, ecuio_talk_kind::plain},
-        {{0x10, 0x03}, 2, ecuio_talk_kind::plain},
-        {{0x3E, 0x00}, 2, ecuio_talk_kind::plain},
         {{0x19, 0x02, 0xFF}, 2, ecuio_talk_kind::plain},
         {{0x2C, 0x03, 0xF2, 0x00}, 2, ecuio_talk_kind::plain},
-        {{0x2A, 0x01, 0x10}, 1, ecuio_talk_kind::plain},
         {{0x27, 0x01}, 2, ecuio_talk_kind::seed},
         {key_for(0x01), 2, ecuio_talk_kind::key},
     };
@@ -178,6 +205,10 @@ TEST(EngineTalkTest, AnEchoIsNeverShorterThanItsServicesOwn)
         }
         EXPECT_EQ(ecuio_talk_echo_min(row.pdu[0]), row.least);
     }
+    /* and the services no plain talk carries keep the rule */
+    EXPECT_EQ(ecuio_talk_echo_min(0x10), 2);
+    EXPECT_EQ(ecuio_talk_echo_min(0x3E), 2);
+    EXPECT_EQ(ecuio_talk_echo_min(0x2A), 1);
     /* a 22 with no whole DID has no echo of three */
     ecuio_engine_talk_state t;
     ecuio_key_window w;

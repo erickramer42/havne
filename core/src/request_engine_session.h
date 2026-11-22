@@ -120,35 +120,34 @@ inline int64_t ecuio_engine_session_next_us(const ecuio_request_engine* e,
     return held > at ? held : at;
 }
 
-/* Channel c's session request, when one is due at now_us: 10 <session>
- * to enter, again once S3 has passed with nothing sent, or 3E 00 after
- * keepalive_us with nothing sent. Built only through the allow-list: a
- * session it refuses goes nowhere, and the channel reads in default. */
-inline bool ecuio_engine_session_due(ecuio_request_engine* e, uint32_t c,
-                                     int64_t now_us)
+/* When channel c's session is urgent (request_turns.h's rule 4): at once
+ * while 10 03 is due; while entered, max(keepalive_us, S3 less
+ * ECUIO_ENGINE_S3_MARGIN_US) after its last request, the margin left for
+ * the exchanges ahead of its hand-over; neither before a key's window
+ * that holds the channel ends; else never */
+inline int64_t ecuio_engine_session_urgent_us(const ecuio_request_engine* e,
+                                              const ecuio_engine_channel& ch)
+{
+    if (!ecuio_engine_session_live(e, ch)) {
+        return INT64_MAX;
+    }
+    int64_t at = ch.next_send_us;
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERED) {
+        const int64_t s3 = ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US;
+        const int64_t wait = e->keepalive_us > s3 ? e->keepalive_us : s3;
+        at = ch.last_sent_us + wait > at ? ch.last_sent_us + wait : at;
+    }
+    const int64_t held = ecuio_engine_key_held_until(e, ch);
+    return held > at ? held : at;
+}
+
+/* Session request sid sub into channel c's one-shot, through the
+ * allow-list: a request it refuses goes nowhere, and the channel reads in
+ * default. False when it was refused. */
+inline bool ecuio_engine_session_fill(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t sid, uint8_t sub)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (!ecuio_engine_session_live(e, ch)) {
-        return false;
-    }
-    if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
-        now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US) {
-        ecuio_engine_session_step(ch,
-                                  ECUIO_SESSION_STATE_ENTERING); /* lapsed */
-        ecuio_engine_count16(ch.session_lost);
-        ++ch.generation;
-    }
-    uint8_t sid = 0;
-    uint8_t sub = 0;
-    if (ch.session_step == ECUIO_SESSION_STATE_ENTERING) {
-        sid = ECUIO_SESSION_CONTROL;
-        sub = e->session;
-    } else if (now_us - ch.last_sent_us >= e->keepalive_us) {
-        sid = ECUIO_TESTER_PRESENT;
-        sub = 0x00;
-    } else {
-        return false;
-    }
     if (!ecuio_engine_session_request_allowed(sid, sub)) {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_REFUSED);
         ch.session_nrc = 0;
@@ -162,6 +161,41 @@ inline bool ecuio_engine_session_due(ecuio_request_engine* e, uint32_t c,
     ch.once.channel = static_cast<uint8_t>(c);
     ch.sessioning = true;
     return true;
+}
+
+/* Channel c's session entry, when due at now_us: 10 <session> to enter,
+ * and again once ECUIO_ENGINE_S3_LATE_US has passed with nothing sent
+ * (the session counted lost: a request now may land past S3). Into the
+ * one-shot; true when it went there. */
+inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
+                                           int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ecuio_engine_session_live(e, ch)) {
+        return false;
+    }
+    if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+        now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_LATE_US) {
+        ecuio_engine_session_step(ch,
+                                  ECUIO_SESSION_STATE_ENTERING); /* lapsed */
+        ecuio_engine_count16(ch.session_lost);
+        ++ch.generation;
+    }
+    return ch.session_step == ECUIO_SESSION_STATE_ENTERING &&
+           ecuio_engine_session_fill(e, c, ECUIO_SESSION_CONTROL, e->session);
+}
+
+/* Channel c's keep-alive, when due at now_us: 3E 00 once entered with
+ * nothing sent for keepalive_us. ecuio_engine_due asks it last, so any
+ * other request due stands in for it (ADR-0060: any request restarts
+ * S3). Into the one-shot; true when it went there. */
+inline bool ecuio_engine_keepalive_due(ecuio_request_engine* e, uint32_t c,
+                                       int64_t now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    return e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+           now_us - ch.last_sent_us >= e->keepalive_us &&
+           ecuio_engine_session_fill(e, c, ECUIO_TESTER_PRESENT, 0x00);
 }
 
 /* Settles channel c's session request: a positive reply to 10 xx enters

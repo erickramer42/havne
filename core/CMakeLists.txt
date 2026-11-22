@@ -64,6 +64,12 @@ add_library(ecuio-core STATIC
     src/signal_file_parts.cpp
     src/signal_file_rules.cpp
     src/signal_file_source.cpp
+    src/signal_file_format3.cpp
+    src/signal_file_merged.cpp
+    src/signal_file_merge.cpp
+    src/signal_file_merge_notes.cpp
+    src/signal_file_merge_signals.cpp
+    src/signal_file_readers.cpp
     src/signal_expr.cpp
     src/signal_file_expr.cpp
     src/signal_keys.cpp
@@ -77,6 +83,7 @@ add_library(ecuio-core STATIC
     src/plugin_pages.cpp
     src/plugin_wrap.cpp
     src/security_store.cpp
+    src/security_store_owner.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp

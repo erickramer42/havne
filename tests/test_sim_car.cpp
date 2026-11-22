@@ -4,7 +4,8 @@
 // The simulated car's faults for each module (ADR-0065 section 10): the
 // faults= grammar's aim at one module (@<reply ID>), each module's own
 // periods and counts, through the unbound sim, and the order create
-// judges an aim in.
+// judges an aim in; sessions=1, a profile's modules in the extended
+// session.
 
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
@@ -380,6 +381,52 @@ TEST(SimAskTest, AnAimNoModuleAnswersIsRefused)
         ECUIO_OK)
         << ecuio_last_error_detail();
     ecuio_sim_destroy(sim);
+}
+
+// sessions=1 gives a profile's modules the extended session: 10 03
+// enters it and 3E 00 is answered, with no security access (27 refused
+// as any service a module lacks); without the key 10 03 is refused, and
+// the key needs a profile
+TEST(SimAskTest, TheSessionsKeyGivesAProfilesModulesTheExtendedSession)
+{
+    EXPECT_TRUE(parsed("mock://ask?profile=x&sessions=1").sessions);
+    EXPECT_FALSE(parsed("mock://ask?profile=x&sessions=0").sessions);
+    EXPECT_FALSE(parsed("mock://ask?profile=x").sessions);
+    EXPECT_EQ(refusal("mock://ask?sessions=1"),
+              "sessions=1 gives a profile's modules the extended session: "
+              "it needs profile=");
+    EXPECT_EQ(refusal("mock://ask?profile=x&sessions=2"),
+              "sessions: 0 or 1 (a profile's modules have the extended "
+              "session too)");
+
+    const auto reply = [](const std::vector<ecuio_sim_reply_t>& r) {
+        return r.size() == 1 ? Bytes(r[0].data, r[0].data + r[0].length)
+                             : Bytes{};
+    };
+    const Bytes entered = {0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    Modules m("sim-car-sessions", 3);
+    {
+        Unbound u("mock://ask?profile=sim-car-sessions");
+        ASSERT_NE(u.sim, nullptr);
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), (Bytes{0x7F, 0x10, 0x12}))
+            << "no session without the key";
+    }
+    Unbound u("mock://ask?profile=sim-car-sessions&sessions=1");
+    ASSERT_NE(u.sim, nullptr);
+    for (uint32_t i = 0; i < 3; ++i) {
+        SCOPED_TRACE(i);
+        EXPECT_EQ(reply(u.ask(0x700 + i, {0x10, 0x03})), entered);
+        EXPECT_EQ(reply(u.ask(0x700 + i, {0x3E, 0x00})), (Bytes{0x7E, 0x00}));
+        EXPECT_EQ(reply(u.ask(0x700 + i, {0x27, 0x01})),
+                  (Bytes{0x7F, 0x27, 0x11}))
+            << "no security access";
+        EXPECT_EQ(reply(u.ask(0x700 + i, {0x22, 0x10, static_cast<uint8_t>(i)}))
+                      .size(),
+                  4u)
+            << "its DID still answers";
+    }
+    EXPECT_EQ(reply(u.ask(0x7E0, {0x10, 0x03})), entered)
+        << "the engine ECU's own session";
 }
 
 // The aim is judged after the profile (its modules are known only then)

@@ -23,14 +23,52 @@
 #include <vector>
 
 struct ecuio_signal_file {
+    /* A channel as the "ecus" entry that names it gives it: id "" for a
+     * base channel no entry names */
+    struct module {
+        std::string id;
+        std::string name;
+        uint32_t part = ECUIO_SIGNAL_PART_NONE;
+    };
+
+    /* What ecuio_signal_file_note gives */
+    struct note {
+        uint32_t kind = 0;
+        uint32_t part = ECUIO_SIGNAL_PART_NONE;
+        uint32_t other_part = ECUIO_SIGNAL_PART_NONE;
+        uint32_t def = UINT32_MAX;
+        uint32_t count = 0;
+        uint32_t base_def = UINT32_MAX;
+        std::string text;
+    };
+
+    /* A part of a merged set, as its "parts" entry gives it */
+    struct part {
+        std::string profile;
+        std::string name;
+        uint32_t format = 0;
+        bool has_plugin = false;
+        std::string plugin_id;
+        std::string plugin_version;
+        std::string plugin_variant;
+        ecuio_signal_source_t source{};
+    };
+
     std::string name;
     std::string profile;
     std::string extends; /* "obd2" or "" */
     std::vector<ecuio_signal_def_t> defs;
     std::vector<ecuio_channel_decl_t> channels;
+    std::vector<module> modules; /* one for each channel */
     std::vector<ecuio_enum_entry_t> enums;
     std::vector<ecuio_computed_t> computed;
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
+    /* A merged set's (signal_file_merged.cpp), empty for any other file:
+     * its parts, each def's part (none for a base def) and the keys a
+     * signal stands for besides its own */
+    std::vector<part> parts;
+    std::vector<uint32_t> def_part; /* by def index */
+    std::vector<std::pair<std::string, uint32_t>> second_keys; /* def index */
     std::vector<std::pair<uint32_t, ecuio_signal_gauge_t>>
         gauges; /* def index */
     std::vector<std::pair<uint32_t, std::string>> exprs; /* def index */
@@ -49,6 +87,11 @@ struct ecuio_signal_file {
     std::string plugin;
     /* Its "source", or a variant's own (ecuio_signal_file_source) */
     ecuio_signal_source_t source{};
+    /* Its "needs" as written, and the keys of its signals left out for
+     * one: in its text, not in its set */
+    std::vector<std::string> needs;
+    std::vector<std::string> waiting;
+    std::vector<note> notes; /* what its load left for a front end */
 };
 
 namespace ecuio_sf {
@@ -83,7 +126,19 @@ struct parts {
     /* The most signals of its own the set holds: a data file's, or a
      * set's for several files merged and for a recording's copy */
     size_t max_signals = ECUIO_SIGNAL_FILE_MAX_SIGNALS;
+    /* The keys the set's expressions read that another file provides
+     * ("needs", read_needs), each with where it is written */
+    std::vector<std::pair<std::string, const ecuio_json::Value*>> needs;
+    /* Every signal of the list may be gone: the build of what is left
+     * once the signals waiting for a need are out */
+    bool may_be_empty = false;
 };
+
+/* root's "needs" into out: format 3's, a list of keys, each given once
+ * (signal_file_format3.cpp) */
+void read_needs(
+    const ecuio_json::Value& root, uint32_t format,
+    std::vector<std::pair<std::string, const ecuio_json::Value*>>* out);
 
 /* A file's "havne_signals", checked first: its first key, a format this
  * core reads. what names the file in the words ("a signal file"). */

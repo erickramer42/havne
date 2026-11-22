@@ -5,8 +5,8 @@
 // The sandbox tests need small modules, most of them hostile (an endless
 // loop, a start function, an import), on every platform and with no
 // WebAssembly toolchain. This writes the binary format directly: each
-// function type once, as a linker writes them, at most one memory, and a
-// function's body given as its instruction bytes.
+// function type once, as a linker writes them, at most one memory, i32
+// globals, and a function's body given as its instruction bytes.
 
 #ifndef ECUIO_TESTS_WASM_BUILDER_H
 #define ECUIO_TESTS_WASM_BUILDER_H
@@ -37,6 +37,8 @@ constexpr uint8_t BR_IF = 0x0D;
 constexpr uint8_t CALL = 0x10;
 constexpr uint8_t LOCAL_GET = 0x20;
 constexpr uint8_t LOCAL_SET = 0x21;
+constexpr uint8_t GLOBAL_GET = 0x23;
+constexpr uint8_t GLOBAL_SET = 0x24;
 constexpr uint8_t I32_LOAD = 0x28;
 constexpr uint8_t I32_STORE = 0x36;
 constexpr uint8_t MEMORY_SIZE = 0x3F;
@@ -99,6 +101,7 @@ struct module {
     /* the limits' flag byte; negative: by memory_max */
     int32_t memory_flags = -1;
     std::string memory_export = "memory";
+    uint32_t i32_globals = 0; /* mutable, each starting at 0 */
     int32_t start = -1; /* the start function's index in funcs */
     bytes tail;         /* sections appended as they are, after the rest */
 
@@ -111,6 +114,7 @@ struct module {
         section(out, 2, import_section(import_type));
         section(out, 3, function_section(type_of));
         section(out, 5, memory_section());
+        section(out, 6, global_section());
         section(out, 7, export_section());
         section(out, 8, start_section());
         section(out, 10, code_section());
@@ -199,6 +203,19 @@ private:
         leb(s, memory_min);
         if (memory_max >= 0) {
             leb(s, static_cast<uint32_t>(memory_max));
+        }
+        return s;
+    }
+
+    bytes global_section() const
+    {
+        bytes s;
+        if (i32_globals == 0) {
+            return s;
+        }
+        leb(s, i32_globals);
+        for (uint32_t g = 0; g < i32_globals; ++g) {
+            s.insert(s.end(), {I32, 0x01, I32_CONST, 0x00, END});
         }
         return s;
     }
