@@ -404,11 +404,15 @@ inline std::atomic<void (*)()> replace_test_before_retry{nullptr};
  * elsewhere the folder holding to is flushed after the rename (a file
  * system that can't flush a folder passes). A move Windows refuses for
  * a file in use is tried kReplaceTries times. False with *why; from is
- * left where it was unless the rename itself went through; once it
- * has, only a failure's words allocate. */
+ * left where it was unless the rename itself went through, which
+ * *renamed (may be NULL) says, set before the words: once it has, only a
+ * failure's words allocate. */
 inline bool replace_with(const std::string& from, const std::string& to,
-                         std::string* why)
+                         std::string* why, bool* renamed = nullptr)
 {
+    bool ignored = false;
+    bool* moved = renamed != nullptr ? renamed : &ignored;
+    *moved = false;
 #ifdef _WIN32
     const std::wstring a = wide(from);
     const std::wstring b = wide(to);
@@ -426,6 +430,7 @@ inline bool replace_with(const std::string& from, const std::string& to,
         }
         if (MoveFileExW(a.c_str(), b.c_str(),
                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            *moved = true;
             return true;
         }
         code = GetLastError();
@@ -444,6 +449,7 @@ inline bool replace_with(const std::string& from, const std::string& to,
         *why = os_words(errno);
         return false;
     }
+    *moved = true;
     const int fd = open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
         *why = "its folder can't be flushed: " + os_words(errno);

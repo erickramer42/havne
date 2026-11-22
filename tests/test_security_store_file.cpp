@@ -489,7 +489,9 @@ TEST(SecurityStoreTest, ReplaceWithPutsOneFileOverAnother)
     put("a", "new");
     put("b", "old");
     std::string why;
-    ASSERT_TRUE(ecuio_files::replace_with(a, b, &why)) << why;
+    bool renamed = false;
+    ASSERT_TRUE(ecuio_files::replace_with(a, b, &why, &renamed)) << why;
+    EXPECT_TRUE(renamed);
     EXPECT_EQ(get("b"), "new");
     EXPECT_FALSE(fs::exists(f.path / "a"));
     put("a", "newer");
@@ -497,13 +499,18 @@ TEST(SecurityStoreTest, ReplaceWithPutsOneFileOverAnother)
     fs::remove(f.path / "b", ec);
     ASSERT_TRUE(ecuio_files::replace_with(a, b, &why)) << why << ": over none";
     EXPECT_EQ(get("b"), "newer");
-    EXPECT_FALSE(ecuio_files::replace_with(a, b, &why)) << "nothing to move";
+    EXPECT_FALSE(ecuio_files::replace_with(a, b, &why, &renamed))
+        << "nothing to move";
+    EXPECT_FALSE(renamed);
     EXPECT_FALSE(why.empty());
     EXPECT_EQ(get("b"), "newer") << "what was there stands";
     put("a", "kept");
     fs::create_directories(f.path / "dir" / "inside", ec);
     const std::string dir = (f.path / "dir").generic_u8string();
-    EXPECT_FALSE(ecuio_files::replace_with(a, dir, &why)) << "a folder";
+    renamed = true;
+    EXPECT_FALSE(ecuio_files::replace_with(a, dir, &why, &renamed))
+        << "a folder";
+    EXPECT_FALSE(renamed);
     EXPECT_EQ(get("a"), "kept") << "the file stays where it was";
     EXPECT_TRUE(fs::exists(f.path / "dir" / "inside"));
 }
@@ -778,4 +785,41 @@ TEST(SecurityStoreTest, AChangedFileIsNeverWrittenOverUnread)
     fs::remove(f.path / kName, ec);
     ASSERT_EQ(store_save(f.file(), &fresh, &why), store_io::ok) << why;
     EXPECT_EQ(f.read(), two);
+}
+
+/* A save refused after its new file stood (the folder's flush failing
+ * after the rename, POSIX) leaves the store holding that file: its next
+ * save is its own, so neither an ended mark nor a right key's zero is
+ * undone by its own file coming back through a merge */
+TEST(SecurityStoreTest, AnEndedMarkNeverComesBackThroughAMerge)
+{
+    Folder f;
+    store s;
+    s.entries.push_back(entry(kRx, 0x01, 2, kUtc));
+    s.entries.push_back(entry(kRx, 0x03, 0, 0));
+    std::string why;
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+
+    store_attempt_began(*store_find(s, kCar, kRx, 0x01), kUtc + 5);
+    store_find(s, kCar, kRx, 0x03)->failed = 4;
+    store_test_fail_at.store(4);
+    EXPECT_EQ(store_save(f.file(), &s, &why), store_io::refused);
+    EXPECT_EQ(why, "the security store can't be written: its folder can't be "
+                   "flushed");
+    EXPECT_NE(f.read().find("\"pending_utc\": 1795132805"), std::string::npos)
+        << "the new file stands";
+    EXPECT_EQ(s.on_disk, f.read()) << "and the store holds it";
+    EXPECT_FALSE(partial_left(f.path, kName));
+
+    /* The attempt ends without a failure, and level 3's right key comes */
+    store_attempt_ended(*store_find(s, kCar, kRx, 0x01), false, false,
+                        kUtc + 6);
+    store_unlocked(*store_find(s, kCar, kRx, 0x03));
+    ASSERT_EQ(store_save(f.file(), &s, &why), store_io::ok) << why;
+    store back;
+    ASSERT_EQ(store_load(f.file(), &back, &why), store_io::ok) << why;
+    ASSERT_EQ(back.entries.size(), 1u) << "level 3's count is gone";
+    EXPECT_EQ(back.entries[0].level, 0x01);
+    EXPECT_EQ(back.entries[0].failed, 2u) << "no mark came back to count";
+    EXPECT_EQ(back.entries[0].last_utc, kUtc);
 }

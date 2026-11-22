@@ -564,6 +564,19 @@ store_io store_load(const std::string& path, store* out, std::string* why)
 store_io store_save(const std::string& path, store* s, std::string* why)
 {
     std::string name; /* this write's own file, while there is one */
+    std::vector<store_entry> merged;
+    std::string text;
+    bool renamed = false;
+    bool kept = false;
+    /* Once the new file stands, *s is what it holds, even when the save
+     * then fails: its next save would merge its own file back otherwise */
+    const auto keep = [&] {
+        if (renamed && !kept) {
+            s->entries = std::move(merged);
+            s->on_disk = std::move(text);
+            kept = true;
+        }
+    };
     try {
         const int fail = store_test_fail_at.exchange(0);
         /* Held from the read to the replace, so no other save comes between */
@@ -572,7 +585,6 @@ store_io store_save(const std::string& path, store* s, std::string* why)
             return store_io::refused;
         }
         std::string words;
-        std::vector<store_entry> merged;
         const store_io look = merged_entries(path, *s, &merged, &words);
         if (look == store_io::out_of_memory) {
             return look;
@@ -588,7 +600,7 @@ store_io store_save(const std::string& path, store* s, std::string* why)
             *why = "the security store is full";
             return store_io::refused;
         }
-        std::string text = text_of_entries(merged);
+        text = text_of_entries(merged);
         if (!write_beside(path, text, fail, &name, &words)) {
             *why = "the security store can't be written: " + words;
             return store_io::refused;
@@ -599,25 +611,27 @@ store_io store_save(const std::string& path, store* s, std::string* why)
         if (fail == 3) {
             words = "the disk is full";
         }
-        const bool replaced =
-            fail != 3 && ecuio_files::replace_with(name, path, &words);
-        if (!replaced) {
-            /* None of this name is left when the rename went through and
-             * its folder's flush then failed */
+        bool replaced = fail != 3 &&
+                        ecuio_files::replace_with(name, path, &words, &renamed);
+        if (fail == 4 && replaced) {
+            replaced = false;
+            words = "its folder can't be flushed";
+        }
+        if (!renamed) {
             ecuio_files::remove_file(name);
         }
         name.clear();
+        keep();
         if (!replaced) {
             *why = "the security store can't be written: " + words;
             return store_io::refused;
         }
-        s->entries = std::move(merged);
-        s->on_disk = std::move(text);
         return store_io::ok;
     } catch (const std::bad_alloc&) {
-        if (!name.empty()) {
+        if (!renamed && !name.empty()) {
             ecuio_files::remove_file(name);
         }
+        keep();
         return store_io::out_of_memory;
     }
 }

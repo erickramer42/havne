@@ -42,7 +42,10 @@
 //     the larger count, the later second and the later mark stand. So a
 //     second writer can leave a count too high, never too low: once the
 //     file has changed, a right key's zero is lost to the file's older
-//     count, on an entry the other writer never touched too.
+//     count, on an entry the other writer never touched too, and an ended
+//     mark can come back. Only a second writer's store does that: a store
+//     always holds what it last put in the file, a failed save whose new
+//     file stood included.
 //   - The words name no path (it can hold the account name).
 
 #ifndef ECUIO_SECURITY_STORE_H
@@ -143,12 +146,12 @@ store_io store_load(const std::string& path, store* out, std::string* why);
  * of the write failed. On any failure the file and *s are as they were
  * and nothing of this write is left, with one exception the words name:
  * the folder's own flush failing after the replace (POSIX), where the new
- * file stands. */
+ * file stands and *s holds it, as after a save that went through. */
 store_io store_save(const std::string& path, store* s, std::string* why);
 
 /* TEST-ONLY: the step of the next store_save that fails as a full disk
- * does, once: 1 the write, 2 the flush to the disk, 3 the replace; 0
- * none. */
+ * does, once: 1 the write, 2 the flush to the disk, 3 the replace, 4 the
+ * folder's flush after the replace (the new file stands); 0 none. */
 inline std::atomic<int> store_test_fail_at{0};
 
 /* TEST-ONLY: an errno the next open of the file for reading (a load's, a
