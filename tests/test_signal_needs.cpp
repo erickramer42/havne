@@ -61,6 +61,7 @@ std::vector<Note> notes_of(const ecuio_signal_file_t* f)
         EXPECT_EQ(n.other_part, ECUIO_SIGNAL_PART_NONE);
         EXPECT_EQ(n.def, UINT32_MAX) << "a signal left out is no def";
         EXPECT_EQ(n.count, 0u);
+        EXPECT_EQ(n.base_def, UINT32_MAX);
         for (uint32_t r : n.reserved) {
             EXPECT_EQ(r, 0u);
         }

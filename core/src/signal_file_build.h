@@ -38,6 +38,7 @@ struct ecuio_signal_file {
         uint32_t other_part = ECUIO_SIGNAL_PART_NONE;
         uint32_t def = UINT32_MAX;
         uint32_t count = 0;
+        uint32_t base_def = UINT32_MAX;
         std::string text;
     };
 

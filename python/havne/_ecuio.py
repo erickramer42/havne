@@ -1549,7 +1549,8 @@ ecuio_signal_note_t._fields_ = [
     ('other_part', c_uint32),
     ('def', c_uint32),
     ('count', c_uint32),
-    ('reserved', (c_uint32 * 4)),
+    ('base_def', c_uint32),
+    ('reserved', (c_uint32 * 3)),
     ('text', (c_char * 384)),
 ]
 ecuio_signal_part_t._fields_ = [

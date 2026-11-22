@@ -1343,7 +1343,10 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
   signal as the others do: when a later part's signal took its place the
   sentence names both ("'Boost' (My car signals) is read beside obd2's
   'Boost' in the place of 'Boost' (Example import)") and the def is the
-  one that stands, so what showed the one can show the other. With
+  one that stands, so what showed the one can show the other. Its
+  `base_def` is obd2's def's place in the set (`UINT32_MAX` in a note
+  of any other kind), so a front end knows which obd2 signal the
+  standing one is read beside without reading the sentence. With
   nothing standing there the note isn't given.
 - **A recording** of a session on a merged set copies the merged text as
   its `signals.json`, past a data file's megabyte too, and writes one

@@ -41,7 +41,10 @@ typedef char abi_part_variant_check
 typedef char abi_note_size_check[(sizeof(ecuio_signal_note_t) == 424) ? 1 : -1];
 typedef char abi_note_kind_check[(offsetof(ecuio_signal_note_t, kind) == 4) ? 1 : -1];
 typedef char abi_note_def_check[(offsetof(ecuio_signal_note_t, def) == 16) ? 1 : -1];
-typedef char abi_note_reserved_check[(offsetof(ecuio_signal_note_t, reserved) == 24) ? 1 : -1];
+typedef char abi_note_base_def_check
+    [(offsetof(ecuio_signal_note_t, base_def) == 24) ? 1 : -1];
+typedef char abi_note_reserved_check
+    [(offsetof(ecuio_signal_note_t, reserved) == 28) ? 1 : -1];
 typedef char abi_note_text_check[(offsetof(ecuio_signal_note_t, text) == 40) ? 1 : -1];
 typedef char abi_note_text_size_check[(sizeof(((ecuio_signal_note_t*)0)->text) == ECUIO_NOTE_TEXT_LEN) ? 1 : -1];
 
@@ -175,7 +178,8 @@ static int merge_from_c(void)
         ecuio_signal_file_note_count(merged) != 1u ||
         ecuio_signal_file_note(merged, 0, &note) != ECUIO_OK ||
         note.kind != ECUIO_NOTE_REPLACED_BY_ADDRESS || note.part != 1u ||
-        note.other_part != 0u || note.def != 0u) {
+        note.other_part != 0u || note.def != 0u ||
+        note.base_def != 0xFFFFFFFFu) {
         printf("FAIL: a merge from C: %s\n", ecuio_last_error_detail());
         failed = 1;
     }
@@ -244,10 +248,12 @@ int main(void)
     if (ecuio_signal_file_note(file, 0, &note) != ECUIO_OK ||
         note.kind != ECUIO_NOTE_SIGNAL_LEFT_OUT ||
         note.part != ECUIO_SIGNAL_PART_NONE || note.def != 0xFFFFFFFFu ||
+        note.base_def != 0xFFFFFFFFu ||
         strstr(note.text, "is left out") == NULL ||
         ecuio_signal_file_note(file, 1, &note) != ECUIO_ERR_INVALID_ARGUMENT ||
         ecuio_signal_file_note(NULL, 0, &note) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_signal_file_needs(NULL, &need, 1, &count) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_signal_file_needs(NULL, &need, 1, &count) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_signal_file_note_count(NULL) != 0u) {
         printf("FAIL: a load's notes from C: %s\n", ecuio_last_error_detail());
         return 1;

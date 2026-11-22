@@ -291,6 +291,8 @@ TEST(MergeTest, NoObd2SignalIsReplaced)
                      "set replaces no obd2 signal; 'C half' reads obd2's"}));
     EXPECT_EQ(notes_of(f)[0].def, place_of(f, "my_rpm"));
     EXPECT_EQ(notes_of(f)[0].part, 0u);
+    ASSERT_LT(notes_of(f)[0].base_def, obd2->count);
+    EXPECT_EQ(set->defs[notes_of(f)[0].base_def].id, ECUIO_OBD2_SIG_RPM_ID);
     /* sha256("obd2\nuser.old\nuser.fresh\n"): the base is in the name */
     EXPECT_EQ(
         std::string(ecuio_signal_file_profile(f)).compare(0, 7, "merged."), 0);
@@ -311,8 +313,9 @@ TEST(MergeTest, NoObd2SignalIsReplaced)
 }
 
 // The note of a signal that stood in an obd2 signal's place follows it to
-// the signal a later part put there, so what showed the one can show the
-// other; with nothing standing there it isn't given
+// the signal a later part put there and still names obd2's def, so what
+// showed the one can show the other; with nothing standing there it isn't
+// given
 TEST(MergeTest, TheNoteBesideObd2FollowsTheSignalThatStands)
 {
     File old =
@@ -336,6 +339,11 @@ TEST(MergeTest, TheNoteBesideObd2FollowsTheSignalThatStands)
     EXPECT_EQ(beside.def, place_of(f, "y"));
     EXPECT_EQ(beside.part, 0u) << "the note is still Old's";
     EXPECT_EQ(beside.other_part, ECUIO_SIGNAL_PART_NONE);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f);
+    ASSERT_LT(beside.base_def, ecuio_obd2_signal_set()->count);
+    EXPECT_EQ(set->defs[beside.base_def].id, ECUIO_OBD2_SIG_RPM_ID)
+        << "obd2's def, whichever signal stands beside it";
+    EXPECT_EQ(notes_of(f)[1].base_def, UINT32_MAX) << "a replacement's note";
 
     /* What took its place is left out: nothing is beside obd2's */
     File unmet = load(doc("Unmet", calc("my_rpm", "130 - oil"),
@@ -349,6 +357,9 @@ TEST(MergeTest, TheNoteBesideObd2FollowsTheSignalThatStands)
                      "'my_rpm'",
                      "8: 'C my_rpm' (Unmet) is left out: it reads 'oil', "
                      "which its part needs and no part gives"}));
+    for (const ecuio_signal_note_t& n : notes_of(gone.file.get())) {
+        EXPECT_EQ(n.base_def, UINT32_MAX) << n.text;
+    }
 }
 
 TEST(MergeTest, AFormat3PartMergedAloneIsItsOwnSet)

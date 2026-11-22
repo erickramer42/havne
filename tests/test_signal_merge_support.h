@@ -124,6 +124,9 @@ inline std::vector<ecuio_signal_note_t> notes_of(const ecuio_signal_file_t* f)
         for (uint32_t r : n.reserved) {
             EXPECT_EQ(r, 0u);
         }
+        if (n.kind != ECUIO_NOTE_BESIDE_BASE) {
+            EXPECT_EQ(n.base_def, UINT32_MAX) << n.text;
+        }
         out.push_back(n);
     }
     return out;

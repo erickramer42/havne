@@ -140,6 +140,15 @@ void check_notes(const ecuio_signal_file_t* f, uint32_t parts)
         check(n.part < parts);
         check(n.other_part < parts || n.other_part == ECUIO_SIGNAL_PART_NONE);
         check(n.def < defs || n.def == UINT32_MAX);
+        /* Beside obd2's def, which is no part's; any other kind names none */
+        if (n.kind == ECUIO_NOTE_BESIDE_BASE) {
+            check(n.base_def < defs && n.def < defs && n.def != n.base_def);
+            check(ecuio_signal_file_def_part(
+                      f, &ecuio_signal_file_set(f)->defs[n.base_def]) ==
+                  ECUIO_SIGNAL_PART_NONE);
+        } else {
+            check(n.base_def == UINT32_MAX);
+        }
         const void* end = memchr(n.text, '\0', sizeof n.text);
         check(end != nullptr && n.text[0] != '\0');
         for (const char* c = n.text; *c != '\0'; ++c) {

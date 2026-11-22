@@ -1368,7 +1368,8 @@ ecuio_status_t ecuio_signal_file_needs(const ecuio_signal_file_t* file,
 #define ECUIO_NOTE_REPLACED_BY_KEY 2u
 /* A signal's own key was one another kept for a signal it replaced */
 #define ECUIO_NOTE_KEY_TAKEN 3u
-/* A signal its part read in an obd2 signal's place is read beside it */
+/* A signal its part read in an obd2 signal's place is read beside it:
+ * def is the signal, base_def obd2's */
 #define ECUIO_NOTE_BESIDE_BASE 4u
 /* A part's ECU id was another module's and took a suffix */
 #define ECUIO_NOTE_MODULE_RENAMED 5u
@@ -1398,7 +1399,10 @@ typedef struct ecuio_signal_note {
                              set: the signal that stands where the note's
                              was; UINT32_MAX for what isn't in the set */
     uint32_t count;       /* a left-out module's or part's signals; else 0 */
-    uint32_t reserved[4]; /* zero */
+    uint32_t base_def;    /* BESIDE_BASE: the obd2 def the note's signal is
+                             read beside, its place in the set; else
+                             UINT32_MAX */
+    uint32_t reserved[3]; /* zero */
     char text[ECUIO_NOTE_TEXT_LEN]; /* one line, UTF-8, no control
                                        character */
 } ecuio_signal_note_t;
@@ -1408,6 +1412,8 @@ static_assert(sizeof(ecuio_signal_note_t) == 424,
               "ecuio_signal_note_t size is ABI");
 static_assert(offsetof(ecuio_signal_note_t, def) == 16,
               "note def offset is ABI");
+static_assert(offsetof(ecuio_signal_note_t, base_def) == 24,
+              "note base_def offset is ABI");
 static_assert(offsetof(ecuio_signal_note_t, text) == 40,
               "note text offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -1415,6 +1421,8 @@ _Static_assert(sizeof(ecuio_signal_note_t) == 424,
                "ecuio_signal_note_t size is ABI");
 _Static_assert(offsetof(ecuio_signal_note_t, def) == 16,
                "note def offset is ABI");
+_Static_assert(offsetof(ecuio_signal_note_t, base_def) == 24,
+               "note base_def offset is ABI");
 _Static_assert(offsetof(ecuio_signal_note_t, text) == 40,
                "note text offset is ABI");
 #endif

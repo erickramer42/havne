@@ -68,6 +68,17 @@ std::string upper(std::string text)
     return text;
 }
 
+/* The place of the base def of this ID: the base's defs are the set's first */
+uint32_t base_place(const ecuio_signal_file& f, size_t base_count, uint16_t id)
+{
+    for (size_t d = 0; d < base_count; ++d) {
+        if (f.defs[d].id == id) {
+            return static_cast<uint32_t>(d);
+        }
+    }
+    return UINT32_MAX;
+}
+
 } // namespace
 
 std::string cut(const std::string& text, size_t max)
@@ -254,6 +265,9 @@ void merger::give_notes(ecuio_signal_file& f) const
         }
         if (stands != kNone) {
             out.def = def_at[stands];
+        }
+        if (n.kind == ECUIO_NOTE_BESIDE_BASE) {
+            out.base_def = base_place(f, first, items_[n.item].base_id);
         }
         out.text = cut(sentence(n, counts), ECUIO_NOTE_TEXT_LEN - 4);
         f.notes.push_back(std::move(out));

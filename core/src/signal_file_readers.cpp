@@ -251,6 +251,7 @@ ecuio_status_t ecuio_signal_file_note(const ecuio_signal_file_t* file,
     filled.other_part = n.other_part;
     filled.def = n.def;
     filled.count = n.count;
+    filled.base_def = n.base_def;
     ecuio_sf::copy_text(filled.text, sizeof filled.text, n.text);
     std::memcpy(out, &filled, sizeof filled);
     return ECUIO_OK;
