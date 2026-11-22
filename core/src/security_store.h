@@ -30,14 +30,19 @@
 //   - A write goes to a file of its own beside the store, is flushed to
 //     the disk, then replaces the store, so a write that fails at any
 //     step leaves the store as it was.
+//   - A save holds a lock on a file of its own beside the store
+//     (<store>.lock, left there) from its read of the store to the
+//     replace, so two saves never overlap, in one process or two: the
+//     second waits up to kStoreLockWaitMs, then is refused ("another
+//     program is using the security store"). A load takes no lock: the
+//     replace is one rename, so it reads the old file or the new whole.
 //   - One owner for a path: one store, in one process, reads and writes
 //     a file. A save that finds the file isn't what this store last read
 //     or wrote merges: every entry there is kept, and where both hold one
 //     the larger count, the later second and the later mark stand. So a
 //     second writer can leave a count too high, never too low: once the
 //     file has changed, a right key's zero is lost to the file's older
-//     count, on an entry the other writer never touched too. Nothing
-//     locks the file between that read and the replace.
+//     count, on an entry the other writer never touched too.
 //   - The words name no path (it can hold the account name).
 
 #ifndef ECUIO_SECURITY_STORE_H
@@ -59,6 +64,8 @@ constexpr uint32_t kStoreMaxFailed = 0x7FFFFFFF;
 /* The last second of the year 9999: a bound for a second read from a file */
 constexpr int64_t kStoreMaxUtc = 253402300799;
 constexpr uint32_t kStoreFormat = 1;
+/* How long a save waits for another's lock on the store */
+constexpr int kStoreLockWaitMs = 250;
 
 struct store_entry {
     uint64_t vehicle = 0;    /* store_vehicle_of's */
@@ -130,6 +137,7 @@ store_io store_load(const std::string& path, store* out, std::string* why);
 /* *s over the file at path, or beside nothing when there is none; merged
  * with the file first when the file isn't what *s last read or wrote
  * (the rules above), and *s then holds the merged entries. refused: the
+ * lock can't be taken or another holds it past kStoreLockWaitMs, the
  * file there can't be read or doesn't read as a store (it is never
  * overwritten unread), the entries are past kStoreMaxEntries, or a step
  * of the write failed. On any failure the file and *s are as they were
@@ -146,6 +154,13 @@ inline std::atomic<int> store_test_fail_at{0};
 /* TEST-ONLY: an errno the next open of the file for reading (a load's, a
  * save's look at what is there) fails with, once; 0 none. */
 inline std::atomic<int> store_test_open_errno{0};
+
+/* TEST-ONLY: the lock's wait in ms; 0 kStoreLockWaitMs */
+inline std::atomic<int> store_test_lock_wait_ms{0};
+
+/* TEST-ONLY: called once, by the next save, with its lock held and its
+ * file written, just before the replace */
+inline std::atomic<void (*)()> store_test_before_replace{nullptr};
 
 } // namespace ecuio_security
 

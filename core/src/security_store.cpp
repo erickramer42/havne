@@ -412,6 +412,22 @@ bool write_beside(const std::string& path, const std::string& text, int fail,
     return ok;
 }
 
+/* The store's lock into *lock; false with *why, the save's refusal */
+bool lock_store(const std::string& path, ecuio_files::file_lock* lock,
+                std::string* why)
+{
+    const int seam = store_test_lock_wait_ms.load();
+    std::string words;
+    const ecuio_files::lock_got got = ecuio_files::lock_file(
+        path + ".lock", seam != 0 ? seam : kStoreLockWaitMs, lock, &words);
+    if (got == ecuio_files::lock_got::busy) {
+        *why = "another program is using the security store";
+    } else if (got == ecuio_files::lock_got::failed) {
+        *why = "the security store can't be written: " + words;
+    }
+    return got == ecuio_files::lock_got::locked;
+}
+
 } // namespace
 
 uint64_t store_vehicle_of(const std::string& identity)
@@ -550,6 +566,11 @@ store_io store_save(const std::string& path, store* s, std::string* why)
     std::string name; /* this write's own file, while there is one */
     try {
         const int fail = store_test_fail_at.exchange(0);
+        /* Held from the read to the replace, so no other save comes between */
+        ecuio_files::file_lock lock;
+        if (!lock_store(path, &lock, why)) {
+            return store_io::refused;
+        }
         std::string words;
         std::vector<store_entry> merged;
         const store_io look = merged_entries(path, *s, &merged, &words);
@@ -571,6 +592,9 @@ store_io store_save(const std::string& path, store* s, std::string* why)
         if (!write_beside(path, text, fail, &name, &words)) {
             *why = "the security store can't be written: " + words;
             return store_io::refused;
+        }
+        if (void (*hook)() = store_test_before_replace.exchange(nullptr)) {
+            hook();
         }
         if (fail == 3) {
             words = "the disk is full";

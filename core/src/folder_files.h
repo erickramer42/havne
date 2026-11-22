@@ -1,20 +1,25 @@
 // File/layer: core/src/folder_files.h | internal, C++17, Qt-free; files and
 //             folders by UTF-8 path, for the imports and exports (ADR-0054)
-// Testing: UNIT: ImportTest, ExportTest, FolderExportTest (test_core)
+// Testing: UNIT: ImportTest, ExportTest, FolderExportTest, SecurityStoreTest
+//          (test_core)
 //
 // A file written whole under a temporary name and renamed into place, a
-// folder made only when the name is free, each failure in words that
-// never name the path. Windows takes UTF-16 paths (win_utf8.h).
+// folder made only when the name is free, a lock file held across a
+// store's save, each failure in words that never name the path. Windows
+// takes UTF-16 paths (win_utf8.h).
 
 #ifndef ECUIO_FOLDER_FILES_H
 #define ECUIO_FOLDER_FILES_H
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -26,6 +31,7 @@
 #else
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #if defined(__linux__)
@@ -475,6 +481,148 @@ inline void remove_folder(const std::string& utf8)
 #else
     rmdir(utf8.c_str());
 #endif
+}
+
+/* A lock on a file, held until release or the object's end */
+class file_lock
+{
+public:
+    file_lock() = default;
+    ~file_lock() { release(); }
+    file_lock(const file_lock&) = delete;
+    file_lock& operator=(const file_lock&) = delete;
+
+    void release()
+    {
+#ifdef _WIN32
+        if (handle != INVALID_HANDLE_VALUE) {
+            if (locked) {
+                /* Explicitly: a close frees a lock only when the system
+                 * gets to it */
+                OVERLAPPED at{};
+                UnlockFileEx(handle, 0, 1, 0, &at);
+            }
+            CloseHandle(handle);
+        }
+        handle = INVALID_HANDLE_VALUE;
+#else
+        if (fd >= 0) {
+            close(fd); /* frees the flock */
+        }
+        fd = -1;
+#endif
+        locked = false;
+    }
+
+#ifdef _WIN32
+    HANDLE handle = INVALID_HANDLE_VALUE;
+#else
+    int fd = -1;
+#endif
+    bool locked = false;
+};
+
+enum class lock_got : uint8_t {
+    locked,
+    busy,   /* another holder kept it past the wait */
+    failed, /* *why */
+};
+
+/* TEST-ONLY: called each time a try of lock_file finds the lock held */
+inline std::atomic<void (*)()> lock_test_held{nullptr};
+
+/* One try of lock_file's: locked, busy while another holds it, or failed
+ * with *why */
+inline lock_got lock_once(const std::string& utf8, file_lock* lock,
+                          std::string* why)
+{
+#ifdef _WIN32
+    if (lock->handle == INVALID_HANDLE_VALUE) {
+        const std::wstring w = wide(utf8);
+        if (w.empty()) {
+            *why = "the name isn't valid UTF-8";
+            return lock_got::failed;
+        }
+        lock->handle =
+            CreateFileW(w.c_str(), GENERIC_READ | GENERIC_WRITE,
+                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (lock->handle == INVALID_HANDLE_VALUE) {
+            const DWORD code = GetLastError();
+            if (code == ERROR_SHARING_VIOLATION) {
+                return lock_got::busy;
+            }
+            *why = os_words(code);
+            return lock_got::failed;
+        }
+    }
+    OVERLAPPED at{};
+    if (LockFileEx(lock->handle,
+                   LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0,
+                   &at)) {
+        lock->locked = true;
+        return lock_got::locked;
+    }
+    const DWORD code = GetLastError();
+    if (code == ERROR_LOCK_VIOLATION) {
+        return lock_got::busy;
+    }
+    *why = os_words(code);
+    return lock_got::failed;
+#else
+    if (lock->fd < 0) {
+        lock->fd = open(utf8.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        if (lock->fd < 0) {
+            *why = os_words(errno);
+            return lock_got::failed;
+        }
+    }
+    int got = flock(lock->fd, LOCK_EX | LOCK_NB);
+    while (got != 0 && errno == EINTR) {
+        got = flock(lock->fd, LOCK_EX | LOCK_NB);
+    }
+    if (got == 0) {
+        lock->locked = true;
+        return lock_got::locked;
+    }
+    if (errno == EWOULDBLOCK || errno == EAGAIN) {
+        return lock_got::busy;
+    }
+    *why = os_words(errno);
+    return lock_got::failed;
+#endif
+}
+
+/* The lock on the file at utf8 into *lock, the file made when there is
+ * none and left there (a lock file removed lets two holders each lock a
+ * file of the name). Waits up to wait_ms while another handle holds it,
+ * in this process or another: busy once that ran out, failed with *why
+ * for any other refusal. Windows locks the file's first byte
+ * (LockFileEx), elsewhere the whole file (flock); either ends with its
+ * handle, so a crash leaves no lock held. */
+inline lock_got lock_file(const std::string& utf8, int wait_ms, file_lock* lock,
+                          std::string* why)
+{
+    lock->release();
+    const auto until =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(wait_ms);
+    for (;;) {
+        const lock_got got = lock_once(utf8, lock, why);
+        if (got != lock_got::busy) {
+            if (got == lock_got::failed) {
+                lock->release();
+            }
+            return got;
+        }
+        if (void (*hook)() = lock_test_held.load()) {
+            hook();
+        }
+        if (std::chrono::steady_clock::now() >= until) {
+            lock->release();
+            return lock_got::busy;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
 }
 
 #ifdef _WIN32
