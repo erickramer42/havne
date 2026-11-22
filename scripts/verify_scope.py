@@ -405,13 +405,16 @@ def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         os.makedirs(os.path.join(tmp, "tests", "qml"))
         for fn, text in [("AKit.qml", "TestCase {}"), ("BKit.qml", "AKit { id: t }"),
-                         ("tst_one.qml", "BKit {}"), ("tst_two.qml", "AKit {\n}"), ("tst_three.qml", "TestCase {}")]:
+                         ("tst_one.qml", "BKit {}"), ("tst_two.qml", "AKit {\n}"), ("tst_three.qml", "TestCase {}"),
+                         ("Helper.qml", "Item {}")]:
             with open(os.path.join(tmp, "tests", "qml", fn), "w", encoding="utf-8") as f:
                 f.write(text)
         check("a kit reaches a kit's files", qml_tests_named(tmp, ["tests/qml/AKit.qml"]), ["one", "two"])
         check("a test file alone", qml_tests_named(tmp, ["tests/qml/tst_three.qml"]), ["three"])
         check("a kit nobody derives from", qml_tests_named(tmp, ["tests/qml/tst_three.qml", "tests/qml/BKit.qml"]),
               ["one", "three"])
+        check("a helper beside a test file keeps every QmlTest",
+              qml_tests_named(tmp, ["tests/qml/tst_three.qml", "tests/qml/Helper.qml"]), None)
     check("app QML runs every QML test", plan(["app/qml/Main.qml", "tests/qml/" + some], root)[2:], ("", False))
     check("a QML file that isn't a test or kit runs every QML test", plan(["tests/qml/helper.qml"], root)[2], "")
     check("a QML test and docs", plan(["docs/a.md", "tests/qml/" + some], root)[0], QML)
