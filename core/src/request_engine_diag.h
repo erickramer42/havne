@@ -171,6 +171,42 @@ inline void ecuio_engine_diag_take_freeze(ecuio_request_engine* e, uint32_t c,
     }
 }
 
+/* Lists the first items on a channel holding none, and marks its
+ * report asked */
+inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
+{
+    ch.diag.flags |= ECUIO_DIAG_ASKED;
+    for (const auto& q : ECUIO_DIAG_FIRST) {
+        ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
+    }
+}
+
+/* Starts channel ch's read over: its report empty but for the last
+ * clear's outcome, its generation moved on */
+inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
+{
+    const uint32_t generation = ch.diag.generation;
+    const uint8_t clear = ch.diag.clear;
+    const uint8_t clear_nrc = ch.diag.clear_nrc;
+    const uint32_t clear_rpm = ch.diag.clear_rpm;
+    const uint32_t clear_kmh = ch.diag.clear_kmh;
+    const uint32_t read_flags =
+        ch.diag.flags & (ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH);
+    ch.diag = ecuio_channel_diagnostics_t{};
+    ch.diag.generation = generation + 1;
+    ch.diag.clear = clear;
+    ch.diag.clear_nrc = clear_nrc;
+    ch.diag.clear_rpm = clear_rpm;
+    ch.diag.clear_kmh = clear_kmh;
+    ch.diag.flags = read_flags;
+    for (uint8_t& b : ch.freeze_bits) {
+        b = 0;
+    }
+    ch.diag_count = 0;
+    ch.diag_pending = 0;
+    ecuio_engine_diag_list(ch);
+}
+
 /* Settles the item channel c has out: answered, with the reply (the
  * whole frame), refused with its code, or unanswered; the report takes
  * what it says, and the freeze frame's answers list what comes next */
@@ -211,16 +247,6 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     d.generation += same ? 0u : 1u;
 }
 
-/* Lists the first items on a channel holding none, and marks its
- * report asked */
-inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
-{
-    ch.diag.flags |= ECUIO_DIAG_ASKED;
-    for (const auto& q : ECUIO_DIAG_FIRST) {
-        ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
-    }
-}
-
 /* Diagnostics (ADR-0037): gives every channel the list to ask, through
  * the one-shot slot after identification and ahead of the scan; set
  * decodes the freeze frame (the obd2 set). Idempotent: a channel
@@ -234,32 +260,6 @@ inline void ecuio_engine_diagnose(ecuio_request_engine* e,
             ecuio_engine_diag_list(e->chans[c]);
         }
     }
-}
-
-/* Starts channel ch's read over: its report empty but for the last
- * clear's outcome, its generation moved on */
-inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
-{
-    const uint32_t generation = ch.diag.generation;
-    const uint8_t clear = ch.diag.clear;
-    const uint8_t clear_nrc = ch.diag.clear_nrc;
-    const uint32_t clear_rpm = ch.diag.clear_rpm;
-    const uint32_t clear_kmh = ch.diag.clear_kmh;
-    const uint32_t read_flags =
-        ch.diag.flags & (ECUIO_DIAG_CLEAR_RPM | ECUIO_DIAG_CLEAR_KMH);
-    ch.diag = ecuio_channel_diagnostics_t{};
-    ch.diag.generation = generation + 1;
-    ch.diag.clear = clear;
-    ch.diag.clear_nrc = clear_nrc;
-    ch.diag.clear_rpm = clear_rpm;
-    ch.diag.clear_kmh = clear_kmh;
-    ch.diag.flags = read_flags;
-    for (uint8_t& b : ch.freeze_bits) {
-        b = 0;
-    }
-    ch.diag_count = 0;
-    ch.diag_pending = 0;
-    ecuio_engine_diag_list(ch);
 }
 
 /* Asks the whole list again on every channel whose last read has
