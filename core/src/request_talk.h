@@ -184,8 +184,9 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
  * tier 2's ceiling for its kind (ecuio_talk_inside_ceiling) is refused
  * here whatever the caller checked, so nothing a plugin's code asks for
  * reaches a transport by another road. A service that splits by
- * sub-function needs its second byte; the echo is 1 to 3 bytes of the
- * request and at least its service's own
+ * sub-function needs its second byte (the guest's list and the kind's
+ * rule refuse one alone too: the check stands should either widen); the
+ * echo is 1 to 3 bytes of the request and at least its service's own
  * (ecuio_talk_echo_min); a seed or a key is what its kind says
  * (ecuio_talk_kind_fits). pdu_max is the bound for this channel on this
  * transport. A taken request is copied: q.pdu is not read after the call
