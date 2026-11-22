@@ -29,15 +29,18 @@
 //      large table, a long scan, can hold another channel's clear, talk or
 //      identification for that long at most. The engine's cursors stay
 //      where they stopped, so the next turn goes on from there;
-//   4. another channel's session entry or keep-alive is due (ADR-0060), so
-//      a lap never runs past S3;
+//   4. another channel's session is urgent (ADR-0060): its entry due, or
+//      its last request max(keepalive, S3 - ECUIO_ENGINE_S3_MARGIN_US)
+//      ago (ecuio_engine_session_urgent_us), so a lap never runs past S3.
+//      Before then any request of the channel's own keeps its session (a
+//      row stands in for the keep-alive), so the turns stay whole;
 //   5. another channel has a key offered in its window (request_talk.h):
 //      the window can be shorter than a turn, and a key that waits one
 //      out is never sent. One past its window is settled lapsed at the
 //      next pass, whoever holds the turn.
 // Then the next channel in order with something due takes it, starting
-// at a channel with a key offered, else at the first whose session
-// request is due, so a keep-alive waits on no channel between. A channel
+// at a channel with a key offered, else at the first whose session is
+// urgent, so an urgent keep-alive waits on no channel between. A channel
 // the driver holds (held, a bit for each channel) is passed over. The
 // walk keeps the turn until it ends or rule 4 or 5 takes it. Its budget
 // (each channel's own second) stands still from a turn's end to the
@@ -161,8 +164,8 @@ inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
     return e->chan_count;
 }
 
-/* The first channel not held, but for skip, whose session entry or
- * keep-alive is due at now_us (rule 4); the channel count for none */
+/* The first channel not held, but for skip, whose session is urgent at
+ * now_us (rule 4); the channel count for none */
 inline uint32_t ecuio_engine_turn_session(const ecuio_request_engine* e,
                                           uint32_t held, uint32_t skip,
                                           int64_t now_us)
@@ -171,7 +174,7 @@ inline uint32_t ecuio_engine_turn_session(const ecuio_request_engine* e,
         const ecuio_engine_channel& o = e->chans[k];
         if (k != skip && (held & (1u << k)) == 0 &&
             o.outstanding == ECUIO_ENGINE_NONE &&
-            ecuio_engine_session_next_us(e, o) <= now_us) {
+            ecuio_engine_session_urgent_us(e, o) <= now_us) {
             return k;
         }
     }
@@ -247,8 +250,8 @@ inline void ecuio_engine_turn_count(const ecuio_request_engine* e,
 /* What goes out next and on which channel (*c), at now_us: the turn's
  * channel's next request while its turn lasts, else the first of the
  * channels after it with something due, which takes the turn; a channel
- * with a key offered, then one with its session request due, is asked
- * ahead of that order. NONE when
+ * with a key offered, then one whose session is urgent, is asked ahead
+ * of that order. NONE when
  * nothing is due; *wait_us is then the time until the turn's channel's
  * floor passes when the turn waits it out (rule 2), else 0, and the driver
  * waits for the engine's next event. Like ecuio_engine_due, it moves the

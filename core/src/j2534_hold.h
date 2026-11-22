@@ -411,7 +411,7 @@ inline int32_t j2534_hold_next(j2534_hold& h, ecuio_request_engine* e,
         }
     }
     if (j2534_hold_session_due(e, c, now_us)) {
-        return ecuio_engine_due(e, c, now_us);
+        return ecuio_engine_due_session(e, c, now_us);
     }
     if (j2534_hold_other_out(h, e, c, true) ||
         (!j2534_hold_key_waits(e, c, now_us) &&

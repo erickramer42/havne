@@ -239,9 +239,10 @@ TEST(RequestTurnsTest, AWalkInterruptedByAKeyStillWalksItsTable)
     EXPECT_FALSE(a->e.chans[0].walking);
 }
 
-/* The same when a keep-alive takes the turn (rule 4): channel 1's falls
- * due while channel 0 walks, and its forty rows follow it */
-TEST(RequestTurnsTest, AWalkInterruptedByAKeepAliveStillWalksItsTable)
+/* The same beside a channel in its session: channel 1's keep-alive falls
+ * due while channel 0 walks, and its first request after is a row,
+ * standing in for the keep-alive; the walk walks its table */
+TEST(RequestTurnsTest, AWalkBesideASessionStillWalksItsTable)
 {
     auto a = adapter(2);
     add(&a->e, 0, {0x01, 0x0C});
@@ -266,19 +267,57 @@ TEST(RequestTurnsTest, AWalkInterruptedByAKeepAliveStillWalksItsTable)
     const size_t from = a->sent.size();
     a->until(a->now + 4000 * kMs);
     size_t first_other = 0;
-    size_t last_bitmap = 0;
     for (size_t i = from; i < a->sent.size(); ++i) {
         const Sent& x = a->sent[i];
         if (x.c == 1 && first_other == 0) {
             first_other = i;
-            EXPECT_EQ(x.bytes, (Bytes{0x3E, 0x00}));
-        }
-        if (x.c == 0 && x.bytes == Bytes{0x01, 0xE0}) {
-            last_bitmap = i;
+            EXPECT_EQ(x.bytes[0], 0x22) << "a row stands in for 3E 00";
         }
     }
     ASSERT_NE(first_other, 0u);
-    EXPECT_LT(first_other, last_bitmap) << "the walk was interrupted";
+    EXPECT_EQ(bitmaps(*a, from), kWholeWalk);
+    EXPECT_EQ(a->e.chans[1].session_lost, 0u);
+}
+
+/* A walk that outlasts another channel's urgent time: channel 1's last
+ * request is S3 less 1.1 s old as channel 0's walk starts, so its
+ * session falls urgent a tenth of a second in (rule 4). Its next request
+ * goes within two exchanges of that, and the walk, its second standing
+ * still meanwhile, still walks its table */
+TEST(RequestTurnsTest, AnUrgentSessionEndsAWalk)
+{
+    auto a = adapter(2);
+    add(&a->e, 0, {0x01, 0x0C});
+    dids(&a->e, 1, 1);
+    ASSERT_TRUE(ecuio_engine_session(&a->e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
+    a->until(2000 * kMs);
+    ASSERT_EQ(a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    a->e.chans[1].last_sent_us =
+        a->now - (ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US) + 100 * kMs;
+    const int64_t urgent = ecuio_engine_session_urgent_us(&a->e, a->e.chans[1]);
+    ecuio_engine_probe(&a->e);
+    a->turns.on = false;
+    a->turns.chan = 0;
+    const size_t from = a->sent.size();
+    a->until(a->now + 3000 * kMs);
+    const Sent* first = nullptr;
+    size_t first_at = 0;
+    size_t last_bitmap = 0;
+    for (size_t i = from; i < a->sent.size(); ++i) {
+        if (a->sent[i].c == 1 && first == nullptr) {
+            first = &a->sent[i];
+            first_at = i;
+        }
+        if (a->sent[i].c == 0 && a->sent[i].bytes == Bytes{0x01, 0xE0}) {
+            last_bitmap = i;
+        }
+    }
+    ASSERT_NE(first, nullptr);
+    EXPECT_GE(first->at_us, urgent);
+    EXPECT_LE(first->at_us, urgent + 2 * a->exchange_us)
+        << "channel 1 waited for the walk";
+    EXPECT_LT(first_at, last_bitmap) << "the walk was interrupted";
     EXPECT_EQ(bitmaps(*a, from), kWholeWalk);
     EXPECT_EQ(a->e.chans[1].session_lost, 0u);
 }

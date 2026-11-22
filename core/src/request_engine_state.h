@@ -53,7 +53,9 @@ constexpr uint8_t ECUIO_NRC_NOT_IN_ACTIVE_SESSION = 0x7F;
 /* Session control (ADR-0060): the one session core enters, the one a
  * close returns to, and tester present. ISO 14229-2's S3 server time is
  * 5 s; tester present goes after a quiet ECUIO_ENGINE_KEEPALIVE_US by
- * default, and a channel quiet for S3 has lost its session. */
+ * default, and a channel quiet for S3 has lost its session. A session is
+ * urgent (an adapter's turns hand over for it) S3 less the margin after
+ * its last request, or at the keep-alive's time when that is later. */
 constexpr uint8_t ECUIO_SESSION_DEFAULT = 0x01;
 constexpr uint8_t ECUIO_SESSION_EXTENDED = 0x03;
 constexpr uint8_t ECUIO_TESTER_PRESENT = 0x3E;
@@ -62,9 +64,15 @@ constexpr int64_t ECUIO_ENGINE_KEEPALIVE_US = 2000000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MIN_US = 500000;
 constexpr int64_t ECUIO_ENGINE_KEEPALIVE_MAX_US = 4500000;
 constexpr int64_t ECUIO_ENGINE_S3_US = 5000000;
-static_assert(ECUIO_KEY_WINDOW_SESSION_US == ECUIO_ENGINE_S3_US - 1000000,
+constexpr int64_t ECUIO_ENGINE_S3_MARGIN_US = 1000000;
+static_assert(ECUIO_KEY_WINDOW_SESSION_US ==
+                  ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US,
               "a key sent inside its window reaches the ECU a second "
               "before S3 runs out");
+static_assert(ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US <=
+                  ECUIO_ENGINE_KEEPALIVE_MAX_US,
+              "an urgent session hands over no later than the longest "
+              "keep-alive's time");
 
 /* A channel's session is one of core.h's ECUIO_SESSION_STATE_*; a module
  * that loses it to 7E or 7F ECUIO_SESSION_LOSSES_MAX times within the

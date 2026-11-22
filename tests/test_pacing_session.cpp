@@ -161,6 +161,17 @@ seen seen_of(const pacing::bench_result& r, const std::vector<uint16_t>& of)
     return s;
 }
 
+// The 3E 00 sent in the tally's window
+uint64_t keepalives(const pacing::bench_result& r)
+{
+    const int64_t from = static_cast<int64_t>(r.tally.from_us());
+    uint64_t n = 0;
+    for (size_t k = 0; k < r.sent_us.size(); ++k) {
+        n += r.sent_us[k] >= from && r.sent_sid[k] == 0x3E ? 1 : 0;
+    }
+    return n;
+}
+
 // Every channel's session entered and never lost, by its report
 void expect_every_session_kept(const pacing::bench_result& r, uint32_t n)
 {
@@ -186,4 +197,23 @@ TEST(PacingTest, ASessionIsEnteredOnEachOfSixModules)
         car, 6, 4, static_cast<uint32_t>(ECUIO_ENGINE_KEEPALIVE_US / 1000)));
     EXPECT_EQ(seen_of(r, ids(24)).answered, 24u);
     expect_every_session_kept(r, 6);
+}
+
+/* 14 modules of four words in the extended session, the keep-alive at
+ * its least, through the MX+ model: each lap (about 1.2 s) outlasts the
+ * keep-alive, so the rows stand in for it. Every row keeps the pace it
+ * has with no session at all and no 3E 00 goes */
+TEST(PacingTest, FourteenModulesInTheSessionKeepTheirLapThroughTheMxPlus)
+{
+    const Car car(14, 4);
+    const seen alone = seen_of(run(config(car, 14, 4, 0)), ids(56));
+    const pacing::bench_result r = run(config(car, 14, 4, 500));
+    const seen s = seen_of(r, ids(56));
+    EXPECT_EQ(s.answered, 56u);
+    EXPECT_LT(s.high_p50, 1.1 * alone.high_p50)
+        << s.high_p50 << " ms against " << alone.high_p50 << " alone";
+    EXPECT_LT(s.worst, 1.25 * alone.worst)
+        << s.worst << " ms against " << alone.worst << " alone";
+    EXPECT_EQ(keepalives(r), 0u);
+    expect_every_session_kept(r, 14);
 }
