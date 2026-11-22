@@ -418,7 +418,7 @@ void SessionBridge::dispatchConditionsForTesting(
 
 // ---- Decoded values from core's worker (ADR-0024) ----
 
-void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
+void BridgeState::ValueStaging::prepare(size_t defs, size_t samplesMax,
                                           size_t textMax)
 {
     samples.clear();
@@ -441,7 +441,7 @@ void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
 // Keeps a numeric signal's window (newest, lowest, highest, each at its
 // frame's time) whatever the limits; a sample past one is counted and
 // goes untimed. Grows nothing: prepare reserved the limits.
-void SessionBridge::ValueStaging::stage(uint32_t def,
+void BridgeState::ValueStaging::stage(uint32_t def,
                                         HostClock::time_point arrived,
                                         uint64_t frameUs,
                                         const ecuio_value_t& v)
@@ -482,7 +482,7 @@ void SessionBridge::ValueStaging::stage(uint32_t def,
     samples.push_back(s);
 }
 
-void SessionBridge::ValueStaging::reset()
+void BridgeState::ValueStaging::reset()
 {
     samples.clear();
     text.clear();

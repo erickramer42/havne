@@ -18,6 +18,7 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_sessioninfo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_store.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_support.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridgestate.h
     ${CMAKE_CURRENT_LIST_DIR}/bridgetext.h
     ${CMAKE_CURRENT_LIST_DIR}/choicerows.h
     ${CMAKE_CURRENT_LIST_DIR}/framelistmodel.cpp
