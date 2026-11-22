@@ -380,12 +380,17 @@ TEST(MergeTest, ABoundOfTheSetPassedIsRefusedNamingItsCount)
 
 TEST(MergeTest, TheTablesBoundsAreRefusedNamingTheirCounts)
 {
-    /* 65,792 enum labels: 257 enums of 256 */
-    const auto enums = [](unsigned first, unsigned n) {
-        std::string values;
-        for (unsigned v = 0; v < 256; ++v) {
-            values += (v == 0 ? "\"" : ",\"") + std::to_string(v) + "\":\"L\"";
-        }
+    /* 65,792 enum labels: 257 enums of 256. The last of a run holds
+     * `fewer` fewer */
+    const auto enums = [](unsigned first, unsigned n, unsigned fewer = 0) {
+        const auto values = [](unsigned count) {
+            std::string out;
+            for (unsigned v = 0; v < count; ++v) {
+                out += (v == 0 ? "\"" : ",\"") + std::to_string(v) + "\":\"L\"";
+            }
+            return out;
+        };
+        const std::string whole = values(256);
         std::string out;
         for (unsigned i = 0; i < n; ++i) {
             char head[160];
@@ -395,7 +400,7 @@ TEST(MergeTest, TheTablesBoundsAreRefusedNamingTheirCounts)
                           "\"field\":{\"byte\":%u},\"values\":{",
                           i == 0 ? "" : ",", first + i,
                           0xA000u + (first + i) / 16, (first + i) % 16);
-            out += head + values + "}}";
+            out += head + (i + 1 == n ? values(256 - fewer) : whole) + "}}";
         }
         return out;
     };
@@ -407,6 +412,21 @@ TEST(MergeTest, TheTablesBoundsAreRefusedNamingTheirCounts)
     EXPECT_EQ(labels.status, ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(labels.words, "the parts' enums hold 65792 labels together, "
                             "more than 65536");
+    /* 65,536 with the base's own are taken, and one more isn't */
+    const unsigned of_base = ecuio_obd2_signal_set()->enum_count;
+    ASSERT_LT(of_base, 256u);
+    File fill_a = load(doc("Fill", enums(0, 128)));
+    File fill_b = load(doc("Filled", enums(128, 128, of_base)));
+    File one = load(doc("One", enums(256, 1, 255)));
+    ASSERT_NE(fill_b, nullptr) << ecuio_last_error_detail();
+    ASSERT_NE(one, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(merge({fill_a.get(), fill_b.get()}, ECUIO_MERGE_BASE_OBD2).status,
+              ECUIO_OK);
+    const Merged past =
+        merge({fill_a.get(), fill_b.get(), one.get()}, ECUIO_MERGE_BASE_OBD2);
+    EXPECT_EQ(past.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(past.words, "the parts' enums hold 65537 labels together, "
+                          "more than 65536");
 
     /* 18,000 replaced keys: four parts over the same 6,000 addresses */
     File layer[4];
