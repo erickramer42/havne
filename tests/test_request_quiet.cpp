@@ -769,3 +769,57 @@ TEST(RequestQuietTest, SocketCansPassAsksAQuietModuleBelowTheLiveOne)
         EXPECT_LE(l.worst, 31 * 250 * kMs + 10 * kMs) << "channel " << c;
     }
 }
+
+/* A held quiet channel in its session beside a live one, with the
+ * keep-alive at its least: between its steps it has nothing but its
+ * keep-alive, so that gives way to the live channel's rows and goes only
+ * at its urgency; the live rows keep their pace */
+TEST(RequestQuietTest, AHeldChannelsKeepAliveGivesWayToTheLiveRows)
+{
+    const auto run = [](bool session) {
+        auto p = std::make_unique<Pair>();
+        p->awake = true;
+        if (session) {
+            EXPECT_TRUE(ecuio_engine_session(&p->a->e, 0x03,
+                                             ECUIO_ENGINE_KEEPALIVE_MIN_US));
+        }
+        Pair* self = p.get();
+        p->a->ecus = [self](uint32_t c, const Bytes& q) {
+            return (c == 0 || self->awake) ? in_session(q) : Bytes{};
+        };
+        p->a->until(1000 * kMs);
+        p->awake = false;
+        p->a->until(40000 * kMs);
+        return p;
+    };
+    const auto median_of_0 = [](const Adapter& a) {
+        const std::vector<int64_t> t = times_of(a, 0);
+        std::vector<int64_t> gaps;
+        for (size_t i = 1; i < t.size(); ++i) {
+            if (t[i - 1] > 10000 * kMs) {
+                gaps.push_back(t[i] - t[i - 1]);
+            }
+        }
+        std::sort(gaps.begin(), gaps.end());
+        return gaps.empty() ? INT64_MAX : gaps[gaps.size() / 2];
+    };
+    const auto alone = run(false);
+    const auto both = run(true);
+    ASSERT_EQ(both->a->e.chans[1].session_entries, 1u);
+    EXPECT_LE(median_of_0(*both->a), median_of_0(*alone->a) * 5 / 4);
+    int64_t last = -1;
+    int keeps = 0;
+    for (const Sent& s : both->a->sent) {
+        if (s.c != 1) {
+            continue;
+        }
+        if (s.bytes[0] == 0x3E) {
+            ++keeps;
+            EXPECT_GE(s.at_us - last,
+                      ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US)
+                << "a keep-alive at " << s.at_us << " before its urgency";
+        }
+        last = s.at_us;
+    }
+    EXPECT_GE(keeps, 1);
+}

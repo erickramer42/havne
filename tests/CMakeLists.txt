@@ -157,11 +157,11 @@ add_executable(test_obd2 test_obd2.cpp
     test_obd2_sim_dids.cpp
     test_obd2_sim_ask.cpp
     test_obd2_focus.cpp
-    test_session_control.cpp
+    test_session_control.cpp test_session_control_late.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
-    test_request_turns_key.cpp test_request_pack.cpp test_reply_segmented.cpp
-    test_request_quiet.cpp
+    test_request_turns_key.cpp test_request_turns_session.cpp
+    test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp
@@ -2772,7 +2772,7 @@ find_package(Threads REQUIRED)
 # test_pacing gates the pacing on the model's figures; bench_pacing
 # prints them for docs/performance.md (not in ctest)
 add_executable(test_pacing test_pacing.cpp test_pacing_quiet.cpp
-                           test_pacing_stall.cpp)
+                           test_pacing_session.cpp test_pacing_stall.cpp)
 target_include_directories(test_pacing PRIVATE ${CMAKE_SOURCE_DIR}/core/src
     ${CMAKE_SOURCE_DIR}/cli)
 target_link_libraries(test_pacing PRIVATE ecuio-core GTest::gtest_main)

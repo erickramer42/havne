@@ -305,8 +305,9 @@ TEST_F(Elm327TalkTest, NothingIsTypedBetweenASeedAndItsKey)
 }
 
 /* A key offered after its seed's window is refused at the door, and what
- * is typed next is tester present, held back meanwhile. */
-TEST_F(Elm327TalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
+ * is typed next is the channel's row, held back meanwhile and standing in
+ * for tester present. */
+TEST_F(Elm327TalkTest, AKeyAfterItsWindowIsRefusedAndItsRowFollows)
 {
     ASSERT_NO_FATAL_FAILURE(start_session(kKeepAlive));
     Ended e;
@@ -319,7 +320,7 @@ TEST_F(Elm327TalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
     EXPECT_EQ(e.end, 0);
     ASSERT_TRUE(talk({0x3E, 0x00}, 2, kPlain, &e));
     EXPECT_EQ(e.end, kAnswered);
-    EXPECT_EQ(typed_after("2701").rfind("3E00", 0), 0u)
+    EXPECT_EQ(typed_after("2701").rfind("221E1C", 0), 0u)
         << typed_after("2701") << " was typed after the seed";
     EXPECT_EQ(typed_exactly(hex_of(key), nullptr), 0u);
 }

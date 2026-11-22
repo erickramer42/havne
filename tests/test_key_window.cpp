@@ -6,6 +6,8 @@
 
 #include "engine_talk_support.h"
 
+#include <algorithm>
+
 using namespace engine_talk_test;
 
 TEST(KeyWindowTest, ASeedThenItsEighteenByteKeyUnlockThroughTheEngine)
@@ -91,9 +93,9 @@ TEST(KeyWindowTest, NothingGoesBetweenASeedAndItsKey)
 }
 
 /* The window's own end: window_us after the seed's reply. Past it no key
- * is taken, and tester present, held back meanwhile, is the next
- * request. */
-TEST(KeyWindowTest, TheWindowEndsAtItsTimeAndTesterPresentFollows)
+ * is taken, and the channel's next request follows, its row standing in
+ * for tester present, which fell due meanwhile. */
+TEST(KeyWindowTest, TheWindowEndsAtItsTimeAndItsRowFollows)
 {
     static ecuio_request_engine e;
     Ecu ecu;
@@ -111,8 +113,8 @@ TEST(KeyWindowTest, TheWindowEndsAtItsTimeAndTesterPresentFollows)
     EXPECT_FALSE(ecuio_engine_key_awaited(&e, e.chans[0], now));
     EXPECT_EQ(offer_key(&e, now, key_for(0x03)), ecuio_talk_offer::refused)
         << "a key for a seed that lapsed";
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kKeep)
-        << "two seconds and more with nothing sent";
+    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kRow)
+        << "two seconds and more with nothing sent: the row stands in";
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(e.chans[0].session_lost, 0u) << "inside S3: the session held";
 }
@@ -711,8 +713,9 @@ TEST(KeyWindowTest, AClearNeverComesBetweenASeedAndItsKey)
 
 /* A key goes ahead of the walk, and its service's reply to another
  * request is no stray answer to the walk's bitmap, which waits behind
- * it. A plain talk takes no such place: tester present and the bitmap
- * go before it. */
+ * it. A plain talk takes no such place: the bitmap goes before it,
+ * standing in for tester present, and the talk at the rotation's next
+ * turn. */
 TEST(KeyWindowTest, AKeyGoesAheadOfTheWalkAndAPlainTalkBehindIt)
 {
     static ecuio_request_engine e;
@@ -745,18 +748,19 @@ TEST(KeyWindowTest, AKeyGoesAheadOfTheWalkAndAPlainTalkBehindIt)
     EXPECT_EQ(wire(&e, 0, ECUIO_ENGINE_ONCE), (Bytes{0x01, 0x00}))
         << "then the walk";
 
-    /* A plain talk: the keep-alive and the walk's bitmap go before it */
+    /* A plain talk: the walk's bitmap goes before it, in the keep-alive's
+     * place */
     now += e.keepalive_us;
     ecuio_engine_probe(&e); /* the walk's budget again */
     ASSERT_TRUE(e.chans[0].walking);
     const Bytes read = {0x22, 0xD3, 0x01};
     ASSERT_EQ(offer(&e, read, 3), ecuio_talk_offer::taken);
-    EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), kKeep);
     EXPECT_EQ(step(&e, 0, &now, std::ref(ecu)), (Bytes{0x01, 0x00}));
     const std::vector<Bytes> sent = until_settled(&e, &now, std::ref(ecu));
     ASSERT_FALSE(sent.empty());
     EXPECT_EQ(sent.back(), read);
     EXPECT_LE(sent.size(), 2u) << "then at the rotation's next turn";
+    EXPECT_EQ(std::count(sent.begin(), sent.end(), kKeep), 0);
 }
 
 /* A window needs no session of core's: an engine that enters none holds
@@ -805,8 +809,9 @@ TEST(KeyWindowTest, ASeedStandsBehindASessionEntryThatIsDue)
 }
 
 /* What a worker waiting on the next event wakes for inside a window:
- * its end, where tester present or the rotation is next, and never a
- * spin through it; a key offered, at once. */
+ * its end, where the channel's next request goes (its row, standing in
+ * for tester present), and never a spin through it; a key offered, at
+ * once. */
 TEST(KeyWindowTest, TheNextEventInsideAWindowIsItsEndOrAKeyOffered)
 {
     /* in the session, with a row to ask */
@@ -827,7 +832,7 @@ TEST(KeyWindowTest, TheNextEventInsideAWindowIsItsEndOrAKeyOffered)
     ecuio_engine_key_window_end(&f, 0);
     EXPECT_EQ(ecuio_engine_next_event_us(&f, at), 0)
         << "and a key whose window ended is settled at once";
-    EXPECT_EQ(step(&f, 0, &at, std::ref(ecu)), kKeep);
+    EXPECT_EQ(step(&f, 0, &at, std::ref(ecu)), kRow);
 
     /* no session and one row: the row waits for the window's end */
     static ecuio_request_engine g;

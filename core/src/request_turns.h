@@ -29,15 +29,23 @@
 //      large table, a long scan, can hold another channel's clear, talk or
 //      identification for that long at most. The engine's cursors stay
 //      where they stopped, so the next turn goes on from there;
-//   4. another channel's session entry or keep-alive is due (ADR-0060), so
-//      a lap never runs past S3;
+//   4. another channel's session is urgent (ADR-0060): its entry due, or
+//      its last request max(keepalive, S3 - ECUIO_ENGINE_S3_MARGIN_US)
+//      ago (ecuio_engine_session_urgent_us), so a lap never runs past S3.
+//      Before then any request of the channel's own keeps its session (a
+//      row stands in for the keep-alive), so the turns stay whole;
 //   5. another channel has a key offered in its window (request_talk.h):
 //      the window can be shorter than a turn, and a key that waits one
 //      out is never sent. One past its window is settled lapsed at the
 //      next pass, whoever holds the turn.
 // Then the next channel in order with something due takes it, starting
-// at a channel with a key offered, else at the first whose session
-// request is due, so a keep-alive waits on no channel between. A channel
+// at a channel with a key offered, else at the first whose session is
+// urgent, so an urgent keep-alive waits on no channel between. A channel
+// whose only request due is a keep-alive not yet urgent (bare: no rows,
+// a focus that leaves it out, a held quiet channel between its steps) is
+// passed over while any other channel has something due, so a picked
+// signal outranks an idle module's tester present; it takes the turn
+// when nothing else is due, or at its urgency. A channel
 // the driver holds (held, a bit for each channel) is passed over. The
 // walk keeps the turn until it ends or rule 4 or 5 takes it. Its budget
 // (each channel's own second) stands still from a turn's end to the
@@ -79,12 +87,12 @@ inline bool ecuio_engine_turn_walking(const ecuio_engine_channel& ch)
            !ch.clearing && !ch.sessioning && !ch.talk.out;
 }
 
-/* When channel ch next has something to ask, by its floor, a focus's gap
- * between sweeps, a held quiet channel's step, its session and a key's
- * window that holds it (none holds a key offered); INT64_MAX while a
- * request is out or with nothing to ask */
-inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
-                                         const ecuio_engine_channel& ch)
+/* When channel ch next has something to ask but its keep-alive, by its
+ * floor, a focus's gap between sweeps and a held quiet channel's step
+ * (an entry due is a one-shot waiting); INT64_MAX while a request is out
+ * or with nothing else to ask */
+inline int64_t ecuio_engine_turn_own_us(const ecuio_request_engine* e,
+                                        const ecuio_engine_channel& ch)
 {
     if (ch.outstanding != ECUIO_ENGINE_NONE) {
         return INT64_MAX;
@@ -104,6 +112,19 @@ inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
         const int64_t q = ecuio_engine_quiet_due_us(e, ch);
         at = q > ch.next_send_us ? q : ch.next_send_us;
     }
+    return at;
+}
+
+/* When channel ch next has something to ask: its own time, its session's
+ * and a key's window that holds it (none holds a key offered); INT64_MAX
+ * while a request is out or with nothing to ask */
+inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
+                                         const ecuio_engine_channel& ch)
+{
+    if (ch.outstanding != ECUIO_ENGINE_NONE) {
+        return INT64_MAX;
+    }
+    int64_t at = ecuio_engine_turn_own_us(e, ch);
     const int64_t s = ecuio_engine_session_next_us(e, ch);
     at = s < at ? s : at;
     if (at != INT64_MAX && !ecuio_talk_key_waits(ch.talk)) {
@@ -161,8 +182,8 @@ inline uint32_t ecuio_engine_turn_key(const ecuio_request_engine* e,
     return e->chan_count;
 }
 
-/* The first channel not held, but for skip, whose session entry or
- * keep-alive is due at now_us (rule 4); the channel count for none */
+/* The first channel not held, but for skip, whose session is urgent at
+ * now_us (rule 4); the channel count for none */
 inline uint32_t ecuio_engine_turn_session(const ecuio_request_engine* e,
                                           uint32_t held, uint32_t skip,
                                           int64_t now_us)
@@ -171,11 +192,21 @@ inline uint32_t ecuio_engine_turn_session(const ecuio_request_engine* e,
         const ecuio_engine_channel& o = e->chans[k];
         if (k != skip && (held & (1u << k)) == 0 &&
             o.outstanding == ECUIO_ENGINE_NONE &&
-            ecuio_engine_session_next_us(e, o) <= now_us) {
+            ecuio_engine_session_urgent_us(e, o) <= now_us) {
             return k;
         }
     }
     return e->chan_count;
+}
+
+/* Whether channel ch is bare at now_us: nothing of its own due and its
+ * session not urgent, so all it could ask is a keep-alive that can wait */
+inline bool ecuio_engine_turn_bare(const ecuio_request_engine* e,
+                                   const ecuio_engine_channel& ch,
+                                   int64_t now_us)
+{
+    return ecuio_engine_turn_own_us(e, ch) > now_us &&
+           ecuio_engine_session_urgent_us(e, ch) > now_us;
 }
 
 /* Channel k's turn ended at now_us: a walk it was asking is away from
@@ -244,11 +275,43 @@ inline void ecuio_engine_turn_count(const ecuio_request_engine* e,
     }
 }
 
+/* The hand-over: the first channel from `from` on, not held and, unless
+ * bare_ok, not bare, with something due, which takes the turn; its
+ * request, NONE when none has one */
+inline int32_t ecuio_engine_turn_pick(ecuio_request_engine* e,
+                                      ecuio_engine_turns& t, uint32_t held,
+                                      uint32_t from, int64_t now_us,
+                                      bool bare_ok, uint32_t* c)
+{
+    const uint32_t n = e->chan_count;
+    for (uint32_t i = 0; i < n; ++i) {
+        const uint32_t k = (from + i) % n;
+        if ((held & (1u << k)) != 0 ||
+            (!bare_ok && ecuio_engine_turn_bare(e, e->chans[k], now_us))) {
+            continue;
+        }
+        const uint32_t limit = e->chans[k].requests;
+        const int32_t r = ecuio_engine_turn_due(e, t, k, now_us);
+        if (r != ECUIO_ENGINE_NONE) {
+            t.chan = k;
+            t.on = true;
+            t.limit = limit;
+            t.asked = 0;
+            t.since_us = now_us;
+            ecuio_engine_turn_count(e, t, k, r);
+            *c = k;
+            return r;
+        }
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
 /* What goes out next and on which channel (*c), at now_us: the turn's
  * channel's next request while its turn lasts, else the first of the
  * channels after it with something due, which takes the turn; a channel
- * with a key offered, then one with its session request due, is asked
- * ahead of that order. NONE when
+ * with a key offered, then one whose session is urgent, is asked ahead
+ * of that order, and a bare one only when no other has anything due.
+ * NONE when
  * nothing is due; *wait_us is then the time until the turn's channel's
  * floor passes when the turn waits it out (rule 2), else 0, and the driver
  * waits for the engine's next event. Like ecuio_engine_due, it moves the
@@ -287,25 +350,11 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
     const uint32_t from = keyed < n       ? keyed
                           : sessioned < n ? sessioned
                                           : t.chan;
-    for (uint32_t i = 0; i < n; ++i) {
-        const uint32_t k = (from + i) % n;
-        if ((held & (1u << k)) != 0) {
-            continue;
-        }
-        const uint32_t limit = e->chans[k].requests;
-        const int32_t r = ecuio_engine_turn_due(e, t, k, now_us);
-        if (r != ECUIO_ENGINE_NONE) {
-            t.chan = k;
-            t.on = true;
-            t.limit = limit;
-            t.asked = 0;
-            t.since_us = now_us;
-            ecuio_engine_turn_count(e, t, k, r);
-            *c = k;
-            return r;
-        }
-    }
-    return ECUIO_ENGINE_NONE;
+    const int32_t r =
+        ecuio_engine_turn_pick(e, t, held, from, now_us, false, c);
+    return r != ECUIO_ENGINE_NONE
+               ? r
+               : ecuio_engine_turn_pick(e, t, held, from, now_us, true, c);
 }
 
 #endif

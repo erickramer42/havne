@@ -469,8 +469,9 @@ TEST_F(SocketCanTalkTest, NothingIsOnTheBusBetweenASeedAndItsKey)
 }
 
 /* A key offered after its seed's window is refused at the door, and what
- * the bus carries next is tester present, held back meanwhile. */
-TEST_F(SocketCanTalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
+ * the bus carries next is the channel's row, held back meanwhile and
+ * standing in for tester present. */
+TEST_F(SocketCanTalkTest, AKeyAfterItsWindowIsRefusedAndItsRowFollows)
 {
     vcan_bus::Ecu ecu;
     vcan_bus::Fd bus = vcan_bus::open_raw();
@@ -499,7 +500,7 @@ TEST_F(SocketCanTalkTest, AKeyAfterItsWindowIsRefusedAndTesterPresentFollows)
         }
     }
     ASSERT_GT(next, seed) << "the window's end lets the session go on";
-    EXPECT_EQ(seen[next].data[1], 0x3E)
+    EXPECT_EQ(seen[next].data[1], 0x22)
         << "after the seed: " << int{seen[next].data[1]} << " "
         << int{seen[next].data[2]};
     EXPECT_EQ(index_starting(seen, vcan_bus::kRequest, {0x06, 0x27, 0x02}), -1)

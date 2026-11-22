@@ -98,10 +98,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     if (out >= 0) {
         timed_out(static_cast<uint32_t>(out));
         ch.check_from = static_cast<uint32_t>(out) + 1; /* a check's next row */
-        if (static_cast<uint32_t>(out) < e->count &&
-            e->requests[out].reply_frames == 0) {
-            e->requests[out].reply_frames = 1;
-            e->requests[out].ran_out = 1;
+        if (static_cast<uint32_t>(out) < e->count) {
+            ecuio_engine_row_ran_out(e->requests[out]);
         }
     } else if (pack) {
         for (uint32_t k = 0; k < ch.pack_count; ++k) {

@@ -14,6 +14,8 @@
 // silence leaves it, and DIDs D200-D203 answer only in it. In that
 // session it has security access too (ADR-0066 section 2.7,
 // sim_security.h): 27 unlocks a level, and DID D210 answers once one is.
+// sessions=1 gives a profile's modules the extended session as well (no
+// security access), so a session can be held on many modules at once.
 // replay://: a recording's replies at the ECU's time since it started
 // (sim_recording.h). Faults break every Nth reply, as ADR-0041 section
 // 4's ECU does, and pending puts a reply off behind a 7F <service> 78.
@@ -107,6 +109,7 @@ struct ecuio_sim_config {
     ecuio_sim_aims aimed;       /* faults aimed at one module each */
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
+    bool sessions = false;      /* mock: sessions=1, the profile's modules */
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
      * is); empty for none */
@@ -668,7 +671,7 @@ inline bool take_source(const char* uri, ecuio_sim_config* out,
     return true;
 }
 
-/* values= and modules= */
+/* values=, modules= and sessions= */
 inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
                              char* why, size_t why_cap)
 {
@@ -691,6 +694,16 @@ inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
             return taken::bad;
         }
         out->second_module = value_is(p, "2");
+        return taken::ok;
+    }
+    if (p.is("sessions")) {
+        if (!value_is(p, "0") && !value_is(p, "1")) {
+            std::snprintf(why, why_cap,
+                          "sessions: 0 or 1 (a profile's modules have the "
+                          "extended session too)");
+            return taken::bad;
+        }
+        out->sessions = value_is(p, "1");
         return taken::ok;
     }
     return taken::other;
@@ -830,7 +843,8 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 } // namespace ecuio_sim_uri_detail
 
 /* The simulated ECU's URI into *out:
- *   mock://<label>[?values][&modules][&profile][&vin][&faults][&timing]
+ *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
+ *          [&timing]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
  * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
@@ -855,8 +869,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values", "modules", "profile", "vin",  "faults", "delay",
-        "fc",     "cf",      "seed",    "busy", "bus",    nullptr};
+        "values", "modules", "sessions", "profile", "vin", "faults", "delay",
+        "fc",     "cf",      "seed",     "busy",    "bus", nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
@@ -867,7 +881,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       "only %s, vin, faults, delay, fc, cf, seed, busy and bus",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
-                      replay ? "loop, from, to" : "values, modules, profile");
+                      replay ? "loop, from, to"
+                             : "values, modules, sessions, profile");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
@@ -879,6 +894,12 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         std::snprintf(why, why_cap,
                       "profile and modules=2 both name a second module: the "
                       "profile's channels are the modules");
+        return ecuio_sim_uri_result::bad;
+    }
+    if (out->sessions && out->profile_len == 0) {
+        std::snprintf(why, why_cap,
+                      "sessions=1 gives a profile's modules the extended "
+                      "session: it needs profile=");
         return ecuio_sim_uri_result::bad;
     }
     if (!ecuio_stretch::ordered(out->stretch)) {
