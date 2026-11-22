@@ -1225,6 +1225,12 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
   check of an expression still answers format 1 or 2, since format 3 adds
   no grammar, so a file that uses nothing of format 3 is never raised to
   it.
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | The calls and structs above, `ECUIO_MERGE_BASE_OBD2` and the note kinds | Additive | New names only; the note kinds are an append-only list |
+  | `ECUIO_SIGNAL_FILE_FORMAT` 2 to 3, beside `ECUIO_SIGNAL_FILE_FORMAT_OLDEST` (1) | Constant change | The newest format this core reads; one line in `abi/api_changes.txt` |
+
 - **Format 3 against formats 1 and 2.**
 
   | | Formats 1 and 2 | Format 3 |
@@ -1266,8 +1272,9 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
   expression reads one, and a `max_age` on one is judged by the signal
   that stands for it. A merged set is never imported and never a part: a
   plugin's data file, `ecuio_plugin_wrap`, `ecuio_plugin_put_variant` and
-  the merge each refuse one ("merge its parts instead"), since a wrap
-  would move one `source` to the manifest and lose each part's.
+  the merge each refuse one (the merge: "merge its parts instead"; a wrap
+  and a put: "import its plugins"), since a wrap would move one `source`
+  to the manifest and lose each part's.
 - **The profile's exact input.** `merged.` and the first 16 hex digits of
   the SHA-256 of: `obd2` and a line feed when the set extends obd2, then
   each part's profile name and a line feed, in merge order. The base is
