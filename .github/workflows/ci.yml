@@ -179,15 +179,18 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
           echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+          echo "SCCACHE_REF=${GITHUB_REF_NAME//[^A-Za-z0-9]/_}" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
           restore-keys: |
-            sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-
-            sccache-core-and-tests-3-
+            sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-
+            sccache-core-and-tests-3-main-${{ env.SCCACHE_WEEK }}-
+            sccache-core-and-tests-3-main-
 
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
       # (ADR-0034 section 4) and ProbeNotesTest runs
@@ -206,11 +209,11 @@ jobs:
       # Saved before the tests, so a run that fails in them still leaves
       # its objects for the next
       - name: Save the compiler cache
-        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || (github.event_name != 'pull_request' && !startsWith(steps.ccache.outputs.cache-matched-key, format('sccache-core-and-tests-3-{0}-', env.SCCACHE_REF))))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # ECUIO_SCHEMA_REQUIRED: SchemaFixturesTest fails rather than skips
       # without jsonschema; ECUIO_PYTEST_REQUIRED: PythonTest.* fail
@@ -274,15 +277,18 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
           echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+          echo "SCCACHE_REF=${GITHUB_REF_NAME//[^A-Za-z0-9]/_}" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
           restore-keys: |
-            sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-
-            sccache-core-sanitizers-3-
+            sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-
+            sccache-core-sanitizers-3-main-${{ env.SCCACHE_WEEK }}-
+            sccache-core-sanitizers-3-main-
 
       # can-utils: candump, which CliTransferRunTest.candump logs vcan0
       # with (ECUIO_VCAN_REQUIRED fails it without one)
@@ -303,11 +309,11 @@ jobs:
       # Saved before the tests, so a run that fails in them still leaves
       # its objects for the next
       - name: Save the compiler cache
-        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || (github.event_name != 'pull_request' && !startsWith(steps.ccache.outputs.cache-matched-key, format('sccache-core-sanitizers-3-{0}-', env.SCCACHE_REF))))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # The simulated CAN bus, as linux-build brings it up, so the
       # SocketCAN worker and the vcan suites run under the sanitizers too
@@ -363,7 +369,7 @@ jobs:
         fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
         fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
         fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module
-        fuzz_security_store fuzz_sur_reply
+        fuzz_security_store fuzz_sur_reply fuzz_signal_merge
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -401,15 +407,18 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
           echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+          echo "SCCACHE_REF=${GITHUB_REF_NAME//[^A-Za-z0-9]/_}" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-fuzz-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
           restore-keys: |
-            sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-
-            sccache-fuzz-3-
+            sccache-fuzz-3-${{ env.SCCACHE_REF }}-
+            sccache-fuzz-3-main-${{ env.SCCACHE_WEEK }}-
+            sccache-fuzz-3-main-
 
       - name: Build fuzzers (Clang, ASan+UBSan)
         id: build
@@ -429,11 +438,11 @@ jobs:
       # Saved before the tests, so a run that fails in them still leaves
       # its objects for the next
       - name: Save the compiler cache
-        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || (github.event_name != 'pull_request' && !startsWith(steps.ccache.outputs.cache-matched-key, format('sccache-fuzz-3-{0}-', env.SCCACHE_REF))))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          key: sccache-fuzz-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # Each harness runs 60 s on one core, as many at once as the runner
       # has cores, each into its own log, from its corpus folder (the
