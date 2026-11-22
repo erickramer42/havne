@@ -631,8 +631,7 @@ bool isotp_frame(ecuio_socketcan_transport* t, worker_state& w,
 }
 
 /* Every frame waiting, up to the burst; then the ISO-TP waits' expiry */
-void read_pass(ecuio_socketcan_transport* t, worker_state& w, int64_t now,
-               int ready)
+void read_pass(ecuio_socketcan_transport* t, worker_state& w, int ready)
 {
     link_health& h = w.h;
     socketcan_clock& clock = w.clock;
@@ -668,7 +667,7 @@ void read_pass(ecuio_socketcan_transport* t, worker_state& w, int64_t now,
             continue;
         }
         const uint64_t kernel_ns = take_control(msg, w);
-        now = now_us(t);
+        const int64_t now = now_us(t);
         uint32_t can_id;
         std::memcpy(&can_id, raw, 4);
         const uint8_t len = raw[4];
@@ -787,7 +786,7 @@ void request_worker(ecuio_socketcan_transport* t)
         if (p == socket_step::again) {
             continue;
         }
-        read_pass(t, w, now, ready);
+        read_pass(t, w, ready);
         serve_session(t, w);
     }
     end_worker(t, w);
