@@ -17,5 +17,7 @@
 #endif
 
 int c_abi_conditions(void);
+int c_abi_signalfile(void);
+int c_abi_plugin(void);
 
 #endif
