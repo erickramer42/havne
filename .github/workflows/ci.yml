@@ -162,14 +162,55 @@ jobs:
           "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/jsonschema-requirements.txt
           "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes, as linux-build's. Entries are keyed by ISO
+      # week and run, and saved on dev's and main's runs only (a lane
+      # branch or a PR restores what it may read and never saves), when the
+      # build compiled 20 or more objects.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-unknown-linux-musl.tar.gz -O "$RUNNER_TEMP/sccache.tar.gz" --clobber
+          echo "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd  $RUNNER_TEMP/sccache.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/sccache-bin"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
+          echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
+          echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-
+            sccache-core-and-tests-3-
+
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
       # (ADR-0034 section 4) and ProbeNotesTest runs
       - name: Build core + tests (no Qt present)
+        id: build
         run: |
           sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DHAVNE_BUILD_CORE_ONLY=ON \
-            -DPython3_EXECUTABLE="$RUNNER_TEMP/schema/bin/python"
+            -DPython3_EXECUTABLE="$RUNNER_TEMP/schema/bin/python" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
+          if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
+
+      # Saved before the tests, so a run that fails in them still leaves
+      # its objects for the next
+      - name: Save the compiler cache
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-core-and-tests-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # ECUIO_SCHEMA_REQUIRED: SchemaFixturesTest fails rather than skips
       # without jsonschema; ECUIO_PYTEST_REQUIRED: PythonTest.* fail
@@ -216,16 +257,57 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes, as linux-build's. Entries are keyed by ISO
+      # week and run, and saved on dev's and main's runs only (a lane
+      # branch or a PR restores what it may read and never saves), when the
+      # build compiled 20 or more objects.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-unknown-linux-musl.tar.gz -O "$RUNNER_TEMP/sccache.tar.gz" --clobber
+          echo "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd  $RUNNER_TEMP/sccache.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/sccache-bin"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
+          echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
+          echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-
+            sccache-core-sanitizers-3-
+
       # can-utils: candump, which CliTransferRunTest.candump logs vcan0
       # with (ECUIO_VCAN_REQUIRED fails it without one)
       - name: Build core + tests with ASan and UBSan
+        id: build
         run: |
           sudo apt-get update && sudo apt-get install -y systemtap-sdt-dev can-utils
           SAN="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHAVNE_BUILD_CORE_ONLY=ON \
             -DCMAKE_C_FLAGS="$SAN" -DCMAKE_CXX_FLAGS="$SAN" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
+          if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
+
+      # Saved before the tests, so a run that fails in them still leaves
+      # its objects for the next
+      - name: Save the compiler cache
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-core-sanitizers-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # The simulated CAN bus, as linux-build brings it up, so the
       # SocketCAN worker and the vcan suites run under the sanitizers too
@@ -302,15 +384,56 @@ jobs:
           /tmp/fuzzcheck -runs=1
           clang++ --version
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes, as linux-build's. Entries are keyed by ISO
+      # week and run, and saved on dev's and main's runs only (a lane
+      # branch or a PR restores what it may read and never saves), when the
+      # build compiled 20 or more objects.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-unknown-linux-musl.tar.gz -O "$RUNNER_TEMP/sccache.tar.gz" --clobber
+          echo "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd  $RUNNER_TEMP/sccache.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/sccache-bin"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
+          echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
+          echo "SCCACHE_WEEK=$(date -u +%G-W%V)" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+          restore-keys: |
+            sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-
+            sccache-fuzz-3-
+
       - name: Build fuzzers (Clang, ASan+UBSan)
+        id: build
         # Optimized with symbols: -O0 runs several times fewer inputs a
         # second, and core has no asserts for NDEBUG to lose.
         run: |
           cmake -B build-fuzz -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
             -DECUIO_BUILD_FUZZERS=ON \
-            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build-fuzz --target $FUZZERS
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
+          if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
+
+      # Saved before the tests, so a run that fails in them still leaves
+      # its objects for the next
+      - name: Save the compiler cache
+        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-fuzz-3-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
 
       # Each harness runs 60 s on one core, as many at once as the runner
       # has cores, each into its own log, from its corpus folder (the
