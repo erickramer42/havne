@@ -32,6 +32,7 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
+#include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/pwr_mgt/IOPMLib.h>
 #include <unistd.h>
 #endif
