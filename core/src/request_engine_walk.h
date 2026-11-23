@@ -111,6 +111,16 @@ inline void ecuio_engine_probe(ecuio_request_engine* e)
     }
 }
 
+/* The session asked of channel ch: none for one never asked (another
+ * channel's conversation entered alone); a close's 10 01 leaves it asked */
+inline uint8_t ecuio_engine_session_asked(const ecuio_request_engine* e,
+                                          const ecuio_engine_channel& ch)
+{
+    const bool asked = ch.session_step != ECUIO_SESSION_STATE_NOT_ASKED ||
+                       ch.session_entries != 0;
+    return asked ? e->session : uint8_t{0};
+}
+
 /* What channel c has learned, for ecuio_session_get_channel_support;
  * the driver adds the channel's rx_id. */
 inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
@@ -182,7 +192,7 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     }
     const bool extended =
         e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
-    out->session_asked = e->session;
+    out->session_asked = ecuio_engine_session_asked(e, ch);
     out->session = extended ? e->session : ECUIO_SESSION_DEFAULT;
     out->session_state =
         e->session != 0 ? ch.session_step : ECUIO_SESSION_STATE_NOT_ASKED;

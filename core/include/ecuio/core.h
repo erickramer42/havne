@@ -569,9 +569,11 @@ typedef struct ecuio_channel_support {
     uint16_t pids_through;    /* the last PID the answered bitmaps cover,
                                  0x20 * (i + 1) for ranges' highest bit
                                  i; 0 with none answered */
-    /* The session (ADR-0060): what the URI asked, and what this channel
+    /* The session (ADR-0060): what was asked of this channel, and what it
      * reads in. 0 for both before its first report. */
-    uint8_t session_asked;    /* 0 none (the default), 3 (?session=03) */
+    uint8_t session_asked;    /* 0 none (the default), 3 (?session=03 for
+                                 every channel, or a conversation's
+                                 module for its own) */
     uint8_t session;          /* in force: 1 default, 3 extended */
     uint8_t session_state;    /* ECUIO_SESSION_STATE_* */
     uint8_t session_nrc;      /* REFUSED or ABANDONED: the code */
