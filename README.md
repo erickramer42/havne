@@ -117,6 +117,8 @@ Download from the [latest release](https://github.com/erickramer42/havne/release
 - **Windows 10 or 11 (x64):** unzip and run `havne.exe`. It isn't code-signed, so SmartScreen may ask first (**More info**, then **Run anyway**).
 - **Android 12 or later:** open the APK on the phone; it's signed with Havne's release key, so each release installs over the last.
 - **Linux (x86_64 or 64-bit ARM; glibc 2.39 or later):** make the AppImage executable and run it ([docs/linux.md](docs/linux.md)).
+- **macOS (Apple silicon, macOS 14.4 or later):** unzip, move Havne to Applications and open it through System Settings > Privacy & Security > **Open Anyway** ([docs/macos.md](docs/macos.md)). Not notarized, and no person has run it on a Mac yet.
+- **iPhone (iOS 18 or later):** an unsigned `.ipa`, installed by sideloading it with your own Apple ID ([docs/ios.md](docs/ios.md)). It has launched on one iPhone.
 - **Python 3.11 or later:** `pip install` the wheel for your platform, then `python read_pids.py mock://demo` ([`read_pids.py`](python/examples/read_pids.py)) prints the simulated car's readings.
 
 Then press **Demo data** on Home (or `mock://demo` under **WiFi and other addresses** on Settings' Connection page) and **Connect**; with **Record sessions** on, each run opens afterward on the Recordings page.

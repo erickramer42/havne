@@ -7,7 +7,9 @@ name: Release
 # and core alone for Linux as a deb and a tarball (ADR-0035), each Linux
 # file for x86_64 and for aarch64 (arm64); the Python package as a wheel
 # for Windows x64, Linux x86_64 and aarch64 (manylinux_2_39) and macOS
-# arm64 (13.0 and later), each holding the shared core (ADR-0053);
+# arm64 (13.0 and later), each holding the shared core (ADR-0053); an
+# unsigned iOS arm64 .ipa for sideloading (docs/ios.md) and a macOS
+# arm64 app, ad hoc signed and not notarized (docs/macos.md);
 # beside them the Windows executables' PDBs in a zip of their own
 # (ADR-0034) and havne-cli's Linux debug info as a -dbgsym deb and a
 # -debug tarball. Each comes with its SHA-256, and one signed build
@@ -25,9 +27,9 @@ name: Release
 # A manual run rebuilds an existing tag and replaces the release's files:
 #   gh workflow run release.yml -f tag=v0.3.1
 #
-# Jobs: gate (the tag and CI) -> windows, android, linux, macos and repro
-# (the reproducible Windows build), side by side -> publish (the SBOM,
-# checksums, provenance, the release). Each
+# Jobs: gate (the tag and CI) -> windows, android, linux, macos, ios,
+# macos-app and repro (the reproducible Windows build), side by side ->
+# publish (the SBOM, checksums, provenance, the release). Each
 # build job writes a <download>.components.json beside its download for
 # the SBOM (packaging/sbom.py); those lists are job artifacts only, never
 # release files. Each wheel is installed into a fresh venv and
@@ -564,6 +566,31 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # The unsigned iOS .ipa and the macOS app: the workflows ci.yml's
+  # ios-build and macos-app call, so the release ships what CI built and
+  # checked. Neither reads a secret or saves a cache.
+  ios:
+    needs: gate
+    uses: ./.github/workflows/ios-ipa.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+      version: ${{ needs.gate.outputs.version }}
+      file: havne-${{ needs.gate.outputs.version }}-ios-arm64-unsigned.ipa
+      artifact: ios
+      retention_days: 1
+      components: true
+
+  macos-app:
+    needs: gate
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      ref: ${{ inputs.tag || github.ref_name }}
+      version: ${{ needs.gate.outputs.version }}
+      file: havne-${{ needs.gate.outputs.version }}-macos-arm64.zip
+      artifact: macos-app
+      retention_days: 1
+      components: true
+
   # The Windows build twice from the tag, byte for byte (ADR-0035)
   repro:
     needs: gate
@@ -572,7 +599,7 @@ jobs:
       ref: ${{ inputs.tag || github.ref_name }}
 
   publish:
-    needs: [gate, windows, android, linux, macos, repro]
+    needs: [gate, windows, android, linux, macos, ios, macos-app, repro]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -627,6 +654,8 @@ jobs:
             echo "WHEEL_LINUX=$wheel-manylinux_2_39_x86_64.whl"
             echo "WHEEL_LINUX_ARM=$wheel-manylinux_2_39_aarch64.whl"
             echo "WHEEL_MACOS=$wheel-macosx_13_0_arm64.whl"
+            echo "IPA=dist/havne-$VERSION-ios-arm64-unsigned.ipa"
+            echo "MACOS_APP=dist/havne-$VERSION-macos-arm64.zip"
           } >> "$GITHUB_ENV"
 
       # The AppImage runtime links libfuse statically: LGPL-2.1 section 6
@@ -645,7 +674,8 @@ jobs:
         run: |
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python3 packaging/sbom.py build \
             --version "$VERSION" --tag "$TAG" --out "$SBOM" "$ZIP" "$APK" "$APPIMAGE" "$DEB" "$TARBALL" \
-            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM" "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS"
+            "$APPIMAGE_ARM" "$DEB_ARM" "$TARBALL_ARM" "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS" \
+            "$IPA" "$MACOS_APP"
           python3 -m venv "$RUNNER_TEMP/spdx"
           "$RUNNER_TEMP/spdx/bin/pip" install --require-hashes -r .github/spdx-requirements.txt
           "$RUNNER_TEMP/spdx/bin/pyspdxtools" -i "$SBOM"
@@ -656,7 +686,8 @@ jobs:
             "${DEB#dist/}" "${DBGSYM#dist/}" "${TARBALL#dist/}" "${DEBUG_TARBALL#dist/}" \
             "${APPIMAGE_ARM#dist/}" "${DEB_ARM#dist/}" "${DBGSYM_ARM#dist/}" "${TARBALL_ARM#dist/}" \
             "${DEBUG_TARBALL_ARM#dist/}" "${WHEEL_WIN#dist/}" "${WHEEL_LINUX#dist/}" \
-            "${WHEEL_LINUX_ARM#dist/}" "${WHEEL_MACOS#dist/}" "${SBOM#dist/}" \
+            "${WHEEL_LINUX_ARM#dist/}" "${WHEEL_MACOS#dist/}" "${IPA#dist/}" "${MACOS_APP#dist/}" \
+            "${SBOM#dist/}" \
             "${FUSE_SOURCE#dist/}" "${RUNTIME_SOURCE#dist/}" \
             > SHA256SUMS.txt)
           cat dist/SHA256SUMS.txt
@@ -684,6 +715,8 @@ jobs:
             ${{ env.WHEEL_LINUX }}
             ${{ env.WHEEL_LINUX_ARM }}
             ${{ env.WHEEL_MACOS }}
+            ${{ env.IPA }}
+            ${{ env.MACOS_APP }}
             ${{ env.FUSE_SOURCE }}
             ${{ env.RUNTIME_SOURCE }}
 
@@ -706,6 +739,8 @@ jobs:
             ${{ env.WHEEL_LINUX }}
             ${{ env.WHEEL_LINUX_ARM }}
             ${{ env.WHEEL_MACOS }}
+            ${{ env.IPA }}
+            ${{ env.MACOS_APP }}
 
       # The same signed provenance (a Sigstore bundle) as one release
       # file. OpenSSF Scorecard's Signed-Releases check reads release
@@ -722,6 +757,7 @@ jobs:
           files=("$ZIP" "$SYMBOLS" "$APK" "$APPIMAGE" "$DEB" "$DBGSYM" "$TARBALL" "$DEBUG_TARBALL"
             "$APPIMAGE_ARM" "$DEB_ARM" "$DBGSYM_ARM" "$TARBALL_ARM" "$DEBUG_TARBALL_ARM"
             "$WHEEL_WIN" "$WHEEL_LINUX" "$WHEEL_LINUX_ARM" "$WHEEL_MACOS"
+            "$IPA" "$MACOS_APP"
             "$SBOM" "$FUSE_SOURCE" "$RUNTIME_SOURCE" dist/SHA256SUMS.txt "dist/havne-$VERSION.intoto.jsonl")
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" "${files[@]}" --clobber

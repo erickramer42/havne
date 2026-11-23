@@ -11,6 +11,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- **An unsigned iPhone app joins each release:** `havne-X.Y.Z-ios-arm64-unsigned.ipa`, installed by sideloading it with your own Apple ID ([docs/ios.md](docs/ios.md)). It has launched on one iPhone and nothing past the launch has been tried, so reports are welcome.
+- **A macOS app for Apple silicon joins each release:** `havne-X.Y.Z-macos-arm64.zip`. It isn't notarized, so macOS blocks the first open; Privacy & Security's **Open Anyway** opens it once ([docs/macos.md](docs/macos.md)). Intel Macs are not supported. No person has run it on a Mac yet, so reports are welcome.
+
 ## [0.9.0] - 2026-11-21
 
 ### Added
