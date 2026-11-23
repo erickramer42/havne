@@ -51,6 +51,7 @@ session, the recorders on a car, a second listener):
 | [2026-11-04-two-ecu-car](2026-11-04-two-ecu-car.md) | Vehicle: both ECUs in one session through the VX and the MX+, the recorders on the car, the MX+ and the USB2CAN listening beside the VX |
 | [2026-11-05-two-ecu-car-rerun](2026-11-05-two-ecu-car-rerun.md) | Vehicle: the VX's reply latency after the read fix, and the MX+ listening with `AT CFC0` and six more setups |
 | [2026-11-06-own-signals-car](2026-11-06-own-signals-car.md) | Vehicle: v0.5.0's own signals through the VX and the MX+: a signal from the form, a file's DIDs on two modules, a refused DID, an enumeration and boost, a replay through its own copy |
+| [2026-11-17-ios](2026-11-17-ios.md) | Phone: CI's unsigned iOS build sideloaded on a tester's iPhone, launched with no adapter |
 | [2026-11-22-car-gate](2026-11-22-car-gate.md) | Vehicle: v0.9.0's release candidate on the test phone (the MX+) and the laptop (the VX): the four-channel Dashboard, the hold on and off, a module that answers nothing |
 
 ## The list
@@ -142,6 +143,13 @@ session, the recorders on a car, a second listener):
 |---|---|---|---|
 | 38 | **A quiet module on a car:** a module that answers nothing is asked one row on a backoff (0.5, 1, 2 and 4 s, then every 5 s) while another module answers, and the answering module keeps its pace; a module heard before that answers again is read at its next step, up to 5 s later; under the hold a module that goes quiet and wakes keeps the others' segmented rows | CONFIRMED for the backoff and the answering module's pace through the VX; the wake and the hold's protection after it STILL UNKNOWN | [2026-11-22-car-gate](2026-11-22-car-gate.md): an address the car has no module at, beside the engine ECU's DIDs through the VX, asked at gaps of 0.6 s (from the connect's identification read), 1.0, 2.0, 4.0 s and then every 5.0 s, in both sessions (27 asks in 120 s with the hold, 15 in 60 s with `hold=0`); its DID stayed empty with no alarm or refusal. Through the MX+ on the phone, 58 timeouts in 274 s against about 56 predicted, events only (a release APK gives no wire log). The engine's DIDs went from 0.026 s to 0.040 s apart with that channel added, flat (worst 0.076 s), the same with `hold=0` and not scaling with the absent module's asks, so a second channel's cost on the VX rather than the rule's (not separated by a control with a second answering module). No module was switched off and on during a session, and none went quiet under the hold. The rule's other cases are tested (`RequestQuietTest`, `J2534HoldTest.AbsentModulesHoldNoOne`, `PacingTest`) and modeled in the pacing model |
 
+### iOS and macOS ([ADR-0001](../adr/0001-qt-free-core-c-abi.md))
+
+| # | Assumption in the code | State | Evidence |
+|---|---|---|---|
+| 40 | **The iOS app runs on an iPhone:** CI's unsigned device build, signed by a tester's sideloading tool with their own Apple ID, installs, opens and draws; `mock://demo` streams; a WiFi ELM327 connects after the local network's prompt; the Files app shows the recordings | CONFIRMED to the launch only: one tester's iPhone opened it, with no adapter, so nothing past the launch was tried. The device's model, its iOS version and the build's commit are unknown | [2026-11-17-ios](2026-11-17-ios.md) |
+| 41 | **The macOS app runs on a Mac:** the ad hoc signed zip opens after Privacy & Security's Open Anyway on Apple silicon, draws, streams `mock://demo` and reaches a USB serial or WiFi ELM327 (macOS 15 asks for the local network once) | STILL UNKNOWN: a CI runner launches it and keeps it up 30 s, and no person has run it on a Mac | `macos-smoke`'s screenshots and stderr, the CI run's artifact |
+
 ### The host kept awake ([ADR-0033](../adr/0033-session-time-counts-sleep.md)'s appendix of 2026-11-22)
 
 | # | Assumption in the code | State | Evidence |
@@ -161,6 +169,10 @@ session, the recorders on a car, a second listener):
   appendix of 2026-11-04), with the ELM327 adapter's session against it.
 - **#19, listening to another tester's multi-frame replies:** on the MX+, only `STCMM1` is untried, and it acknowledges on the bus, which a listener must not; another adapter's monitor instead.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
+- **#40, the iOS app past its launch:** a session on `mock://demo`, a WiFi
+  adapter and the Files app's view of the recordings, on an iPhone.
+- **#41, the macOS app on a Mac:** the first open through Open Anyway,
+  `mock://demo`, then an adapter, on an Apple silicon Mac.
 - **#36, the extended session on a car:** the module's session read
   back after quiet gaps (a session DID it answers, or a DID that reads
   only in the extended session: none in seven blocks on the test car's
