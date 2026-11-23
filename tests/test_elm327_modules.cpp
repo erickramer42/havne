@@ -2,7 +2,8 @@
 // Testing: HARNESS: Elm327ModulesTest (the modules a session opens by the
 //          pick and the start's probe on the fake ELM327: the support
 //          report's CLOSED and NO_ROOM flags and open_reasons, the info's
-//          module_budget, an undeclared answerer joining; ADR-0065 step 5)
+//          module_budget, an undeclared answerer joining, the receive
+//          filter following the open modules; ADR-0065 step 5)
 
 #include "test_elm327_support.h"
 
@@ -119,6 +120,34 @@ TEST_F(Elm327ModulesTest, APickMovedClosesOneModuleAndOpensAnother)
     ASSERT_EQ(ecuio_session_set_focus(s.s, &pick, 1), ECUIO_OK);
     ASSERT_TRUE(states_reach(s.s, {0, ECUIO_SUPPORT_CLOSED, 0}));
     ASSERT_TRUE(wait_for([] { return fake_count("22D802") >= 1; }, 5000));
+}
+
+/* The adapter's receive filter passes the open modules: typed again
+ * when a pick closes one and opens another. 0x7E8 (the probe's) and
+ * 0x7B8 take the mask 7AF, which 0x7B9 doesn't pass; 0x7E8 and 0x7B9
+ * take 7AE */
+TEST_F(Elm327ModulesTest, TheReceiveFilterFollowsTheOpenModules)
+{
+    ThreeModules modules;
+    Session s;
+    ASSERT_EQ(s.create(uri(kThreeModules)), ECUIO_OK)
+        << ecuio_last_error_detail();
+    uint16_t pick = ECUIO_UDS_GENERIC_SIG_ID_BASE + 1;
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &pick, 1), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(states_reach(s.s, {0, 0, ECUIO_SUPPORT_CLOSED}));
+    ASSERT_TRUE(wait_for([] { return fake_count("ATCF7A8") >= 1; }, 5000));
+    EXPECT_GE(fake_count("ATCM7AF"), 1u) << "the two open modules' filter";
+    /* The record holds the first commands: begin it again */
+    (void)on_fake<int>([](fake_elm327::adapter& a) {
+        a.commands = 0;
+        return 0;
+    });
+    pick = ECUIO_UDS_GENERIC_SIG_ID_BASE + 2;
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &pick, 1), ECUIO_OK);
+    ASSERT_TRUE(states_reach(s.s, {0, ECUIO_SUPPORT_CLOSED, 0}));
+    EXPECT_TRUE(wait_for([] { return fake_count("ATCM7AE") >= 1; }, 5000))
+        << "the filter never followed the pick";
 }
 
 /* The info names the budget: the ELM327's one filter over every open

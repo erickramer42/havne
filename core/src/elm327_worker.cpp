@@ -654,6 +654,31 @@ void judge_io(transport* t, worker_state& w, elm327_io io)
     }
 }
 
+/* The receive filter typed again when the hearing modules (open or
+ * closing) change; no command is out between passes. A refusal runs the
+ * setup again, which types the filter as it stands */
+void follow_modules(transport* t, const worker_state& w)
+{
+    if (w.passive) {
+        return;
+    }
+    uint32_t hearing = 0;
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        if (ecuio_engine_module_hears(t->engine.chans[c])) {
+            hearing |= 1u << c;
+        }
+    }
+    if (hearing == t->hearing) {
+        return;
+    }
+    t->hearing = hearing;
+    if (t->configured && hearing_filter(t) != ECUIO_OK) {
+        elm327_log_write(
+            t->log, "the receive filter was refused: the setup runs again");
+        t->configured = false;
+    }
+}
+
 /* What the session asked for since the last pass, and what it's told */
 void serve_session(transport* t, worker_state& w)
 {
@@ -671,6 +696,7 @@ void serve_session(transport* t, worker_state& w)
     ecuio_take_test_talk(t->session, &e, now_us(t));
     ecuio_take_focus(t->session, &e, w.focus_seen);
     (void)ecuio_take_modules(t->session, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_step_conversations(t->session, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->rx_ids[c], w.published[c]);
@@ -716,6 +742,7 @@ void elm327_worker(transport* t)
     /* A focus set before start applies from the first request */
     ecuio_take_focus(t->session, &e, w.focus_seen);
     (void)ecuio_take_modules(t->session, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_conversations_start(t->session, &e);
 
     while (!t->stop_requested.load()) {

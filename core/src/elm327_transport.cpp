@@ -397,7 +397,12 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
         st = build_channels(session, req, t);
     }
     if (st == ECUIO_OK) {
-        st = receive_filter(t, t->rx_ids, t->chan_count);
+        /* every module, so the worker's first take types it again only
+         * when some module doesn't hear */
+        t->hearing = t->chan_count >= ECUIO_MAX_CHANNELS
+                         ? UINT32_MAX
+                         : (1u << t->chan_count) - 1u;
+        st = hearing_filter(t);
     }
     if (st != ECUIO_OK) {
         close_port(t);

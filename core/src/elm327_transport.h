@@ -120,6 +120,9 @@ struct ecuio_elm327_transport {
     /* The channels that answered the start's emissions probe, a bit each
      * (the session's module_range); every one when no probe ran */
     uint32_t range = UINT32_MAX;
+    /* The modules the receive filter passes (open or closing), a bit
+     * each: every one until the worker's first take */
+    uint32_t hearing = UINT32_MAX;
     /* The requests and their pacing (request_engine.h), built at attach,
      * the worker's alone after; probe and identify as for J2534. */
     ecuio_request_engine engine;
@@ -387,6 +390,7 @@ bool asks_nothing(const transport* t);
 ecuio_status_t run_setup(transport* t, char* version, size_t version_cap);
 ecuio_status_t receive_filter(transport* t, const uint32_t* rx_ids,
                               uint32_t count);
+ecuio_status_t hearing_filter(transport* t);
 ecuio_status_t run_probe(transport* t, ecuio_probe* p);
 void describe_session(transport* t, const char* reset_version,
                       ecuio_session_info_t* info);

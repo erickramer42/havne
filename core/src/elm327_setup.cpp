@@ -194,7 +194,7 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
     if (!header.ok) {
         return refuse(t, header_cmd, header, "OK");
     }
-    const ecuio_status_t st = receive_filter(t, t->rx_ids, t->chan_count);
+    const ecuio_status_t st = hearing_filter(t);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -217,6 +217,20 @@ ecuio_status_t receive_filter(transport* t, const uint32_t* rx_ids,
         }
     }
     return ECUIO_OK;
+}
+
+/* The receive filter for the hearing modules' reply IDs (t->hearing);
+ * nothing typed while none hears */
+ecuio_status_t hearing_filter(transport* t)
+{
+    uint32_t ids[ECUIO_MAX_CHANNELS];
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < t->chan_count && c < ECUIO_MAX_CHANNELS; ++c) {
+        if (((t->hearing >> c) & 1u) != 0) {
+            ids[n++] = t->rx_ids[c];
+        }
+    }
+    return receive_filter(t, ids, n);
 }
 
 /* The start's emissions probe (request_probe.h): for each group, its
