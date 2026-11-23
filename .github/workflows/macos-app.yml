@@ -120,8 +120,8 @@ jobs:
           [ -s "$RUNNER_TEMP/macho.txt" ] || { echo "::error::no Mach-O file in the bundle"; exit 1; }
           while IFS= read -r f; do
             archs=$(lipo -archs "$f")
-            case " $archs " in
-              *" arm64 "*" x86_64 "*|*" x86_64 "*" arm64 "*)
+            case "$archs" in
+              *x86_64*)
                 lipo -thin arm64 "$f" -output "$f.thin"
                 mv "$f.thin" "$f"
                 chmod +x "$f" ;;
@@ -174,7 +174,9 @@ jobs:
           while IFS= read -r f; do
             [ "$(lipo -archs "$f")" = arm64 ] || { echo "::error::$f isn't arm64 alone: $(lipo -archs "$f")"; bad=1; }
             # the first line names the file; each other line, a library
-            otool -L "$f" | tail -n +2 | awk '{ print $1 }' | grep -Ev '^(/System/Library/|/usr/lib/|@rpath/|@executable_path/|@loader_path/)' |
+            # (a dylib's own install name among them, which is no link)
+            id=$(otool -D "$f" 2>/dev/null | tail -n +2 || true)
+            otool -L "$f" | tail -n +2 | awk '{ print $1 }' | grep -vxF "${id:-/nonexistent}" | grep -Ev '^(/System/Library/|/usr/lib/|@rpath/|@executable_path/|@loader_path/)' |
               sed "s|^|::error::$f links |" && bad=1
             otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }' | grep -v '^@' |
               sed "s|^|::error::$f has the rpath |" && bad=1
