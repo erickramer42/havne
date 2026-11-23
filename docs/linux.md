@@ -294,6 +294,22 @@ sudo --preserve-env=ECUIO_VCAN_REQUIRED build-core/tests/test_vcan \
   --gtest_filter='SocketCanBusTest.TheInterfaceGoingDown*'
 ```
 
+## Staying awake during a session
+
+A session on an adapter or a CAN interface holds the machine from
+sleeping on its idle timer (the app's "Keep the computer awake while
+connected", `havne-cli stream` and `log` unless `--allow-sleep`;
+[ADR-0033](adr/0033-session-time-counts-sleep.md)'s appendix of
+2026-11-22). Havne asks logind for an `idle` lock and the desktop's own
+power manager through its session-bus inhibit (Xfce's and KDE's
+`org.freedesktop.PowerManagement`, GNOME's session manager), through
+`libsystemd.so.0` when it is installed. `systemd-inhibit --list` shows
+logind's lock while a session reads. A closed lid still sleeps the
+machine (logind's `LidSwitchIgnoreInhibited=yes`), and so does a
+suspend you ask for. With neither logind nor a desktop that answers,
+the app's activity log and `havne-cli`'s standard error say the hold
+was refused, and the session reads on.
+
 ## Where Havne keeps things
 
 | What | Where |
