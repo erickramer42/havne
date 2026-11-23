@@ -52,6 +52,8 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
         return QString::fromUtf8(ecuio_status_string(rc));
     }
 
+    // Here, off the GUI thread: on Linux a take can wait for the buses
+    holdAwake(session);
     *out_session = session;
     return {};
 }
@@ -265,6 +267,7 @@ QString SessionBridge::connectSession(const QString& typed)
         return err;
     }
     applyConnectedState(session, uri);
+    applyAwake(session);
     return {};
 }
 
@@ -324,6 +327,7 @@ void SessionBridge::connectSessionAsync(const QString& typed)
             }
             if (err.isEmpty()) {
                 applyConnectedState(session, uri);
+                applyAwake(session);
             }
             m_connecting = false;
             emit connectingChanged();
