@@ -252,6 +252,52 @@ TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
     EXPECT_EQ(ecuio_profile_unregister(kCarSet), ECUIO_OK);
 }
 
+/* With the start's probe on (ADR-0065 step 5), the module answering it
+ * (the fake's engine ECU, 7E8) is RANGE: read with nothing picked, its
+ * identity logged, while 7E9, which answers no 01 00, is asked nothing
+ * until a row on it is ticked */
+TEST(BridgeTest, TheProbesAnswererIsReadWithNothingPicked)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    StartProbe probe;
+    FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E9:1003=11");
+    ASSERT_EQ(ecuio_profile_register(kCarSet, car_sized::set(), nullptr),
+              ECUIO_OK);
+    {
+        SessionBridge bridge;
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [&log](const QString& line) { log << line; });
+        ASSERT_TRUE(bridge
+                        .connectSession(
+                            QStringLiteral("j2534://%1?profile=%2&diagnose=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH),
+                                     QString::fromUtf8(kCarSet)))
+                        .isEmpty());
+        const auto of = [&log](const char* ecu) {
+            return log.filter(QStringLiteral("ECU %1 ").arg(ecu));
+        };
+        ASSERT_TRUE(spinUntil([&]() {
+            return !of("0x7E8").isEmpty(); }, 8000))
+            << log.join('\n').toStdString();
+        QElapsedTimer quiet;
+        quiet.start();
+        ASSERT_TRUE(spinUntil([&]() {
+            return quiet.elapsed() >= 1000; }, 5000));
+        EXPECT_TRUE(of("0x7E9").isEmpty()) << log.join('\n').toStdString();
+
+        SignalListModel* model = bridge.signalModel();
+        model->toggleSubscribed(
+            modelRowOf(model, car_sized::id_of(car_sized::kMost + 3)));
+        EXPECT_TRUE(spinUntil([&]() {
+            return !of("0x7E9").isEmpty(); }, 8000))
+            << "the ticked row opened 7E9: " << log.join('\n').toStdString();
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
+    EXPECT_EQ(ecuio_profile_unregister(kCarSet), ECUIO_OK);
+}
+
 /* A default pick core refuses (every def ranked: 2048 requests) leaves a
  * pick-only session asking nothing, with core's words; never "every
  * signal" */
