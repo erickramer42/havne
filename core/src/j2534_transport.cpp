@@ -668,11 +668,13 @@ ecuio_status_t ecuio_j2534::j2534_filters_follow(ecuio_j2534_transport* t,
 {
     ecuio_request_engine& e = t->engine;
     uint32_t held = 0;
+    uint32_t holding = 0; /* a bit for each module holding a filter */
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         if (!ecuio_engine_module_hears(e.chans[c])) {
             j2534_filter_close(t, c);
         }
         held += t->chans[c].filter_active ? 1u : 0u;
+        holding |= t->chans[c].filter_active ? 1u << c : 0u;
     }
     /* RANGE first: a refusal falls on a pick, never on an emissions module */
     for (const bool range : {true, false}) {
@@ -685,10 +687,11 @@ ecuio_status_t ecuio_j2534::j2534_filters_follow(ecuio_j2534_transport* t,
             const ecuio_status_t st = j2534_filter_open(t, c);
             if (st == ECUIO_OK) {
                 ++held;
+                holding |= 1u << c;
             } else if (at_start && held == 0) {
                 return st;
             } else {
-                ecuio_engine_filter_refused(&e, c, held);
+                ecuio_engine_filter_refused(&e, c, holding);
             }
         }
     }

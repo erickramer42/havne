@@ -175,17 +175,27 @@ inline void ecuio_engine_visits_step(ecuio_request_engine* e)
     }
 }
 
-/* Module c's filter was refused with held filters in place (J2534): the
- * filters and the live budget fall to those held, so nothing open closes
- * and a later visit finds none free. A refused visit ends its read
- * NOT_OPENED; the module, wanted for another reason or not a visit,
- * waits for a filter with no room. */
+/* Module c's filter was refused (J2534) with a filter held on each module
+ * whose bit holding has: the filters fall to those held, and the live
+ * budget to those live data holds, a visit's left out, so nothing open
+ * closes, live data never reaches for the filter a visit holds, and that
+ * filter is the next visit's. A refused visit ends its read NOT_OPENED;
+ * the module, wanted for another reason or not a visit, waits for a
+ * filter with no room. */
 inline void ecuio_engine_filter_refused(ecuio_request_engine* e, uint32_t c,
-                                        uint32_t held)
+                                        uint32_t holding)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    uint32_t held = 0;
+    uint32_t live = 0;
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        if (((holding >> k) & 1u) != 0) {
+            ++held;
+            live += e->chans[k].visiting ? 0u : 1u;
+        }
+    }
     e->filters_most = held;
-    const uint32_t live = held > 0 ? held : 1u; /* 0 would be no limit */
+    live = live > 0 ? live : 1u; /* 0 would be no limit */
     e->module_budget = live < e->module_budget ? live : e->module_budget;
     ++ch.generation;
     bool waited = false;

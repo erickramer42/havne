@@ -149,10 +149,11 @@ void j2534_filter_close(ecuio_j2534_transport* t, uint32_t c);
 
 /* Each module's filter follows its state (ADR-0065 step 5): a filter for
  * every module that hears (open or closing), stopped once it has closed;
- * the stops go first, then RANGE's starts. A refused start lowers the filters to those held
- * and leaves the module waiting (ecuio_engine_filter_refused), but with
- * none held at_start answers the refusal: the start fails. The caller's
- * thread before the worker exists, the worker's after. */
+ * the stops go first, then RANGE's starts. A refused start lowers the
+ * filters to those held, and the live budget to those held less a
+ * visit's, and leaves the module waiting (ecuio_engine_filter_refused),
+ * but with none held at_start answers the refusal: the start fails. The
+ * caller's thread before the worker exists, the worker's after. */
 ecuio_status_t j2534_filters_follow(ecuio_j2534_transport* t, bool at_start);
 
 } // namespace ecuio_j2534

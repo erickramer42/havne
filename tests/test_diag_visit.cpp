@@ -311,6 +311,38 @@ TEST_F(DiagVisitTest, AVisitedModuleWaitingForAFilterWaitsAgain)
     EXPECT_EQ(v.e.chans[1].reasons, kRead);
 }
 
+/* A live module's filter refused while a visit holds the one kept back:
+ * the live budget falls to the filters live data holds, so no module
+ * opens into the visit's filter, and that filter is the next visit's */
+TEST_F(DiagVisitTest, ARefusalDuringAVisitLeavesItsFilterToTheNextVisit)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(v.make({kRead, kRead, kRead, kRead}, 3, 4));
+    v.until(500 * kMs);
+    ASSERT_EQ(v.state(3), ECUIO_MODULE_STATE_NO_ROOM);
+    ecuio_engine_visit_want(&v.e, 3);
+    v.step();
+    ASSERT_TRUE(v.e.chans[3].visiting);
+    /* module 2's start refused: modules 0 and 1 and the visit hold one */
+    ecuio_engine_filter_refused(&v.e, 2, 0x1u | 0x2u | 0x8u);
+    EXPECT_EQ(v.e.filters_most, 3u);
+    EXPECT_EQ(v.e.module_budget, 2u);
+    EXPECT_EQ(v.state(2), ECUIO_MODULE_STATE_NO_ROOM);
+    v.until(v.now + 4000 * kMs);
+    EXPECT_EQ(v.state(2), ECUIO_MODULE_STATE_NO_ROOM)
+        << "opened into the visit's filter";
+    EXPECT_EQ(v.state(3), ECUIO_MODULE_STATE_NO_ROOM);
+    ecuio_engine_diagnose_again(&v.e);
+    ecuio_engine_visit_closed(&v.e);
+    v.until(v.now + 8000 * kMs);
+    for (const uint32_t c : {2u, 3u}) {
+        const ecuio_channel_diagnostics_t d = v.report(c);
+        EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE) << c;
+        EXPECT_FALSE(d.flags & ECUIO_DIAG_NOT_OPENED)
+            << c << ": the next visit found no filter";
+    }
+}
+
 namespace {
 
 /* A Visits whose engine module (channel 0) reads 0 rpm, the rest the
