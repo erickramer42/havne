@@ -488,6 +488,11 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
     }
     session->module_range = ecuio_probe_range(
         p, rx_ids, t->chan_count, ecuio_engine_rpm_module_of(&t->engine));
+    if (p.requests > 0) {
+        char line[160];
+        ecuio_probe_describe(p, line, sizeof line);
+        ecuio_j2534_log_line(t->handle, line);
+    }
     return ECUIO_OK;
 }
 

@@ -58,6 +58,7 @@ const char* const ecuio_socketcan_query_keys[] = {
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -204,6 +205,12 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
     }
     session->module_range = ecuio_probe_range(
         p, r.rx_ids, r.chan_count, ecuio_engine_rpm_module_of(&r.engine));
+    if (p.requests > 0) {
+        /* SocketCAN keeps no session log: standard error has the line */
+        char line[160];
+        ecuio_probe_describe(p, line, sizeof line);
+        std::fprintf(stderr, "socketcan: %s\n", line);
+    }
     return ECUIO_OK;
 }
 

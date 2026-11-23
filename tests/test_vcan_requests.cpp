@@ -571,3 +571,21 @@ TEST_F(SocketCanRequestTest, AnUndeclaredAnswererJoinsTheTable)
     ASSERT_EQ(ecuio_session_get_info(f.get(), &info), ECUIO_OK);
     EXPECT_EQ(info.module_count, 1u);
 }
+
+/* SocketCAN keeps no session log: the probe's time and answerers go to
+ * standard error */
+TEST_F(SocketCanRequestTest, TheProbeWritesItsLineToStandardError)
+{
+    vcan_bus::Ecu engine;
+    ASSERT_TRUE(engine.ok());
+    testing::internal::CaptureStderr();
+    {
+        Session s("?profile=obd2&identify=0&diagnose=0");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    }
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_NE(err.find("socketcan: emissions probe: 1 functional 01 00 in "),
+              std::string::npos)
+        << err;
+    EXPECT_NE(err.find("answered by 7E8"), std::string::npos) << err;
+}

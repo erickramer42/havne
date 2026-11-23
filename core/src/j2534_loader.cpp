@@ -1,7 +1,8 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
 // Testing: HARNESS: J2534ConnectTest (test_j2534_connect); test_j2534_load;
 //          test_j2534_stream; test_j2534_routing; J2534DiscoveryTest
-//          (test_j2534_discovery)
+//          (test_j2534_discovery); a line of core's own in the session
+//          log: J2534ProbeTest.TheProbeWritesItsLineInTheSessionLog
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "ecuio/j2534.h"
@@ -14,6 +15,7 @@
 #include <windows.h>
 #include "ecuio/j2534_ptypes.h"
 #include "error_detail.h"
+#include "j2534_surrogate_client.h" /* sur_log */
 #include "win_utf8.h"
 
 #include <algorithm>
@@ -531,6 +533,12 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
     return ecuio_j2534_sur_stop_msg_filter(handle->sur, channel, filter_id);
 }
 
+void ecuio_j2534_log_line(ecuio_j2534_handle_t* handle, const char* line)
+{
+    ecuio_sur_client::sur_log(handle != nullptr ? handle->sur : nullptr, "%s",
+                              line != nullptr ? line : "");
+}
+
 ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* handle,
                                         char* firmware,
                                         char* dll,
@@ -702,6 +710,8 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* /*h*/,
 {
     return ECUIO_ERR_NOT_IMPLEMENTED;
 }
+
+void ecuio_j2534_log_line(ecuio_j2534_handle_t* /*h*/, const char* /*line*/) {}
 
 ecuio_status_t ecuio_j2534_read_version(ecuio_j2534_handle_t* /*h*/,
                                         char* firmware,

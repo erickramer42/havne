@@ -88,6 +88,20 @@ TEST_F(J2534ProbeTest, AnUndeclaredAnswererJoinsTheTable)
     EXPECT_EQ(info.module_count, 1u);
 }
 
+/* The probe's time and answerers go in the session log (the surrogate
+ * client's, which writes each line to standard error too) */
+TEST_F(J2534ProbeTest, TheProbeWritesItsLineInTheSessionLog)
+{
+    testing::internal::CaptureStderr();
+    create("?identify=0&diagnose=0");
+    const std::string err = testing::internal::GetCapturedStderr();
+    ASSERT_NE(session, nullptr);
+    EXPECT_NE(err.find("emissions probe: 1 functional 01 00 in "),
+              std::string::npos)
+        << err;
+    EXPECT_NE(err.find("answered by 7E8"), std::string::npos) << err;
+}
+
 /* A probe no module answers (the engine ECU absent) leaves the engine
  * module, the channel asking PID 0C, RANGE alone */
 TEST_F(J2534ProbeTest, ASilentProbeLeavesTheEngineModuleInRange)
