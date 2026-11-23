@@ -100,6 +100,7 @@ void mark_overflow(ecuio_j2534_transport* t, ecuio_frame_t* f)
     if (t->overflow_pending) {
         f->flags |= ECUIO_FRAME_FLAG_OVERFLOW;
         t->overflow_pending = false;
+        ecuio_engine_overflowed(&t->engine);
     }
 }
 

@@ -251,6 +251,7 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
         if (t->overflow_pending) {
             frame.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
             t->overflow_pending = false;
+            ecuio_engine_overflowed(&t->engine);
         }
         frame.reserved = 0;
         /* ISO-TP's longest message, 4095 bytes, fits the frame whole */

@@ -40,11 +40,18 @@ constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
 constexpr int64_t ECUIO_ENGINE_PROBE_BUDGET_US = 1000000;
 
+/* A reply taken later than P2 after its request is late (ADR-0065
+ * section 11's counters) */
+constexpr int64_t ECUIO_ENGINE_P2_US = 50000;
+static_assert(ECUIO_ENGINE_P2_US < ECUIO_ENGINE_WAIT_US,
+              "a reply inside the wait can be late");
+
 /* Negative responses: 7F <service> <code> (ISO 14229-1). */
 constexpr uint8_t ECUIO_NEGATIVE_RESPONSE = 0x7F;
 constexpr uint8_t ECUIO_NRC_SERVICE_NOT_SUPPORTED = 0x11;
 constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_SUPPORTED = 0x12;
 constexpr uint8_t ECUIO_NRC_REQUEST_OUT_OF_RANGE = 0x31;
+constexpr uint8_t ECUIO_NRC_BUSY_REPEAT_REQUEST = 0x21;
 constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
 constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION = 0x7E;
@@ -197,6 +204,26 @@ struct ecuio_scan_entry {
                            a recovery's rescan clears it */
 };
 
+/* What a module's replies did (ADR-0065 section 11), each saturating:
+ * a table row's or a pack's wait run out with nothing (lost), each
+ * 7F xx 21 (busy), each 7F xx 78 (pending), and a reply that completed
+ * its request later than ECUIO_ENGINE_P2_US after it went out (late).
+ * Internal: step 8's in-flight policy reads them. */
+struct ecuio_engine_counts {
+    uint32_t lost = 0;
+    uint32_t busy = 0;
+    uint32_t pending = 0;
+    uint32_t late = 0;
+};
+
+/* Adds one to a count, which stops at its most */
+inline void ecuio_engine_count(uint32_t& n)
+{
+    if (n != UINT32_MAX) {
+        ++n;
+    }
+}
+
 struct ecuio_engine_channel {
     int64_t deadline_us = 0;    /* when the outstanding request's wait ends */
     int64_t sent_us = 0;        /* when it went out (ADR-0042) */
@@ -322,6 +349,7 @@ struct ecuio_engine_channel {
      * sends only a key */
     ecuio_key_window key;
     ecuio_request session_refused = {};
+    ecuio_engine_counts counts;
 };
 
 /* Sets channel ch's session step. A key's window lasts only while the
@@ -425,6 +453,11 @@ struct ecuio_request_engine {
     /* The longest request the transport sends, a talk's bound: attach
      * sets ECUIO_ENGINE_PDU_MAX where a request goes out as ISO-TP */
     uint32_t pdu_max = ECUIO_ENGINE_PDU_SINGLE;
+    /* Frames the transport said were lost before one it handed over
+     * (ecuio_engine_overflowed), and writes the kernel refused for want
+     * of buffers (SocketCAN's ENOBUFS); saturating, internal */
+    uint32_t overflowed = 0;
+    uint32_t writes_refused = 0;
 };
 
 /* Whether request r is asked in the rotation: not dropped by the probe

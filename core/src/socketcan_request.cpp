@@ -182,6 +182,9 @@ bool send_frame(ecuio_socketcan_transport* t, sent_request& pending, uint32_t c,
                 int32_t r, const isotp_can& f, int64_t now)
 {
     if (!write_frame(t->fd, f, t->ext29[c])) {
+        if (errno == ENOBUFS) {
+            ecuio_engine_write_refused(&t->engine);
+        }
         return false;
     }
     ecuio_engine_sent(&t->engine, c, r, true, now);
@@ -583,6 +586,7 @@ void deliver_reply(ecuio_socketcan_transport* t, worker_state& w, uint32_t c,
     if (overflow_pending) {
         reply.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
         overflow_pending = false;
+        ecuio_engine_overflowed(&e);
     }
     reply.reserved = 0;
     std::memcpy(reply.data, m.data, m.len);
