@@ -26,6 +26,8 @@
 # fuzz_sim's are runs of requests that enter the simulated ECU's extended
 # session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
 # would have to guess; and URIs whose faults aim at one module.
+# fuzz_guest's are guest modules (seeds_wasm.py's guest_seeds()): from
+# nothing the fuzzer never writes the guest ABI's six exports.
 # fuzz_conversation's are runs that unlock a level (talk_seeds()):
 # the input's bytes are read by the harness and the table alike, so an
 # unlock is hard to find from nothing.
@@ -51,7 +53,7 @@ import re
 import struct
 import sys
 
-from seeds_wasm import conversation_seeds, wasm_seeds
+from seeds_wasm import conversation_seeds, guest_seeds, wasm_seeds
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SEP = b"\x1e"
@@ -612,6 +614,11 @@ def main(argv):
     # (1, 2, 0x7F), then the module
     for name, module in wasm_seeds().items():
         write(out, "fuzz_wasm_module", name + ".wasm", b"\x0a\x01\x02\x03" + module)
+
+    # A guest bound and stepped: the adapter's 60 bytes and a budget of
+    # 100,000 (0x0B), level 01's word at pass 4 (0x10), the fates from 0
+    for name, module in guest_seeds().items():
+        write(out, "fuzz_guest", name + ".wasm", b"\x0b\x10\x00\x00" + module)
 
     # The simulated ECU's session and security access (sim_security.h),
     # the canned car with no faults
