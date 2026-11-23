@@ -8,9 +8,11 @@
 // visit that finds no filter free ends the read at once: COMPLETE, every
 // item unasked, ECUIO_DIAG_NOT_OPENED. The visiting module's own due is
 // ecuio_engine_due_visit (_send.h); the worker queues and steps visits
-// from request_setup.h and request_modules.h.
+// from request_setup.h and request_modules.h. A filter the adapter
+// refuses (J2534) lowers the filters to those held here too.
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: DiagVisitTest (test_obd2)
+// Testing: UNIT: DiagVisitTest (test_obd2); HARNESS: J2534ModulesTest
+//          (test_j2534_health)
 
 #ifndef ECUIO_REQUEST_DIAG_VISIT_H
 #define ECUIO_REQUEST_DIAG_VISIT_H
@@ -129,6 +131,38 @@ inline void ecuio_engine_visits_step(ecuio_request_engine* e)
         e->visit_now = c;
         ++ch.generation;
         return;
+    }
+}
+
+/* Module c's filter was refused with held filters in place (J2534): the
+ * filters and the live budget fall to those held, so nothing open closes
+ * and a later visit finds none free. A refused visit ends its read
+ * NOT_OPENED; the module, wanted for another reason or not a visit,
+ * waits for a filter with no room. */
+inline void ecuio_engine_filter_refused(ecuio_request_engine* e, uint32_t c,
+                                        uint32_t held)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    e->filters_most = held;
+    const uint32_t live = held > 0 ? held : 1u; /* 0 would be no limit */
+    e->module_budget = live < e->module_budget ? live : e->module_budget;
+    ++ch.generation;
+    bool waited = false;
+    if (ch.visiting) {
+        waited = ch.visit_from_no_room;
+        ch.visiting = false;
+        e->visit_now = UINT32_MAX;
+        ch.reasons =
+            static_cast<uint8_t>(ch.reasons & ~ECUIO_ENGINE_REASON_VISIT);
+        ecuio_engine_visit_not_opened(e, c);
+        if (ch.reasons == 0) {
+            ch.module_state = ECUIO_MODULE_STATE_CLOSED;
+            return;
+        }
+    }
+    ch.module_state = ECUIO_MODULE_STATE_NO_ROOM;
+    if (!waited) {
+        ch.waiting = ++e->waiting_last;
     }
 }
 

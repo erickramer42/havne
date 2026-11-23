@@ -193,8 +193,7 @@ long __stdcall PassThruReadMsgs(unsigned long ChannelID,
         unsigned long judged = 0;
         while (judged < arrived && fake_j2534::g_queue_len > 0) {
             bool match = false;
-            for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
-                                      i < FAKE_FILTER_DEPTH; ++i) {
+            for (unsigned long i = 0; i < FAKE_FILTER_DEPTH; ++i) {
                 if (fake_j2534::g_filters[i].filter_id == 0) {
                     continue;
                 }

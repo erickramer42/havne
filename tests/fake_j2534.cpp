@@ -74,8 +74,10 @@
 //    that status, and PassThruGetLastError then describes the refusal.
 //  * Disconnect: counted; ECUIO_FAKE_DISCONNECT_DELAY_MS sleeps
 //    before each one (a slow vendor teardown).
-//  * Filters: registration bookkeeping; the last started and stopped
-//    are published. Filter-aware echo prepends the filter pattern
+//  * Filters: registration bookkeeping; the last started and stopped,
+//    and the count held now and at most, are published.
+//    ECUIO_FAKE_FILTER_MAX=N refuses a start with N held
+//    (ERR_EXCEEDED_LIMIT), as an adapter out of filters does. Filter-aware echo prepends the filter pattern
 //    (4-byte BE CAN ID). ECUIO_FAKE_FILTER_GATING=1 controls ONLY
 //    ReadMsgs dropping; the echo shape is unconditional once a filter
 //    lands.
@@ -269,8 +271,29 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
                                             "PassThruStartMsgFilter")) {
         return rc;
     }
+    /* the filters the fake holds at once (a number, read as knob_ms does) */
+    const unsigned long most =
+        fake_j2534::knob_ms("ECUIO_FAKE_FILTER_MAX", FAKE_FILTER_DEPTH);
 
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    unsigned long active = 0;
+    fake_j2534::FilterRecord* slot = nullptr;
+    for (fake_j2534::FilterRecord& f : fake_j2534::g_filters) {
+        if (f.filter_id != 0) {
+            ++active;
+        } else if (slot == nullptr) {
+            slot = &f;
+        }
+    }
+    if (active >= most || slot == nullptr) {
+        snprintf(fake_j2534::g_last_error, sizeof(fake_j2534::g_last_error),
+                 "fake_j2534: PassThruStartMsgFilter refused "
+                 "(ECUIO_FAKE_FILTER_MAX)");
+        if (fake_control::Page* page = fake_control::attach()) {
+            InterlockedIncrement(&page->filters_refused);
+        }
+        return ERR_EXCEEDED_LIMIT;
+    }
 
     fake_j2534::FilterRecord rec = {};
     rec.filter_id = ++fake_j2534::g_filter_seq;
@@ -283,14 +306,14 @@ long __stdcall PassThruStartMsgFilter(unsigned long ChannelID,
         memcpy(rec.flow_control, pFlowControlMsg->Data,
                pFlowControlMsg->DataSize);
     }
-    if (fake_j2534::g_filter_seq <= FAKE_FILTER_DEPTH) {
-        fake_j2534::g_filters[fake_j2534::g_filter_seq - 1] = rec;
-    }
+    *slot = rec;
     fake_j2534::g_last_filter = rec;
     if (fake_control::Page* page = fake_control::attach()) {
         fake_control::record_filter(page, rec.filter_id, rec.filter_type,
                                     rec.mask, rec.pattern, rec.mask_len,
                                     rec.flow_control);
+        fake_control::record_filters_active(page,
+                                            static_cast<uint32_t>(active + 1));
     }
 
     *pFilterID = rec.filter_id;
@@ -312,14 +335,24 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
         fake_control::record_filter_stop(
             page, FilterID, static_cast<uint32_t>(fake_j2534::g_queue_len));
     }
-    for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
-                              i < FAKE_FILTER_DEPTH; ++i) {
-        if (fake_j2534::g_filters[i].filter_id == FilterID) {
-            fake_j2534::g_filters[i].filter_id = 0;   /* tombstone */
-            return STATUS_NOERROR;
+    unsigned long active = 0;
+    bool found = false;
+    for (fake_j2534::FilterRecord& f : fake_j2534::g_filters) {
+        if (f.filter_id == FilterID) {
+            f.filter_id = 0; /* the slot is free */
+            found = true;
+        } else if (f.filter_id != 0) {
+            ++active;
         }
     }
-    return STATUS_FAILED;   /* unknown/already-stopped: strict vendor */
+    if (!found) {
+        return STATUS_FAILED; /* unknown/already-stopped: strict vendor */
+    }
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_filters_active(page,
+                                            static_cast<uint32_t>(active));
+    }
+    return STATUS_NOERROR;
 }
 
 /* v04.04's form (DeviceID first). Like READ_VBATT, it fails for any

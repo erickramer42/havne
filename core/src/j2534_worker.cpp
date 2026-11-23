@@ -12,6 +12,7 @@
 //          .VxTheFloorsWaitReadsNothing
 //          The hold (Known Issue #42): UNIT: J2534HoldTest; on the fake,
 //          tests/test_j2534_hold_bus.cpp (J2534HealthTest)
+//          The filters following the modules: J2534ModulesTest
 //
 // The J2534 session's worker: the read pump, a request's write, the
 // link-health feed and the close's 10 01. j2534_transport.cpp starts it
@@ -394,9 +395,7 @@ struct worker_state {
     j2534_hold hold;
 
     explicit worker_state(ecuio_j2534_transport* t)
-        : e(t->engine), requests(e.count > 0 || e.scan_count > 0 ||
-                                 ecuio_session_may_talk(t->session)),
-          precise(requests),
+        : e(t->engine), requests(j2534_asks(t)), precise(requests),
           h(t->session->last_error, t->session->error_count,
             t->session->record_link.get(), t->session, t->epoch,
             &t->clock.last_us, &t->clock.last_host_us)
@@ -426,6 +425,7 @@ void begin_worker(ecuio_j2534_transport* t, worker_state& w)
         ecuio_take_focus(t->session, &e, w.focus_seen);
         (void)ecuio_take_modules(t->session, &e, w.modules_seen,
                                  engine_now_us(t));
+        (void)j2534_filters_follow(t, false);
         ecuio_conversations_start(t->session, &e);
     }
 }
@@ -525,6 +525,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
         ecuio_take_focus(t->session, &e, w.focus_seen);
         (void)ecuio_take_modules(t->session, &e, w.modules_seen,
                                  engine_now_us(t));
+        (void)j2534_filters_follow(t, false);
         ecuio_step_conversations(t->session, &e, engine_now_us(t));
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {

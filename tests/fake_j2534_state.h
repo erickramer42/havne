@@ -23,6 +23,7 @@
 #define FAKE_CONFIG_DEPTH 16
 #define STATUS_NOERROR ECUIO_PT_STATUS_NOERROR
 #define STATUS_FAILED  ECUIO_PT_STATUS_FAILED
+#define ERR_EXCEEDED_LIMIT 0x0CL /* J2534-1: no filter or message ID left */
 
 namespace fake_j2534 {
 
@@ -78,7 +79,8 @@ inline unsigned long g_cfg_param[FAKE_CONFIG_DEPTH];
 inline unsigned long g_cfg_value[FAKE_CONFIG_DEPTH];
 inline unsigned long g_cfg_len = 0;
 
-/* Filter bookkeeping */
+/* Filter bookkeeping: a started filter takes the first free slot (a
+ * stopped one's too), filter_id 0 marking a free one */
 inline FilterRecord g_filters[FAKE_FILTER_DEPTH];
 inline unsigned long g_filter_seq = 0;
 inline FilterRecord g_last_filter;              /* the last started: its pattern

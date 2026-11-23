@@ -4,7 +4,8 @@
 //          test_j2534_health (through the transport they build)
 //
 // j2534:// transport as its sources share it: the transport struct, its
-// channel, and the constants the worker and attach both use. The parts:
+// channel, the constants the worker and attach both use, and each
+// module's filter. The parts:
 // j2534_transport.cpp (attach, start, detach, the URI) and
 // j2534_worker.cpp (the worker).
 
@@ -137,6 +138,22 @@ namespace ecuio_j2534 {
 
 /* The worker thread's body (j2534_worker.cpp): runs until stop_requested. */
 void j2534_worker(ecuio_j2534_transport* t);
+
+/* Whether the session asks anything: its table, a scan or a talk */
+bool j2534_asks(const ecuio_j2534_transport* t);
+
+/* Channel c's FLOW_CONTROL filter, started (the adapter's status) or
+ * stopped when it holds one */
+ecuio_status_t j2534_filter_open(ecuio_j2534_transport* t, uint32_t c);
+void j2534_filter_close(ecuio_j2534_transport* t, uint32_t c);
+
+/* Each module's filter follows its state (ADR-0065 step 5): a filter for
+ * every module that hears (open or closing), stopped once it has closed;
+ * the stops go first, then RANGE's starts. A refused start lowers the filters to those held
+ * and leaves the module waiting (ecuio_engine_filter_refused), but with
+ * none held at_start answers the refusal: the start fails. The caller's
+ * thread before the worker exists, the worker's after. */
+ecuio_status_t j2534_filters_follow(ecuio_j2534_transport* t, bool at_start);
 
 } // namespace ecuio_j2534
 

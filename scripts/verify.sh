@@ -404,7 +404,7 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release -j "$jobs" --output-on-failure \
-        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car|Conversation)Test\."
+        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car|Conversation|Modules)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
     skips=$(skipped_cases "$LOGDIR/cross-arch.log" | paste -sd ',' - | sed 's/,/, /g')

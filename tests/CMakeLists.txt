@@ -2768,6 +2768,7 @@ if(WIN32)
         test_j2534_talk.cpp
         test_j2534_car.cpp
         test_j2534_conversation.cpp
+        test_j2534_modules.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
