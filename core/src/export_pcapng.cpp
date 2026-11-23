@@ -203,8 +203,8 @@ void recording_export::left_out(const seg& s, uint32_t cls, bool counted)
     dropped_.push_back(s.index);
     if (in_range(s.host_us)) {
         ++r_.left_out[cls];
-        if (counted) {
-            --r_.frames;
+        if (counted && r_.frames > 0) {
+            --r_.frames; /* never wraps, whatever a join names */
         }
     }
 }
