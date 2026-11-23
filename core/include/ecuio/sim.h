@@ -70,6 +70,10 @@ extern "C" {
  * answering on it alone (faults=late:3@7EA), in place of that fault
  * for every module; at most 32 aims. A faults key given twice adds to
  * the first, a later item in place of an earlier, as the timing keys do.
+ * relock, mock:// with gateway= only, is the gateway's alone (no @, or
+ * aimed at its reply ID): every nth request it lets through on a gated
+ * route, on its own count, it locks again first and withholds that
+ * request as the route does while locked.
  * The timing, both: delay is each reply's time from the request to its
  * first frame, a log-normal through its median p50 and its 99th
  * percentile p99 (1 <= p50 <= p99 <= 10000000), drawn on a generator of
@@ -432,7 +436,8 @@ typedef struct ecuio_sim_gateway {
     uint64_t wrong_keys;      /* 7F 27 35 and 36 */
     uint64_t lockouts;        /* 7F 27 36 */
     uint64_t unlocks;         /* 67 02 or 67 04 */
-    uint64_t relocks;         /* unlocks lost: 10 01, 10 03, S3 */
+    uint64_t relocks;         /* unlocks lost: 10 01, 10 03, S3, the
+                                 relock fault */
     uint64_t too_early;       /* 27s answered 7F 27 37: a tester that
                                  didn't wait out the delay */
     uint32_t overrides;       /* route= entries for a service or a module:

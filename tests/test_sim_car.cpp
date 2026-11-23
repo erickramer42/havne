@@ -163,8 +163,8 @@ TEST(SimEcuTest, AnAimsRefusalsNameTheirCause)
 {
     const std::string shape =
         "faults: 'late:3@' isn't <fault>:<n>[@<reply ID>], the fault one of "
-        "silent, late, pending, bad_sequence or stalled, n from 1 to 10000 "
-        "and the reply ID 11-bit hex";
+        "silent, late, pending, bad_sequence, stalled or relock, n from 1 to "
+        "10000 and the reply ID 11-bit hex";
     EXPECT_EQ(refusal("mock://sim?faults=late:3@"), shape);
     for (const char* bad :
          {"mock://sim?faults=late:3@800", "mock://sim?faults=late:3@7EG",

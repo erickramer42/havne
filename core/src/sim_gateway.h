@@ -129,6 +129,8 @@ struct ecuio_sim_gateway_config {
     bool never = false;
     bool delay_given = false;
     int64_t delay_us = 0;
+    /* faults=relock's period, the gateway's own (plan_sim), 0 for none */
+    uint32_t relock = 0;
 };
 
 namespace ecuio_sim_gateway_detail {
@@ -659,6 +661,39 @@ inline bool ecuio_sim_gateway_lands(const ecuio_sim_gateway_config& g,
         }
         return false;
     }
+    return true;
+}
+
+/* Whether faults=relock is the gateway's alone (with no @, or aimed at
+ * its reply ID), and its period into g->relock; false with why */
+inline bool ecuio_sim_gateway_relock(ecuio_sim_gateway_config* g,
+                                     const ecuio_sim_faults& all,
+                                     const ecuio_sim_aims& aims, char* why,
+                                     size_t why_cap)
+{
+    bool aimed = false;
+    for (uint32_t i = 0; i < aims.count; ++i) {
+        const ecuio_sim_aim& a = aims.items[i];
+        if (a.kind != ecuio_sim_fault_kind::relock) {
+            continue;
+        }
+        aimed = true;
+        if (g->given && a.reply_id != g->reply_id) {
+            std::snprintf(why, why_cap,
+                          "faults: relock:%u@%X aims at a module: relock is "
+                          "the gateway's alone (%X)",
+                          a.every, a.reply_id, g->reply_id);
+            return false;
+        }
+    }
+    if (!g->given && (aimed || all.relock != 0)) {
+        std::snprintf(why, why_cap,
+                      "faults: relock locks a gateway again: it needs "
+                      "gateway=");
+        return false;
+    }
+    g->relock =
+        g->given ? ecuio_sim_faults_for(all, aims, g->reply_id).relock : 0;
     return true;
 }
 

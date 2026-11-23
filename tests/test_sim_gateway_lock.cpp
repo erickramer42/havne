@@ -4,9 +4,10 @@
 //
 // The simulated gateway's security access (sa=, sa_delay=, gwopt=keep-any)
 // and the gated routes it opens: locked, unlocked together, locked again
-// by its own session's end, the lockout and its delay, never, the fixed
-// pairs and the named transforms, each key worked out in the case from
-// the rule sim.h states, through the unbound sim at the case's time.
+// by its own session's end or the relock fault, the lockout and its
+// delay, never, the fixed pairs and the named transforms, each key
+// worked out in the case from the rule sim.h states, through the unbound
+// sim at the case's time.
 
 #include "sim_gateway_support.h"
 
@@ -423,4 +424,81 @@ TEST(SimSecurityTest, NeverRefusesTheRightKey)
     }
     EXPECT_EQ(s.unlocked, 0);
     EXPECT_EQ(s.delay_until_us, 1000);
+}
+
+// faults=relock:<n>: every nth request let through on a gated route, on
+// the gateway's own count, locks it again first and is withheld as the
+// route is locked; other routes' requests count nothing
+TEST(SimGatewayTest, ARelockLocksTheGatewayAgain)
+{
+    for (const char* aim : {"", "@6F8"}) {
+        Sim s(kBase +
+              "&sa=key&route=reads:gated,write:gated-silent&faults="
+              "relock:3" +
+              aim);
+        unlock(s);
+        EXPECT_EQ(s.one(kModule, kD100), kD100Answer) << aim;
+        EXPECT_EQ(s.one(kModule, {0x3E, 0x00}), (Bytes{0x7E, 0x00}))
+            << "not gated: no count";
+        EXPECT_EQ(s.one(kModule, {0x2E, 0xD1, 0x00, 0x01}),
+                  (Bytes{0x7F, 0x2E, 0x11}));
+        EXPECT_EQ(s.one(kModule, {0x3E, 0x00}), (Bytes{0x7E, 0x00}));
+        EXPECT_EQ(s.one(kModule, kD100), kLocked)
+            << aim << ": the third gated request locks it first";
+        EXPECT_EQ(s.one(kModule, kD100), kLocked) << "and it stays locked";
+        EXPECT_TRUE(s.ask(kModule, {0x2E, 0xD1, 0x00, 0x01}).empty());
+        ecuio_sim_gateway_t v{};
+        ASSERT_EQ(ecuio_sim_get_gateway(s.sim, &v), ECUIO_OK);
+        EXPECT_EQ(v.relocks, 1u);
+        EXPECT_EQ(v.unlocked_level, 0);
+        EXPECT_NE(v.flags & ECUIO_SIM_GATEWAY_EXTENDED, 0u)
+            << "the session stays; the unlock is lost";
+
+        EXPECT_EQ(s.one(kGw, made_up_key(s.one(kGw, {0x27, 0x01}))),
+                  (Bytes{0x67, 0x02}));
+        EXPECT_EQ(s.one(kModule, kD100), kD100Answer);
+        EXPECT_EQ(s.one(kModule, kD100), kD100Answer);
+        EXPECT_TRUE(s.ask(kModule, {0x2E, 0xD1, 0x00, 0x01}).empty())
+            << aim << ": the sixth, gated silent, locks it again";
+        ASSERT_EQ(ecuio_sim_get_gateway(s.sim, &v), ECUIO_OK);
+        EXPECT_EQ(v.relocks, 2u);
+    }
+    Sim module_faults(kBase + "&sa=key&route=reads:gated&faults=relock:1@6F8,"
+                              "late:1@7E9");
+    unlock(module_faults);
+    EXPECT_EQ(module_faults.one(kModule, kD100), kLocked)
+        << "relock:1: the first gated request locks it";
+}
+
+// relock is the gateway's: with no gateway, or aimed at another node, it
+// is refused after the profile, beside the aims
+TEST(SimEcuTest, RelockIsTheGatewaysFault)
+{
+    const ecuio_sim_config c =
+        parsed("mock://sim?faults=relock:4,relock:2@6F8,silent:3");
+    EXPECT_EQ(c.faults.relock, 4u);
+    ASSERT_EQ(c.aimed.count, 1u);
+    EXPECT_EQ(c.aimed.items[0].kind, ecuio_sim_fault_kind::relock);
+    EXPECT_STREQ(ecuio_sim_fault_name(ecuio_sim_fault_kind::relock), "relock");
+    EXPECT_EQ(ecuio_sim_faults_for(c.faults, c.aimed, 0x6F8).relock, 2u);
+
+    std::string why;
+    EXPECT_EQ(create_status("mock://sim?faults=relock:2", &why),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(why, "faults: relock locks a gateway again: it needs gateway=");
+    EXPECT_EQ(create_status("mock://sim?modules=2&faults=relock:2@7E9", &why),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(why, "faults: relock locks a gateway again: it needs gateway=");
+    EXPECT_EQ(create_status(kBase + "&faults=relock:2@7E9", &why),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(why, "faults: relock:2@7E9 aims at a module: relock is the "
+                   "gateway's alone (6F8)");
+    EXPECT_EQ(create_status(kBase + "&faults=relock:2@6F8", &why), ECUIO_OK)
+        << why;
+    EXPECT_EQ(create_status(kBase + "&faults=relock:2", &why), ECUIO_OK) << why;
+    EXPECT_EQ(create_status(kBase + "&faults=relock:2@7EA", &why),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_NE(why.find("aims at a module the simulated car hasn't"),
+              std::string::npos)
+        << "an aim landing nowhere is the aims' refusal first: " << why;
 }

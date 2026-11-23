@@ -112,7 +112,8 @@ ecuio_sim_gateway_verdict route(ecuio_sim* s, const sim_node& n,
     ecuio_sim_session& gw = s->nodes[s->gateway].session;
     const bool was = gw.security.unlocked != 0;
     const ecuio_sim_gateway_verdict v = ecuio_sim_gateway_route(
-        s->ecu.config.gateway, gw, n.reply_id, req, functional, s->ecu.time_us);
+        s->ecu.config.gateway, gw, &s->gateway_tally.gated, n.reply_id, req,
+        functional, s->ecu.time_us);
     ecuio_sim_gateway_count_route(s->gateway_tally, v, was, gw);
     publish_gateway(s);
     return v;
@@ -224,7 +225,9 @@ ecuio_status_t plan_sim(const char* uri, bool unbound, sim_plan* p)
     }
     if (!ecuio_sim_aims_land(p->config.aimed, ids, count, why, sizeof why) ||
         !ecuio_sim_timing::aims_land(p->config.timing, ids, count, why,
-                                     sizeof why)) {
+                                     sizeof why) ||
+        !ecuio_sim_gateway_relock(&p->config.gateway, p->config.faults,
+                                  p->config.aimed, why, sizeof why)) {
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }

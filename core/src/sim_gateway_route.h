@@ -81,21 +81,31 @@ inline ecuio_sim_route ecuio_sim_gateway_now(ecuio_sim_route r, bool unlocked,
 /* The gateway's verdict on req (len at least 1) for the module answering
  * on reply_id, gw its session at the ECU's time now_us: S3 lapses it
  * first (locking it), a gated class follows its lock, and with keep_any
- * a request let through keeps the session. A refusal goes on the
- * module's reply ID; on a functional request a withheld one is silent
- * unless aloud, and aloud keeps the suppressed codes silent unless
- * unsuppressed. */
-inline ecuio_sim_gateway_verdict
-ecuio_sim_gateway_route(const ecuio_sim_gateway_config& g,
-                        ecuio_sim_session& gw, uint32_t reply_id,
-                        const uint8_t* req, bool functional, int64_t now_us)
+ * a request let through keeps the session. Each request an unlocked
+ * gated route meets is counted in *gated; with g.relock (faults=relock)
+ * every relock-th locks the gateway again first and is withheld as the
+ * route is while locked. A refusal goes on the module's reply ID; on a
+ * functional request a withheld one is silent unless aloud, and aloud
+ * keeps the suppressed codes silent unless unsuppressed. */
+inline ecuio_sim_gateway_verdict ecuio_sim_gateway_route(
+    const ecuio_sim_gateway_config& g, ecuio_sim_session& gw, uint64_t* gated,
+    uint32_t reply_id, const uint8_t* req, bool functional, int64_t now_us)
 {
     ecuio_sim_session_lapse(gw, now_us);
     ecuio_sim_gateway_verdict v;
     uint8_t nrc = 0;
-    const ecuio_sim_route r = ecuio_sim_gateway_now(
-        ecuio_sim_gateway_outcome(g, reply_id, req[0], &nrc),
-        gw.security.unlocked != 0, &nrc);
+    const ecuio_sim_route configured =
+        ecuio_sim_gateway_outcome(g, reply_id, req[0], &nrc);
+    if ((configured == ecuio_sim_route::gated ||
+         configured == ecuio_sim_route::gated_silent) &&
+        gw.security.unlocked != 0) {
+        ++*gated;
+        if (g.relock != 0 && *gated % g.relock == 0) {
+            ecuio_sim_security_lock(gw.security);
+        }
+    }
+    const ecuio_sim_route r =
+        ecuio_sim_gateway_now(configured, gw.security.unlocked != 0, &nrc);
     switch (r) {
     case ecuio_sim_route::forward:
         if (g.keep_any) {
@@ -150,6 +160,7 @@ struct ecuio_sim_gateway_tally {
     uint64_t unlocks = 0;
     uint64_t relocks = 0;
     uint64_t too_early = 0;
+    uint64_t gated = 0; /* through an unlocked gated route: relock's count */
 };
 
 /* A verdict counted by its fate, and an unlock its S3 lapse lost (was:
