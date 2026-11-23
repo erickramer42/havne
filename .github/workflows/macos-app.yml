@@ -101,7 +101,9 @@ jobs:
       # modules app/qml imports into the bundle. Then, in this order, as
       # each step breaks the signature the next one needs unbroken:
       #  - no qmltooling plugins (the debugger's server, as the Windows
-      #    zip leaves out);
+      #    zip leaves out) and no SQL drivers (the app has no database;
+      #    macdeployqt reports their missing client libraries as errors
+      #    and goes on);
       #  - every Mach-O file thinned to arm64 (Qt's kit is universal);
       #  - no rpath that isn't relative (the build tree's and the kit's);
       #  - the ad hoc signature over the finished bundle.
@@ -110,8 +112,8 @@ jobs:
           app=$(find build -maxdepth 3 -name Havne.app -type d | head -n 1)
           [ -n "$app" ] || { echo "::error::no Havne.app under build/"; exit 1; }
           "$QT_ROOT_DIR/bin/macdeployqt" "$app" -qmldir=app/qml -verbose=1
-          rm -rf "$app/Contents/PlugIns/qmltooling"
-          find "$app" -type f -exec file {} + | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
+          rm -rf "$app/Contents/PlugIns/qmltooling" "$app/Contents/PlugIns/sqldrivers"
+          find "$app" -type f -exec file {} + | grep -v '(for architecture' | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
           [ -s "$RUNNER_TEMP/macho.txt" ] || { echo "::error::no Mach-O file in the bundle"; exit 1; }
           while IFS= read -r f; do
             archs=$(lipo -archs "$f")
@@ -162,7 +164,7 @@ jobs:
           grep -q '^TeamIdentifier=not set' <<< "$sig" || fail "the signature carries a Team ID"
           codesign --verify --deep --strict "$APP" || fail "the signature doesn't verify"
 
-          find "$APP" -type f -exec file {} + | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
+          find "$APP" -type f -exec file {} + | grep -v '(for architecture' | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
           bad=0
           while IFS= read -r f; do
             [ "$(lipo -archs "$f")" = arm64 ] || { echo "::error::$f isn't arm64 alone: $(lipo -archs "$f")"; bad=1; }
