@@ -210,4 +210,27 @@ TEST(ExportTest, AJoinsFramesAlreadyLeftOutAreCountedOnce)
     EXPECT_EQ(copy.report.frames, 1u);
 }
 
+/* A kept join's frame the plan already left out (a classic frame of 9
+ * bytes is no CAN frame) is counted in its own class alone */
+TEST(ExportTest, AKeptJoinsFrameLeftOutAsNoCanFrameIsCountedOnce)
+{
+    const std::vector<uint8_t> p = did_text(); /* 21 bytes */
+    const std::vector<Mem> frames = {
+        {1000, 0x7A8, 0, {0x10, 0x15, p[0], p[1], p[2], p[3], p[4], p[5]}},
+        {1200, 0x7A8, 0, {0x21, p[6], p[7], p[8], p[9], p[10], p[11], p[12]}},
+        {1300, 0x7A8, 0,
+         {0x22, p[13], p[14], p[15], p[16], p[17], p[18], p[19], p[20]}},
+        {2000, 0x123, 0, {0x01}}};
+    Folder f;
+    recording(f, rows_of(frames));
+    Exported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.report.left_out[kVinClass], 2u);
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE], 1u);
+    EXPECT_EQ(e.report.frames, 1u);
+    ASSERT_EQ(e.pcap.packets.size(), 1u);
+    EXPECT_EQ(e.pcap.packets[0].can_id(), 0x123u);
+    expect_no_vin(e.bytes);
+}
+
 } // namespace
