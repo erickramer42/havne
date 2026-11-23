@@ -1683,9 +1683,10 @@ jobs:
   # The macOS app's launch smoke: the zip as a user unpacks it, opened
   # through Launch Services, checked alive 15 s later, with a screenshot
   # of the runner's display. The app has no option to connect at start,
-  # so what it draws is Home; there is no mock:// session here. A runner
-  # that draws nothing (a blank or missing screenshot) is not a failure:
-  # the screenshot is evidence to read. It runs wherever macos-app does:
+  # so a synthetic click on Home's mock://demo row and Connect tries a
+  # session, which a refused click leaves on Home. A runner that draws
+  # nothing (a blank or missing screenshot) is not a failure: the
+  # screenshots are evidence to read. It runs wherever macos-app does:
   # about two minutes beside the app's build.
   macos-smoke:
     needs: [scope, macos-app]
@@ -1713,6 +1714,16 @@ jobs:
           ditto -x -k macos/havne-macos-arm64.zip app
           APP="$PWD/app/Havne.app"
           codesign --verify --deep --strict "$APP"
+          cat > smoke/click.js <<'JS'
+          ObjC.import('CoreGraphics');
+          function run(argv) {
+            const p = $.CGPointMake(Number(argv[0]), Number(argv[1]));
+            for (const t of [$.kCGEventMouseMoved, $.kCGEventLeftMouseDown, $.kCGEventLeftMouseUp]) {
+              $.CGEventPost($.kCGHIDEventTap, $.CGEventCreateMouseEvent($(), t, p, $.kCGMouseButtonLeft));
+              delay(0.15);
+            }
+          }
+          JS
           : > smoke/stdout.log
           : > smoke/stderr.log
           sw_vers | tee smoke/host.txt
@@ -1736,9 +1747,19 @@ jobs:
             exit 1
           fi
           echo "Havne still running after 15 s, pid $PID"
-          if grep -q "QSG" smoke/stderr.log; then echo "The scene graph initialized"; else echo "::warning::no scene graph line in stderr"; fi
-          sleep 15
-          screencapture -x smoke/launch-30s.png || true
+          if grep -q "Created QRhi" smoke/stderr.log; then echo "The scene graph initialized"; else echo "::warning::no QRhi line in stderr"; fi
+          # The app can't connect at start: click Home's mock://demo row
+          # and Connect (a 1024x768 display puts the window at its
+          # top-left, as the 15 s shot shows). Mouse events need the
+          # runner's permission, so a refusal is a warning and the
+          # shots below say what happened
+          osascript -l JavaScript smoke/click.js 600 335 || echo "::warning::the first click failed"
+          sleep 1
+          osascript -l JavaScript smoke/click.js 822 407 || echo "::warning::the second click failed"
+          sleep 10
+          screencapture -x smoke/connected-27s.png || true
+          sleep 5
+          screencapture -x smoke/launch-32s.png || true
           kill -0 "$PID" || { echo "::error::Havne exited within 30 s of the launch"; exit 1; }
           pkill -x Havne || true
 
