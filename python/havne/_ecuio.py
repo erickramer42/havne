@@ -15,6 +15,8 @@ ECUIO_ABSENT_AFTER_FRAMES = 3
 ECUIO_ALERT_DANGER = 2
 ECUIO_ALERT_NONE = 0
 ECUIO_ALERT_WARNING = 1
+ECUIO_AWAKE_SYSTEM = 1
+ECUIO_AWAKE_WHY_MAX = 128
 ECUIO_BACKEND_ELM327 = 5
 ECUIO_BACKEND_J2534_INPROC = 2
 ECUIO_BACKEND_J2534_SURROGATE = 3
@@ -1794,6 +1796,7 @@ FUNCTIONS = {
     'ecuio_session_create': (c_int, [c_char_p, POINTER(POINTER(ecuio_session_t))]),  # core.h
     'ecuio_session_destroy': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_get_absent_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
+    'ecuio_session_get_awake': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint32)]),  # core.h
     'ecuio_session_get_channel_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_diagnostics_t)]),  # core.h
     'ecuio_session_get_channel_identity': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_identity_t)]),  # core.h
     'ecuio_session_get_channel_support': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_support_t)]),  # core.h
@@ -1806,6 +1809,7 @@ FUNCTIONS = {
     'ecuio_session_get_unasked_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unsplit_replies': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint64)]),  # profile.h
     'ecuio_session_get_unsupported_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
+    'ecuio_session_keep_awake': (c_int, [POINTER(ecuio_session_t), c_uint32, c_char_p]),  # core.h
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h

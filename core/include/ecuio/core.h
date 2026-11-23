@@ -1172,6 +1172,47 @@ ecuio_status_t ecuio_session_set_focus_with(
     uint32_t flags
 );
 
+/* What ecuio_session_keep_awake holds off (ADR-0033's appendix "the host
+ * kept awake while a session reads") */
+#define ECUIO_AWAKE_SYSTEM   0x00000001u   /* the machine's sleep on its
+                                              idle timer */
+#define ECUIO_AWAKE_WHY_MAX  128           /* bytes of `why`, its NUL
+                                              included */
+
+/*
+ * Keeps the host from sleeping on its idle timer while this session is
+ * open: from this call until ecuio_session_close or ecuio_session_destroy,
+ * or a call with what = 0, which never waits. `why` is the reason the
+ * platform lists (NULL: a neutral default). Only a live transport holds
+ * (elm327://, j2534://, socketcan://): under mock:// and replay:// the
+ * call returns ECUIO_OK and holds nothing. A second call while held
+ * changes nothing. A sleep the user asks for, a closed lid and a critical
+ * battery still sleep the machine.
+ * ECUIO_ERR_NOT_IMPLEMENTED where core can't hold (Android and iOS, whose
+ * apps hold their own; a Linux with neither logind nor a desktop's
+ * inhibit), with ecuio_last_error_detail() saying why; the session runs
+ * on either way. ECUIO_ERR_INVALID_ARGUMENT for a bit not listed above or
+ * a `why` of ECUIO_AWAKE_WHY_MAX bytes or more; ECUIO_ERR_SESSION_CLOSED
+ * after close. The detail is cleared on entry. On Linux a take waits up
+ * to 1 s for the buses, on the calling thread, holding no lock: a call
+ * with what = 0 or the close on another thread meanwhile wins, and the
+ * take returns ECUIO_OK (ECUIO_ERR_SESSION_CLOSED after the close)
+ * holding nothing.
+ */
+ecuio_status_t ecuio_session_keep_awake(
+    ecuio_session_t* session,
+    uint32_t what,
+    const char* why
+);
+
+/* The ECUIO_AWAKE_* held for this session now, whoever asked (a caller,
+ * or core itself through a write): 0 under mock:// and replay://, after a
+ * refusal and after close. Any thread. */
+ecuio_status_t ecuio_session_get_awake(
+    const ecuio_session_t* session,
+    uint32_t* out_what
+);
+
 #ifdef __cplusplus
 }
 #endif

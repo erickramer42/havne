@@ -11,6 +11,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "frame_decoder.h"
+#include "host_awake.h"
 #include "profile_hold.h"
 #include "pull_queue.h"
 #include "recorder.h"
@@ -224,6 +225,9 @@ struct ecuio_session {
     uint32_t queue_count = 0;
     uint32_t value_queues = 0;
     ecuio_test_talk_slot test_talk;
+    /* The host held awake (host_awake.h): the caller's claim and core's
+     * own, released at close after the detach */
+    ecuio_awake_state awake;
 };
 
 #endif /* ECUIO_SESSION_H */
