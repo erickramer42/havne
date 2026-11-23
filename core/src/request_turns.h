@@ -1,7 +1,7 @@
 // File/layer: core/src/request_turns.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: RequestTurnsTest (test_obd2); HARNESS: Elm327TurnsTest
-//          (test_elm327)
+// Testing: UNIT: RequestTurnsTest, RequestSlotsTest (test_obd2); HARNESS:
+//          Elm327TurnsTest (test_elm327)
 //
 // Turns on an adapter that asks one channel at a time (ELM327: one command
 // for the whole adapter; ADR-0015's appendix of 2026-11-18). Each channel's
@@ -52,9 +52,12 @@
 // channel's next request, so it holds only the channel's own exchanges,
 // whoever asks in between.
 //
-// SocketCAN and J2534 don't use this: their channels' exchanges overlap
+// SocketCAN and J2534 don't take turns: their channels' exchanges overlap
 // (each channel's one outstanding request), so a busy channel's pace never
-// waits on another's.
+// waits on another's. They take free slots instead: at most the engine's
+// cap of requests out at once, a free slot going to the channel whose
+// next request has been due longest (ecuio_engine_next_slot, ADR-0065
+// section 11); SocketCAN through it, J2534's plain pass too.
 
 #ifndef ECUIO_REQUEST_TURNS_H
 #define ECUIO_REQUEST_TURNS_H
@@ -355,6 +358,66 @@ inline int32_t ecuio_engine_take_turn(ecuio_request_engine* e,
     return r != ECUIO_ENGINE_NONE
                ? r
                : ecuio_engine_turn_pick(e, t, held, from, now_us, true, c);
+}
+
+/* The channel not in skip, with nothing out, whose next request has been
+ * due longest (the least ecuio_engine_turn_next_us at or before now),
+ * equal times from e->slot_from on; UINT32_MAX for none */
+inline uint32_t ecuio_engine_longest_due(const ecuio_request_engine* e,
+                                         int64_t now_us, uint32_t skip)
+{
+    uint32_t best = UINT32_MAX;
+    int64_t best_at = INT64_MAX;
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const uint32_t c = (e->slot_from + k) % e->chan_count;
+        const int64_t at = ecuio_engine_turn_next_us(e, e->chans[c]);
+        if (((skip >> c) & 1u) == 0 && at <= now_us && at < best_at) {
+            best = c;
+            best_at = at;
+        }
+    }
+    return best;
+}
+
+/* A free slot's request at now, its channel in *out_c, or NONE with every
+ * slot taken or nothing due (ADR-0065 section 11). The channel due
+ * longest goes first; one its time names but due passes by is skipped;
+ * then any other channel due gives, from slot_from on (an unpicked
+ * session's check, which no time names). A one-shot takes a slot as a
+ * row does. */
+inline int32_t ecuio_engine_next_slot(ecuio_request_engine* e, int64_t now_us,
+                                      uint32_t skip, uint32_t* out_c)
+{
+    if (e->chan_count == 0 || ecuio_engine_slots_full(e)) {
+        return ECUIO_ENGINE_NONE;
+    }
+    for (;;) {
+        const uint32_t c = ecuio_engine_longest_due(e, now_us, skip);
+        if (c == UINT32_MAX) {
+            break;
+        }
+        skip |= 1u << c;
+        const int32_t r = ecuio_engine_due(e, c, now_us);
+        if (r != ECUIO_ENGINE_NONE) {
+            e->slot_from = (c + 1) % e->chan_count;
+            *out_c = c;
+            return r;
+        }
+    }
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const uint32_t c = (e->slot_from + k) % e->chan_count;
+        if (((skip >> c) & 1u) != 0 ||
+            e->chans[c].outstanding != ECUIO_ENGINE_NONE) {
+            continue;
+        }
+        const int32_t r = ecuio_engine_due(e, c, now_us);
+        if (r != ECUIO_ENGINE_NONE) {
+            e->slot_from = (c + 1) % e->chan_count;
+            *out_c = c;
+            return r;
+        }
+    }
+    return ECUIO_ENGINE_NONE;
 }
 
 #endif

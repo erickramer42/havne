@@ -27,6 +27,7 @@
 #include "request_engine_quiet.h"
 #include "request_engine_send.h"
 #include "request_engine_reply.h"
+#include "request_engine_modules.h"
 
 /* The request engine (ADR-0015): what to request, derived from the
  * defs, and when, paced by the replies. It does no I/O and reads no

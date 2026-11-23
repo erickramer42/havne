@@ -297,6 +297,8 @@ ecuio_status_t plan_requests(ecuio_session_t* session,
         return st;
     }
     ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_HOST);
+    /* one command out for the whole adapter: the turns pick its channel */
+    ecuio_engine_slots(&t->engine, ECUIO_ENGINE_INFLIGHT_DEFAULT, 1);
     elm327_one_frame_pids_for(set, &t->one_frame);
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames

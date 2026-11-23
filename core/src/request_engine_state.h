@@ -40,6 +40,11 @@ constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
 constexpr int64_t ECUIO_ENGINE_PROBE_BUDGET_US = 1000000;
 
+/* The requests in flight at once, session-wide (ADR-0065 section 11): a
+ * transport's attach sets its ceiling through ecuio_engine_slots; step 8
+ * sets the cap */
+constexpr uint32_t ECUIO_ENGINE_INFLIGHT_DEFAULT = 4;
+
 /* A reply taken later than P2 after its request is late (ADR-0065
  * section 11's counters) */
 constexpr int64_t ECUIO_ENGINE_P2_US = 50000;
@@ -458,6 +463,12 @@ struct ecuio_request_engine {
      * of buffers (SocketCAN's ENOBUFS); saturating, internal */
     uint32_t overflowed = 0;
     uint32_t writes_refused = 0;
+    /* The requests out at once: the least of cap and ceiling (the
+     * transport's), and the channel after the last one given a free slot,
+     * where ties start (ecuio_engine_next_slot) */
+    uint32_t cap = ECUIO_ENGINE_INFLIGHT_DEFAULT;
+    uint32_t ceiling = ECUIO_MAX_CHANNELS;
+    uint32_t slot_from = 0;
 };
 
 /* Whether request r is asked in the rotation: not dropped by the probe

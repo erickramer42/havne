@@ -410,6 +410,29 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
            ch.talk.offered || ch.talk.out;
 }
 
+/* The channels with a request out (a pending wait's too): the slots taken */
+inline uint32_t ecuio_engine_out_count(const ecuio_request_engine* e)
+{
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        n += e->chans[c].outstanding != ECUIO_ENGINE_NONE ? 1u : 0u;
+    }
+    return n;
+}
+
+/* The most requests out at once: the least of the cap and the
+ * transport's ceiling */
+inline uint32_t ecuio_engine_slots_most(const ecuio_request_engine* e)
+{
+    return e->cap < e->ceiling ? e->cap : e->ceiling;
+}
+
+/* Whether every slot is taken */
+inline bool ecuio_engine_slots_full(const ecuio_request_engine* e)
+{
+    return ecuio_engine_out_count(e) >= ecuio_engine_slots_most(e);
+}
+
 /* Microseconds until the engine next has something to do: a wait
  * ending, or a channel's floor passing while it has something to send
  * (with only its rotation left, a focus's next sweep, or held quiet its
@@ -417,15 +440,18 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
  * window's end); 0 when something is due now, INT64_MAX when nothing
  * is. A channel whose window is open with nothing to send after it
  * reports the window's end too: a driver counts quiet reads only at
- * INT64_MAX, and a link judged silent would end the window. The
- * channels with a bit in skip are left out. */
+ * INT64_MAX, and a link judged silent would end the window. With every
+ * slot taken only the waits count. The channels with a bit in skip are
+ * left out. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us, uint32_t skip = 0)
 {
     int64_t next = INT64_MAX;
+    const bool full = ecuio_engine_slots_full(e);
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
-        if (((skip >> c) & 1u) != 0) {
+        if (((skip >> c) & 1u) != 0 ||
+            (full && ch.outstanding == ECUIO_ENGINE_NONE)) {
             continue;
         }
         const bool window = ecuio_key_window_open(ch.key, now_us);

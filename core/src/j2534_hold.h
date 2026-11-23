@@ -92,6 +92,7 @@
 #define ECUIO_J2534_HOLD_H
 
 #include "request_engine.h"
+#include "request_turns.h"
 
 #include <cstdint>
 
@@ -324,12 +325,32 @@ inline bool j2534_hold_extra_turn(const j2534_hold& h,
     return true;
 }
 
+/* Whether the channels outside seg with something due at now outnumber
+ * the free slots (ADR-0065 section 11) */
+inline bool j2534_hold_slots_bind(const ecuio_request_engine* e, uint32_t seg,
+                                  int64_t now_us)
+{
+    const uint32_t out = ecuio_engine_out_count(e);
+    const uint32_t most = ecuio_engine_slots_most(e);
+    const uint32_t free_slots = out < most ? most - out : 0u;
+    uint32_t due = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        due += ((seg >> c) & 1u) == 0 &&
+                       ecuio_engine_turn_next_us(e, e->chans[c]) <= now_us
+                   ? 1u
+                   : 0u;
+    }
+    return due > free_slots;
+}
+
 /* The pass's order at now into order[] (e->chan_count entries): the
  * channels whose last write was a Single Frame and with no chosen row, in
- * channel order, then the rest (a segmented last write or a chosen row),
- * the oldest age first, equal ages from h.from on around the channels. A
- * chosen row so goes ahead of another only as the older. With no
- * segmented write it is channel order. */
+ * channel order (or, when they outnumber the free slots, the one due
+ * longest first, equal times from e->slot_from on), then the rest (a
+ * segmented last write or a chosen row), the oldest age first, equal ages
+ * from h.from on around the channels. A chosen row so goes ahead of
+ * another only as the older. With no segmented write it is channel
+ * order. */
 inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
                              int64_t now_us, uint32_t* order)
 {
@@ -338,11 +359,24 @@ inline void j2534_hold_order(const j2534_hold& h, const ecuio_request_engine* e,
         const bool chosen = h.chosen[c] != ECUIO_ENGINE_NONE;
         seg |= ((h.segmented >> c) & 1u) != 0 || chosen ? 1u << c : 0u;
     }
+    const bool binds = j2534_hold_slots_bind(e, seg, now_us);
+    const uint32_t from = binds ? e->slot_from : 0u;
+    int64_t due[ECUIO_MAX_CHANNELS] = {};
     uint32_t n = 0;
-    for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (((seg >> c) & 1u) == 0) {
-            order[n++] = c;
+    for (uint32_t i = 0; i < e->chan_count; ++i) {
+        const uint32_t c = (from + i) % e->chan_count;
+        if (((seg >> c) & 1u) != 0) {
+            continue;
         }
+        const int64_t at =
+            binds ? ecuio_engine_turn_next_us(e, e->chans[c]) : 0;
+        uint32_t k = n++;
+        for (; k > 0 && due[k - 1] > at; --k) {
+            order[k] = order[k - 1];
+            due[k] = due[k - 1];
+        }
+        order[k] = c;
+        due[k] = at;
     }
     const uint32_t first = n;
     int64_t age[ECUIO_MAX_CHANNELS] = {};
@@ -492,22 +526,37 @@ inline void j2534_hold_recovered(j2534_hold& h)
 
 /* The worker's pass at now: timed_out(c) for each channel whose wait ran
  * out, write(c, r) for each request to write. Held, every wait is ended
- * first, then each channel in j2534_hold_order through j2534_hold_next;
- * otherwise each channel's wait is ended and its due request written in
- * turn, so a write's failure is seen by the next channel's timeout. */
+ * first, then each channel in j2534_hold_order goes through
+ * j2534_hold_next until every slot is taken (a chosen row past them
+ * stays chosen). Otherwise, with no more channels than slots, each
+ * channel's wait is ended and its due request written in turn, so a
+ * write's failure is seen by the next channel's timeout; with more,
+ * every wait is ended first, then each free slot's request written
+ * (ecuio_engine_next_slot). */
 template <typename TimedOut, typename Write>
 inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
                             int64_t now_us, TimedOut&& timed_out, Write&& write)
 {
     if (!j2534_hold_applies(h, e)) {
+        const bool fits = e->chan_count <= ecuio_engine_slots_most(e);
         for (uint32_t c = 0; c < e->chan_count; ++c) {
             if (ecuio_engine_expire(e, c, now_us)) {
                 timed_out(c);
             }
-            const int32_t r = ecuio_engine_due(e, c, now_us);
+            const int32_t r =
+                fits ? ecuio_engine_due(e, c, now_us) : ECUIO_ENGINE_NONE;
             if (r != ECUIO_ENGINE_NONE) {
                 write(c, r);
             }
+        }
+        uint32_t written = 0; /* once a pass, a failed write's too */
+        uint32_t c = 0;
+        for (int32_t r = fits ? ECUIO_ENGINE_NONE
+                              : ecuio_engine_next_slot(e, now_us, written, &c);
+             r != ECUIO_ENGINE_NONE;
+             r = ecuio_engine_next_slot(e, now_us, written, &c)) {
+            written |= 1u << c;
+            write(c, r);
         }
         return;
     }
@@ -521,7 +570,8 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
     j2534_hold_order(h, e, now_us, order);
     uint32_t held_now = 0;
     bool ahead = false; /* a write went ahead of a chosen row */
-    for (uint32_t k = 0; k < e->chan_count; ++k) {
+    for (uint32_t k = 0; k < e->chan_count && !ecuio_engine_slots_full(e);
+         ++k) {
         const uint32_t c = order[k];
         const int32_t r = j2534_hold_next(h, e, c, now_us, &held_now);
         if (r == ECUIO_ENGINE_NONE) {
@@ -529,6 +579,7 @@ inline void j2534_hold_pass(j2534_hold& h, ecuio_request_engine* e,
         }
         const bool segmented = j2534_hold_long(h, e, c, r);
         ahead = ahead || (!segmented && j2534_hold_other_row(h, e, c));
+        e->slot_from = (c + 1) % e->chan_count;
         write(c, r);
         h.segmented = segmented ? h.segmented | 1u << c
                                 : h.segmented & ~(1u << c);

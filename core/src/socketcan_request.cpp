@@ -18,6 +18,7 @@
 #include "link_health.h"
 #include "request_setup.h"
 #include "request_conversation.h"
+#include "request_turns.h"
 #include "socketcan_send.h"
 
 #include <errno.h>
@@ -205,23 +206,17 @@ void send_failed(ecuio_socketcan_transport* t, link_health& h,
     socketcan_send_failed(send, *t->sender, &t->engine, c, r, why, h, now);
 }
 
-/* The next request due on any channel, from next_chan on: its one frame,
- * or the First Frame of one longer than a frame (socketcan_send.h) */
+/* A free slot's request (ecuio_engine_next_slot): its one frame, or the
+ * First Frame of one longer than a frame (socketcan_send.h) */
 void send_due(ecuio_socketcan_transport* t, link_health& h,
-              sent_request& pending, socketcan_send& send, uint32_t& next_chan,
-              int64_t now)
+              sent_request& pending, socketcan_send& send, int64_t now)
 {
     ecuio_request_engine& e = t->engine;
     uint32_t c = 0;
-    int32_t r = ECUIO_ENGINE_NONE;
-    for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE; ++k) {
-        c = (next_chan + k) % e.chan_count;
-        r = ecuio_engine_due(&e, c, now);
-    }
+    const int32_t r = ecuio_engine_next_slot(&e, now, 0, &c);
     if (r == ECUIO_ENGINE_NONE) {
         return;
     }
-    next_chan = (c + 1) % e.chan_count;
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
     uint32_t len = 0;
     const uint8_t* pdu = ecuio_engine_pdu_of(
@@ -290,7 +285,6 @@ struct request_sends {
     ecuio_socketcan_transport* t;
     ecuio_request_engine& e;
     link_health& h;
-    uint32_t next_chan = 0;
     sent_request pending;
     socketcan_send send; /* a request longer than a frame, under way */
 
@@ -355,7 +349,7 @@ struct request_sends {
     {
         if (!t->proof.halted && !t->proof.confirming) {
             if (!pending.active && !send.active) {
-                send_due(t, h, pending, send, next_chan, now);
+                send_due(t, h, pending, send, now);
             }
             send_on(t, h, pending, send, now);
         }
