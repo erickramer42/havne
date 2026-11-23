@@ -10,6 +10,7 @@
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/sur_fingerprint.h"
+#include "../core/src/access_cut.h" /* a security access cut from the log */
 
 #include <chrono>
 #include <cstdio>
@@ -133,20 +134,31 @@ static void stage(const char* fmt, ...)
 }
 
 /* "41 0C 1F 40" for the first ECUIO_SUR_MSG_MAX bytes, then " +N" for
- * the rest, so a long message can't overrun stage()'s line. */
+ * the rest, so a long message can't overrun stage()'s line. A security
+ * access's message (four ID bytes, then service 27 or 67) shows zeroes
+ * after its sub-function, then their length and SHA-256 (access_cut.h). */
 static void format_hex(char* out, size_t cap, const unsigned char* data,
                        unsigned long size)
 {
+    const bool cut = size > 4 && ecuio_access_cut(data + 4, size - 4);
     const unsigned long shown = (size < ECUIO_SUR_MSG_MAX)
                                 ? size : ECUIO_SUR_MSG_MAX;
     size_t pos = 0;
     out[0] = '\0';
     for (unsigned long i = 0; i < shown && pos + 4 < cap; ++i) {
+        const unsigned char b =
+            cut && i >= 4 + ECUIO_ACCESS_KEPT ? 0 : data[i];
         pos += static_cast<size_t>(snprintf(out + pos, cap - pos,
-                                            i ? " %02X" : "%02X", data[i]));
+                                            i ? " %02X" : "%02X", b));
     }
     if (size > shown && pos < cap) {
-        (void)snprintf(out + pos, cap - pos, " +%lu", size - shown);
+        pos += static_cast<size_t>(
+            snprintf(out + pos, cap - pos, " +%lu", size - shown));
+    }
+    if (cut && pos + 3 < cap) {
+        char text[ECUIO_ACCESS_CUT_TEXT];
+        ecuio_access_cut_text(data + 4, size - 4, text, sizeof text);
+        (void)snprintf(out + pos, cap - pos, " (%s)", text);
     }
 }
 
@@ -324,7 +336,7 @@ static int handle_op_read(unsigned long channel, uint32_t timeout_ms,
             const PASSTHRU_MSG& m = s_read_batch[i];
             const bool indication = ecuio_pt_is_indication(m.RxStatus) != 0;
             if (g_log_frames) {
-                char hex[3 * ECUIO_SUR_MSG_MAX + 16];
+                char hex[3 * ECUIO_SUR_MSG_MAX + 16 + ECUIO_ACCESS_CUT_TEXT];
                 format_hex(hex, sizeof(hex), m.Data, m.DataSize);
                 stage("OP_READ frame: status %ld, rx 0x%08lX, ts %lu, len %lu: "
                       "%s%s",
@@ -418,7 +430,7 @@ static int handle_op_write(unsigned long channel, const uint8_t* data,
     if (out_num != nullptr) *out_num = static_cast<uint32_t>(num);
 
     if (g_log_frames) {
-        char hex[3 * ECUIO_SUR_MSG_MAX + 16];
+        char hex[3 * ECUIO_SUR_MSG_MAX + 16 + ECUIO_ACCESS_CUT_TEXT];
         format_hex(hex, sizeof(hex), msg.Data, msg.DataSize);
         stage("OP_WRITE frame: status %ld, tx 0x%08lX, len %lu: %s",
               rc, msg.TxFlags, msg.DataSize, hex);

@@ -135,6 +135,26 @@ ECUIO_CONDITION_WHY_NO_CHECK = 7
 ECUIO_CONDITION_WHY_NO_LINK = 6
 ECUIO_CONDITION_WHY_NO_SIGNAL = 2
 ECUIO_CONDITION_WHY_UNIT = 3
+ECUIO_CONVERSATION_DECLINED = 3
+ECUIO_CONVERSATION_ENDED = 5
+ECUIO_CONVERSATION_FAULTED = 4
+ECUIO_CONVERSATION_FAULT_BEGIN = 4
+ECUIO_CONVERSATION_FAULT_BOUND = 6
+ECUIO_CONVERSATION_FAULT_BUDGET = 1
+ECUIO_CONVERSATION_FAULT_BUFFER = 3
+ECUIO_CONVERSATION_FAULT_CHANNEL = 12
+ECUIO_CONVERSATION_FAULT_DOOR = 9
+ECUIO_CONVERSATION_FAULT_KEY = 10
+ECUIO_CONVERSATION_FAULT_LENGTH = 5
+ECUIO_CONVERSATION_FAULT_NONE = 0
+ECUIO_CONVERSATION_FAULT_SERVICE = 7
+ECUIO_CONVERSATION_FAULT_TRAP = 2
+ECUIO_CONVERSATION_FAULT_UNDECLARED = 8
+ECUIO_CONVERSATION_FAULT_WINDOW = 11
+ECUIO_CONVERSATION_NONE = 0
+ECUIO_CONVERSATION_NOT_KEPT = 1
+ECUIO_CONVERSATION_TALKING = 2
+ECUIO_CONVERSATION_UNBEGUN = 1
 ECUIO_CSV_GUESS_DECIMAL_COMMA = 2
 ECUIO_CSV_GUESS_PREAMBLE = 4
 ECUIO_CSV_GUESS_TIME_NUMBERS = 8
@@ -205,6 +225,7 @@ ECUIO_EXPR_REF_LEN = 64
 ECUIO_FOCUS_DEFAULT_PICK = 1
 ECUIO_FOCUS_MIN_SWEEP_MAX_MS = 0xea60
 ECUIO_FRAME_DATA_MAX = 0x1000
+ECUIO_FRAME_FLAG_ACCESS_CUT = 0x400
 ECUIO_FRAME_FLAG_BITRATE_SWITCH = 8
 ECUIO_FRAME_FLAG_ERROR = 16
 ECUIO_FRAME_FLAG_EXTENDED = 1
@@ -319,6 +340,7 @@ ECUIO_RECORDING_FORMAT_KEYS = 4
 ECUIO_RECORDING_FORMAT_OLDER = 1
 ECUIO_RECORDING_FORMAT_UNKNOWN = 0
 ECUIO_RECORDING_INFO_CONDITIONS_CUT = 4
+ECUIO_RECORDING_INFO_CONVERSATION = 8
 ECUIO_RECORDING_INFO_FRAMES = 2
 ECUIO_RECORDING_INFO_NO_SUMMARY = 1
 ECUIO_RECORDING_MAX_CONDITION_EVENTS = 0x100000
@@ -414,6 +436,7 @@ ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
 ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED = 1
 ECUIO_SUPPORT_COMPLETE = 2
+ECUIO_SUPPORT_CONVERSATION = 64
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
 ECUIO_SUPPORT_PACKED = 8
@@ -447,6 +470,20 @@ ECUIO_TIMING_P999_SAMPLES = 0x3e8
 ECUIO_TIMING_P99_SAMPLES = 100
 ECUIO_UNITS_IMPERIAL = 1
 ECUIO_UNITS_METRIC = 0
+ECUIO_UNLOCK_ALREADY_UNLOCKED = 12
+ECUIO_UNLOCK_BUSY = 10
+ECUIO_UNLOCK_DELAYED = 11
+ECUIO_UNLOCK_ENDED = 6
+ECUIO_UNLOCK_FAILED = 5
+ECUIO_UNLOCK_KEY = 3
+ECUIO_UNLOCK_KEY_TOO_LONG = 9
+ECUIO_UNLOCK_LOST = 7
+ECUIO_UNLOCK_NONE = 0
+ECUIO_UNLOCK_NO_LEVEL = 8
+ECUIO_UNLOCK_REFUSED = 13
+ECUIO_UNLOCK_SEED = 2
+ECUIO_UNLOCK_UNLOCKED = 4
+ECUIO_UNLOCK_WAITING = 1
 ECUIO_VALIDATE_ERR_BIG_ENDIAN = 12
 ECUIO_VALIDATE_ERR_BIT_LENGTH = 3
 ECUIO_VALIDATE_ERR_BIT_OFFSET = 4
@@ -510,6 +547,7 @@ ECUIO_ERR_RECORDING_FAILED = 18
 ECUIO_ERR_CANCELED = 19
 ECUIO_ERR_IN_USE = 20
 ECUIO_ERR_STREAM_ENDED = 21
+ECUIO_ERR_TOO_SOON = 22
 ECUIO_VALUE_UINT = 0
 ECUIO_VALUE_INT = 1
 ECUIO_VALUE_FLOAT = 2
@@ -523,6 +561,9 @@ ecuio_value_kind_t = c_int
 
 # --- opaque handles and every struct, declared first -------------------
 class ecuio_can_interface_t(Structure):
+    pass
+
+class ecuio_channel_conversation_t(Structure):
     pass
 
 class ecuio_channel_decl_t(Structure):
@@ -823,6 +864,25 @@ ecuio_can_interface_t._fields_ = [
     ('modes', c_uint32),
     ('modes_supported', c_uint32),
     ('reserved', (c_uint32 * 3)),
+]
+ecuio_channel_conversation_t._fields_ = [
+    ('flags', c_uint32),
+    ('rx_id', c_uint32),
+    ('generation', c_uint32),
+    ('state', c_uint8),
+    ('session', c_uint8),
+    ('fault', c_uint8),
+    ('fault_len', c_uint8),
+    ('fault_bytes', (c_uint8 * 4)),
+    ('level', c_uint8),
+    ('unlock', c_uint8),
+    ('nrc', c_uint8),
+    ('reserved0', c_uint8),
+    ('delay_left_ms', c_uint32),
+    ('words_ended', c_uint32),
+    ('requests', c_uint32),
+    ('failed', c_uint32),
+    ('reserved', (c_uint32 * 6)),
 ]
 ecuio_channel_decl_t._fields_ = [
     ('rx_id', c_uint32),
@@ -1794,6 +1854,7 @@ FUNCTIONS = {
     'ecuio_session_create': (c_int, [c_char_p, POINTER(POINTER(ecuio_session_t))]),  # core.h
     'ecuio_session_destroy': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_get_absent_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
+    'ecuio_session_get_channel_conversation': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_conversation_t)]),  # core.h
     'ecuio_session_get_channel_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_diagnostics_t)]),  # core.h
     'ecuio_session_get_channel_identity': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_identity_t)]),  # core.h
     'ecuio_session_get_channel_support': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_support_t)]),  # core.h
@@ -1809,6 +1870,8 @@ FUNCTIONS = {
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
+    'ecuio_session_security_store': (c_int, [POINTER(ecuio_session_t), c_char_p, c_char_p]),  # core.h
+    'ecuio_session_security_unlock': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint8, c_uint32, POINTER(c_uint32)]),  # core.h
     'ecuio_session_send': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t)]),  # core.h
     'ecuio_session_set_conditions': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_condition_set_t), POINTER(ecuio_signal_file_t)]),  # conditions.h
     'ecuio_session_set_focus': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32]),  # core.h

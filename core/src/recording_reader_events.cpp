@@ -89,6 +89,20 @@ void read_copy(const std::string& path, uint64_t most, const char* sha256,
     }
 }
 
+/* The conditions line's copy named: evidence beside the data, so a line
+ * that isn't the copy's names none, and the open goes on */
+void name_conditions(const char* p, size_t n, ecuio_recording_conditions_t& c)
+{
+    const size_t key = std::strlen(rows::kConditionsKey);
+    std::string hex;
+    if (rows::parse_named_file(p + key, n - key, rows::kConditionsName,
+                               &hex)) {
+        std::memcpy(c.sha256, hex.data(), hex.size());
+        c.sha256[hex.size()] = '\0';
+        c.flags |= ECUIO_RECORDING_CONDITIONS_NAMED;
+    }
+}
+
 } // namespace
 
 void ecuio_recording::read_copies(const std::string& folder)
@@ -272,18 +286,11 @@ bool ecuio_recording::read_events(const std::string& folder)
                 std::memcpy(signal_file.sha256, hex.data(), hex.size());
                 signal_file.sha256[hex.size()] = '\0';
                 signal_file.flags |= ECUIO_RECORDING_SIGNALS_NAMED;
+            } else if (rows::starts_with(p, n, rows::kConversationKey)) {
+                info.flags |= ECUIO_RECORDING_INFO_CONVERSATION;
             } else if (keys::has_enums(info.format) &&
                        rows::starts_with(p, n, rows::kConditionsKey)) {
-                /* Evidence beside the data: a line that isn't the copy's
-                 * names none, and the open goes on */
-                const size_t key = std::strlen(rows::kConditionsKey);
-                std::string hex;
-                if (rows::parse_named_file(p + key, n - key,
-                                           rows::kConditionsName, &hex)) {
-                    std::memcpy(conditions.sha256, hex.data(), hex.size());
-                    conditions.sha256[hex.size()] = '\0';
-                    conditions.flags |= ECUIO_RECORDING_CONDITIONS_NAMED;
-                }
+                name_conditions(p, n, conditions);
             } else if (rows::starts_with(p, n, "utc  ")) {
                 if (!rows::parse_utc(p + 5, n - 5, &info.utc_start_us)) {
                     ecuio_detail_set("events.log line %llu: the utc line "

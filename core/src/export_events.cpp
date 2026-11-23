@@ -114,7 +114,8 @@ void recording_export::head_line(const std::string& line)
             return;
         }
     }
-    if (rows::starts_with(p, n, rows::kPluginKey)) {
+    if (rows::starts_with(p, n, rows::kPluginKey) ||
+        rows::starts_with(p, n, rows::kConversationKey)) {
         events_head_.push_back(line);
         return;
     }

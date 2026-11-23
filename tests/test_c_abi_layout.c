@@ -150,6 +150,12 @@ typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reser
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
+typedef char abi_conversation_size_check[(sizeof(ecuio_channel_conversation_t) == 64) ? 1 : -1];
+typedef char abi_conversation_state_check[(offsetof(ecuio_channel_conversation_t, state) == 12) ? 1 : -1];
+typedef char abi_conversation_level_check[(offsetof(ecuio_channel_conversation_t, level) == 20) ? 1 : -1];
+typedef char abi_conversation_delay_check[(offsetof(ecuio_channel_conversation_t, delay_left_ms) == 24) ? 1 : -1];
+typedef char abi_conversation_failed_check[(offsetof(ecuio_channel_conversation_t, failed) == 36) ? 1 : -1];
+typedef char abi_conversation_reserved_check[(offsetof(ecuio_channel_conversation_t, reserved) == 40) ? 1 : -1];
 typedef char abi_dtc_list_check[(sizeof(ecuio_dtc_list_t) == 68) ? 1 : -1];
 typedef char abi_monitor_check[(sizeof(ecuio_monitor_t) == 4) ? 1 : -1];
 typedef char abi_freeze_value_check[(sizeof(ecuio_freeze_value_t) == 16) ? 1 : -1];

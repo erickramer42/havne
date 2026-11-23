@@ -1974,3 +1974,65 @@ list of steps, which the declarative plan can carry.
    functional `10 81` (no reboot), the cluster watched and the fault
    codes read after; (d) the same closed with `11 81`, to see what the
    reboot leaves. Only then any write, following the captured sequence.
+
+### Step 1, the conversation bound to a session as built (2026-11-22)
+
+A plugin's module now talks to a session's modules, behind the test
+door (`ecuio_test_conversation_binding`, `core/src/consent_gate.h`)
+until the consent record answers `ecuio_plugin_code_may_run`.
+
+- **The part travels with its set.** Register keeps a plugin's
+  conversation part under its signal set (`core/src/conversation_registry.h`)
+  and free forgets it; create takes its set's part, and the consent it
+  finds then: consent is a create-time fact. A session created without
+  it is the plugin's data tier alone, its worker unchanged.
+- **The bind is at start** (`core/src/conversation_bind.{h,cpp}`): one
+  loaded module for each session, one instance for each channel whose
+  request and response IDs are one of the part's ECUs, on a requesting
+  transport (never `mock://` or `replay://`). Each instance's ABI and
+  exchange buffer are judged; a failure refuses the start in words
+  (LOAD_FAILED) or as OUT_OF_MEMORY, and gives the named store back for
+  the next start. Item 8 of the appendix of 2026-11-17 says a second
+  session's plugin past what is left is refused at its attach: it is
+  refused at its start, where the bind is.
+- **The worker drives it** (`core/src/request_conversation.h`, the same
+  calls in the ELM327, J2534 and SocketCAN workers): each frame on a
+  bound channel goes to its module after the engine takes it, each pass
+  steps every module (begin, the caller's word, its request, the settle,
+  the report), the next event counts a word waiting, and a bound module
+  makes the session one that asks. A bound channel takes no built-in
+  session step: the module's begin names its session. At close each
+  module's end comes while its session stands, before the engine's
+  `10 01`.
+- **The store is written off the worker.** The worker posts a settle to
+  a box of its own; the store owner's thread (`core/src/security_store_owner.h`)
+  saves it within 50 ms. The caller's unlock saves the pending mark
+  before the word reaches the worker. A close after the seed was asked
+  and before the key's answer leaves the mark: the next load counts it
+  as one failed attempt, the safe direction.
+- **The public calls** (`core.h`): `ecuio_session_get_channel_conversation`,
+  `ecuio_session_security_store` (before start; the module's key is its
+  serial, `22 F18C`, else the car's VIN, else the host's label) and
+  `ecuio_session_security_unlock`, each under one mutex for the whole
+  call, refused SESSION_CLOSED after close. ECUIO_ERR_TOO_SOON has two
+  causes, told apart by the time left: a delay after a refused key (a
+  seed's `7F 27 36` or `37` starts one too) reports its time left above
+  0; the module's identity still being read reports 0.
+- **A recording says which module talked:** the header's
+  `conversation  <id>,<version>,<module SHA-256>,<response IDs bound>`
+  line, the reader's `ECUIO_RECORDING_INFO_CONVERSATION`, kept by the
+  folder export.
+- **Seeds and keys stay out of every capture** (`core/src/access_cut.h`),
+  as section 5's request log has them: a `27` or `67` on a bound channel
+  is recorded with its bytes after the sub-function zeroed
+  (`ECUIO_FRAME_FLAG_ACCESS_CUT`) and an events.log `cut` line with their
+  length and SHA-256; the ELM327 wire log writes a `27` command's key and
+  every line of its reply as their length and SHA-256; the J2534
+  surrogate's session log zeroes them by service in the messages it
+  sees whole, with the same words. A seed of 4 bytes can be found again
+  from its SHA-256 by trying every value: the hash ties a capture to the
+  request log, it doesn't hide a short seed.
+- `ConversationSessionTest`, `CoreConversationTest`, `AccessCutTest`
+  (test_core), `Elm327ConversationTest`, `J2534ConversationTest`
+  (cross-arch too), `fuzz_guest` (a module's bytes bound and stepped
+  against the simulated ECU).

@@ -33,6 +33,8 @@ int c_abi_core(void)
     const ecuio_signal_set_t* set = NULL;
     ecuio_validation_t validation;
     ecuio_session_info_t info;
+    ecuio_channel_conversation_t conversation;
+    uint32_t wait_ms = 7;
     uint32_t version_major = 0, version_minor = 0, version_patch = 0;
 
     if (ecuio_version(&version_major, &version_minor, &version_patch) !=
@@ -42,6 +44,16 @@ int c_abi_core(void)
         version_patch != ECUIO_VERSION_PATCH ||
         ecuio_version(NULL, &version_minor, &version_patch) !=
             ECUIO_ERR_NULL_ARGUMENT) {
+        return 1;
+    }
+    if (ecuio_session_get_channel_conversation(NULL, 0, &conversation) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_security_store(NULL, "s.json", NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_security_unlock(NULL, 0, 0x01, 0, &wait_ms) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        wait_ms != 0 || ECUIO_ERR_TOO_SOON != 22 ||
+        ECUIO_SUPPORT_CONVERSATION != 0x40u) {
         return 1;
     }
     printf("detail '%s'\n", ecuio_last_error_detail());

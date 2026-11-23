@@ -2,7 +2,7 @@
 //             recorder: its open and the session's record call (ADR-0049
 //             section 3, armed too: ADR-0063)
 // Testing: UNIT: RecorderTest, ConditionRecordingTest,
-//          ArmedRecorderTest (test_core);
+//          ArmedRecorderTest, CoreConversationTest (test_core);
 //          BRIDGE: BridgeTest (test_bridge);
 //          HARNESS: Elm327SessionTest (test_elm327)
 //
@@ -15,6 +15,7 @@
 #include "recorder.h"
 
 #include "condition_eval.h"
+#include "conversation_bind.h" /* the channels a part talks on */
 #include "error_detail.h"
 #include "folder_files.h"
 #include "recorder_impl.h"
@@ -122,6 +123,29 @@ void attach_defs(const ecuio_signal_set_t* set,
         [](const def_entry& a, const def_entry& b) { return a.id < b.id; });
 }
 
+/* The conversation line, or "" where no plugin's code talks */
+std::string conversation_line(const ecuio_session_t* s)
+{
+    if (!ecuio_session_may_talk(s)) {
+        return {};
+    }
+    const ecuio_conversation_part& p = *s->conversation;
+    std::string line = std::string(ecuio_recording_rows::kConversationKey) +
+                       one_line(p.plugin_id.c_str()) + "," +
+                       one_line(p.plugin_version.c_str()) + "," +
+                       ecuio_sha256::hex(p.sha256) + ",";
+    const char* sep = "";
+    for (uint32_t c = 0; c < s->module_rx.size(); ++c) {
+        if (ecuio_session_talks_on(s, c)) {
+            char id[16];
+            std::snprintf(id, sizeof id, "%s0x%X", sep, s->module_rx[c]);
+            line += id;
+            sep = " ";
+        }
+    }
+    return line + "\n";
+}
+
 /* The header's lines from the start to frame flags, and an armed
  * recorder's copy of those from core on */
 void header_top(const ecuio_session_t* session,
@@ -139,6 +163,7 @@ void header_top(const ecuio_session_t* session,
                   recorder->signals_sha + "\n";
     }
     header += recorder->signals_plugin;
+    header += conversation_line(session);
     /* The conditions line goes here once the set is read under the
      * locks, into room kept now */
     b.conditions_at = header.size();

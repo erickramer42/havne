@@ -17,6 +17,7 @@
 
 #include "link_health.h"
 #include "request_setup.h"
+#include "request_conversation.h"
 #include "socketcan_send.h"
 
 #include <errno.h>
@@ -365,7 +366,9 @@ struct request_sends {
          * floor, ISO-TP's N_Cr; at most one quiet window. A halted session
          * sends nothing more, so what the engine calls due isn't one: it
          * waits the window out, still asking, so no quiet read counts */
-        const int64_t in_us = ecuio_engine_next_event_us(&e, now);
+        const int64_t in_us =
+            (std::min)(ecuio_engine_next_event_us(&e, now),
+                       ecuio_conversations_next_us(t->session, &e, now));
         const bool asking = in_us != INT64_MAX;
         int64_t next_us = asking && !t->proof.halted ? now + in_us : INT64_MAX;
         if (pending.active) {
@@ -441,6 +444,7 @@ void begin_worker(ecuio_socketcan_transport* t, worker_state& w)
      * seam's talk handed over before start is that request */
     ecuio_take_focus(s, &e, w.focus_seen);
     ecuio_take_test_talk(s, &e, now_us(t));
+    ecuio_conversations_start(s, &e);
 }
 
 socket_step socket_pass(ecuio_socketcan_transport* t, worker_state& w)
@@ -591,6 +595,7 @@ void deliver_reply(ecuio_socketcan_transport* t, worker_state& w, uint32_t c,
     e.stamp_breaks = clock.host_steps;
     (void)ecuio_engine_on_frame(&e, c, reply.data, reply.data_length, now,
                                 nullptr);
+    ecuio_conversations_frame(s, &e, c, reply.data, reply.data_length);
     /* an ECU answered at this rate */
     (void)socketcan_proof_settle(t->proof, now, true);
 }
@@ -725,6 +730,7 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
     ecuio_take_clear_requests(s, &e, w.clear_seen);
     ecuio_take_test_talk(s, &e, now_us(t));
     ecuio_take_focus(s, &e, w.focus_seen);
+    ecuio_step_conversations(s, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(s, e, c, t->rx_ids[c], w.published[c]);
         ecuio_publish_identity(s, e, c, t->rx_ids[c], w.published_identity[c]);
@@ -736,6 +742,7 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
 
 void end_worker(ecuio_socketcan_transport* t, worker_state& w)
 {
+    ecuio_conversations_end(w.s, &w.e);
     leave_sessions(t);
     ecuio_publish_timing(w.s, w.e, &w.iso, now_us(t), w.timing_at, true);
 }

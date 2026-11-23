@@ -112,6 +112,8 @@ struct conversation {
 
 } // namespace ecuio_plugin_loader
 
+struct ecuio_conversation_part; /* conversation_registry.h */
+
 struct ecuio_plugin {
     std::string id;
     std::string name;
@@ -124,6 +126,8 @@ struct ecuio_plugin {
     uint32_t tiers = 0;
     /* NULL without the conversation tier */
     std::unique_ptr<ecuio_plugin_loader::conversation> conversation;
+    /* conversation's copy for the registry, made at the first register */
+    std::shared_ptr<const ecuio_conversation_part> conversation_part;
     std::vector<ecuio_plugin_loader::match_rule> match;
     std::vector<ecuio_plugin_loader::variant> variants;
     std::vector<std::string> fixtures;

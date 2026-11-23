@@ -45,7 +45,9 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
-    test_security_store_owner.cpp)
+    test_security_store_owner.cpp test_conversation_registry.cpp
+    test_conversation_session.cpp test_core_conversation.cpp
+    test_access_cut.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -222,7 +224,8 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_stream.cpp test_elm327_session_links.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
-    test_elm327_pack.cpp test_elm327_gate.cpp)
+    test_elm327_pack.cpp test_elm327_gate.cpp
+    test_elm327_conversation.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -286,6 +289,8 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # section 2.4, SocketCanTalkTest).
 # test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
 # pace doesn't wait on another's (SocketCanTurnsTest).
+# test_vcan_conversation.cpp: a plugin's module bound to a session,
+# unlocking the simulated ECU (SocketCanConversationTest).
 # RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
 # every session's ID filter; every vcan0 user takes the lock, so they run
 # one at a time while the rest of the suite runs beside them.
@@ -294,7 +299,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests.cpp test_vcan_requests_focus.cpp
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
+                   test_vcan_conversation.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
@@ -2734,6 +2740,7 @@ if(WIN32)
         test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
+        test_j2534_conversation.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
