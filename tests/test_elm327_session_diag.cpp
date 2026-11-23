@@ -464,7 +464,8 @@ TEST_F(Elm327SessionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
     const std::vector<std::string> sent = fake_commands();
     std::string first;
     for (const std::string& c : sent) {
-        if (c.rfind("AT", 0) != 0 && c.rfind("ST", 0) != 0) {
+        if (c.rfind("AT", 0) != 0 && c.rfind("ST", 0) != 0 &&
+            c != kProbeCommand) {
             first = c;
             break;
         }

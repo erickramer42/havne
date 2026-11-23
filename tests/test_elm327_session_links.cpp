@@ -360,13 +360,18 @@ struct ModuleDids {
     ModuleDids& operator=(const ModuleDids&) = delete;
 };
 
-/* Whether both modules' identification and diagnostics have an outcome
- * for every item */
+/* Whether each open module's identification and diagnostics have an
+ * outcome for every item */
 bool items_settled(ecuio_session_t* s)
 {
     for (uint32_t c = 0; c < 2; ++c) {
         ecuio_channel_identity_t id{};
         ecuio_channel_diagnostics_t diag{};
+        ecuio_channel_support_t sup{};
+        if (ecuio_session_get_channel_support(s, c, &sup) == ECUIO_OK &&
+            (sup.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+            continue; /* no answer to the start's probe, nothing picked */
+        }
         if (ecuio_session_get_channel_identity(s, c, &id) != ECUIO_OK ||
             ecuio_session_get_channel_diagnostics(s, c, &diag) != ECUIO_OK ||
             (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
@@ -555,9 +560,10 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuChecksItAndFindsItAwake)
     fs::remove_all(root, ec);
 }
 
-/* One module of two answers nothing at all, and the other nothing to
- * what it doesn't serve (the fake's refusals as silence): the silence
- * is one module's and an item's, never the vehicle's. The link is OK
+/* One module of two answers nothing at all (so the start's probe leaves
+ * it closed), and the other nothing to what it doesn't serve (the fake's
+ * refusals as silence): the silence is an item's, never the vehicle's.
+ * The link is OK
  * through the unanswered items, and after the adapter dropped and came
  * back, when they are all asked again with no reply among them. */
 TEST_F(Elm327SessionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
@@ -593,11 +599,11 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     }
     EXPECT_GE(silent_items, 1u)
         << "the case needs an item the live ECU leaves unanswered";
-    ecuio_channel_identity_t module{};
-    ASSERT_EQ(ecuio_session_get_channel_identity(s.s, 1, &module), ECUIO_OK);
-    for (uint32_t i = 0; i < module.items; ++i) {
-        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
-    }
+    /* The silent module gave the start's probe no answer: closed with
+     * nothing picked, so its silence is never asked */
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.s, 1, &module), ECUIO_OK);
+    EXPECT_NE(module.flags & ECUIO_SUPPORT_CLOSED, 0u);
 
     /* The adapter drops and is back: the recovery asks every unanswered
      * item again, the live ECU's too, and none is answered */

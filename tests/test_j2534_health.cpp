@@ -2,10 +2,16 @@
 // Testing: HARNESS: J2534HealthTest (test_j2534_health); Cross-arch
 
 #include "test_j2534_health_support.h"
+#include "start_probe_seam.h"
 
 #ifdef _WIN32
 
 namespace {
+
+/* These cases pin the fake's first writes and filters: the start's probe
+ * is off, and on in J2534ProbeTest's own cases */
+[[maybe_unused]] ::testing::Environment* const kStartProbeOff =
+    ::testing::AddGlobalTestEnvironment(new StartProbeOff);
 
 /* A frame's time is the session's: the first takes the host's time
  * since connect, not the vendor's stamp; the next the vendor's delta,

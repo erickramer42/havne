@@ -204,6 +204,13 @@ void ecuio_elm327_test_add_slept(uint64_t us);
  * at once. */
 void ecuio_set_unpicked_check_ms(uint32_t ms);
 
+/* TEST-ONLY: on (the default, nonzero) or off (0) for the start's
+ * emissions probe at a requesting attach (request_probe.h). Off, a session
+ * is attached as one the probe heard no answer on: the declared modules in
+ * the emissions range are RANGE. For the suites that pin a fake's first
+ * writes, filters or commands; an attach reads it once. */
+void ecuio_set_start_probe(int on);
+
 /* TEST-ONLY: how far a J2534 vendor clock may fall behind the host's
  * before core stops trusting it (us; j2534_clock.h's J2534_CLOCK_LAG_US);
  * 0 restores 10 s. A worker reads it on every frame. */

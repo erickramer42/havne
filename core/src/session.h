@@ -235,6 +235,10 @@ struct ecuio_session {
     uint32_t focus_modules = 0;
     uint8_t focus_module_order[ECUIO_MAX_CHANNELS] = {};
     uint32_t focus_module_count = 0;
+    /* The modules that answered the start's emissions probe (RANGE,
+     * request_probe.h), a bit each; every module when no probe ran (the
+     * mock, ?poll=). Set by attach, read-only afterwards. */
+    uint32_t module_range = UINT32_MAX;
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

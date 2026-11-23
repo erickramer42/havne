@@ -1,8 +1,8 @@
 // File/layer: tests/test_elm327_modules.cpp | test_elm327, Qt-free
 // Testing: HARNESS: Elm327ModulesTest (the modules a session opens by the
-//          pick on the fake ELM327: the support report's CLOSED and
-//          NO_ROOM flags and open_reasons, the info's module_budget;
-//          ADR-0065 step 5)
+//          pick and the start's probe on the fake ELM327: the support
+//          report's CLOSED and NO_ROOM flags and open_reasons, the info's
+//          module_budget, an undeclared answerer joining; ADR-0065 step 5)
 
 #include "test_elm327_support.h"
 
@@ -20,10 +20,10 @@ protected:
     fake_elm327::installed fake_;
 };
 
-/* The engine ECU (in the emissions range) and two modules outside it,
- * each with a DID: their signals 20000, 20001 and 20002. The fake's ECUs
- * answer only 7E0-7E7's requests, so the two are judged by what is typed
- * to them */
+/* The engine ECU (the one answer to the start's probe) and two modules
+ * outside the emissions range, each with a DID: their signals 20000,
+ * 20001 and 20002. The fake's ECUs answer only 7E0-7E7's requests, so the
+ * two are judged by what is typed to them */
 struct ThreeModules {
     ThreeModules()
     {
@@ -130,4 +130,51 @@ TEST_F(Elm327ModulesTest, TheInfoGivesTheBudget)
     ecuio_session_info_t info{};
     ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
     EXPECT_EQ(info.module_budget, ECUIO_MAX_CHANNELS - 1u);
+}
+
+/* The start's probe (request_probe.h): the engine ECU answers the
+ * functional 01 00, and a set that doesn't declare it gains it as a
+ * module, open for RANGE with nothing of its own asked */
+TEST_F(Elm327ModulesTest, AnUndeclaredAnswererJoinsTheTable)
+{
+    ThreeModules modules;
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=7B8:D801&identify=0"
+                           "&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    ASSERT_EQ(info.module_count, 2u);
+    ecuio_channel_decl_t m{};
+    ASSERT_EQ(ecuio_session_get_module(s.s, 1, &m), ECUIO_OK);
+    EXPECT_EQ(m.rx_id, 0x7E8u);
+    EXPECT_EQ(m.tx_id, 0x7E0u);
+    EXPECT_NE(support_of(s.s, 1).open_reasons & ECUIO_MODULE_REASON_RANGE, 0u);
+    EXPECT_EQ(support_of(s.s, 0).open_reasons & ECUIO_MODULE_REASON_RANGE, 0u)
+        << "7B8 gave the probe no answer";
+}
+
+/* ?filter= names the one module asked: the probe's answerers join no
+ * table, and a module that didn't answer is left to the picks */
+TEST_F(Elm327ModulesTest, AFilterJoinsNoAnswerer)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?filter=0x7B8&identify=0&diagnose=0")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 1u);
+    EXPECT_EQ(fake_count(kProbeCommand), 1u) << "the probe still ran";
+}
+
+/* A URI refused while the requests are built touches no hardware: the
+ * build runs before the port opens, the probe after */
+TEST_F(Elm327ModulesTest, ABadUriIsRefusedBeforeTheAdapterIsTouched)
+{
+    Session s;
+    EXPECT_EQ(s.create(uri("?profile=uds-generic&did=7E8:D801,"
+                           "18DAF110:D802")),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_TRUE(fake_commands().empty());
 }

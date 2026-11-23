@@ -162,17 +162,6 @@ TEST(PickModulesTest, AddingAModuleClosesNothing)
     }
 }
 
-/* Until the start's probe, RANGE is J1979's emissions range by reply ID */
-TEST(PickModulesTest, TheInterimRangeIsTheLiteralOne)
-{
-    for (const uint32_t rx : {0x7E8u, 0x7E9u, 0x7EFu, 0x18DAF110u, 0x18DAF1A5u}) {
-        EXPECT_TRUE(ecuio_module_in_range(rx)) << std::hex << rx;
-    }
-    for (const uint32_t rx : {0x7E7u, 0x7F0u, 0x726u, 0x7B8u, 0x18DA10F1u}) {
-        EXPECT_FALSE(ecuio_module_in_range(rx)) << std::hex << rx;
-    }
-}
-
 /* The modules a pick reads follow its defs, wherever their modules stand
  * in the set: the same defs over two module orders read the same reply
  * IDs, in the picks' order */

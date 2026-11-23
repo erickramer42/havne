@@ -180,7 +180,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
     test_request_quiet_reports.cpp test_request_counts.cpp
     test_request_slots.cpp test_request_modules.cpp test_pick_modules.cpp
-    test_diag_visit.cpp
+    test_diag_visit.cpp test_probe_range.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
@@ -2675,6 +2675,7 @@ if(WIN32)
         ../tests/test_j2534_stream_requests.cpp
         ../tests/test_j2534_stream_rotation.cpp
         ../tests/test_j2534_stream_probe.cpp
+        ../tests/test_j2534_start_probe.cpp
         ../tests/test_j2534_stream_session.cpp
         ../tests/test_j2534_stream_clear.cpp
         ../tests/test_j2534_stream_stamps.cpp

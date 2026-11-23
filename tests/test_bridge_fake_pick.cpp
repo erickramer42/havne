@@ -2,10 +2,16 @@
 // Testing: BRIDGE: BridgeTest (test_bridge)
 
 #include "test_bridge_fake_support.h"
+#include "start_probe_seam.h"
 
 #ifdef _WIN32
 
 namespace {
+
+/* The bridge's fake-DLL cases pin the fake's first writes: the start's
+ * probe is off for the binary (J2534ProbeTest has it on) */
+[[maybe_unused]] ::testing::Environment* const kStartProbeOff =
+    ::testing::AddGlobalTestEnvironment(new StartProbeOff);
 
 /* The obd2 set's id for Service 01 PID pid */
 uint16_t obd2IdOf(uint8_t pid)

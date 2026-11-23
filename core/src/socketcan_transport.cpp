@@ -42,6 +42,7 @@ const char* const ecuio_socketcan_query_keys[] = {
 #include "link_health.h"
 #include "request_engine.h"
 #include "request_setup.h"
+#include "request_probe.h"
 #include "socketcan_netlink.h"
 
 #include <errno.h>
@@ -77,6 +78,132 @@ std::atomic<int64_t> g_vcan_unproven_us{0};
 std::string why(int err)
 {
     return std::generic_category().message(err);
+}
+
+/* The requests for the channels as they stand (ecuio_build_requests),
+ * each channel's width, the ISO-TP the socket sends whole */
+ecuio_status_t build_channels(ecuio_session_t* session,
+                              const ecuio_signal_set_t* set,
+                              const request_params& req,
+                              ecuio_socketcan_transport& r)
+{
+    for (uint32_t c = 0; c < r.chan_count; ++c) {
+        r.ext29[c] = ecuio_channel_is_29bit(r.rx_ids[c], r.tx_ids[c]);
+    }
+    const ecuio_status_t st =
+        ecuio_build_requests(session, set, req, r.rx_ids, r.tx_ids,
+                             r.chan_count, &r.engine, &r.probe, &r.identify);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
+    r.engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* socketcan_send.h */
+    return ECUIO_OK;
+}
+
+/* A probe group's socket: CAN_RAW on the link, hearing only the group's
+ * reply IDs at the session's width; -1 on failure */
+int probe_socket(int ifindex, const uint32_t* group, uint32_t n, bool ext29)
+{
+    const int fd =
+        socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, CAN_RAW);
+    if (fd < 0) {
+        return -1;
+    }
+    struct can_filter f[ECUIO_MAX_CHANNELS];
+    for (uint32_t i = 0; i < n; ++i) {
+        f[i].can_id = group[i] | (ext29 ? CAN_EFF_FLAG : 0u);
+        f[i].can_mask =
+            (ext29 ? CAN_EFF_MASK : CAN_SFF_MASK) | CAN_EFF_FLAG | CAN_RTR_FLAG;
+    }
+    struct sockaddr_can addr;
+    std::memset(&addr, 0, sizeof addr);
+    addr.can_family = AF_CAN;
+    addr.can_ifindex = ifindex;
+    if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, f,
+                   static_cast<socklen_t>(n * sizeof f[0])) != 0 ||
+        bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof addr) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* A probe group's request and its replies: one functional 01 00 as a
+ * Single Frame, then each Single Frame heard, until the one-shot's wait
+ * has passed */
+void probe_group(int fd, bool ext29, ecuio_probe* p)
+{
+    struct can_frame q;
+    std::memset(&q, 0, sizeof q);
+    q.can_id = ext29 ? (ECUIO_PROBE_TX_29 | CAN_EFF_FLAG) : ECUIO_PROBE_TX_11;
+    q.can_dlc = 8;
+    std::memset(q.data, ECUIO_ISOTP_PAD, sizeof q.data);
+    q.data[0] = sizeof ECUIO_PROBE_REQUEST; /* a Single Frame's length */
+    q.data[1] = ECUIO_PROBE_REQUEST[0];
+    q.data[2] = ECUIO_PROBE_REQUEST[1];
+    if (write(fd, &q, sizeof q) != static_cast<ssize_t>(sizeof q)) {
+        return;
+    }
+    ++p->requests;
+    const auto until = std::chrono::steady_clock::now() +
+                       std::chrono::microseconds(ECUIO_ENGINE_WAIT_US);
+    for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            until - std::chrono::steady_clock::now());
+        struct pollfd pfd = {fd, POLLIN, 0};
+        if (left.count() <= 0 ||
+            poll(&pfd, 1, static_cast<int>(left.count())) <= 0) {
+            return;
+        }
+        struct can_frame r;
+        while (read(fd, &r, sizeof r) == static_cast<ssize_t>(sizeof r)) {
+            const uint8_t len = r.data[0] & 0x0F;
+            if ((r.can_id & (CAN_ERR_FLAG | CAN_RTR_FLAG)) != 0 ||
+                (r.data[0] >> 4) != 0 || len + 1u > r.can_dlc) {
+                continue;
+            }
+            const uint32_t id =
+                r.can_id & (ext29 ? CAN_EFF_MASK : CAN_SFF_MASK);
+            ecuio_probe_take(*p, id, r.data + 1, len);
+        }
+    }
+}
+
+/* The start's emissions probe (request_probe.h) on a session that asks
+ * anything, on sockets of its own before the session's: its answerers
+ * are RANGE, and an undeclared 11-bit one joins the channels (never under
+ * ?filter= or ?poll=), whose requests are then built again */
+ecuio_status_t probe_modules(ecuio_session_t* session,
+                             const ecuio_signal_set_t* set,
+                             const request_params& req,
+                             ecuio_socketcan_transport& r, int ifindex)
+{
+    if (r.engine.count == 0 && r.engine.scan_count == 0) {
+        return ECUIO_OK;
+    }
+    ecuio_probe p;
+    const bool ext29 = r.chan_count > 0 && r.ext29[0];
+    uint32_t group[ECUIO_MAX_CHANNELS];
+    for (uint32_t g = 0; ecuio_start_probe_on().load(); ++g) {
+        const uint32_t n = ecuio_probe_group(r.rx_ids, r.chan_count, ext29,
+                                             r.engine.module_budget, g, group);
+        const int fd = n == 0 ? -1 : probe_socket(ifindex, group, n, ext29);
+        if (fd < 0) {
+            break;
+        }
+        probe_group(fd, ext29, &p);
+        close(fd);
+    }
+    if (req.rx_id == 0 && !req.has_poll &&
+        ecuio_probe_join(p, r.rx_ids, r.tx_ids, &r.chan_count) > 0) {
+        const ecuio_status_t st = build_channels(session, set, req, r);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+    }
+    session->module_range = ecuio_probe_range(p, r.rx_ids, r.chan_count);
+    return ECUIO_OK;
 }
 
 /* A CAN_RAW socket on the link, set up as ADR-0032 section 4 says: CAN FD,
@@ -480,17 +607,13 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             ecuio_socketcan_transport& r = *impl;
             r.requesting = true;
             r.chan_count = ecuio_resolve_channels(set, req, r.rx_ids, r.tx_ids);
-            for (uint32_t c = 0; c < r.chan_count; ++c) {
-                r.ext29[c] = ecuio_channel_is_29bit(r.rx_ids[c], r.tx_ids[c]);
+            ecuio_status_t st = build_channels(session, set, req, r);
+            if (st == ECUIO_OK) {
+                st = probe_modules(session, set, req, r, link.index);
             }
-            const ecuio_status_t st = ecuio_build_requests(
-                session, set, req, r.rx_ids, r.tx_ids, r.chan_count, &r.engine,
-                &r.probe, &r.identify);
             if (st != ECUIO_OK) {
                 return st;
             }
-            ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
-            r.engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* socketcan_send.h */
             const ecuio_status_t tables = ecuio_session_set_modules(
                 session, r.rx_ids, r.tx_ids, r.chan_count);
             if (tables != ECUIO_OK) {

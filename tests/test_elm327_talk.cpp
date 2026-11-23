@@ -414,7 +414,7 @@ TEST_F(Elm327TalkTest, NothingOutsideTheCeilingIsTyped)
             continue;
         }
         EXPECT_TRUE(c.rfind("1003", 0) == 0 || c.rfind("22", 0) == 0 ||
-                    c.rfind("3E00", 0) == 0)
+                    c.rfind("3E00", 0) == 0 || c == "0100") /* the probe */
             << c << " was typed";
     }
 }

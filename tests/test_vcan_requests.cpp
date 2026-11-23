@@ -172,7 +172,8 @@ TEST_F(SocketCanRequestTest, ASetPastARotationIsAskedOnlyItsPicks)
 
     /* Twice the quiet run a link takes to say an ECU isn't answering */
     std::this_thread::sleep_for(2000ms);
-    EXPECT_EQ(engine.answered(), 0u) << "nothing is asked before a pick";
+    EXPECT_EQ(engine.answered(), 1u)
+        << "the start's probe alone: nothing is asked before a pick";
     EXPECT_EQ(second.answered(), 0u);
     EXPECT_EQ(state(), ECUIO_OK)
         << "a session asking nothing isn't one an ECU doesn't answer";
@@ -228,6 +229,11 @@ bool items_settled(const Session& s)
     for (uint32_t c = 0; c < 2; ++c) {
         ecuio_channel_identity_t id{};
         ecuio_channel_diagnostics_t diag{};
+        ecuio_channel_support_t sup{};
+        if (ecuio_session_get_channel_support(s.get(), c, &sup) == ECUIO_OK &&
+            (sup.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+            continue; /* no answer to the start's probe, nothing picked */
+        }
         if (ecuio_session_get_channel_identity(s.get(), c, &id) != ECUIO_OK ||
             ecuio_session_get_channel_diagnostics(s.get(), c, &diag) !=
                 ECUIO_OK ||
@@ -309,10 +315,10 @@ bool asks_the_first_did(const Asked& a)
 } // namespace
 
 /* Such a session with nothing picked still asks identification and
- * diagnostics, each module's. One module of two isn't on the bus, and
- * the other answers nothing to what it doesn't serve (its refusals are
- * silence): the silence is one module's and an item's, never the
- * vehicle's. The link is OK through the unanswered items, and after a
+ * diagnostics, each module's. One module of two isn't on the bus (so the
+ * start's probe leaves it closed), and the other answers nothing to what
+ * it doesn't serve (its refusals are silence): the silence is an item's,
+ * never the vehicle's. The link is OK through the unanswered items, and after a
  * bus-off and the bus clean again, when they are all asked again with
  * no reply among them. */
 TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
@@ -347,12 +353,11 @@ TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     }
     EXPECT_GE(silent_items, 1u)
         << "the case needs an item the live ECU leaves unanswered";
-    ecuio_channel_identity_t module{};
-    ASSERT_EQ(ecuio_session_get_channel_identity(s.get(), 1, &module),
-              ECUIO_OK);
-    for (uint32_t i = 0; i < module.items; ++i) {
-        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
-    }
+    /* The module off the bus gave the start's probe no answer: closed
+     * with nothing picked, so its silence is never asked */
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 1, &module), ECUIO_OK);
+    EXPECT_NE(module.flags & ECUIO_SUPPORT_CLOSED, 0u);
     uint32_t episodes = 0;
     EXPECT_EQ(state_of(s, &episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
@@ -529,4 +534,34 @@ TEST_F(SocketCanRequestTest,
     EXPECT_EQ(episodes, 1u);
     take_asked(bus.get(), asked);
     EXPECT_EQ(asked.size(), before) << "nothing was asked to end it";
+}
+
+/* The start's probe (request_probe.h) on the bus: the engine ECU answers
+ * the functional 01 00 on a socket of the probe's own, so a set that
+ * doesn't declare it gains it as a module, open for RANGE; ?filter=
+ * joins nothing */
+TEST_F(SocketCanRequestTest, AnUndeclaredAnswererJoinsTheTable)
+{
+    vcan_bus::Ecu engine;
+    ASSERT_TRUE(engine.ok());
+    {
+        Session s("?profile=uds-generic&did=7B8:D801&identify=0&diagnose=0");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s.get(), &info), ECUIO_OK);
+        ASSERT_EQ(info.module_count, 2u);
+        ecuio_channel_decl_t m{};
+        ASSERT_EQ(ecuio_session_get_module(s.get(), 1, &m), ECUIO_OK);
+        EXPECT_EQ(m.rx_id, 0x7E8u);
+        EXPECT_EQ(m.tx_id, 0x7E0u);
+        ecuio_channel_support_t sup{};
+        ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 1, &sup),
+                  ECUIO_OK);
+        EXPECT_NE(sup.open_reasons & ECUIO_MODULE_REASON_RANGE, 0u);
+    }
+    Session f("?profile=obd2&filter=0x7B8&identify=0&diagnose=0");
+    ASSERT_EQ(f.status(), ECUIO_OK) << f.detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(f.get(), &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 1u);
 }

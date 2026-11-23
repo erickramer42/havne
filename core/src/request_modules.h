@@ -144,14 +144,6 @@ ecuio_modules_wanted(const ecuio_signal_set_t* set, const uint32_t* module_rx,
     return m;
 }
 
-/* Until the start's emissions probe (ADR-0065 step 5's RANGE): a module
- * whose reply ID is in J1979's emissions range, 7E8-7EF on 11-bit or any
- * 18DAF1xx on 29-bit */
-inline bool ecuio_module_in_range(uint32_t rx)
-{
-    return (rx >= 0x7E8 && rx <= 0x7EF) || (rx & 0xFFFFFF00u) == 0x18DAF100u;
-}
-
 /* What ecuio_take_modules has taken: the focus's count it worked the
  * reasons out at, and whether it has */
 struct ecuio_modules_seen {
@@ -161,10 +153,11 @@ struct ecuio_modules_seen {
 
 /* Each module's reasons, worked out again when the picks or the
  * conditions moved (and once before the worker's loop): RANGE for the
- * emissions range, CONVERSATION for a bound conversation's module, READ
- * for what the picks and conditions read, every module's on a table asked
- * whole with no focus, none on a pick-only table with nothing picked. The
- * engine then opens what fits its budget (ecuio_engine_modules_apply).
+ * start's probe's answerers (session->module_range), CONVERSATION for a
+ * bound conversation's module, READ for what the picks and conditions
+ * read, every module's on a table asked whole with no focus, none on a
+ * pick-only table with nothing picked. The engine then opens what fits
+ * its budget (ecuio_engine_modules_apply).
  * Every pass, the closing modules that are done close, a freed filter
  * opens the module waiting longest, and a visit ends or the next begins
  * (ecuio_engine_visits_step). The modules closed now, a bit each.
@@ -198,8 +191,7 @@ inline uint32_t ecuio_take_modules(ecuio_session_t* session,
             }
         }
         for (uint32_t c = 0; c < e->chan_count && c < ECUIO_MAX_CHANNELS; ++c) {
-            if (c < session->module_rx.size() &&
-                ecuio_module_in_range(session->module_rx[c])) {
+            if (((session->module_range >> c) & 1u) != 0) {
                 reasons[c] |= ECUIO_ENGINE_REASON_RANGE;
             }
             if (((read >> c) & 1u) != 0) {

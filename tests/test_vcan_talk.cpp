@@ -707,7 +707,9 @@ TEST_F(SocketCanTalkTest, ASlowEcusPaceIsKeptWithNothingElseSentMeanwhile)
             return wait_for(
                 [&] {
                     for (const BusFrame& f : drain(bus)) {
-                        seen.push_back(f);
+                        if (f.id != 0x7DF) { /* the attach's probe */
+                            seen.push_back(f);
+                        }
                     }
                     return index_of(seen, vcan_bus::kRequest, pci) >= 0;
                 },
@@ -839,7 +841,9 @@ TEST_F(SocketCanTalkTest, AFlowControlProvesTheRateSoTheSendGoesOn)
             return wait_for(
                 [&] {
                     for (const BusFrame& f : drain(bus)) {
-                        seen.push_back(f);
+                        if (f.id != 0x7DF) { /* the attach's probe */
+                            seen.push_back(f);
+                        }
                     }
                     return index_of(seen, vcan_bus::kRequest, pci) >= 0;
                 },
