@@ -214,6 +214,20 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
     return ECUIO_OK;
 }
 
+/* The kernel's filter list on fd: count 0 passes nothing */
+bool set_filters(int fd, const socketcan_filter* filters, size_t count)
+{
+    struct can_filter f[2 * ECUIO_MAX_CHANNELS];
+    static_assert(SOCKETCAN_MAX_FILTERS <= 2 * ECUIO_MAX_CHANNELS,
+                  "either list fits");
+    for (size_t i = 0; i < count; ++i) {
+        f[i].can_id = filters[i].id;
+        f[i].can_mask = filters[i].mask;
+    }
+    return setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, f,
+                      static_cast<socklen_t>(count * sizeof f[0])) == 0;
+}
+
 /* A CAN_RAW socket on the link, set up as ADR-0032 section 4 says: CAN FD,
  * error frames, the kernel's receive time, its drop count, the filters.
  * -1 with errno set on failure. */
@@ -232,29 +246,15 @@ int open_socket(const ecuio_socketcan_transport* t, int ifindex)
                    sizeof errors) == 0 &&
         setsockopt(fd, SOL_SOCKET, SO_TIMESTAMPNS, &on, sizeof on) == 0 &&
         setsockopt(fd, SOL_SOCKET, SO_RXQ_OVFL, &on, sizeof on) == 0;
-    /* A requesting session hears its channels' replies, and its own
+    /* A requesting session hears its open modules' replies, and its own
      * requests back (the echo, ADR-0040 section 3) */
-    socketcan_filter channel_filters[2 * ECUIO_MAX_CHANNELS];
-    const socketcan_filter* filters = t->filters;
-    size_t filter_count = t->filter_count;
     if (t->requesting) {
-        filter_count = socketcan_channel_filters(
-            t->rx_ids, t->tx_ids, t->chan_count, channel_filters);
-        filters = channel_filters;
-        ok = ok && setsockopt(fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &on,
-                              sizeof on) == 0;
-    }
-    if (ok && filter_count > 0) {
-        struct can_filter f[2 * ECUIO_MAX_CHANNELS];
-        static_assert(SOCKETCAN_MAX_FILTERS <= 2 * ECUIO_MAX_CHANNELS,
-                      "either list fits");
-        for (size_t i = 0; i < filter_count; ++i) {
-            f[i].can_id = filters[i].id;
-            f[i].can_mask = filters[i].mask;
-        }
-        ok =
-            setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, f,
-                       static_cast<socklen_t>(filter_count * sizeof f[0])) == 0;
+        ok = ok &&
+             setsockopt(fd, SOL_CAN_RAW, CAN_RAW_RECV_OWN_MSGS, &on,
+                        sizeof on) == 0 &&
+             ecuio_socketcan::set_channel_filters(t, fd, t->hearing);
+    } else if (ok && t->filter_count > 0) {
+        ok = set_filters(fd, t->filters, t->filter_count);
     }
     if (ok) {
         struct sockaddr_can addr;
@@ -293,6 +293,15 @@ int reopen(const ecuio_socketcan_transport* t)
         return -1;
     }
     return open_socket(t, link.index);
+}
+
+bool set_channel_filters(const ecuio_socketcan_transport* t, int fd,
+                         uint32_t hearing)
+{
+    socketcan_filter filters[2 * ECUIO_MAX_CHANNELS];
+    const size_t count = socketcan_channel_filters(
+        t->rx_ids, t->tx_ids, t->chan_count, hearing, filters);
+    return set_filters(fd, filters, count);
 }
 
 /* Waits up to ms for the stop; true when it came */

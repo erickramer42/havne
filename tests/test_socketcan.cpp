@@ -469,7 +469,8 @@ TEST(SocketCanTest, ARequestingSessionFiltersItsChannelsIds)
     const uint32_t rx[] = {0x7E8, 0x7E9, 0x18DAF110};
     const uint32_t tx[] = {0x7E0, 0x7E0, 0x18DA10F1};
     socketcan_filter f[6];
-    ASSERT_EQ(socketcan_channel_filters(rx, tx, 3, f), 5u) << "0x7E0 once";
+    ASSERT_EQ(socketcan_channel_filters(rx, tx, 3, UINT32_MAX, f), 5u)
+        << "0x7E0 once";
     EXPECT_EQ(f[0].id, 0x7E8u);
     EXPECT_EQ(f[0].mask, SOCKETCAN_SFF_MASK | SOCKETCAN_EFF_FLAG);
     EXPECT_EQ(f[1].id, 0x7E0u);
@@ -477,6 +478,25 @@ TEST(SocketCanTest, ARequestingSessionFiltersItsChannelsIds)
     EXPECT_EQ(f[3].id, 0x18DAF110u | SOCKETCAN_EFF_FLAG);
     EXPECT_EQ(f[3].mask, SOCKETCAN_EFF_MASK | SOCKETCAN_EFF_FLAG);
     EXPECT_EQ(f[4].id, 0x18DA10F1u | SOCKETCAN_EFF_FLAG);
+}
+
+/* ADR-0065 step 5: a closed module's IDs leave the list, an ID two
+ * modules share stays while either hears, and none open is an empty list
+ * (which passes nothing) */
+TEST(SocketCanTest, TheChannelFiltersListTheOpenModulesOnly)
+{
+    const uint32_t rx[] = {0x7E8, 0x7E9, 0x18DAF110};
+    const uint32_t tx[] = {0x7E0, 0x7E0, 0x18DA10F1};
+    socketcan_filter f[6];
+    ASSERT_EQ(socketcan_channel_filters(rx, tx, 3, 0x5u, f), 4u);
+    EXPECT_EQ(f[0].id, 0x7E8u);
+    EXPECT_EQ(f[1].id, 0x7E0u);
+    EXPECT_EQ(f[2].id, 0x18DAF110u | SOCKETCAN_EFF_FLAG);
+    EXPECT_EQ(f[3].id, 0x18DA10F1u | SOCKETCAN_EFF_FLAG);
+    ASSERT_EQ(socketcan_channel_filters(rx, tx, 3, 0x2u, f), 2u);
+    EXPECT_EQ(f[0].id, 0x7E9u);
+    EXPECT_EQ(f[1].id, 0x7E0u) << "shared with a closed module, still heard";
+    EXPECT_EQ(socketcan_channel_filters(rx, tx, 3, 0u, f), 0u);
 }
 
 TEST(SocketCanTest, DiscoveryListsControllersAndVcanOnly)

@@ -431,6 +431,29 @@ struct frame_in {
     int64_t now;
 };
 
+/* The kernel's filter set again when the hearing modules (open or
+ * closing) change, so a closed module's frames never reach the session;
+ * a refusal is a hard failure, and the reopen sets the list as it
+ * stands */
+void follow_modules(ecuio_socketcan_transport* t, worker_state& w)
+{
+    uint32_t hearing = 0;
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        if (ecuio_engine_module_hears(w.e.chans[c])) {
+            hearing |= 1u << c;
+        }
+    }
+    if (hearing == t->hearing) {
+        return;
+    }
+    t->hearing = hearing;
+    if (t->fd >= 0 && !set_channel_filters(t, t->fd, hearing)) {
+        link_on_read(w.h, true, false, false);
+        close(t->fd);
+        t->fd = -1;
+    }
+}
+
 void begin_worker(ecuio_socketcan_transport* t, worker_state& w)
 {
     ecuio_session_t* s = w.s;
@@ -442,6 +465,7 @@ void begin_worker(ecuio_socketcan_transport* t, worker_state& w)
      * seam's talk handed over before start is that request */
     ecuio_take_focus(s, &e, w.focus_seen);
     (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_take_test_talk(s, &e, now_us(t));
     ecuio_conversations_start(s, &e);
 }
@@ -731,6 +755,7 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
     ecuio_take_test_talk(s, &e, now_us(t));
     ecuio_take_focus(s, &e, w.focus_seen);
     (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_step_conversations(s, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(s, e, c, t->rx_ids[c], w.published[c]);

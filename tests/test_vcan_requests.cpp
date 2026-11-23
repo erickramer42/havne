@@ -405,6 +405,64 @@ TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     EXPECT_EQ(episodes, 1u) << "the bus-off, and nothing since";
 }
 
+/* ADR-0065 step 5: the kernel's filter holds the open modules' IDs
+ * alone, so a frame on a closed module's reply ID never reaches the
+ * session (the worker takes a whole message on any declared channel);
+ * once a pick opens the module, the same frame is the session's. */
+TEST_F(SocketCanRequestTest, AClosedModulesFramesAreNotDelivered)
+{
+    using car_sized::id_of;
+    using car_sized::kMost;
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E8:1007=2A")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    const CarProfile profile("socketcan-filter-car");
+    struct Heard {
+        std::atomic<uint32_t> engine{0};
+        std::atomic<uint32_t> closed{0};
+        static void cb(const ecuio_frame_t* f, void* user)
+        {
+            auto* h = static_cast<Heard*>(user);
+            (f->arbitration_id == 0x7E9u ? h->closed : h->engine)++;
+        }
+    } heard;
+    vcan_bus::Ecu engine; /* the start's probe hears 0x7E8 alone */
+    ASSERT_TRUE(engine.ok());
+    vcan_bus::Fd bus = vcan_bus::open_raw();
+    ASSERT_TRUE(bus.ok());
+    Session s("?profile=socketcan-filter-car&identify=0&diagnose=0", Heard::cb,
+              &heard);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const uint16_t engine_pick = id_of(7);
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), &engine_pick, 1), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return heard.engine.load() >= 2; }, 5000ms));
+    /* A Single Frame shaped as module 0x7E9's answer to its first DID */
+    const std::vector<uint8_t> shaped = {0x04, 0x62, 0x10, 0x00, 0x11};
+    ASSERT_TRUE(put(bus.get(), 0x7E9, shaped));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(heard.closed.load(), 0u) << "a closed module's frame came";
+
+    /* Its pick opens it */
+    const uint16_t picks[] = {engine_pick, id_of(kMost)};
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), picks, 2), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            ecuio_channel_support_t sup{};
+            return ecuio_session_get_channel_support(s.get(), 1, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_CLOSED) == 0;
+        },
+        5000ms));
+    ASSERT_TRUE(wait_for(
+        [&] {
+            (void)put(bus.get(), 0x7E9, shaped);
+            return heard.closed.load() > 0;
+        },
+        2000ms))
+        << "the open module's frame never came";
+}
+
 /* On a bus with no ECU the link says not responding and keeps saying
  * so: an idle pass never turns that into OK. While it is down the
  * worker asks one request an interval (here kCheckMs) of the module

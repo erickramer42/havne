@@ -230,11 +230,12 @@ socketcan_proof_settle(socketcan_proof& p, int64_t now_us, bool answered)
 
 /* ---- A requesting session's filters ---- */
 
-/* Each channel's reply ID (its ECU's frames) and request ID (the echo
- * of its own), exact, each of its width; out holds 2 * n. */
+/* The reply ID (its ECU's frames) and request ID (the echo of its own)
+ * of each channel whose bit hearing sets (the modules open or closing),
+ * exact, each of its width; out holds 2 * n. */
 inline size_t socketcan_channel_filters(const uint32_t* rx_ids,
                                         const uint32_t* tx_ids, size_t n,
-                                        socketcan_filter* out)
+                                        uint32_t hearing, socketcan_filter* out)
 {
     size_t k = 0;
     auto add = [&](uint32_t id) {
@@ -251,9 +252,11 @@ inline size_t socketcan_channel_filters(const uint32_t* rx_ids,
                       SOCKETCAN_EFF_FLAG;
         ++k;
     };
-    for (size_t c = 0; c < n; ++c) {
-        add(rx_ids[c]);
-        add(tx_ids[c]);
+    for (size_t c = 0; c < n && c < 32; ++c) {
+        if (((hearing >> c) & 1u) != 0) {
+            add(rx_ids[c]);
+            add(tx_ids[c]);
+        }
     }
     return k;
 }

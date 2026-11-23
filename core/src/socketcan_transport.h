@@ -48,6 +48,9 @@ struct ecuio_socketcan_transport {
      * addressing, the engine, ISO-TP's receiver (timed) and sender, the
      * message frame, and the rate's proof */
     bool requesting = false;
+    /* The modules whose IDs the socket's filter holds, a bit each: every
+     * one until the worker's first take, then the worker's alone */
+    uint32_t hearing = UINT32_MAX;
     uint32_t chan_count = 0;
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
@@ -84,6 +87,11 @@ namespace ecuio_socketcan {
 int reopen(const ecuio_socketcan_transport* t);
 /* Waits up to ms for the stop; true when it came */
 bool wait_for_stop(ecuio_socketcan_transport* t, uint32_t ms);
+/* A requesting session's filter on fd: the hearing modules' IDs, none
+ * passing anything else (an empty list passes nothing); false when the
+ * kernel refuses it */
+bool set_channel_filters(const ecuio_socketcan_transport* t, int fd,
+                         uint32_t hearing);
 /* A requesting session's worker, until the stop (socketcan_request.cpp) */
 void request_worker(ecuio_socketcan_transport* t);
 
