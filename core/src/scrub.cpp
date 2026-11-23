@@ -469,10 +469,13 @@ void check::window_hit(uint64_t at)
 }
 
 /* The newest kVinLength characters of the VIN alphabet: a VIN's shape, and
- * position 9 their check digit. A run of exactly 17 is a VIN by its shape
- * alone (vin_end); in a longer run, a VIN that a letter or digit either
- * side hides is found by its check digit, which other text of the shape
- * matches about one window in eleven. */
+ * position 9 their check digit or their maker code one vPIC lists. A run
+ * of exactly 17 is a VIN by its shape alone (vin_end); in a longer run, a
+ * VIN that a letter or digit either side hides is found by its check digit
+ * (other text of the shape matches about one window in 33) or, as a VIN
+ * outside North America needs none, by its maker code (about one in 22
+ * more). vPIC lists the codes of vehicles sold in the US: a VIN with no
+ * check digit whose code it doesn't list is missed here. */
 bool check::vin_window() const
 {
     char w[kVinLength + 1];
@@ -491,8 +494,11 @@ bool check::vin_window() const
         return false;
     }
     ecuio_vin_info_t info{};
-    return ecuio_vin_decode(w, 0, &info) == ECUIO_OK &&
-           (info.flags & ECUIO_VIN_CHECK_MATCHES) != 0;
+    if (ecuio_vin_decode(w, 0, &info) != ECUIO_OK) {
+        return false;
+    }
+    return (info.flags & ECUIO_VIN_CHECK_MATCHES) != 0 ||
+           *ecuio_vin_make(info.wmi) != '\0';
 }
 
 /* The run under way ends at byte at: a run of exactly 17 is the shape
