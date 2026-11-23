@@ -488,7 +488,8 @@ if(TARGET havne-cli)
                --elm327 tcp:0)
         # The emulator on 127.0.0.1, a port the system picks: a host's
         # ELM327 exchange, core's own elm327:// session, a second module's
-        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        # DID, a module behind the gateway, a plugin's DIDs, and python-OBD
+        # (skipped without it)
         function(app_cli_elm327 name mode)
             add_test(NAME CliElm327RunTest.${name}
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
@@ -501,6 +502,7 @@ if(TARGET havne-cli)
         app_cli_elm327(AHostThatComesBackAtOnceIsNeverRefused reconnect)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(AGatewayHoldsAModuleUntilItsUnlocked gateway)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
         app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
