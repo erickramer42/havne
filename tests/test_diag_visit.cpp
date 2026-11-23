@@ -428,6 +428,53 @@ TEST_F(DiagVisitTest, AClearOfAModuleWaitingForAFilterTakesOneVisit)
         << "a later clear refused";
 }
 
+/* A module picked between its visit's 04 and the reply holds the visit's
+ * filter live from then: the clear ends CLEARED with its read after, and
+ * the module stays open and asks its row, though live data had no room */
+TEST_F(DiagVisitTest, AModulePickedMidClearVisitStaysOpenAndClears)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(v.make({kRange, 0}, 1, 2));
+    const uint8_t row[2] = {0x01, 0x05};
+    ASSERT_EQ(ecuio_engine_add(&v.e, 1, row, 2),
+              ecuio_engine_add_result::added);
+    v.e.rpm_module = 0;
+    v.respond = [](uint32_t, const Bytes& q) {
+        return q == Bytes{0x01, 0x0C} ? Bytes{0x41, 0x0C, 0x00, 0x00}
+                                      : fake_reply(q);
+    };
+    v.until(500 * kMs);
+    ecuio_engine_visit_closed(&v.e);
+    v.until(v.now + 4000 * kMs);
+    ASSERT_TRUE(v.report(1).flags & ECUIO_DIAG_COMPLETE);
+    ASSERT_EQ(v.state(1), ECUIO_MODULE_STATE_CLOSED);
+    const int64_t from = v.now;
+    ASSERT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation));
+    while (count_04(v, 1, from) == 0 && v.now < from + 2000 * kMs) {
+        v.step();
+    }
+    ASSERT_EQ(count_04(v, 1, from), 1u);
+    ASSERT_TRUE(v.e.chans[1].visiting) << "the 04 went out of a visit";
+    const uint8_t picked[2] = {kRange, kRead};
+    ecuio_engine_modules_apply(&v.e, picked, nullptr, 0);
+    const int64_t pick = v.now;
+    v.until(v.now + 6000 * kMs);
+    const ecuio_channel_diagnostics_t d = v.report(1);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE) << "read again after";
+    EXPECT_EQ(v.state(1), ECUIO_MODULE_STATE_OPEN);
+    EXPECT_FALSE(v.e.chans[1].visiting);
+    EXPECT_EQ(v.e.visit_now, UINT32_MAX);
+    EXPECT_EQ(v.e.chans[1].reasons, kRead);
+    size_t rows = 0;
+    for (const Sent& s : v.sent) {
+        rows +=
+            s.c == 1 && s.at >= pick && s.bytes == Bytes{0x01, 0x05} ? 1u : 0u;
+    }
+    EXPECT_GT(rows, 0u) << "the picked row never asked";
+    EXPECT_FALSE(ecuio_engine_clear_running(&v.e));
+}
+
 /* With no filter free for the visit the target ends NOT_OPENED, nothing
  * sent, its report's read untouched; the request ends */
 TEST_F(DiagVisitTest, AClearOfAClosedModuleWithNoFilterEndsNotOpened)

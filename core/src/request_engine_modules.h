@@ -100,6 +100,23 @@ inline void ecuio_engine_module_reopen(ecuio_request_engine* e, uint32_t c)
     }
 }
 
+/* Visiting module c is wanted for another reason: it holds its filter
+ * live from now (counted in ecuio_engine_modules_held, whatever the
+ * budget's room), and what its visit began goes on as an open module's,
+ * so a clear's 04 or read out is never cut by the visit's end */
+inline void ecuio_engine_visit_hold(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ch.visiting) {
+        return;
+    }
+    ch.visiting = false;
+    e->visit_now = UINT32_MAX;
+    ch.reasons = static_cast<uint8_t>(ch.reasons & ~ECUIO_ENGINE_REASON_VISIT);
+    ch.waiting = 0;
+    ++ch.generation;
+}
+
 /* The modules live data holds a filter for: open or closing, a visit's
  * left out (it holds the one kept back) */
 inline uint32_t ecuio_engine_modules_held(const ecuio_request_engine* e)
@@ -167,8 +184,9 @@ inline uint32_t ecuio_engine_module_view(const ecuio_engine_channel& ch,
 /* The worker's reasons for every module (reasons[c], ECUIO_ENGINE_REASON_*)
  * and the order the picks first read the modules in (order, count of
  * them). A module no reason wants starts its close (one waiting for a
- * filter closes at once); a closing one wanted again is open at once; a
- * module holding a filter keeps it, never closed for a newcomer. The rest
+ * filter closes at once); a closing one wanted again is open at once, a
+ * visiting one holds its filter live from then; a module holding a
+ * filter keeps it, never closed for a newcomer. The rest
  * wait for a filter in the order RANGE, CONVERSATION, the picks' order,
  * then channel order, and the budget opens them in that order. The first
  * call holds no filter yet: nothing has been sent. A module's generation
@@ -194,6 +212,9 @@ inline void ecuio_engine_modules_apply(ecuio_request_engine* e,
         /* a visit under way keeps its reason to its pass's end */
         ch.reasons = static_cast<uint8_t>(
             reasons[c] | (ch.reasons & ECUIO_ENGINE_REASON_VISIT));
+        if (reasons[c] != 0) {
+            ecuio_engine_visit_hold(e, c);
+        }
         if (ch.reasons == 0 && ch.module_state == ECUIO_MODULE_STATE_NO_ROOM) {
             ch.module_state = ECUIO_MODULE_STATE_CLOSED;
             ch.waiting = 0;
@@ -241,7 +262,11 @@ inline void ecuio_engine_module_want(ecuio_request_engine* e, uint32_t c,
                                      uint8_t reasons)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    ch.reasons = reasons;
+    ch.reasons = static_cast<uint8_t>(reasons |
+                                      (ch.reasons & ECUIO_ENGINE_REASON_VISIT));
+    if (reasons != 0) {
+        ecuio_engine_visit_hold(e, c);
+    }
     if (reasons == 0) {
         if (ch.module_state == ECUIO_MODULE_STATE_OPEN) {
             ch.module_state = ECUIO_MODULE_STATE_CLOSING;
