@@ -26,7 +26,7 @@ extern "C" {
  *          [&sessions=0|1]
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
- *          [&route=<class or service>:<outcome>[@<reply ID>][,...]]
+ *          [&route=<class or service>:<outcome>[.<NRC>][@<reply ID>][,...]]
  *          [&sa=<form>][&sa_delay=<ms>][&gwopt=<knob>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
