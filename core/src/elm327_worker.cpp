@@ -490,6 +490,7 @@ struct worker_state {
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     ecuio_engine_turns turns;    /* which channel asks next */
     const bool passive;
     /* A requesting worker's waits to the engine's next event end on
@@ -669,6 +670,7 @@ void serve_session(transport* t, worker_state& w)
     ecuio_take_clear_requests(t->session, &e, w.clear_seen);
     ecuio_take_test_talk(t->session, &e, now_us(t));
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    (void)ecuio_take_modules(t->session, &e, w.modules_seen, now_us(t));
     ecuio_step_conversations(t->session, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->rx_ids[c], w.published[c]);
@@ -713,6 +715,7 @@ void elm327_worker(transport* t)
     }
     /* A focus set before start applies from the first request */
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    (void)ecuio_take_modules(t->session, &e, w.modules_seen, now_us(t));
     ecuio_conversations_start(t->session, &e);
 
     while (!t->stop_requested.load()) {

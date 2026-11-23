@@ -359,12 +359,14 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
 }
 
 /* At a close: the request that returns channel c to the default session
- * (10 01), when it entered one, into *out. False when it never did. */
+ * (10 01), when it entered one, into *out. False when it never did, or
+ * its module closed (it left then). */
 inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
                                        ecuio_request* out)
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (e->session == 0 || ch.session_entries == 0 ||
+        !ecuio_engine_module_hears(ch) ||
         !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL,
                                               ECUIO_SESSION_DEFAULT)) {
         return false;

@@ -228,6 +228,13 @@ struct ecuio_session {
     /* One byte per def, sized with focus_askable: 1 for a def the focus the
      * worker took leaves unasked (ecuio_focus_unasked), under the mutex */
     std::vector<uint8_t> focus_unasked;
+    /* The modules the picks and the attached conditions read (ADR-0065
+     * step 5's READ, ecuio_modules_wanted), worked out with them under
+     * the mutex before focus_generation moves: one bit per module, and
+     * those modules in the order of their first pick */
+    uint32_t focus_modules = 0;
+    uint8_t focus_module_order[ECUIO_MAX_CHANNELS] = {};
+    uint32_t focus_module_count = 0;
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

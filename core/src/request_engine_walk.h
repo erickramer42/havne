@@ -135,7 +135,14 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     out->flags = ((ch.probed && ended) ? ECUIO_SUPPORT_PROBED : 0u) |
                  (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u) |
                  (ch.packed ? ECUIO_SUPPORT_PACKED : 0u) |
-                 (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u);
+                 (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u) |
+                 (ch.module_state == ECUIO_MODULE_STATE_CLOSED
+                      ? ECUIO_SUPPORT_CLOSED
+                      : 0u) |
+                 (ch.module_state == ECUIO_MODULE_STATE_NO_ROOM
+                      ? ECUIO_SUPPORT_NO_ROOM
+                      : 0u);
+    out->open_reasons = ch.reasons;
     out->generation = ch.generation;
     out->ranges = ch.ranges;
     for (uint32_t b = 0; b < sizeof(out->pid_bitmap); ++b) {

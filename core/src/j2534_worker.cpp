@@ -387,6 +387,7 @@ struct worker_state {
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     int64_t timing_at = 0;
     /* made after attach's ecuio_engine_init: its chosen rows are this
      * table's, and it ends with the worker */
@@ -423,6 +424,8 @@ void begin_worker(ecuio_j2534_transport* t, worker_state& w)
     if (requests) {
         /* A focus set before start applies from the first request */
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        (void)ecuio_take_modules(t->session, &e, w.modules_seen,
+                                 engine_now_us(t));
         ecuio_conversations_start(t->session, &e);
     }
 }
@@ -520,6 +523,8 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
         ecuio_take_clear_requests(t->session, &e, w.clear_seen);
         ecuio_take_test_talk(t->session, &e, engine_now_us(t));
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        (void)ecuio_take_modules(t->session, &e, w.modules_seen,
+                                 engine_now_us(t));
         ecuio_step_conversations(t->session, &e, engine_now_us(t));
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {

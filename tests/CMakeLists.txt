@@ -179,7 +179,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_turns_key.cpp test_request_turns_session.cpp
     test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
     test_request_quiet_reports.cpp test_request_counts.cpp
-    test_request_slots.cpp test_request_modules.cpp
+    test_request_slots.cpp test_request_modules.cpp test_pick_modules.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
@@ -228,7 +228,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
-    test_elm327_conversation.cpp)
+    test_elm327_conversation.cpp test_elm327_modules.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )

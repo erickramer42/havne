@@ -56,6 +56,11 @@ constexpr int64_t J2534_GAP_US = 5000;
  * messages to share DataSize and TxFlags. Verified: Opus IVS
  * "Constructing an OBDII Message", Quantex PassThruStartMsgFilter
  * docs. */
+/* The filters a channel is taken to hold before any is refused (ADR-0065
+ * step 5): no call reports a count, so live data keeps one less, the rest
+ * for a visit, raised only on a measured adapter's count */
+constexpr uint32_t J2534_FILTERS_GUARANTEED = 10;
+
 constexpr uint32_t J2534_ADDR_LEN       = 4;
 constexpr uint32_t J2534_FILTER_MSG_LEN = 4;
 

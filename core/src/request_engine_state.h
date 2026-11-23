@@ -217,6 +217,12 @@ constexpr uint8_t ECUIO_ENGINE_REASON_RANGE = 0x1;
 constexpr uint8_t ECUIO_ENGINE_REASON_READ = 0x2;
 constexpr uint8_t ECUIO_ENGINE_REASON_CONVERSATION = 0x4;
 constexpr uint8_t ECUIO_ENGINE_REASON_VISIT = 0x8;
+static_assert(ECUIO_ENGINE_REASON_RANGE == ECUIO_MODULE_REASON_RANGE &&
+                  ECUIO_ENGINE_REASON_READ == ECUIO_MODULE_REASON_READ &&
+                  ECUIO_ENGINE_REASON_CONVERSATION ==
+                      ECUIO_MODULE_REASON_CONVERSATION &&
+                  ECUIO_ENGINE_REASON_VISIT == ECUIO_MODULE_REASON_VISIT,
+              "the support report's open_reasons are the engine's");
 
 /* A module's state: open; closing, finishing what it began; closed; or
  * wanted with no filter free for it */
@@ -375,6 +381,9 @@ struct ecuio_engine_channel {
      * state (ECUIO_MODULE_STATE_*): only an open module asks anything new */
     uint8_t reasons = ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ;
     uint8_t module_state = ECUIO_MODULE_STATE_OPEN;
+    /* With no room: its place among the modules waiting for a filter, 0
+     * otherwise (ecuio_engine_modules_fill opens the lowest first) */
+    uint32_t waiting = 0;
 };
 
 /* Whether module ch asks anything new: open */
@@ -501,6 +510,13 @@ struct ecuio_request_engine {
     uint32_t cap = ECUIO_ENGINE_INFLIGHT_DEFAULT;
     uint32_t ceiling = ECUIO_MAX_CHANNELS;
     uint32_t slot_from = 0;
+    /* The modules live data may hold open at once (the transport's
+     * filters less one kept back for a visit), 0 for no bound; whether
+     * the worker has set the reasons yet (ecuio_engine_modules_apply);
+     * the last place given to a module waiting for a filter */
+    uint32_t module_budget = 0;
+    bool modules_taken = false;
+    uint32_t waiting_last = 0;
 };
 
 /* Whether request r is asked in the rotation: not dropped by the probe

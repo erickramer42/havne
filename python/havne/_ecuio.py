@@ -268,6 +268,10 @@ ECUIO_MERGE_BASE_OBD2 = 1
 ECUIO_MERGE_MAX_PARTS = 16
 ECUIO_MODULE_BASE = 1
 ECUIO_MODULE_MAX_REQUESTS = 0x400
+ECUIO_MODULE_REASON_CONVERSATION = 4
+ECUIO_MODULE_REASON_RANGE = 1
+ECUIO_MODULE_REASON_READ = 2
+ECUIO_MODULE_REASON_VISIT = 8
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
@@ -456,10 +460,12 @@ ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
 ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED = 1
+ECUIO_SUPPORT_CLOSED = 128
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_CONVERSATION = 64
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
+ECUIO_SUPPORT_NO_ROOM = 0x100
 ECUIO_SUPPORT_PACKED = 8
 ECUIO_SUPPORT_PROBED = 1
 ECUIO_SUPPORT_SCAN_COMPLETE = 4
@@ -1004,7 +1010,8 @@ ecuio_channel_support_t._fields_ = [
     ('session_nrc', c_uint8),
     ('session_entries', c_uint16),
     ('session_lost', c_uint16),
-    ('reserved', (c_uint32 * 2)),
+    ('open_reasons', c_uint32),
+    ('reserved', (c_uint32 * 1)),
 ]
 ecuio_check_finding_t._fields_ = [
     ('kind', c_uint32),
@@ -1566,7 +1573,8 @@ ecuio_session_info_t._fields_ = [
     ('replay_speed_milli', c_uint32),
     ('replay_rows_torn', c_uint32),
     ('module_count', c_uint32),
-    ('reserved', (c_uint32 * 11)),
+    ('module_budget', c_uint32),
+    ('reserved', (c_uint32 * 10)),
 ]
 ecuio_session_timing_t._fields_ = [
     ('snapshot_us', c_uint64),

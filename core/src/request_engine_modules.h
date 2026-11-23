@@ -96,6 +96,133 @@ inline void ecuio_engine_module_reopen(ecuio_request_engine* e, uint32_t c)
     }
 }
 
+/* The modules holding a filter: open or closing */
+inline uint32_t ecuio_engine_modules_held(const ecuio_request_engine* e)
+{
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        n += ecuio_engine_module_hears(e->chans[c]) ? 1u : 0u;
+    }
+    return n;
+}
+
+/* Opens the modules waiting for a filter while the budget has room, the
+ * one waiting longest first */
+inline void ecuio_engine_modules_fill(ecuio_request_engine* e)
+{
+    for (;;) {
+        if (e->module_budget != 0 &&
+            ecuio_engine_modules_held(e) >= e->module_budget) {
+            return;
+        }
+        uint32_t next = UINT32_MAX;
+        for (uint32_t c = 0; c < e->chan_count; ++c) {
+            const ecuio_engine_channel& ch = e->chans[c];
+            if (ch.module_state == ECUIO_MODULE_STATE_NO_ROOM &&
+                (next == UINT32_MAX || ch.waiting < e->chans[next].waiting)) {
+                next = c;
+            }
+        }
+        if (next == UINT32_MAX) {
+            return;
+        }
+        ecuio_engine_channel& ch = e->chans[next];
+        ch.module_state = ECUIO_MODULE_STATE_OPEN;
+        ch.waiting = 0;
+        ++ch.generation;
+        ecuio_engine_module_reopen(e, next);
+    }
+}
+
+/* Module c, wanted and holding no filter, waits for one */
+inline void ecuio_engine_module_wait(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.reasons != 0 && ch.module_state == ECUIO_MODULE_STATE_CLOSED) {
+        ch.module_state = ECUIO_MODULE_STATE_NO_ROOM;
+        ch.waiting = ++e->waiting_last;
+        ++ch.generation;
+    }
+}
+
+/* What module ch's support report says of it: its CLOSED or NO_ROOM flag,
+ * and with reasons its open_reasons */
+inline uint32_t ecuio_engine_module_view(const ecuio_engine_channel& ch,
+                                         bool reasons)
+{
+    const uint32_t flag =
+        ch.module_state == ECUIO_MODULE_STATE_CLOSED    ? 1u
+        : ch.module_state == ECUIO_MODULE_STATE_NO_ROOM ? 2u
+                                                        : 0u;
+    return flag | (reasons ? uint32_t{ch.reasons} << 8 : 0u);
+}
+
+/* The worker's reasons for every module (reasons[c], ECUIO_ENGINE_REASON_*)
+ * and the order the picks first read the modules in (order, count of
+ * them). A module no reason wants starts its close (one waiting for a
+ * filter closes at once); a closing one wanted again is open at once; a
+ * module holding a filter keeps it, never closed for a newcomer. The rest
+ * wait for a filter in the order RANGE, CONVERSATION, the picks' order,
+ * then channel order, and the budget opens them in that order. The first
+ * call holds no filter yet: nothing has been sent. A module's generation
+ * moves once when what its report says changed (the first call's
+ * reasons replace a placeholder, so only its flag counts then). */
+inline void ecuio_engine_modules_apply(ecuio_request_engine* e,
+                                       const uint8_t* reasons,
+                                       const uint8_t* order, uint32_t count)
+{
+    const uint32_t n = e->chan_count;
+    const bool first_take = !e->modules_taken;
+    uint32_t view[ECUIO_MAX_CHANNELS] = {};
+    uint32_t generation[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t c = 0; c < n; ++c) {
+        view[c] = ecuio_engine_module_view(e->chans[c], !first_take);
+        generation[c] = e->chans[c].generation;
+    }
+    for (uint32_t c = 0; c < n; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (first_take) {
+            ch.module_state = ECUIO_MODULE_STATE_CLOSED;
+        }
+        ch.reasons = reasons[c];
+        if (ch.reasons == 0 && ch.module_state == ECUIO_MODULE_STATE_NO_ROOM) {
+            ch.module_state = ECUIO_MODULE_STATE_CLOSED;
+            ch.waiting = 0;
+            ++ch.generation;
+        } else if (ch.reasons == 0 &&
+                   ch.module_state == ECUIO_MODULE_STATE_OPEN) {
+            ch.module_state = ECUIO_MODULE_STATE_CLOSING;
+        } else if (ch.reasons != 0 &&
+                   ch.module_state == ECUIO_MODULE_STATE_CLOSING) {
+            ch.module_state = ECUIO_MODULE_STATE_OPEN;
+            ecuio_engine_module_reopen(e, c);
+        }
+    }
+    e->modules_taken = true;
+    for (const uint8_t first :
+         {ECUIO_ENGINE_REASON_RANGE, ECUIO_ENGINE_REASON_CONVERSATION}) {
+        for (uint32_t c = 0; c < n; ++c) {
+            if ((reasons[c] & first) != 0) {
+                ecuio_engine_module_wait(e, c);
+            }
+        }
+    }
+    for (uint32_t k = 0; k < count; ++k) {
+        if (order[k] < n) {
+            ecuio_engine_module_wait(e, order[k]);
+        }
+    }
+    for (uint32_t c = 0; c < n; ++c) {
+        ecuio_engine_module_wait(e, c);
+    }
+    ecuio_engine_modules_fill(e);
+    for (uint32_t c = 0; c < n; ++c) {
+        const bool moved =
+            ecuio_engine_module_view(e->chans[c], !first_take) != view[c];
+        e->chans[c].generation = generation[c] + (moved ? 1u : 0u);
+    }
+}
+
 /* The reasons that want module c (ECUIO_ENGINE_REASON_*), worked out by
  * the worker: any opens it (asking again only what it never answered),
  * none starts its close, which ends once what it began has settled

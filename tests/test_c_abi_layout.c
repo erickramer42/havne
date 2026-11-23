@@ -126,7 +126,8 @@ typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 
 typedef char abi_info_replay_check[(offsetof(ecuio_session_info_t, replay_frames) == 368) ? 1 : -1];
 typedef char abi_info_torn_check[(offsetof(ecuio_session_info_t, replay_rows_torn) == 380) ? 1 : -1];
 typedef char abi_info_modules_check[(offsetof(ecuio_session_info_t, module_count) == 384) ? 1 : -1];
-typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 388) ? 1 : -1];
+typedef char abi_info_budget_check[(offsetof(ecuio_session_info_t, module_budget) == 388) ? 1 : -1];
+typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 392) ? 1 : -1];
 typedef char abi_info_listed_check[(ECUIO_SESSION_INFO_MAX_CHANNELS == 4) ? 1 : -1];
 typedef char abi_channels_check[(ECUIO_MAX_CHANNELS == 32) ? 1 : -1];
 typedef char abi_decl_size_check[(sizeof(ecuio_channel_decl_t) == 16) ? 1 : -1];
@@ -146,7 +147,8 @@ typedef char abi_support_session_state_check[(offsetof(ecuio_channel_support_t, 
 typedef char abi_support_session_nrc_check[(offsetof(ecuio_channel_support_t, session_nrc) == 139) ? 1 : -1];
 typedef char abi_support_session_entries_check[(offsetof(ecuio_channel_support_t, session_entries) == 140) ? 1 : -1];
 typedef char abi_support_session_lost_check[(offsetof(ecuio_channel_support_t, session_lost) == 142) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 144) ? 1 : -1];
+typedef char abi_support_reasons_check[(offsetof(ecuio_channel_support_t, open_reasons) == 144) ? 1 : -1];
+typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 148) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];

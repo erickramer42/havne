@@ -291,6 +291,9 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     if (!ecuio_engine_init(e, chan_count, static_cast<uint32_t>(room))) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    /* A filter for each module up to the cap, one kept back for a visit;
+     * J2534's attach lowers it */
+    e->module_budget = ECUIO_MAX_CHANNELS - 1;
     for (uint32_t c = 0; c < chan_count; ++c) {
         e->chans[c].functional = isotp_functional_id(tx_ids[c]);
     }

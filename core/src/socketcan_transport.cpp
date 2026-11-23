@@ -531,8 +531,8 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
         session->info.flags |= ECUIO_SESSION_INFO_LISTEN_ONLY;
     }
     if (requesting) {
-        const auto* t = static_cast<const ecuio_socketcan_transport*>(
-            session->transport->impl);
+        auto* t =
+            static_cast<ecuio_socketcan_transport*>(session->transport->impl);
         session->info.protocol_id =
             static_cast<uint32_t>(ECUIO_PT_PROTOCOL_ISO15765);
         ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);

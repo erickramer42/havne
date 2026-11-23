@@ -122,8 +122,10 @@ protected:
 
 } // namespace
 
-/* 18 modules on one channel's filters, each answering its own DID, with
- * the fake dropping whatever no filter it kept matches */
+/* 18 modules on one channel's filters, with the fake dropping whatever
+ * no filter it kept matches: live data holds J2534's budget of them open
+ * (ADR-0065 step 5), the first in channel order, each answering its own
+ * DID; the rest wait with no room and are asked nothing */
 TEST_F(J2534CarTest, EighteenModulesEachAnswerThroughTheSurrogate)
 {
     const std::string spec = module_spec();
@@ -137,6 +139,8 @@ TEST_F(J2534CarTest, EighteenModulesEachAnswerThroughTheSurrogate)
     ecuio_session_info_t info{};
     ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
     EXPECT_EQ(info.module_count, static_cast<uint32_t>(kModules));
+    const int open = static_cast<int>(info.module_budget);
+    ASSERT_EQ(open, 9) << "J2534's 10 filters less the one kept back";
 
     ASSERT_EQ(
         ecuio_register_frame_callback(session, Answered::on_frame, &answered),
@@ -144,9 +148,16 @@ TEST_F(J2534CarTest, EighteenModulesEachAnswerThroughTheSurrogate)
     ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(15);
-    while (answered.count() < static_cast<size_t>(kModules) &&
+    while (answered.count() < static_cast<size_t>(open) &&
            std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    for (int i = open; i < kModules; ++i) {
+        ecuio_channel_support_t sup{};
+        ASSERT_EQ(ecuio_session_get_channel_support(
+                      session, static_cast<uint32_t>(i), &sup),
+                  ECUIO_OK);
+        EXPECT_NE(sup.flags & ECUIO_SUPPORT_NO_ROOM, 0u) << i;
     }
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
@@ -154,8 +165,17 @@ TEST_F(J2534CarTest, EighteenModulesEachAnswerThroughTheSurrogate)
 
     const std::lock_guard<std::mutex> lock(answered.mutex);
     std::string missing;
+    std::string asked;
     char hex[16];
-    for (int i = 0; i < kModules; ++i) {
+    for (int i = open; i < kModules; ++i) {
+        if (answered.ids.count(reply_id(i)) != 0) {
+            snprintf(hex, sizeof hex, " %08X",
+                     static_cast<unsigned>(reply_id(i)));
+            asked += hex;
+        }
+    }
+    EXPECT_TRUE(asked.empty()) << "a module with no room answered:" << asked;
+    for (int i = 0; i < open; ++i) {
         if (answered.ids.count(reply_id(i)) == 0) {
             snprintf(hex, sizeof hex, " %08X",
                      static_cast<unsigned>(reply_id(i)));
