@@ -29,7 +29,7 @@ set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
     fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
     fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module
-    fuzz_security_store fuzz_sur_reply fuzz_signal_merge)
+    fuzz_security_store fuzz_sur_reply fuzz_signal_merge fuzz_conversation)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -58,7 +58,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         # fuzz_validate_set and fuzz_signal_file the frame decoder,
         # fuzz_wasm_module the sandbox, fuzz_security_store the
         # security store's reader, fuzz_sur_reply the surrogate client's
-        # reading of the child's replies, all internal
+        # reading of the child's replies, fuzz_conversation one module's
+        # conversation, all internal
         # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})

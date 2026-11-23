@@ -26,6 +26,9 @@
 # fuzz_sim's are runs of requests that enter the simulated ECU's extended
 # session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
 # would have to guess; and URIs whose faults aim at one module.
+# fuzz_conversation's are runs that unlock a level (talk_seeds()):
+# the input's bytes are read by the harness and the table alike, so an
+# unlock is hard to find from nothing.
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
@@ -664,6 +667,8 @@ def main(argv):
               json.dumps(store, indent=2).encode())
     for name, data in sur_seeds().items():
         write(out, "fuzz_sur_reply", name, data)
+    for name, data in talk_seeds().items():
+        write(out, "fuzz_conversation", name, data)
     return 0
 
 
@@ -684,6 +689,27 @@ def sur_reply(rid, status=0, num_frames=0, data=b"", data_len=None, text=b""):
 
 def sur_frame(payload):
     return struct.pack("<III", 0, 0x1234, len(payload)) + payload.ljust(PT_DATA, b"\0")
+
+
+def talk_seeds():
+    """fuzz_conversation's runs. Its first byte: bit 0 the bound (a
+    request whole, else one frame), the rest the key's window (50 ms on in
+    steps of 50 ms). Then begin's fault and session (0 none, 1 the extended
+    one), and operations: a zero byte is a pass whose every read of the
+    input (the module's poll, a write's failure, a reply's fate) is a zero,
+    so an honest one; 0x04 then a level's pick (0 level 01, 1 level 03) is
+    the caller's word."""
+    window_1s = 0x99  # bound 60, window 50 + 50 x 19 = 1000 ms
+    honest = bytes(40)
+    seeds = {}
+    for name, cfg, pick in (("unlock_01", window_1s, 0), ("unlock_03", window_1s, 1),
+                            ("unlock_01_one_frame", window_1s - 1, 0),
+                            ("unlock_01_short_window", 0x01, 0)):
+        seeds[name] = bytes([cfg, 0x00, 0x01]) + honest + bytes([0x04, pick]) + honest + honest
+    seeds["two_words"] = (bytes([window_1s, 0x00, 0x01]) + honest + bytes([0x04, 0x00, 0x04, 0x01])
+                          + honest + bytes([0x04, 0x01]) + honest)
+    seeds["declined"] = bytes([window_1s, 0x00, 0x03]) + honest
+    return seeds
 
 
 def sur_seeds():
