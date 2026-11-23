@@ -86,6 +86,7 @@ add_library(ecuio-core STATIC
     src/security_store_owner.cpp
     src/conversation.cpp
     src/conversation_registry.cpp
+    src/conversation_bind.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp

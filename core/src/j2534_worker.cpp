@@ -29,6 +29,7 @@
 #include "request_engine.h"
 #include "j2534_hold.h"
 #include "request_setup.h"
+#include "request_conversation.h"
 #include "link_health.h"
 #include "j2534_clock.h"
 #include "host_clock.h"
@@ -37,6 +38,7 @@
 #include "ecuio/profile.h"
 #include "precise_wait.h"          /* the wait after an empty read */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -390,7 +392,8 @@ struct worker_state {
     j2534_hold hold;
 
     explicit worker_state(ecuio_j2534_transport* t)
-        : e(t->engine), requests(e.count > 0 || e.scan_count > 0),
+        : e(t->engine), requests(e.count > 0 || e.scan_count > 0 ||
+                                 ecuio_session_may_talk(t->session)),
           precise(requests),
           h(t->session->last_error, t->session->error_count,
             t->session->record_link.get(), t->session, t->epoch,
@@ -419,6 +422,7 @@ void begin_worker(ecuio_j2534_transport* t, worker_state& w)
     if (requests) {
         /* A focus set before start applies from the first request */
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        ecuio_conversations_start(t->session, &e);
     }
 }
 
@@ -442,9 +446,13 @@ read_step read_pass(ecuio_j2534_transport* t, worker_state& w)
      * request can time out, so the session reads as a passive one
      * does: empty reads count toward quiet, which can't tell an
      * ECU that went away from one with nothing left to answer. */
-    const int64_t next_us =
+    int64_t next_us =
         requests ? j2534_hold_next_event_us(w.hold, &e, engine_now_us(t))
                  : INT64_MAX;
+    if (requests) {
+        next_us = (std::min)(next_us, ecuio_conversations_next_us(
+                                          t->session, &e, engine_now_us(t)));
+    }
     const bool asking = next_us != INT64_MAX;
     /* Every reply in and only a floor (or a focus's sweep) to wait
      * for: the worker's own timer, no vendor read, which the VX holds
@@ -473,6 +481,7 @@ read_step read_pass(ecuio_j2534_transport* t, worker_state& w)
             e.stamp_breaks = t->clock.host_steps;
             (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                         engine_now_us(t), nullptr);
+            ecuio_conversations_frame(t->session, &e, o.chan, o.payload, o.len);
             j2534_hold_answered(w.hold, &e, o.chan);
         }
         const bool unpicked = !asking && ecuio_engine_unpicked(&e);
@@ -510,6 +519,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
         ecuio_take_clear_requests(t->session, &e, w.clear_seen);
         ecuio_take_test_talk(t->session, &e, engine_now_us(t));
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        ecuio_step_conversations(t->session, &e, engine_now_us(t));
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,
@@ -550,6 +560,7 @@ bool pass_wait(ecuio_j2534_transport* t, worker_state& w, const read_step& rs)
 void end_worker(ecuio_j2534_transport* t, worker_state& w)
 {
     if (w.requests) {
+        ecuio_conversations_end(t->session);
         leave_sessions(t, w.h);
     }
     ecuio_publish_timing(t->session, w.e, nullptr, engine_now_us(t),

@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_worker.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
-// Testing: HARNESS: Elm327SessionTest, Elm327TalkTest, Elm327TurnsTest
-//          (test_elm327); BENCH
+// Testing: HARNESS: Elm327SessionTest, Elm327TalkTest, Elm327TurnsTest,
+//          Elm327ConversationTest (test_elm327); BENCH
 //
 // The worker and a request's exchange: the I/O under every command,
 // the header switch, a reply's lines into frames, a cut reply's hold.
@@ -10,9 +10,11 @@
 #include "elm327_transport.h"
 
 #include "request_setup.h"
+#include "request_conversation.h"
 #include "request_turns.h"
 #include "precise_wait.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 
@@ -205,6 +207,8 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
         if (to_engine) {
             (void)ecuio_engine_on_frame(&t->engine, c, frame.data,
                                         frame.data_length, at, nullptr);
+            ecuio_conversations_frame(t->session, &t->engine, c, frame.data,
+                                      frame.data_length);
         }
         seen.matched = true;
         return;
@@ -528,6 +532,8 @@ elm327_io idle_pass(transport* t, worker_state& w, int64_t now,
         /* what's due is a held channel's: until its hold ends */
         next_us = held_left;
     }
+    next_us =
+        (std::min)(next_us, ecuio_conversations_next_us(t->session, &e, now));
     const bool asking = next_us != INT64_MAX;
     uint32_t wait = ELM327_IDLE_READ_MS;
     if (asking) {
@@ -605,6 +611,7 @@ void serve_session(transport* t, worker_state& w)
     ecuio_take_clear_requests(t->session, &e, w.clear_seen);
     ecuio_take_test_talk(t->session, &e, now_us(t));
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    ecuio_step_conversations(t->session, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->rx_ids[c], w.published[c]);
         ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
@@ -648,6 +655,7 @@ void elm327_worker(transport* t)
     }
     /* A focus set before start applies from the first request */
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    ecuio_conversations_start(t->session, &e);
 
     while (!t->stop_requested.load()) {
         const int64_t now = expire_waits(t, w);
@@ -670,6 +678,7 @@ void elm327_worker(transport* t)
             w.h.backoff_ms = link_backoff_next(w.h.backoff_ms);
         }
     }
+    ecuio_conversations_end(t->session);
     leave_sessions(t);
     ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), w.timing_at,
                          true);

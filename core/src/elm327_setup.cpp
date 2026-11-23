@@ -9,6 +9,7 @@
 #include "elm327_transport.h"
 
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_PROTOCOL_ISO15765; plain C */
+#include "conversation_bind.h"
 #include "error_detail.h"
 
 #include <cstdio>
@@ -127,7 +128,8 @@ setup_answer identify(transport* t, const char* cmd, char* version,
  * (ADR-0026's appendix "passive listening") */
 bool asks_nothing(const transport* t)
 {
-    return t->engine.count == 0 && t->engine.scan_count == 0;
+    return t->engine.count == 0 && t->engine.scan_count == 0 &&
+           !ecuio_session_may_talk(t->session);
 }
 
 /* The setup's contract commands (ADR-0026 section 3), each answered before the

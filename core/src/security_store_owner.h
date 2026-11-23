@@ -1,6 +1,6 @@
 // File/layer: core/src/security_store_owner.h | internal, C++17, Qt-free,
 //             every platform
-// Testing: UNIT: SecurityStoreTest (test_core)
+// Testing: UNIT: SecurityStoreTest, ConversationSessionTest (test_core)
 //
 // The one owner of a security store's file in the process (the rules in
 // security_store.h): every caller naming a path reaches its store through
@@ -10,7 +10,12 @@
 // again after its save, a merge's larger counts with it.
 //
 // A save waits up to kStoreLockWaitMs for another program's lock: a step
-// is called off any thread with a deadline.
+// is called off any thread with a deadline. A session's worker never
+// calls one: it posts each attempt's end to a settle box, and the owner's
+// writer thread saves it (the next mark saves every box first, under the
+// mutex, so a mark never overtakes a settle). The post takes no lock and
+// waits for nothing; a box holds one end at a time, since the next mark
+// on its channel takes it first.
 
 #ifndef ECUIO_SECURITY_STORE_OWNER_H
 #define ECUIO_SECURITY_STORE_OWNER_H
@@ -19,10 +24,14 @@
 #include "security_store.h"
 
 #include <cstddef>
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace ecuio_security {
 
@@ -34,6 +43,19 @@ struct store_key {
     uint8_t level = 0;
 };
 
+/* One channel's attempt end on its way to the store: the worker writes
+ * the fields, then moves posted on (release); the owner reads them once
+ * posted differs from taken */
+struct settle_box {
+    std::atomic<uint32_t> posted{0};
+    uint32_t taken = 0; /* the owner's, under its mutex */
+    store_key key;
+    bool unlocked = false; /* the right key; else ended's failed and delay */
+    bool failed = false;
+    bool delay = false;
+    int64_t utc = 0;
+};
+
 class store_owner
 {
 public:
@@ -42,6 +64,20 @@ public:
     {}
     store_owner(const store_owner&) = delete;
     store_owner& operator=(const store_owner&) = delete;
+    /* Saves what the boxes hold, then joins the writer */
+    ~store_owner();
+
+    /* b's ends are saved by this owner's writer from now (started at the
+     * first box): refused in words when the thread can't start,
+     * out_of_memory; nothing kept either way */
+    store_io attach(settle_box* b, std::string* why);
+
+    /* b's end still posted is saved, and b is let go; called once its
+     * worker has stopped */
+    void detach(settle_box* b) noexcept;
+
+    /* The worker's call after a post: the writer looks at once, no lock */
+    void wake() noexcept { wake_.notify_one(); }
 
     /* The key's entry as the store holds it: zero counts when it has none.
      * Allocates nothing. */
@@ -68,10 +104,21 @@ public:
 private:
     store_io save_and_find(const store_key& key, store_entry* after,
                            std::string* why);
+    store_io ended_held(const store_key& key, bool failed, bool delay,
+                        int64_t utc, store_entry* after, std::string* why);
+    store_io unlocked_held(const store_key& key, store_entry* after,
+                           std::string* why);
+    void settle_held(settle_box& b) noexcept;
+    void settle_all_held() noexcept;
+    void write_loop() noexcept;
 
     std::mutex mutex_;
     const std::string path_;
     store store_;
+    std::vector<settle_box*> boxes_; /* under mutex_ */
+    std::condition_variable wake_;
+    bool stop_ = false; /* under mutex_ */
+    std::thread writer_;
 };
 
 using store_ref = ecuio_files::path_registry<store_owner>::ref;

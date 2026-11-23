@@ -10,6 +10,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "session.h"
+#include "conversation_bind.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
@@ -327,7 +328,7 @@ ecuio_status_t ecuio_session_create(
     }
     /* After attach, which fills the rest of the info; the worker hasn't
      * started, so no lock */
-    if (s->focus_requests) {
+    if (s->focus_requests || ecuio_session_may_talk(s.get())) {
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
     }
     if (s->focus_requests && s->focus_pick_only) {
@@ -354,6 +355,12 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
     }
     if (session->transport == nullptr) {
         return ECUIO_ERR_NO_TRANSPORT;
+    }
+    if (!session->started) {
+        const ecuio_status_t bound = ecuio_conversation_bind(session);
+        if (bound != ECUIO_OK) {
+            return bound;
+        }
     }
     const ecuio_status_t st =
         session->transport->ops->start(session, session->transport->impl);
@@ -384,6 +391,7 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         delete session->transport;
         session->transport = nullptr;
     }
+    ecuio_conversation_unbind(session); /* the worker has joined */
     /* The worker has stopped: the recorder takes no more frames, and its
      * notes go on until the caller closes it (ADR-0049 section 1) */
     ecuio_record_detach(*session->record_link);
