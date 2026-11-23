@@ -138,12 +138,12 @@ an issue is resolved it is removed, and its number is not reused.
     on the test phone (Android 16) with the mock.
 - **#50. The macOS app is unvalidated.** CI builds it, signs it ad hoc
    and launches it on a runner (`macos-smoke`: still running after
-   30 s, with a screenshot), and each release carries it as a zip
+   30 s, `mock://demo` connected by a synthetic click, with
+   screenshots), and each release carries it as a zip
    ([docs/macos.md](docs/macos.md)); no person has run it on a Mac.
    It is not notarized, so the first open goes through Privacy &
-   Security > Open Anyway. Intel Macs are not built for. The app can't
-   connect at start, so the runner's launch shows Home, not a
-   `mock://` session. A USB serial or WiFi ELM327 is untried on macOS
+   Security > Open Anyway. Intel Macs are not built for. A USB serial
+   or WiFi ELM327 is untried on macOS
    ([BENCH prep #41](docs/bench-sessions/bench-prep.md)).
 
 ## Roadmap

@@ -13,8 +13,8 @@ all, and an ad hoc one satisfies that and nothing more.
 
 The macOS app is unvalidated
 ([Known Issue #50](../STATUS.md#known-issues-and-technical-debt)): CI
-launches it on a runner and checks it stays up, and no person has run it
-on a Mac yet. An install is a test of its own, and what it shows is
+launches it on a runner, connects `mock://demo` and checks it stays up,
+and no person has run it on a Mac yet. An install is a test of its own, and what it shows is
 worth reporting, whatever it is.
 
 ## What you need

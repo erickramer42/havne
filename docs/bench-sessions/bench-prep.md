@@ -148,7 +148,7 @@ session, the recorders on a car, a second listener):
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
 | 40 | **The iOS app runs on an iPhone:** CI's unsigned device build, signed by a tester's sideloading tool with their own Apple ID, installs, opens and draws; `mock://demo` streams; a WiFi ELM327 connects after the local network's prompt; the Files app shows the recordings | CONFIRMED to the launch only: one tester's iPhone opened it, with no adapter, so nothing past the launch was tried. The device's model, its iOS version and the build's commit are unknown | [2026-11-17-ios](2026-11-17-ios.md) |
-| 41 | **The macOS app runs on a Mac:** the ad hoc signed zip opens after Privacy & Security's Open Anyway on Apple silicon, draws, streams `mock://demo` and reaches a USB serial or WiFi ELM327 (macOS 15 asks for the local network once) | STILL UNKNOWN: a CI runner launches it and keeps it up 30 s, and no person has run it on a Mac | `macos-smoke`'s screenshots and stderr, the CI run's artifact |
+| 41 | **The macOS app runs on a Mac:** the ad hoc signed zip opens after Privacy & Security's Open Anyway on Apple silicon, draws, streams `mock://demo` and reaches a USB serial or WiFi ELM327 (macOS 15 asks for the local network once) | STILL UNKNOWN: a CI runner launches it, connects `mock://demo` by a synthetic click and keeps it up 30 s, and no person has run it on a Mac | `macos-smoke`'s screenshots and stderr, the CI run's artifact |
 
 ### The host kept awake ([ADR-0033](../adr/0033-session-time-counts-sleep.md)'s appendix of 2026-11-22)
 
