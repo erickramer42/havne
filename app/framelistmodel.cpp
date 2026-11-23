@@ -471,6 +471,7 @@ FrameListModel::ScrubbedCsv FrameListModel::scrubbedCsv() const
     out.identification = report.left_out[ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION];
     out.textValues = report.left_out[ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES];
     out.unattributed = report.left_out[ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE];
+    out.vinShaped = report.left_out[ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED];
     QByteArray body;
     for (size_t i = 0; i < rows.size(); ++i) {
         const Row& r = rows[i];
@@ -496,7 +497,8 @@ FrameListModel::ScrubbedCsv FrameListModel::scrubbedCsv() const
             "# Havne %1, the Log page's frames, scrubbed (ADR-0054): %2 "
             "written%3; left out of the %4 held: %5 frames of "
             "identification replies, %6 of text signals' messages, %7 "
-            "segments of messages that couldn't be reassembled\n")
+            "segments of messages that couldn't be reassembled, %8 frames "
+            "of messages holding a VIN-shaped token\n")
             .arg(QString::fromLatin1(ecuio_version_string()))
             .arg(out.written)
             .arg(m_filter.active() ? QStringLiteral(" (those the filter shows)")
@@ -505,6 +507,7 @@ FrameListModel::ScrubbedCsv FrameListModel::scrubbedCsv() const
             .arg(out.identification)
             .arg(out.textValues)
             .arg(out.unattributed)
+            .arg(out.vinShaped)
             .toUtf8() +
         "time_s,id,ext,dir,dlc,flags,data\n" + body;
     out.ok = true;

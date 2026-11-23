@@ -1204,11 +1204,19 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
 #define ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES    2u /* text signals' values */
 #define ECUIO_EXPORT_LEFT_OUT_ACTIVITY       3u /* activity lines of a kind
                                                    the export doesn't know */
-#define ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED     4u /* the check alone: a token
-                                                   of 17 VIN characters; an
-                                                   export holding one fails,
-                                                   so its count stays 0 */
-#define ECUIO_EXPORT_LEFT_OUT_COUNT          5u
+#define ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED     4u /* the frames of messages
+                                                   holding 17 VIN characters
+                                                   inside a longer run, by
+                                                   their check digit; one of
+                                                   exactly 17 fails the
+                                                   export */
+#define ECUIO_EXPORT_LEFT_OUT_VIN_MASKED     5u /* the VIN-shaped tokens of
+                                                   text a user wrote (names,
+                                                   labels, markers) a CSV or
+                                                   a folder copy writes as
+                                                   '*', one each; never a
+                                                   failed check's class */
+#define ECUIO_EXPORT_LEFT_OUT_COUNT          6u
 
 /* ecuio_export_options_t.layout, the CSV's (ADR-0056 section 5) */
 #define ECUIO_CSV_WIDE 0u /* a column a signal, a row a sweep or a grid */
@@ -1315,7 +1323,14 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * written bytes, and every message as it was before any segmenting,
  * searched for the recording's own identity values and VIN-shaped
  * tokens; one match fails the export, leaving no file, with the class
- * in report->failed_class. ECUIO_EXPORT_CSV writes signals.csv's number
+ * in report->failed_class. Two kinds of match are left out instead: a
+ * message holding a VIN inside a longer run of letters and digits (its
+ * frames, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED), and a VIN-shaped token in
+ * text a user wrote (a signal's name or unit, a marker's label, the
+ * signal and condition files), written as '*' and counted in
+ * ECUIO_EXPORT_LEFT_OUT_VIN_MASKED; a folder copy that masks anything
+ * holds masks.txt, which says so. The recording's own identity values
+ * fail it wherever they stand. ECUIO_EXPORT_CSV writes signals.csv's number
  * values. ECUIO_CSV_WIDE, the default (ADR-0056 sections 4 and 5): a
  * column a signal, Time (ms) first; a row each time every column in
  * the rule has a sample newer than the last row, at the completing
@@ -1459,8 +1474,9 @@ typedef int (*ecuio_scrub_frame_callback_t)(void* user_data, size_t index,
  * they crossed the bus are reassembled first, on their timestamp_us. An
  * identification reply's frames (every segment of a segmented one), a
  * torn message's segments on a diagnostic reply ID and the messages a
- * text or hex def of set applies to (set may be NULL) are left out:
- * keep[i] is 0 for those and 1 for every other frame. Then each kept
+ * text or hex def of set applies to (set may be NULL) are left out, and
+ * so is a message holding a VIN inside a longer run of letters and
+ * digits: keep[i] is 0 for those and 1 for every other frame. Then each kept
  * frame, and each whole message a kept frame carries, is searched for
  * the identity values the left-out replies carry and for VIN-shaped
  * tokens; one match fails it, the same as ecuio_export, with keep all

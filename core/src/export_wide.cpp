@@ -367,7 +367,7 @@ bool recording_export::wide_walk(const std::string& folder, bool survey,
 
 bool recording_export::write_wide(const std::string& folder)
 {
-    file_check_.reset(new scrub::check(values_));
+    start_check(scrub::kMask);
     buf_ = wide_head();
     std::vector<wide_rows> engines(1);
     engines[0].row_ms = o_.row_ms;

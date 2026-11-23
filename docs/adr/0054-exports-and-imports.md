@@ -1831,3 +1831,75 @@ after each comma has the spaces around an unquoted value dropped, a quoted
 value keeping its own, and the preview shows the cells as they will be
 imported. This amends the appendix "a column map guessed from the header",
 whose plain numbers asked for a unit.
+
+## Note of 2026-11-22: a VIN-shaped token masked or left out
+
+A VIN-shaped token that isn't one of the recording's identity values is
+masked in text a user wrote and left out with its message, and the
+export goes on. These still fail an export: the recording's own identity
+values wherever they stand, a VIN's shape in bytes core writes (the
+pcapng's, frames.csv's, latency.csv's, the health report's) and a
+message of exactly 17 VIN characters between bytes that aren't letters
+or digits (a DID echoing the VIN with no identification reply read).
+
+- **Masked, in text a user wrote.** The CSV's (long and wide) and a
+  folder copy's events.log, signals.csv, markers.csv, signals.json and
+  conditions.json are checked with `scrub::kMask`: a run of exactly 17
+  (the shape rule) and a window inside a longer run (the window rule)
+  are written as `*`, one count each in
+  `left_out[ECUIO_EXPORT_LEFT_OUT_VIN_MASKED]`. A window's mask runs
+  from 16 characters before it to 16 after, clipped to its run of the
+  VIN alphabet, so a VIN any window of it overlaps is masked whole; what
+  the span leaves of its run is judged as written, a run of exactly 17
+  there masked too. The check reads the bytes as written, so the same
+  check over a masked file finds nothing (`fuzz_export` checks each
+  scrubbed export's files so). A file is written in 64 KiB chunks, the
+  last 49 bytes (`kMaskReach`) held to the next, which every mask's
+  reach back fits. Each writer that masks flushes at a line's end, so
+  no span reaches back past a flush; the hold keeps one that doesn't
+  correct.
+- **The JSON files** are masked whole in memory before anything is
+  written, read as JSON (`scrub::kJson`: an escape standing for anything
+  but a letter or a digit separates runs, as the character does in
+  signals.csv, so a name is masked alike in both files), and events.log's
+  `signal file` and `conditions` lines carry the masked copy's SHA-256,
+  so a reader still takes them as the copy's own. A file that loaded and
+  doesn't once masked (a mask over an escape's digits) refuses the copy.
+  A conditions.json past `ECUIO_CONDITION_FILE_MAX_BYTES`, which no
+  reader loads, is left out and counted in `files_left_out`.
+- **A note in a folder copy.** A copy that masks a token or leaves out a
+  frame by these rules, or is made from a copy that did, holds
+  `masks.txt`: the counts and what a `*` run is. The export doesn't
+  count it as a file it doesn't know.
+- **Left out, in a message.** The plan (pass one) leaves out a message
+  the window rule takes (`scrub::check::window_in`: a window inside a
+  run longer than 17), every frame of it, counted in
+  `left_out[ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED]`: a message reassembled
+  from the wire, one an adapter delivered whole, a CAN FD frame's
+  payload, and a message `any_id_messages` joins on any ID (judged only
+  while a frame of it is kept). A masked frame would pass for one the
+  car sent, so a message is never masked. A message so left out that
+  holds an identity value still fails the export, as the second check
+  would. The pcapng, a folder copy's frames.csv and `ecuio_scrub_frames`
+  take the same rule; the pcapng's section comment and events.log's
+  export line count the frames.
+- **The window rule** also takes a window whose maker code vPIC lists
+  (`ecuio_vin_make`), where the check digit fails: a VIN outside North
+  America needs none. Over the VIN alphabet the check digit matches
+  about one window in 33 and the maker clause about one in 22 more; a
+  false hit costs a mask or a left-out message, never the export.
+
+Measured 2026-11-22 over the recordings on hand, 76 distinct (624,505
+frame rows), each exported scrubbed as a pcapng, a long and a wide CSV
+and a folder copy by dev's `havne-cli` and by this change's: no export
+refused, no token masked and no frame left out, either way.
+
+| Change | ABI | Notes |
+|---|---|---|
+| `ECUIO_EXPORT_LEFT_OUT_VIN_MASKED` (5) | Additive | A count of tokens, never a failed check's class |
+| `ECUIO_EXPORT_LEFT_OUT_COUNT` 5 to 6 | Constant change | The report's `left_out[8]` has room; one line in `abi/api_changes.txt` |
+
+What the scrub doesn't find narrows: a VIN with no check digit whose
+maker code vPIC doesn't list, glued to letters or digits. A typed label
+of the VIN alphabet is masked where it holds a window, at the rates
+above, and never refuses a copy.

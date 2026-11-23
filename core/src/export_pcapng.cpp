@@ -222,6 +222,127 @@ bool recording_export::add_identity(const uint8_t* msg, size_t n)
     return true;
 }
 
+bool recording_export::plan_whole(const ecuio_frame_t& f, const seg& s)
+{
+    if (!folder_ && !re_segmentable(f)) {
+        left_out(s, kUnattributable, false);
+    } else if (!raw_ && scrub::identification(f.data, f.data_length)) {
+        if (!add_identity(f.data, f.data_length)) {
+            return false;
+        }
+        left_out(s, kIdentification, false);
+    } else if (!raw_ &&
+               text_message(f.arbitration_id, f.flags, f.data, f.data_length)) {
+        left_out(s, kTextValues, false);
+    } else if (!raw_ && vin_window(f.data, f.data_length)) {
+        left_out(s, kVinShaped, false);
+    } else if (folder_ && in_range(s.host_us)) {
+        ++r_.frames; /* kept whole, one row */
+    } else if (in_range(s.host_us)) {
+        const uint64_t n =
+            segments(f.arbitration_id,
+                     (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0,
+                     static_cast<uint16_t>(f.data_length));
+        r_.frames += n;
+        r_.made_up += n;
+    }
+    return true;
+}
+
+bool recording_export::plan_other(const ecuio_frame_t& f, const seg& s,
+                                  other_id_identification& others,
+                                  std::vector<uint8_t>& whole)
+{
+    uint8_t bytes[pc::kFdBytes];
+    uint32_t n = 0;
+    /* a frame no CAN frame can be, or a reply whose ISO-TP form isn't
+     * read (CAN FD's) */
+    if ((!folder_ && !pc::socketcan(f, bytes, &n)) ||
+        (!raw_ && reassembly::unread_reply(f))) {
+        left_out(s, kUnattributable, false);
+    } else if (!raw_ && others.take(f, &whole)) {
+        if (!whole.empty() && !add_identity(whole.data(), whole.size())) {
+            return false;
+        }
+        left_out(s, kIdentification, false);
+    } else if (!raw_ &&
+               text_message(f.arbitration_id, f.flags, f.data, f.data_length)) {
+        left_out(s, kTextValues, false);
+    } else if (!raw_ && vin_window(f.data, f.data_length)) {
+        left_out(s, kVinShaped, false); /* a CAN FD frame's payload */
+    } else if (in_range(s.host_us)) {
+        ++r_.frames;
+    }
+    return true;
+}
+
+bool recording_export::vin_window(const uint8_t* p, size_t n)
+{
+    if (!scrub::check::window_in(p, n)) {
+        return false;
+    }
+    vin_messages_.emplace_back(p, p + n);
+    return true;
+}
+
+void recording_export::vin_joins(std::vector<joined>& joins)
+{
+    for (joined& j : joins) {
+        if (scrub::check::window_in(j.data.data(), j.data.size())) {
+            vin_joined_.push_back(std::move(j));
+        }
+    }
+}
+
+bool recording_export::vin_end()
+{
+    for (const std::vector<uint8_t>& m : vin_messages_) {
+        const uint32_t found = values_.find(m.data(), m.size());
+        if (found != 0) {
+            r_.failed_class = found;
+            return fail("the check found %s in a message the export would "
+                        "write: nothing was written",
+                        scrub::failed_words(found));
+        }
+    }
+    return vin_joined_end();
+}
+
+bool recording_export::vin_joined_end()
+{
+    std::sort(dropped_.begin(), dropped_.end());
+    std::vector<seg> out;
+    for (const joined& j : vin_joined_) {
+        bool kept = false;
+        for (const seg& s : j.frames) {
+            kept = kept || !is_dropped(s.index);
+        }
+        if (!kept) {
+            continue; /* another class left it out */
+        }
+        const uint32_t found = values_.find(j.data.data(), j.data.size());
+        if (found != 0) {
+            r_.failed_class = found;
+            return fail("the check found %s in a message the export would "
+                        "write: nothing was written",
+                        scrub::failed_words(found));
+        }
+        out.insert(out.end(), j.frames.begin(), j.frames.end());
+    }
+    std::sort(out.begin(), out.end(),
+              [](const seg& a, const seg& b) { return a.index < b.index; });
+    const auto planned = static_cast<std::ptrdiff_t>(dropped_.size());
+    for (size_t i = 0; i < out.size(); ++i) {
+        if ((i > 0 && out[i - 1].index == out[i].index) ||
+            std::binary_search(dropped_.begin(), dropped_.begin() + planned,
+                               out[i].index)) {
+            continue;
+        }
+        left_out(out[i], kVinShaped, true);
+    }
+    return true;
+}
+
 bool recording_export::plan(const std::string& folder)
 {
     if (canceled(true)) {
@@ -233,6 +354,7 @@ bool recording_export::plan(const std::string& folder)
     }
     reassembly rs;
     other_id_identification others;
+    any_id_messages any;
     std::vector<uint8_t> whole;
     std::vector<message_end> ends;
     uint64_t index = 0;
@@ -244,6 +366,11 @@ bool recording_export::plan(const std::string& folder)
         const ecuio_frame_t& f = rows_in.frame();
         const seg s{index++, rows_in.host_us()};
         ends.clear();
+        if (!raw_ && !reassembly::on_the_wire(f) && fr::tp_readable(f)) {
+            joins_.clear();
+            any.take(f, true, joins_, &s);
+            vin_joins(joins_);
+        }
         if (reassembly::on_the_wire(f)) {
             if (in_range(s.host_us)) {
                 ++r_.frames;
@@ -254,48 +381,11 @@ bool recording_export::plan(const std::string& folder)
             }
             continue;
         }
-        if ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0) {
-            if (!folder_ && !re_segmentable(f)) {
-                left_out(s, kUnattributable, false);
-            } else if (!raw_ &&
-                       scrub::identification(f.data, f.data_length)) {
-                if (!add_identity(f.data, f.data_length)) {
-                    return false;
-                }
-                left_out(s, kIdentification, false);
-            } else if (!raw_ && text_message(f.arbitration_id, f.flags,
-                                             f.data, f.data_length)) {
-                left_out(s, kTextValues, false);
-            } else if (folder_ && in_range(s.host_us)) {
-                ++r_.frames; /* kept whole, one row */
-            } else if (in_range(s.host_us)) {
-                const uint64_t n =
-                    segments(f.arbitration_id,
-                             (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0,
-                             static_cast<uint16_t>(f.data_length));
-                r_.frames += n;
-                r_.made_up += n;
-            }
-            continue;
-        }
-        uint8_t bytes[pc::kFdBytes];
-        uint32_t n = 0;
-        /* a frame no CAN frame can be, or a reply whose ISO-TP form
-         * isn't read (CAN FD's) */
-        if ((!folder_ && !pc::socketcan(f, bytes, &n)) ||
-            (!raw_ && reassembly::unread_reply(f))) {
-            left_out(s, kUnattributable, false);
-        } else if (!raw_ && others.take(f, &whole)) {
-            if (!whole.empty() &&
-                !add_identity(whole.data(), whole.size())) {
-                return false;
-            }
-            left_out(s, kIdentification, false);
-        } else if (!raw_ && text_message(f.arbitration_id, f.flags, f.data,
-                                         f.data_length)) {
-            left_out(s, kTextValues, false);
-        } else if (in_range(s.host_us)) {
-            ++r_.frames;
+        const bool ok = (f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0
+                            ? plan_whole(f, s)
+                            : plan_other(f, s, others, whole);
+        if (!ok) {
+            return false;
         }
     }
     if (got < 0) {
@@ -312,6 +402,12 @@ bool recording_export::plan(const std::string& folder)
         if (!add_identity(m.data(), m.size())) {
             return false;
         }
+    }
+    joins_.clear();
+    any.finish(joins_);
+    vin_joins(joins_);
+    if (!vin_end()) {
+        return false;
     }
     std::sort(dropped_.begin(), dropped_.end());
     return true;
@@ -338,6 +434,10 @@ bool recording_export::judge(std::vector<message_end>& ends)
                            e.data.data(), e.data.size())) {
                 for (const seg& s : e.frames) {
                     left_out(s, kTextValues, true);
+                }
+            } else if (vin_window(e.data.data(), e.data.size())) {
+                for (const seg& s : e.frames) {
+                    left_out(s, kVinShaped, true);
                 }
             }
         } else if (scrub::segment_reply_id(e.id, e.extended)) {
@@ -407,14 +507,16 @@ std::string recording_export::section_comment() const
         "Havne %s, %s (ADR-0054): %llu frames, %llu of them made up from "
         "messages an adapter delivered whole; left out: %llu frames "
         "of identification replies, %llu of text signals' messages, "
-        "%llu segments of messages that couldn't be reassembled",
+        "%llu segments of messages that couldn't be reassembled, %llu "
+        "frames of messages holding a VIN-shaped token",
         ecuio_version_string(),
         raw_ ? "a raw export, not scrubbed" : "a scrubbed export",
         static_cast<unsigned long long>(r_.frames),
         static_cast<unsigned long long>(r_.made_up),
         static_cast<unsigned long long>(r_.left_out[kIdentification]),
         static_cast<unsigned long long>(r_.left_out[kTextValues]),
-        static_cast<unsigned long long>(r_.left_out[kUnattributable]));
+        static_cast<unsigned long long>(r_.left_out[kUnattributable]),
+        static_cast<unsigned long long>(r_.left_out[kVinShaped]));
     return buf;
 }
 
@@ -423,7 +525,7 @@ bool recording_export::write(const std::string& folder)
     if (canceled(true)) {
         return false;
     }
-    file_check_.reset(new scrub::check(values_));
+    start_check(scrub::kRefuse);
     made_up_ = kMadeUp;
     made_up_flow_ = kMadeUpFlow;
     pc::section_header(buf_, section_comment(),

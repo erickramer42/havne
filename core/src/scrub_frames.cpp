@@ -7,7 +7,9 @@
 // reassembles the frames of ISO-TP messages as they crossed the bus
 // (frame_reassembly.h, ecuio_export's own) and classifies each frame and
 // message with scrub.h, as ecuio_export's plan does, collecting the
-// identity values the left-out replies carry. The second checks each kept
+// identity values the left-out replies carry; a message the VIN window
+// rule takes is left out, and fails the call when it holds one of those
+// values, as the second check would have. The second checks each kept
 // frame, and each whole message a kept frame carries, for those values
 // and for VIN-shaped tokens. Nothing is re-segmented: the caller writes
 // the frames as they are.
@@ -35,6 +37,7 @@ namespace scrub = ecuio_scrub;
 constexpr uint32_t kIdentification = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION;
 constexpr uint32_t kUnattributable = ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE;
 constexpr uint32_t kTextValues = ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES;
+constexpr uint32_t kVinShaped = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED;
 
 /* The two passes; a false return has set the detail and status_ */
 class scrubber
@@ -64,7 +67,9 @@ public:
         std::fill(keep_, keep_ + count_, uint8_t{1});
         fr::reassembly rs;
         fr::other_id_identification others;
+        fr::any_id_messages any;
         std::vector<fr::message_end> ends;
+        std::vector<fr::joined> joins;
         std::vector<uint8_t> whole;
         for (size_t i = 0; i < count_; ++i) {
             if (!fetch(i)) {
@@ -96,6 +101,14 @@ public:
             } else if (text_message(f.arbitration_id, f.flags, f.data,
                                     f.data_length)) {
                 left_out(i, kTextValues);
+            } else if (vin_window(f.data, f.data_length)) {
+                left_out(i, kVinShaped);
+            }
+            if (fr::tp_readable(f)) {
+                const fr::seg s{i, f.timestamp_us};
+                joins.clear();
+                any.take(f, true, joins, &s);
+                vin_joins(joins);
             }
         }
         ends.clear();
@@ -110,7 +123,10 @@ public:
                 return false;
             }
         }
-        return true;
+        joins.clear();
+        any.finish(joins);
+        vin_joins(joins);
+        return vin_values();
     }
 
     bool check()
@@ -195,6 +211,51 @@ private:
         return true;
     }
 
+    /* A message the VIN window rule takes: its bytes kept for the identity
+     * values the plan finds by its end */
+    bool vin_window(const uint8_t* p, size_t n)
+    {
+        if (!scrub::check::window_in(p, n)) {
+            return false;
+        }
+        vin_messages_.emplace_back(p, p + n);
+        return true;
+    }
+
+    /* The joins the window rule takes that still have a frame kept: each
+     * frame left out */
+    void vin_joins(const std::vector<fr::joined>& joins)
+    {
+        for (const fr::joined& j : joins) {
+            bool kept = false;
+            for (const fr::seg& s : j.frames) {
+                kept = kept || keep_[static_cast<size_t>(s.index)] != 0;
+            }
+            if (kept && vin_window(j.data.data(), j.data.size())) {
+                for (const fr::seg& s : j.frames) {
+                    left_out(static_cast<size_t>(s.index), kVinShaped);
+                }
+            }
+        }
+    }
+
+    /* A message the window rule took that holds an identity value */
+    bool vin_values()
+    {
+        for (const std::vector<uint8_t>& m : vin_messages_) {
+            const uint32_t found = values_.find(m.data(), m.size());
+            if (found != 0) {
+                r_.failed_class = found;
+                status_ = ECUIO_ERR_LOAD_FAILED;
+                ecuio_detail_set("the check found %s in a frame the export "
+                                 "would write: nothing was written",
+                                 scrub::failed_words(found));
+                return false;
+            }
+        }
+        return true;
+    }
+
     /* A message a text or hex def applies to */
     bool text_message(uint32_t id, uint32_t flags, const uint8_t* data,
                       size_t n)
@@ -232,6 +293,8 @@ private:
                                    ECUIO_FRAME_FLAG_REASSEMBLED,
                                e.data.data(), e.data.size())) {
                     cls = kTextValues;
+                } else if (vin_window(e.data.data(), e.data.size())) {
+                    cls = kVinShaped;
                 }
             } else if (scrub::segment_reply_id(e.id, e.extended)) {
                 cls = kUnattributable;
@@ -295,6 +358,7 @@ private:
     std::unique_ptr<ecuio_frame_t> probe_;
     std::vector<const ecuio_signal_def_t*> text_;
     scrub::values values_;
+    std::vector<std::vector<uint8_t>> vin_messages_;
     ecuio_status_t status_ = ECUIO_OK;
 };
 

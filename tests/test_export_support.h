@@ -117,8 +117,11 @@ inline std::string row(uint64_t t, uint32_t id, uint32_t flags,
 inline std::vector<uint8_t> text_bytes(std::initializer_list<uint8_t> head,
                                 const std::string& text)
 {
-    std::vector<uint8_t> v(head);
-    v.insert(v.end(), text.begin(), text.end());
+    /* sized once: GCC 15's -Warray-bounds misreads an insert here */
+    std::vector<uint8_t> v(head.size() + text.size());
+    std::copy(head.begin(), head.end(), v.begin());
+    std::copy(text.begin(), text.end(),
+              v.begin() + static_cast<std::ptrdiff_t>(head.size()));
     return v;
 }
 
@@ -548,7 +551,8 @@ inline std::string export_line(const char* kind, uint64_t frames, uint64_t ident
         b, sizeof b,
         "export  %s (ADR-0054), Havne %s: frames.csv %llu frames (left out: "
         "%llu of identification replies, 0 of text signals' messages, 0 "
-        "segments of messages that couldn't be reassembled); signals.csv "
+        "segments of messages that couldn't be reassembled, 0 of messages "
+        "holding a VIN-shaped token); signals.csv "
         "%llu values (left out: 0 of identification signals, %llu of text "
         "signals); markers.csv %llu markers, their labels as typed; "
         "events.log %llu lines left out (the caller's notes, its other "

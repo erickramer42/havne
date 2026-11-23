@@ -24,7 +24,8 @@ import pytest
 import havne
 from conftest import FINDINGS, Asks, cli, line_of, nothing_made, partials
 
-CLASSES = ("identification", "unattributable", "text_values", "activity")
+CLASSES = ("identification", "unattributable", "text_values", "activity", "vin_shaped",
+           "vin_masked")
 
 
 def tree(root):
@@ -105,7 +106,7 @@ def test_a_pcapng_leaves_out_what_the_scrub_finds(tmp_path):
 
 def test_a_raw_pcapng_is_the_clis(tmp_path):
     raw = both(tmp_path, FINDINGS, "pcapng", ["--raw"], havne.export_pcapng, raw=True)
-    assert not raw.scrubbed and raw.left_out == (0, 0, 0, 0)
+    assert not raw.scrubbed and raw.left_out == (0,) * 6
     scrubbed = havne.export_pcapng(FINDINGS, tmp_path / "scrubbed.pcapng")
     assert scrubbed.frames < raw.frames
 
@@ -122,6 +123,25 @@ def test_a_pcapng_over_a_range_is_the_clis(tmp_path):
     early = havne.export_pcapng(FINDINGS, tmp_path / "early.pcapng", to_us=lo)
     late = havne.export_pcapng(FINDINGS, tmp_path / "late.pcapng", from_us=hi)
     assert 0 < early.frames < whole.frames and 0 < late.frames < whole.frames
+
+
+def test_a_vin_shaped_name_is_masked_and_counted(tmp_path):
+    # A made-up VIN inside a signal's name: written as *, counted, the same
+    # through havne-cli
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    (rec / "events.log").write_bytes(
+        b"ecuio session recording, format 2 (ADR-0049)\n"
+        b"started  2023-11-14 22:13:20.250 (UTC)\nutc  2023-11-14T22:13:20.250Z\n"
+        b"profile  raw\nframe flags  complete\n\n")
+    (rec / "signals.csv").write_bytes(
+        b"host_us,signal,value,unit\n1000,PN_ZZZFAKE11M0000001x,5,rpm\n")
+    got = both(tmp_path, str(rec), "csv", ["--layout", "long"], havne.export_csv,
+               layout="long")
+    assert got.left_out.vin_masked == 1 and got.left_out.vin_shaped == 0
+    with open(got.path, "rb") as f:
+        data = f.read()
+    assert b"FAKE11M" not in data and b"PN_" + b"*" * 17 + b"x," in data
 
 
 # --- the folder copy ----------------------------------------------------
@@ -141,7 +161,7 @@ def test_a_folder_copy_over_a_range_is_the_clis(tmp_path):
 
 def test_a_raw_folder_copy_is_the_clis(tmp_path, car):
     got = both(tmp_path, car, "folder", ["--raw"], havne.export_folder, raw=True)
-    assert not got.scrubbed and got.left_out == (0, 0, 0, 0)
+    assert not got.scrubbed and got.left_out == (0,) * 6
 
 
 # --- the CSV ------------------------------------------------------------
@@ -406,7 +426,7 @@ def test_each_failed_class_has_its_word():
     from havne.export import class_word
     assert [class_word(i) for i in range(0, 8)] == \
         ["unknown", "identification", "unattributable", "text_values", "activity", "vin_shaped",
-         "unknown", "unknown"]
+         "vin_masked", "unknown"]
 
 
 # --- the cancel ---------------------------------------------------------

@@ -59,7 +59,6 @@ core/src/csv_import.h	run	185	93
 core/src/csv_map.h	parse_map	150	75
 core/src/csv_reader.h	next	99	79
 core/src/export_csv.cpp	values	-	47
-core/src/export_pcapng.cpp	plan	92	49
 core/src/export_wide.cpp	wide_survey	98	50
 core/src/export_wide.cpp	wide_walk	95	66
 core/src/frame_decoder.cpp	plan_computed	-	41

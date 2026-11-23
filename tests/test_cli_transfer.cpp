@@ -349,7 +349,8 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "{\"type\":\"exported\",\"format\":\"pcapng\",\"file\":"
               "\"out.pcapng\",\"scrubbed\":true,\"frames\":12,\"made_up\":4,"
               "\"left_out\":{\"identification\":3,\"unattributable\":1,"
-              "\"text_values\":0,\"activity\":0}}");
+              "\"text_values\":0,\"activity\":0,\"vin_shaped\":0,"
+              "\"vin_masked\":0}}");
 
     Args c({"havne-cli", "export", "rec", "out.csv", "--format", "csv"});
     cli::ExportArgs csv;
@@ -366,7 +367,8 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "\"out.csv\",\"scrubbed\":true,\"frames\":0,\"made_up\":0,"
               "\"values\":40,\"signals\":3,\"layout\":\"wide\",\"rows\":14,"
               "\"row_ms\":0,\"missing\":0,\"left_out\":{\"identification\":0,"
-              "\"unattributable\":0,\"text_values\":2,\"activity\":0}}");
+              "\"unattributable\":0,\"text_values\":2,\"activity\":0,"
+              "\"vin_shaped\":0,\"vin_masked\":0}}");
     cli::Line ml(buf, sizeof buf);
     cli::exported_line(ml, csv, v, 2);
     EXPECT_NE(text(ml).find("\"row_ms\":0,\"missing\":2,"), std::string::npos)
@@ -407,7 +409,8 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
               "\"copy\",\"scrubbed\":true,\"frames\":9,\"made_up\":0,"
               "\"values\":40,\"signals\":3,\"files\":4,\"files_left_out\":1,"
               "\"left_out\":{\"identification\":0,\"unattributable\":0,"
-              "\"text_values\":0,\"activity\":2}}");
+              "\"text_values\":0,\"activity\":2,\"vin_shaped\":0,"
+              "\"vin_masked\":0}}");
 
     r.failed_class = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1;
     cli::Line f(buf, sizeof buf);
@@ -562,7 +565,7 @@ TEST(CliTransferTest, LongPathsFitTheirLines)
     cli::exported_line(e, ex, r);
     ASSERT_TRUE(e.finish());
     EXPECT_NE(text(e).find("\"file\":\"" + escaped + "\""), std::string::npos);
-    EXPECT_NE(text(e).find("\"activity\":0}}"), std::string::npos);
+    EXPECT_NE(text(e).find("\"vin_masked\":0}}"), std::string::npos);
 
     cli::ImportArgs im;
     im.folder = path.c_str();

@@ -706,16 +706,18 @@ void heldForExport(FrameListModel& model, FrameMaker& m)
 }
 
 std::string csvHead(int written, const char* filter, int held, int ident,
-                    int text)
+                    int text, int vin = 0)
 {
     char line[512];
     std::snprintf(line, sizeof line,
                   "# Havne %s, the Log page's frames, scrubbed (ADR-0054): %d "
                   "written%s; left out of the %d held: %d frames of "
                   "identification replies, %d of text signals' messages, 0 "
-                  "segments of messages that couldn't be reassembled\n"
+                  "segments of messages that couldn't be reassembled, %d "
+                  "frames of messages holding a VIN-shaped token\n"
                   "time_s,id,ext,dir,dlc,flags,data\n",
-                  ecuio_version_string(), written, filter, held, ident, text);
+                  ecuio_version_string(), written, filter, held, ident, text,
+                  vin);
     return line;
 }
 
@@ -762,6 +764,20 @@ TEST(BridgeTest, FrameCsvLeavesIdentificationOutAndWritesWhatTheFilterShows)
                   "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n");
     EXPECT_EQ(csv.textValues, 1u);
 
+    // A message holding a VIN inside a longer run is left out and counted
+    FrameListModel glued;
+    m.add(glued, 0x7E8, {0x62, 0xD8, 0x01, 'a', 'Z', 'Z', 'Z', 'F', 'A', 'K',
+                         'E',  '1',  '1',  'M', '0', '0', '0', '0', '0', '0',
+                         '1'},
+          1000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    m.add(glued, 0x7E8, {0x04, 0x41, 0x0C, 0x1A, 0xF8}, 2000);
+    csv = glued.scrubbedCsv();
+    ASSERT_TRUE(csv.ok) << csv.words.toStdString();
+    EXPECT_EQ(csv.bytes.toStdString(),
+              csvHead(1, "", 2, 0, 0, 1) +
+                  "0.002000,0x7E8,0,rx,5,,04 41 0C 1A F8\n");
+    EXPECT_EQ(csv.vinShaped, 1u);
+
     // A frame echoing the VIN fails the check: no bytes, the class alone
     FrameListModel echo;
     m.add(echo, 0x7E8, {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
@@ -804,8 +820,24 @@ TEST(BridgeTest, ExportFramesWritesTheFileAndLogsOneLine)
     EXPECT_FALSE(bytes.contains("FAKE11M")) << "the VIN reply left out";
     ASSERT_EQ(lines.size(), 1);
     EXPECT_EQ(lines[0].toStdString(),
-              "Frames exported: 4 written, 1 left out (identification and text "
-              "signals), 0 segments unattributed");
+              "Frames exported: 4 written, 1 left out (identification, text "
+              "signals and VIN-shaped messages), 0 segments unattributed");
+
+    // A message holding a VIN inside a longer run joins the count
+    m.add(*bridge.model(), 0x7E8,
+          {0x62, 0xD8, 0x01, 'a', 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+           '1',  '3',  'M',  '0', '0', '0', '0', '0', '0', '2'},
+          5500, ECUIO_FRAME_FLAG_REASSEMBLED);
+    lines.clear();
+    const QVariantMap glued = bridge.exportFrames(
+        QUrl::fromLocalFile(out.path() + QStringLiteral("/glued.csv")));
+    ASSERT_TRUE(glued.value(QStringLiteral("ok")).toBool())
+        << glued.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(glued.value(QStringLiteral("leftOut")).toULongLong(), 2u);
+    ASSERT_EQ(lines.size(), 1);
+    EXPECT_EQ(lines[0].toStdString(),
+              "Frames exported: 4 written, 2 left out (identification, text "
+              "signals and VIN-shaped messages), 0 segments unattributed");
 
     // A frame echoing the VIN: nothing written, the file as it was
     m.add(*bridge.model(), 0x7E8,

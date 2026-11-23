@@ -447,26 +447,30 @@ private:
     std::vector<std::vector<uint8_t>> short_;
 };
 
-/* A message any_id_messages joined, and whether the export writes any
- * frame of it */
+/* A message any_id_messages joined, whether the export writes any frame
+ * of it, and its frames when take was given them (the plan's) */
 struct joined {
     bool written = false;
     std::vector<uint8_t> data;
+    std::vector<seg> frames;
 };
 
-/* ISO-TP-shaped messages on any ID, for the second check only: the frames
- * on_the_wire doesn't take, read in each layout (tp_read), a First Frame's
- * payload joined with each Consecutive Frame after it on its ID and
- * layout, whatever its sequence number, until its length (kFollowMax when
- * its length can't be right), a frame there that isn't one, or the end.
- * Joining frames that aren't one message can only fail a check, never
- * pass one; nothing more is left out. */
+/* ISO-TP-shaped messages on any ID: the frames on_the_wire doesn't take,
+ * read in each layout (tp_read), a First Frame's payload joined with each
+ * Consecutive Frame after it on its ID and layout, whatever its sequence
+ * number, until its length (kFollowMax when its length can't be right), a
+ * frame there that isn't one, or the end. The plan leaves out the frames
+ * of one the VIN window rule takes; the second check checks each. Joining
+ * frames that aren't one message can only leave frames out or fail a
+ * check, never pass one. */
 class any_id_messages
 {
 public:
-    /* Frame f, which tp_readable takes; written when the export writes it.
-     * The messages it ends go in out. */
-    void take(const ecuio_frame_t& f, bool written, std::vector<joined>& out)
+    /* Frame f, which tp_readable takes; written when the export writes it,
+     * s its place when the joins should name their frames. The messages it
+     * ends go in out. */
+    void take(const ecuio_frame_t& f, bool written, std::vector<joined>& out,
+              const seg* s = nullptr)
     {
         for (size_t layout = 0; layout < tp_read::kLayouts; ++layout) {
             const uint64_t key = tp_key(f, layout);
@@ -482,6 +486,9 @@ public:
                 m.j.data.insert(m.j.data.end(), f.data + r.at,
                                 f.data + r.at + take);
                 m.j.written = m.j.written || written;
+                if (s != nullptr) {
+                    m.j.frames.push_back(*s);
+                }
                 if (m.j.data.size() >= m.expected) {
                     end(it, out);
                 }
@@ -499,6 +506,10 @@ public:
             message& m = open_[key];
             m.expected = r.length_valid ? r.length : kFollowMax;
             m.j.written = written;
+            m.j.frames.clear();
+            if (s != nullptr) {
+                m.j.frames.push_back(*s);
+            }
             m.j.data.assign(f.data + r.at,
                             f.data + r.at +
                                 std::min<size_t>(r.end - r.at, m.expected));

@@ -507,6 +507,29 @@ def main(argv):
     signals = b"\xef\xbb\xbfhost_us,signal,value,unit\n1500000,RPM,1726,RPM\n"
     write(out, "fuzz_export", "engine-ecu",
           b"F" + events + SEP + signals + SEP + SEP + ecu)
+    # VIN-shaped tokens (made up) in a user's text, masked ('3', then a
+    # sixth part, signals.json): inside a longer run in a signal's name,
+    # a marker's label and the signal file, exactly 17 as a name and a
+    # condition file's name; a manufacturer DID's reply holding one,
+    # left out
+    signal_file = (b'{"havne_signals":1,"name":"T","source":{"name":"t"},'
+            b'"ecus":[{"id":"pcm","rx":"7E8"}],"signals":[{"key":"a",'
+            b'"name":"PN_ZZZFAKE11M0000001x","read":{"service":"22",'
+            b'"number":"D100"},"field":{"byte":0}}]}')
+    named = b'{"havne_conditions":1,"name":"Pulls ZZZFAKE11M0000001","conditions":[]}'
+    reply = b"62 D8 01 " + b" ".join(b"%02X" % c for c in b"aZZZFAKE11M0000001")
+    write(out, "fuzz_export", "vin-shaped-text",
+          b"3" + SEP.join((
+              b"profile  raw\nframe flags  complete\n"
+              b"signal file  signals.json," +
+              hashlib.sha256(signal_file).hexdigest().encode("ascii") +
+              b"\nconditions  conditions.json," +
+              hashlib.sha256(named).hexdigest().encode("ascii") + b"\n\n",
+              b"host_us,signal,value,unit\n1000000,PN_ZZZFAKE11M0000001x,5,rpm\n"
+              b"2000000,ZZZFAKE22M0000002,6,\n",
+              b"host_us,label\n1500000,aZZZFAKE11M0000001b\n",
+              header + b"1200000,1200000,0x7E8,0x100," + reply + b"\n",
+              named, signal_file)))
     # A focus key named twice, holding the harness's scratch folder's
     # name: the wide CSV's refusal quotes it, which names no folder
     write(out, "fuzz_export", "focus-twice-folder-word",
