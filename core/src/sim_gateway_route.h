@@ -35,25 +35,60 @@ inline bool ecuio_sim_gateway_suppressed(uint8_t nrc)
            nrc == 0x7F;
 }
 
-/* The gateway's verdict on req (len at least 1) for the module answering
- * on reply_id. A refusal goes on the module's reply ID; on a functional
- * request a withheld one is silent unless aloud, and aloud keeps the
- * suppressed codes silent unless unsuppressed. */
-inline ecuio_sim_gateway_verdict
-ecuio_sim_gateway_route(const ecuio_sim_gateway_config& g, uint32_t reply_id,
-                        const uint8_t* req, bool functional)
+/* An outcome as it stands: a gated one forwards once the gateway is
+ * unlocked, else refuses (33 unless its entry names a code) or, gated
+ * silent, drops; a refusal's code its default when *nrc is 0 */
+inline ecuio_sim_route ecuio_sim_gateway_now(ecuio_sim_route r, bool unlocked,
+                                             uint8_t* nrc)
 {
+    switch (r) {
+    case ecuio_sim_route::gated:
+        if (unlocked) {
+            return ecuio_sim_route::forward;
+        }
+        *nrc = *nrc != 0 ? *nrc : ECUIO_SIM_ROUTE_GATED_NRC;
+        return ecuio_sim_route::refuse;
+    case ecuio_sim_route::gated_silent:
+        return unlocked ? ecuio_sim_route::forward : ecuio_sim_route::silent;
+    case ecuio_sim_route::refuse:
+        *nrc = *nrc != 0 ? *nrc : ECUIO_SIM_ROUTE_REFUSE_NRC;
+        break;
+    case ecuio_sim_route::forward:
+    case ecuio_sim_route::silent:
+        break;
+    }
+    return r;
+}
+
+/* The gateway's verdict on req (len at least 1) for the module answering
+ * on reply_id, gw its session at the ECU's time now_us: S3 lapses it
+ * first (locking it), a gated class follows its lock, and with keep_any
+ * a request let through keeps the session. A refusal goes on the
+ * module's reply ID; on a functional request a withheld one is silent
+ * unless aloud, and aloud keeps the suppressed codes silent unless
+ * unsuppressed. */
+inline ecuio_sim_gateway_verdict
+ecuio_sim_gateway_route(const ecuio_sim_gateway_config& g,
+                        ecuio_sim_session& gw, uint32_t reply_id,
+                        const uint8_t* req, bool functional, int64_t now_us)
+{
+    ecuio_sim_session_lapse(gw, now_us);
     ecuio_sim_gateway_verdict v;
     uint8_t nrc = 0;
-    const ecuio_sim_route r =
-        ecuio_sim_gateway_outcome(g, reply_id, req[0], &nrc);
+    const ecuio_sim_route r = ecuio_sim_gateway_now(
+        ecuio_sim_gateway_outcome(g, reply_id, req[0], &nrc),
+        gw.security.unlocked != 0, &nrc);
     switch (r) {
     case ecuio_sim_route::forward:
+        if (g.keep_any) {
+            gw.heard_us = now_us;
+        }
         return v;
     case ecuio_sim_route::refuse:
-        nrc = nrc != 0 ? nrc : ECUIO_SIM_ROUTE_REFUSE_NRC;
         break;
     case ecuio_sim_route::silent:
+    case ecuio_sim_route::gated:
+    case ecuio_sim_route::gated_silent:
         v.fate = ecuio_sim_gateway_fate::drop;
         return v;
     }
@@ -68,9 +103,11 @@ ecuio_sim_gateway_route(const ecuio_sim_gateway_config& g, uint32_t reply_id,
 
 /* The gateway's answer to a physical request on its own request ID at
  * the ECU's time now_us, into out, its length: 10 01, 10 03, 3E 00 and
- * 3E 80 (silent) as any node's session answers them, 27 refused 11
- * without security access, every other service 7F <service> 11 */
-inline uint32_t ecuio_sim_gateway_answer(ecuio_sim_session& s, int64_t now_us,
+ * 3E 80 (silent) as any node's session answers them, 27 from its
+ * security access (sa=) or refused 11 without one, every other service
+ * 7F <service> 11 */
+inline uint32_t ecuio_sim_gateway_answer(const ecuio_sim_gateway_config& g,
+                                         ecuio_sim_session& s, int64_t now_us,
                                          const uint8_t* req, uint32_t len,
                                          uint8_t* out)
 {
@@ -78,8 +115,8 @@ inline uint32_t ecuio_sim_gateway_answer(ecuio_sim_session& s, int64_t now_us,
         return 0;
     }
     bool handled = false;
-    const uint32_t n = ecuio_sim_session_answer(s, true, false, now_us, req,
-                                                len, out, &handled);
+    const uint32_t n = ecuio_sim_session_answer(s, true, g.sa_given, now_us,
+                                                req, len, out, &handled);
     return handled ? n : ecuio_sim_detail::refuse(req[0], 0x11, out);
 }
 

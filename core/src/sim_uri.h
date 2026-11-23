@@ -221,17 +221,19 @@ inline taken take_timing(const ecuio_uri::param& p, ecuio_sim_config* out,
     return ok ? taken::ok : taken::bad;
 }
 
-/* gateway=, behind=, route= and gwopt= (sim_gateway.h) */
+/* gateway=, behind=, route=, sa=, sa_delay= and gwopt= (sim_gateway.h) */
 inline taken take_gateway(const ecuio_uri::param& p, ecuio_sim_config* out,
                           char* why, size_t why_cap)
 {
     using parse =
         bool (*)(const char*, size_t, ecuio_sim_gateway_config*, char*, size_t);
-    parse read = p.is("gateway")  ? ecuio_sim_parse_gateway
-                 : p.is("behind") ? ecuio_sim_parse_behind
-                 : p.is("route")  ? ecuio_sim_parse_route
-                 : p.is("gwopt")  ? ecuio_sim_parse_gwopt
-                                  : nullptr;
+    parse read = p.is("gateway")    ? ecuio_sim_parse_gateway
+                 : p.is("behind")   ? ecuio_sim_parse_behind
+                 : p.is("route")    ? ecuio_sim_parse_route
+                 : p.is("gwopt")    ? ecuio_sim_parse_gwopt
+                 : p.is("sa")       ? ecuio_sim_parse_sa
+                 : p.is("sa_delay") ? ecuio_sim_parse_sa_delay
+                                    : nullptr;
     if (read == nullptr) {
         return taken::other;
     }
@@ -262,7 +264,7 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
- *          [&timing][&gateway][&behind][&route][&gwopt]
+ *          [&timing][&gateway][&behind][&route][&sa][&sa_delay][&gwopt]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
  * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
@@ -289,14 +291,15 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values",  "modules", "sessions", "profile", "vin",  "faults",
-        "delay",   "fc",      "cf",       "seed",    "busy", "bus",
-        "gateway", "behind",  "route",    "gwopt",   nullptr};
+        "values", "modules", "sessions", "profile", "vin",
+        "faults", "delay",   "fc",       "cf",      "seed",
+        "busy",   "bus",     "gateway",  "behind",  "route",
+        "gwopt",  "sa",      "sa_delay", nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
-    static const char* const kGatewayKeys[] = {"gateway", "behind", "route",
-                                               "gwopt", nullptr};
+    static const char* const kGatewayKeys[] = {
+        "gateway", "behind", "route", "gwopt", "sa", "sa_delay", nullptr};
     const ecuio_uri::param* p =
         ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys);
     bool gateway_key = false;
@@ -319,7 +322,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to"
                              : "values, modules, sessions, profile, "
-                               "gateway, behind, route, gwopt");
+                               "gateway, behind, route, sa, sa_delay, gwopt");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {

@@ -58,9 +58,10 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out)
 {
     if (n.role == sim_role::gateway) {
-        return functional ? 0
-                          : ecuio_sim_gateway_answer(n.session, s->ecu.time_us,
-                                                     req, len, out);
+        return functional
+                   ? 0
+                   : ecuio_sim_gateway_answer(s->ecu.config.gateway, n.session,
+                                              s->ecu.time_us, req, len, out);
     }
     /* sessions=1's modules take 10 03 but have no security access */
     const bool engine = n.role == sim_role::engine && !n.from_set;
@@ -219,6 +220,11 @@ void build_gateway(ecuio_sim* s, const ecuio_sim_gateway_config& g)
     gw.reply_id = g.reply_id;
     gw.role = sim_role::gateway;
     gw.rx.timed = true;
+    gw.session.security.keying = &g.keying;
+    gw.session.security.never = g.never;
+    if (g.delay_us != 0) {
+        gw.session.security.delay_us = g.delay_us;
+    }
     s->gateway = s->node_count++;
 }
 
@@ -258,7 +264,7 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
         s->node_count = 1 + static_cast<int>(p.modules.count);
     }
     if (config.gateway.given) {
-        build_gateway(s, config.gateway);
+        build_gateway(s, s->ecu.config.gateway); /* the sim's, kept */
     }
     for (int i = 0; i < s->node_count; ++i) {
         sim_node& n = s->nodes[i];
@@ -426,12 +432,13 @@ bool ask_gateway(ecuio_sim* sim, const sim_node& node, const uint8_t* request,
                  uint32_t length, bool functional, int64_t t,
                  ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n)
 {
+    sim_node& gw = sim->nodes[sim->gateway];
     const ecuio_sim_gateway_verdict v = ecuio_sim_gateway_route(
-        sim->ecu.config.gateway, node.reply_id, request, functional);
+        sim->ecu.config.gateway, gw.session, node.reply_id, request, functional,
+        sim->ecu.time_us);
     if (v.fate == ecuio_sim_gateway_fate::forward) {
         return false;
     }
-    sim_node& gw = sim->nodes[sim->gateway];
     gw.r.on_id = node.reply_id;
     if (v.fate == ecuio_sim_gateway_fate::withhold &&
         !ask_busy(sim, gw, request, t, replies, capacity, n)) {

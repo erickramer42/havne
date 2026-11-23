@@ -27,7 +27,7 @@ extern "C" {
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
  *          [&route=<class or service>:<outcome>[@<reply ID>][,...]]
- *          [&gwopt=<knob>[,...]]
+ *          [&sa=<form>][&sa_delay=<ms>][&gwopt=<knob>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
@@ -105,7 +105,10 @@ extern "C" {
  * 14, 2C, 2E, 2F, 31, 3D; prog 11, 34, 35, 36, 37, 38; other the rest)
  * or by one service byte (01-BF): forward (the default for anything not
  * named), refuse (7F <service> 22 on the module's reply ID, or the code
- * .<NRC> names, 10-FE but 78) or silent. @<reply ID> aims an entry at one
+ * .<NRC> names, 10-FE but 78), silent, gated (7F <service> 33, or the
+ * code .<NRC> names, until the gateway is unlocked; forward from then
+ * on) or gated-silent (silent until unlocked). @<reply ID> aims an entry
+ * at one
  * module behind it; the most specific entry wins: a service for the
  * module, a class for the module, a service, a class. A later entry for
  * the same aim replaces the earlier; a second route key adds; at most
@@ -115,7 +118,21 @@ extern "C" {
  * reaches a module whose entry forwards; one withheld is silent, unless
  * gwopt=aloud, which refuses it for each module, keeping ISO 14229-1's
  * suppressed codes (11, 12, 31, 7E, 7F) silent unless gwopt=unsuppressed
- * too. behind, route and gwopt need gateway.
+ * too. sa: the gateway's security access in its extended session, on the
+ * engine ECU's levels (01 with 4 bytes, 03 with 16) and refusals, three
+ * wrong keys locking it out: key, the engine ECU's made-up transform
+ * and seeds; key:<seed hex>:<key hex>[,...], fixed pairs (at most 8, a
+ * seed of 4 or 16 bytes and its key as long), each level's handed out
+ * in turn, a level with none refused 12; xor:<hex> or add:<hex> (1 to
+ * 16 bytes), the key the level's seed XORed with or added to them, byte
+ * by byte, repeated; never, every seed answered and no key right.
+ * sa_delay: the lockout's delay in ms (1-600000; 10 s by default), for
+ * any form (never:<ms> says both). The unlock opens every gated entry
+ * at once and lasts the gateway's own session: a 10 01, a 10 03 or S3
+ * with no request on its own request ID locks them all again, unless
+ * gwopt=keep-any, under which a request it lets through keeps the
+ * session too. behind, route, sa, sa_delay and gwopt need gateway, a
+ * gated entry sa, sa_delay sa.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.

@@ -132,8 +132,9 @@ TEST(SimGatewayTest, ACodeIsTenToFeButNot78)
               std::string::npos);
     for (const char* bad : {"22:silent.22", "22:forward.22", "22:refuse.2",
                             "22:refuse.222", "22:refuse.", "22:refuse.zz"}) {
-        EXPECT_NE(refusal(kBase + "&route=" + bad).find("only refuse takes"),
-                  std::string::npos)
+        EXPECT_NE(
+            refusal(kBase + "&route=" + bad).find("only refuse and gated take"),
+            std::string::npos)
             << bad;
     }
 }
@@ -142,7 +143,7 @@ TEST(SimGatewayTest, RouteRefusalsNameTheirCause)
 {
     const char* const shapes[] = {
         "reading:refuse", "22:block", "00:refuse", "C0:refuse", "2:refuse",
-        "222:refuse",     "22",       ":refuse",   "22:",       "22:gated"};
+        "222:refuse",     "22",       ":refuse",   "22:",       "22:locked"};
     for (const char* bad : shapes) {
         const std::string why = refusal(kBase + "&route=" + bad);
         EXPECT_NE(why.find("isn't <class or service>:<outcome>"),
@@ -223,7 +224,7 @@ TEST(SimGatewayTest, TheGatewaysKeysAndWhatEachNeeds)
     const ecuio_sim_config both = parsed(kBase + "&gwopt=aloud,unsuppressed");
     EXPECT_TRUE(both.gateway.aloud);
     EXPECT_TRUE(both.gateway.unsuppressed);
-    EXPECT_NE(refusal(kBase + "&gwopt=loud").find("gwopt: aloud"),
+    EXPECT_NE(refusal(kBase + "&gwopt=loud").find("gwopt: keep-any"),
               std::string::npos);
     EXPECT_EQ(refusal(kBase + "&gwopt=unsuppressed"),
               "gwopt: unsuppressed says ISO 14229-1's suppressed codes aloud: "
@@ -233,15 +234,15 @@ TEST(SimGatewayTest, TheGatewaysKeysAndWhatEachNeeds)
          {"mock://gw?modules=2&behind=7E9", "mock://gw?route=22:refuse",
           "mock://gw?gwopt=aloud"}) {
         EXPECT_EQ(refusal(alone),
-                  "behind, route and gwopt are a gateway's: they need "
-                  "gateway=")
+                  "behind, route, sa, sa_delay and gwopt are a gateway's: "
+                  "they need gateway=")
             << alone;
     }
     EXPECT_TRUE(refusal("mock://gw?gateway=6F0:6F8").empty())
         << "a gateway with nothing behind it";
     EXPECT_NE(refusal("mock://gw?bogus=1")
                   .find("values, modules, sessions, profile, gateway, "
-                        "behind, route, gwopt"),
+                        "behind, route, sa, sa_delay, gwopt"),
               std::string::npos);
 
 #ifdef _WIN32

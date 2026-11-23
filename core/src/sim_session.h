@@ -23,6 +23,16 @@ struct ecuio_sim_session {
     ecuio_sim_security security;
 };
 
+/* S3 of silence at the ECU's time now_us leaves the extended session and
+ * locks its security access */
+inline void ecuio_sim_session_lapse(ecuio_sim_session& s, int64_t now_us)
+{
+    if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
+        s.extended = false;
+        ecuio_sim_security_lock(s.security);
+    }
+}
+
 /* A physical request at the ECU's time now_us: S3 lapses the session
  * first, then the request counts as heard. Services 10 and 3E are
  * answered here (handled true; the length, 0 for none): 10 03 enters the
@@ -42,16 +52,12 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
                                          bool* handled)
 {
     using namespace ecuio_sim_detail;
-    if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
-        s.extended = false;
-        ecuio_sim_security_lock(s.security);
-    }
+    ecuio_sim_session_lapse(s, now_us);
     s.heard_us = now_us;
     if (has_extended && has_security && len > 0 && req[0] == 0x27) {
         *handled = true;
-        return ecuio_sim_security_answer(s.security, s.extended,
-                                         ECUIO_SIM_SECURITY_DELAY_US, now_us,
-                                         req, len, out);
+        return ecuio_sim_security_answer(
+            s.security, s.extended, s.security.delay_us, now_us, req, len, out);
     }
     ecuio_sim_security_between(s.security);
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);
