@@ -41,6 +41,7 @@ struct StreamArgs {
     const char* plugin = nullptr;  // --plugin's package
     const char* conditions = nullptr; // --conditions' file
     bool pick_ranked = false;         // --pick ranked
+    bool allow_sleep = false;         // --allow-sleep
 };
 
 int run_stream(const StreamArgs& args);

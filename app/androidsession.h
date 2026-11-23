@@ -17,8 +17,11 @@ class SessionBridge;
 // kept to what is connected and whether it's recording, stopped at the
 // disconnect. mock:// and replay:// run without it. A relay to a computer
 // (ADR-0047) holds it the same way while it runs, so hours of a sweep
-// survive the screen going off. The notification permission is asked
-// once, at the first adapter connect or relay.
+// survive the screen going off. The service's wake lock follows Settings'
+// keep-awake switch (SessionBridge::keepAwake) for a session and is held
+// whatever it says for a relay, which serves another device's session.
+// The notification permission is asked once, at the first adapter
+// connect or relay.
 class AndroidSession : public QObject
 {
     Q_OBJECT
@@ -35,4 +38,5 @@ private:
     SessionBridge* m_bridge;
     AdapterRelay* m_relay;
     QString m_shown; // the notification's text, "" while none is up
+    bool m_held = false; // whether the shown notification's start held
 };

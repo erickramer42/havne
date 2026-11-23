@@ -262,3 +262,170 @@ timer slept with an ELM327 read half answered.
   Android's service holds a wake lock (ADR-0029 section 2); a laptop's
   idle timer runs while nobody touches it, which is every logged drive.
   A request to stay awake while a session is up is a later release's.
+  (Note of 2026-11-22: the next appendix holds the host awake while a
+  session reads.)
+
+## Appendix: 2026-11-22, the host kept awake while a session reads
+
+A laptop's idle timer runs while nobody touches it, which is every
+logged drive, and a sleep stops a session's reads until the wake (the
+appendix of 2026-11-21). A desktop and `havne-cli` hold the host awake
+through core; the phone's app holds its own.
+
+```c
+#define ECUIO_AWAKE_SYSTEM   0x00000001u
+#define ECUIO_AWAKE_WHY_MAX  128
+ecuio_status_t ecuio_session_keep_awake(ecuio_session_t* session,
+                                        uint32_t what, const char* why);
+ecuio_status_t ecuio_session_get_awake(const ecuio_session_t* session,
+                                       uint32_t* out_what);
+```
+
+`core.h` holds the contract. In short: held from the call until the
+close or a call with 0, which never waits; only a live transport holds;
+a refusal is `ECUIO_ERR_NOT_IMPLEMENTED` with the detail, and the
+session runs on. The getter reads an atomic, since the session info is
+written once at the attach and read with no lock. A take runs outside
+the session's lock and publishes after it, so a 0 or the close never
+waits on a take that waits on Linux's buses: one that comes during the
+take wins, and the take's hold is released at once.
+
+### 1. On each platform
+
+| Platform | Held by | Released by | Listed by |
+|---|---|---|---|
+| Windows | `PowerCreateRequest` with the reason, then `PowerSetRequest(PowerRequestSystemRequired)` | `PowerClearRequest`, `CloseHandle` | `powercfg /requests` (an administrator's prompt) |
+| Linux | logind's `Inhibit("idle", <program>, <why>, "block")` on the system bus, and on the session bus the desktop's `org.freedesktop.PowerManagement.Inhibit` and `org.gnome.SessionManager.Inhibit` (flag 4) where they answer, through libsystemd's sd-bus loaded at run time; a write step takes logind's `"sleep:idle"` | closing logind's descriptor; closing the session bus, which ends the desktop's inhibits | `systemd-inhibit --list`; the desktop's power manager |
+| macOS | `IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep)` | `IOPMAssertionRelease` | `pmset -g assertions` |
+| Android | the app: `SessionService`'s partial wake lock while the switch is on or a relay runs ([ADR-0029](0029-android-background-sessions.md) section 2) | | `dumpsys power` |
+| iOS | nothing | | |
+
+- **A sleep the user asks for still sleeps, except during a write
+  step.** A read holds off the idle timer alone on every platform. A
+  write step's hold on Linux is logind's sleep lock, which holds off
+  the suspend key and makes `systemctl suspend` ask for `-i`: without
+  it the write's take is refused, in words, even where the desktop's
+  inhibit holds, since that holds off only the desktop's idle timer.
+  Windows and macOS let no program hold off a sleep the user asks for,
+  so a write's hold there is the read's power request or assertion,
+  and a sleep the user asks for still sleeps a write step.
+- **Windows takes a power request, not `SetThreadExecutionState`:**
+  a request is a handle any thread can take and clear, while an
+  execution state belongs to the thread that set it, and a request
+  carries a reason the user can read.
+- **Linux asks logind and the desktop both,** since a desktop's power
+  manager may suspend on its own idle timer without asking logind
+  (Xfce's does). libsystemd is loaded when first asked, so core has no
+  build dependency; a system with neither refuses with a reason. All
+  three calls share one second, the buses' authentication included
+  (`sd_bus_call` alone would wait for it by a far longer bound of its
+  own). The lock is a descriptor and the inhibits a bus connection, so
+  both end with the process; closing the connection ends the desktop's
+  inhibits, so their cookies are never passed back. GNOME's flag 4 is
+  suspend, which its power daemon's idle suspend honors.
+- **A lid is out of reach.** logind's `LidSwitchIgnoreInhibited=`
+  defaults to `yes`, Apple's power management lets no application
+  prevent a lid's sleep, and Windows' lid action is the power plan's.
+  A run that closes the lid sets that by hand.
+
+### 2. When it holds
+
+- **A live session, while it is open.** Through link errors and the
+  reopen's backoff, since the worker reopens after a wake or an
+  adapter's return; with the app minimized or behind another window.
+  The close releases after the transport's detach, so the hold covers
+  the close's `10 01`.
+- **Not `mock://` or `replay://`.** They are desk tools, as on the
+  phone, and section 7's sleep check runs under `mock://`.
+- **The system, not the display.** The screen sleeps on its timer and
+  the session reads behind it.
+- **A write holds whatever the setting.** Core keeps a claim of its
+  own for a write-class step, at the write's level, and a caller's 0
+  releases only the caller's.
+- **At a process's end the platform drops it,** a crash included.
+
+### 3. The front ends
+
+- **The app:** Settings > Connection's "Keep the computer awake while
+  connected" ("Keep the phone awake while connected" on a phone), on
+  by default and kept between runs. On a desktop the connect thread
+  holds after the create, so a take never waits on the GUI thread.
+  Switched off during a session, it releases at once; switched on, it
+  holds from the next connect. A refusal logs one line, "Couldn't keep
+  the computer awake: " and the detail. On Android the switch gates
+  the service's wake lock, and a relay holds it whatever the switch
+  says, since it serves another device's session.
+- **`havne-cli`:** `stream` and `log` hold for a live address unless
+  `--allow-sleep`. The `session` line adds `awake` (`true` or `false`)
+  for a live session only, which schema 1 grows by (ADR-0031 section
+  3), and a refusal writes one standard-error line. `slept` lines keep
+  section 6's rule.
+- **Python:** `Session.keep_awake()` and `Session.awake`, off unless
+  asked.
+
+### 4. Tests
+
+- **UNIT:** a seam stands in for the platform's take and release,
+  counting them: `CoreTest.AMockOrReplaySessionHoldsNothing`,
+  `CoreTest.KeepAwakeRefusesAnUnknownBitAndALongWhy`,
+  `.OnlyALiveBackendHoldsAwake`, `.AWriteHoldNeedsLogindsSleepLock`
+  (Linux's rule, built everywhere); on the fake ELM327,
+  `Elm327AwakeTest.ALiveSessionHoldsUntilItsClose`,
+  `.ASecondCallTakesNothingMore`, `.KeepAwakeWithZeroReleasesAtOnce`,
+  `.ARefusedHoldSaysWhyAndTheSessionRuns`, `.TwoSessionsHoldApart`,
+  `.ZeroLeavesCoresOwnHold`, `.TheCloseReleasesAfterTheDetach`, and
+  with a take held in the seam `.AZeroDuringATakeReturnsAtOnceAndWins`,
+  `.ACloseDuringATakeReturnsAtOnceAndHoldsNothing`,
+  `.CoresFalseDuringItsTakeReturnsAtOnceAndWins`;
+  `CliUsageTest.AllowSleepTakesNoValue`,
+  `.AllowSleepIsStreamAndLogOnly`.
+- **HARNESS:** the platform's own calls:
+  `Elm327AwakeTest.LogindListsTheHoldUntilTheClose` (skipped without
+  logind, or on polkit's refusal of the lock),
+  `.AWedgedBusRefusesInsideTheSecond` (Linux: a bus that never answers),
+  `.MacOsListsTheAssertion`, `.WindowsTakesARealRequest`;
+  `BridgeTest.AMockConnectHoldsNothing`,
+  `.AConnectHoldsTheHostOnlyWhenTicked`, `.UntickingReleasesAtOnce`,
+  `.UntickedWhileConnectingReleasesAtTheApply`,
+  `.ARefusedHoldLogsOneLine`; `CliLogRunTest.ALiveSessionLineSaysAwake`;
+  the switch's words and its return in `QmlTest.settings_devices`;
+  `PythonTest.test_session`; `test_c_abi`.
+- **BENCH:** no runner's idle timer runs. BENCH prep #39: a laptop with
+  its power plan's sleep at 1 min, the app and `havne-cli log` on
+  `elm327://` to the ELM327 emulator, 5 min untouched, no `slept`
+  line; switched off, or with `--allow-sleep`, the laptop sleeps and
+  the `slept` line says how long. The same on a Linux desktop's own
+  idle suspend, on a Modern Standby laptop, and on the phone with its
+  screen off.
+
+### Consequences
+
+- **Good:** a logged drive is read end to end without a power-plan
+  edit, on every desktop, from the app, the CLI and Python alike; the
+  platform's own list says what holds the machine and why.
+- **Bad:**
+  - A laptop left connected runs its battery down; a critical battery
+    still sleeps it.
+  - A desktop whose power manager neither asks logind nor takes an
+    inhibit on the session bus isn't held; the bench run says which
+    desktops do.
+  - Whether a system-required request holds a Modern Standby laptop
+    once its display is off rests on that run.
+- Two functions and two macros join the C ABI (append-only), and
+  `test_c_abi` covers them.
+
+### Alternatives considered
+
+- **Each front end owns it:** the platform code written for the app
+  and again for the CLI, and Python's sessions sleep.
+- **A session info flag:** the info is written once at the attach and
+  read with no lock.
+- **`SetThreadExecutionState`:** the state is the calling thread's.
+- **A `systemd-inhibit` child process:** a process to start and reap
+  from inside a library, and the desktop's inhibit still missing.
+- **Linking libsystemd at build time:** a dependency for the core-only
+  tree and the AppImage, for a few calls.
+- **logind's sleep lock for a read:** a user's suspend key would do
+  nothing while connected.
+- **The display too, or only while recording:** more battery and a
+  lit screen in a car; a drive watched without Record sleeps.

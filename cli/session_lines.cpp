@@ -117,7 +117,71 @@ const char* backend_name(uint32_t backend)
     }
 }
 
+// The session info's flags a reader can't tell from the rest
+void flag_keys(cli::Line& l, const ecuio_session_info_t& info)
+{
+    if (info.flags & ECUIO_SESSION_INFO_PENDING_OFF) {
+        l.key("pending_off");
+        l.raw("true");
+    }
+    if (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) {
+        l.key("listen_only");
+        l.raw("true");
+    }
+    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
+        l.key("pick_only");
+        l.raw("true");
+    }
+}
+
+// A live session says whether the host is held awake for it
+void awake_key(cli::Line& l, const ecuio_session_t* session,
+               const ecuio_session_info_t& info)
+{
+    if (session_live(info)) {
+        uint32_t awake = 0;
+        (void)ecuio_session_get_awake(session, &awake);
+        l.key("awake");
+        l.raw(awake != 0 ? "true" : "false");
+    }
+}
+
 } // namespace
+
+bool session_live(const ecuio_session_info_t& info)
+{
+    return info.backend == ECUIO_BACKEND_ELM327 ||
+           info.backend == ECUIO_BACKEND_J2534_SURROGATE ||
+           info.backend == ECUIO_BACKEND_SOCKETCAN;
+}
+
+namespace {
+
+// stream's and log's hold on the host's idle sleep: a refusal is one
+// standard-error line and the run goes on
+void keep_host_awake(ecuio_session_t* session,
+                     const ecuio_session_info_t& info, bool allow_sleep)
+{
+    if (allow_sleep || !session_live(info)) {
+        return;
+    }
+    const ecuio_status_t st = ecuio_session_keep_awake(
+        session, ECUIO_AWAKE_SYSTEM, "havne-cli: reading a vehicle");
+    if (st != ECUIO_OK) {
+        const char* detail = ecuio_last_error_detail();
+        std::fprintf(stderr, "havne-cli: couldn't keep the host awake: %s\n",
+                     *detail != '\0' ? detail : ecuio_status_string(st));
+    }
+}
+
+} // namespace
+
+void write_held_session(Output& out, ecuio_session_t* session,
+                        const ecuio_session_info_t& info, bool allow_sleep)
+{
+    keep_host_awake(session, info, allow_sleep);
+    write_session(out, session, info);
+}
 
 void write_session(Output& out, const ecuio_session_t* session,
                    const ecuio_session_info_t& info)
@@ -162,18 +226,8 @@ void write_session(Output& out, const ecuio_session_t* session,
         l.key("api_version");
         l.string(info.api_version, sizeof info.api_version);
     }
-    if (info.flags & ECUIO_SESSION_INFO_PENDING_OFF) {
-        l.key("pending_off");
-        l.raw("true");
-    }
-    if (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) {
-        l.key("listen_only");
-        l.raw("true");
-    }
-    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
-        l.key("pick_only");
-        l.raw("true");
-    }
+    flag_keys(l, info);
+    awake_key(l, session, info);
     if (info.backend == ECUIO_BACKEND_REPLAY) {
         l.key("replay");
         l.ch('{');

@@ -201,6 +201,10 @@ struct BridgeState
     // Atomic only for the test seam: both owners read it after joining
     // the connect thread.
     std::atomic<ecuio_session_t*> m_pendingSession{nullptr};
+    // Keep-awake: the switch, read by the connect thread; and that
+    // thread's refusal line, read by the completion after the join
+    std::atomic<bool> m_keepAwake{true};
+    QString m_awakeRefusal;
     // Async disconnect support, the same shape as connect: the thread
     // owns the session it tears down, and m_disconnecting is written
     // only on the GUI thread (in disconnectSession and its completion).

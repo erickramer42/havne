@@ -1,6 +1,7 @@
 # core/CMakeLists.txt
 add_library(ecuio-core STATIC
     src/core.cpp
+    src/core_awake.cpp
     src/core_detail.cpp
     src/core_getters.cpp
     src/core_dispatch.cpp
@@ -16,6 +17,7 @@ add_library(ecuio-core STATIC
     src/health.cpp
     src/health_build.cpp
     src/health_write.cpp
+    src/host_awake.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp
@@ -156,6 +158,17 @@ if(WIN32)
     # Windows only: elsewhere it compiles to nothing, which Apple's ranlib
     # reports. Added before ecuio-core-mt reads the sources (below).
     target_sources(ecuio-core PRIVATE src/j2534_surrogate_log.cpp)
+endif()
+
+# The host held awake (core/src/host_awake*.cpp, ADR-0033's appendix "the
+# host kept awake while a session reads"): Linux loads libsystemd at run
+# time (dlopen), so it needs only the dl library; macOS its power
+# assertions. Neither is Qt.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    target_sources(ecuio-core PRIVATE src/host_awake_linux.cpp)
+    target_link_libraries(ecuio-core PRIVATE ${CMAKE_DL_LIBS})
+elseif(APPLE AND NOT IOS)
+    target_link_libraries(ecuio-core PRIVATE "-framework IOKit" "-framework CoreFoundation")
 endif()
 
 # USDT probes (ADR-0034 section 4, core/src/probes.h): systemtap's header-only

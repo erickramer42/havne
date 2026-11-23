@@ -48,7 +48,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
     test_security_store_owner.cpp test_conversation_registry.cpp
     test_conversation_session.cpp test_core_conversation.cpp
-    test_access_cut.cpp)
+    test_access_cut.cpp test_core_awake.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -227,7 +227,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
-    test_elm327_conversation.cpp)
+    test_elm327_conversation.cpp test_elm327_awake.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -823,6 +823,13 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick-only
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            PROPERTIES TIMEOUT 120)
+        # The host kept awake (ADR-0033's appendix): a live session's line
+        # says so, --allow-sleep doesn't hold, the mock has no key
+        add_test(NAME CliLogRunTest.ALiveSessionLineSaysAwake
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_awake.py
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.ALiveSessionLineSaysAwake
             PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
@@ -1490,6 +1497,10 @@ if(TARGET havne-cli)
         "--pick takes 'ranked'")
     app_cli_usage_says(StreamPickWithoutAWordIsUsage "stream|mock://x|--pick"
         "--pick takes 'ranked'")
+    app_cli_usage_says(AllowSleepTakesNoValue "stream|mock://x|--allow-sleep=1"
+        "unexpected '--allow-sleep=1'")
+    app_cli_usage_says(AllowSleepIsStreamAndLogOnly "vin|mock://x|--allow-sleep"
+        "--allow-sleep")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
@@ -2198,6 +2209,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_live.cpp
         test_bridge_fake.cpp
         test_bridge_fake_pick.cpp
+        test_bridge_fake_awake.cpp
         test_bridge_signals.cpp
         test_bridge_signals_trace.cpp
         test_bridge_ticks.cpp

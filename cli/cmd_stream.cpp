@@ -309,7 +309,7 @@ int run_stream(const StreamArgs& args)
     stream->wait = replay;
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, session, info);
+    write_held_session(out, session, info, args.allow_sleep);
     ShownConditions shown;
     if (conditions != nullptr) {
         if (!attach_conditions(out, session, conditions, conditions_source,
@@ -606,6 +606,8 @@ int cmd_stream(int argc, char** argv)
             args.values = true;
         } else if (a == "--until-scanned") {
             args.until_scanned = true;
+        } else if (a == "--allow-sleep") {
+            args.allow_sleep = true;
         } else if (a == "--count" && i + 1 < argc) {
             if (!parse_count(argv[++i], args.count)) {
                 std::fprintf(
