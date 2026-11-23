@@ -259,6 +259,7 @@ ecuio_status_t ecuio_session_create(
         }
         return found;
     }
+    s->conversation = ecuio_conversation_of(profile_set);
 
     /* uds-generic (ADR-0020) reads its DIDs from the query and gets a set
      * of its own, owned by the session; no other profile takes ?did=.
