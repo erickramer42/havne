@@ -64,7 +64,8 @@ std::string recording_export::export_line() const
         "export  %s (ADR-0054), Havne %s: frames.csv %llu frames (left "
         "out: %llu of identification replies, %llu of text signals' "
         "messages, %llu segments of messages that couldn't be "
-        "reassembled); signals.csv %llu values (left out: %llu of "
+        "reassembled, %llu of messages holding a VIN-shaped token); "
+        "signals.csv %llu values (left out: %llu of "
         "identification signals, %llu of text signals); markers.csv %llu "
         "markers, their labels as typed; events.log %llu lines left out "
         "(the caller's notes, its other lines and lines of a kind the "
@@ -74,6 +75,7 @@ std::string recording_export::export_line() const
         static_cast<unsigned long long>(frames_left_[kIdentification]),
         static_cast<unsigned long long>(frames_left_[kTextValues]),
         static_cast<unsigned long long>(frames_left_[kUnattributable]),
+        static_cast<unsigned long long>(frames_left_[kVinShaped]),
         static_cast<unsigned long long>(r_.values),
         static_cast<unsigned long long>(vi),
         static_cast<unsigned long long>(vt),

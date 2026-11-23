@@ -202,7 +202,8 @@ TEST(ExportTest, FramesAsTheyArrivedAreWrittenAsSocketCanHoldsThem)
                   "from messages an adapter delivered whole; left out: 0 "
                   "frames of identification replies, 0 of text signals' "
                   "messages, 0 segments of messages that couldn't be "
-                  "reassembled");
+                  "reassembled, 0 frames of messages holding a VIN-shaped "
+                  "token");
     ASSERT_EQ(e.pcap.packets.size(), 6u);
     const std::vector<Packet>& k = e.pcap.packets;
     for (size_t i = 0; i < k.size(); ++i) {

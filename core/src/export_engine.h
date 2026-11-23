@@ -345,6 +345,21 @@ private:
                     other_id_identification& others,
                     std::vector<uint8_t>& whole);
 
+    /* A message the VIN window rule takes (scrub::check::window_in): its
+     * bytes kept for the identity values the plan finds by its end */
+    bool vin_window(const uint8_t* p, size_t n);
+
+    /* The joins (any_id_messages) the window rule takes, judged at the
+     * plan's end */
+    void vin_joins(std::vector<joined>& joins);
+
+    /* The plan's end for the window rule: a message it took that holds an
+     * identity value fails the export, as the second check would; so does
+     * a join it took that still has a frame kept, whose frames not yet
+     * left out then are, each once */
+    bool vin_end();
+    bool vin_joined_end();
+
     /* Messages reassembled from the wire: an identification reply's
      * frames left out, a text or hex def's, a torn one's on a reply ID */
     bool judge(std::vector<message_end>& ends);
@@ -703,6 +718,9 @@ private:
     std::string made_up_;
     std::string made_up_flow_;
     std::vector<joined> joins_;
+    /* The plan's messages the window rule took, and the joins' frames */
+    std::vector<std::vector<uint8_t>> vin_messages_;
+    std::vector<joined> vin_joined_;
     uint64_t written_ = 0;
 };
 

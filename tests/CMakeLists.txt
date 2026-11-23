@@ -35,7 +35,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_export_csv.cpp test_export_folder.cpp test_export_range.cpp
     test_export_frames.cpp test_export_cancel.cpp test_scrub_mask.cpp
-    test_export_mask.cpp
+    test_export_mask.cpp test_export_vin_messages.cpp
     test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
     test_health_baseline.cpp test_csv_import.cpp test_csv_import_recording.cpp
