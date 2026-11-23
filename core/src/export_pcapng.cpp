@@ -222,6 +222,56 @@ bool recording_export::add_identity(const uint8_t* msg, size_t n)
     return true;
 }
 
+bool recording_export::plan_whole(const ecuio_frame_t& f, const seg& s)
+{
+    if (!folder_ && !re_segmentable(f)) {
+        left_out(s, kUnattributable, false);
+    } else if (!raw_ && scrub::identification(f.data, f.data_length)) {
+        if (!add_identity(f.data, f.data_length)) {
+            return false;
+        }
+        left_out(s, kIdentification, false);
+    } else if (!raw_ &&
+               text_message(f.arbitration_id, f.flags, f.data, f.data_length)) {
+        left_out(s, kTextValues, false);
+    } else if (folder_ && in_range(s.host_us)) {
+        ++r_.frames; /* kept whole, one row */
+    } else if (in_range(s.host_us)) {
+        const uint64_t n =
+            segments(f.arbitration_id,
+                     (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0,
+                     static_cast<uint16_t>(f.data_length));
+        r_.frames += n;
+        r_.made_up += n;
+    }
+    return true;
+}
+
+bool recording_export::plan_other(const ecuio_frame_t& f, const seg& s,
+                                  other_id_identification& others,
+                                  std::vector<uint8_t>& whole)
+{
+    uint8_t bytes[pc::kFdBytes];
+    uint32_t n = 0;
+    /* a frame no CAN frame can be, or a reply whose ISO-TP form isn't
+     * read (CAN FD's) */
+    if ((!folder_ && !pc::socketcan(f, bytes, &n)) ||
+        (!raw_ && reassembly::unread_reply(f))) {
+        left_out(s, kUnattributable, false);
+    } else if (!raw_ && others.take(f, &whole)) {
+        if (!whole.empty() && !add_identity(whole.data(), whole.size())) {
+            return false;
+        }
+        left_out(s, kIdentification, false);
+    } else if (!raw_ &&
+               text_message(f.arbitration_id, f.flags, f.data, f.data_length)) {
+        left_out(s, kTextValues, false);
+    } else if (in_range(s.host_us)) {
+        ++r_.frames;
+    }
+    return true;
+}
+
 bool recording_export::plan(const std::string& folder)
 {
     if (canceled(true)) {
@@ -254,48 +304,11 @@ bool recording_export::plan(const std::string& folder)
             }
             continue;
         }
-        if ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0) {
-            if (!folder_ && !re_segmentable(f)) {
-                left_out(s, kUnattributable, false);
-            } else if (!raw_ &&
-                       scrub::identification(f.data, f.data_length)) {
-                if (!add_identity(f.data, f.data_length)) {
-                    return false;
-                }
-                left_out(s, kIdentification, false);
-            } else if (!raw_ && text_message(f.arbitration_id, f.flags,
-                                             f.data, f.data_length)) {
-                left_out(s, kTextValues, false);
-            } else if (folder_ && in_range(s.host_us)) {
-                ++r_.frames; /* kept whole, one row */
-            } else if (in_range(s.host_us)) {
-                const uint64_t n =
-                    segments(f.arbitration_id,
-                             (f.flags & ECUIO_FRAME_FLAG_EXTENDED) != 0,
-                             static_cast<uint16_t>(f.data_length));
-                r_.frames += n;
-                r_.made_up += n;
-            }
-            continue;
-        }
-        uint8_t bytes[pc::kFdBytes];
-        uint32_t n = 0;
-        /* a frame no CAN frame can be, or a reply whose ISO-TP form
-         * isn't read (CAN FD's) */
-        if ((!folder_ && !pc::socketcan(f, bytes, &n)) ||
-            (!raw_ && reassembly::unread_reply(f))) {
-            left_out(s, kUnattributable, false);
-        } else if (!raw_ && others.take(f, &whole)) {
-            if (!whole.empty() &&
-                !add_identity(whole.data(), whole.size())) {
-                return false;
-            }
-            left_out(s, kIdentification, false);
-        } else if (!raw_ && text_message(f.arbitration_id, f.flags, f.data,
-                                         f.data_length)) {
-            left_out(s, kTextValues, false);
-        } else if (in_range(s.host_us)) {
-            ++r_.frames;
+        const bool ok = (f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0
+                            ? plan_whole(f, s)
+                            : plan_other(f, s, others, whole);
+        if (!ok) {
+            return false;
         }
     }
     if (got < 0) {

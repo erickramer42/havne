@@ -337,6 +337,14 @@ private:
     /* The first pass: each frame's fate, the counts, the identity values */
     bool plan(const std::string& folder);
 
+    /* A frame an adapter delivered whole: its fate and its count */
+    bool plan_whole(const ecuio_frame_t& f, const seg& s);
+
+    /* A frame on_the_wire doesn't take, as it crossed the bus */
+    bool plan_other(const ecuio_frame_t& f, const seg& s,
+                    other_id_identification& others,
+                    std::vector<uint8_t>& whole);
+
     /* Messages reassembled from the wire: an identification reply's
      * frames left out, a text or hex def's, a torn one's on a reply ID */
     bool judge(std::vector<message_end>& ends);
