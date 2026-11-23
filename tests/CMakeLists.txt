@@ -394,7 +394,7 @@ if(TARGET havne-cli)
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
-        test_cli_summary.cpp test_cli_emulator.cpp)
+        test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -486,6 +486,13 @@ if(TARGET havne-cli)
         app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
                --elm327 tcp:0)
+        # The gateway's seed and key pairs never reach the output: its
+        # elm327 line shows sa=key:*, the other keys as given
+        app_cli_golden(SimElm327HidesTheGatewaysSeedsAndKeys sim-elm327-sa.jsonl
+            --ignore listen
+            -- $<TARGET_FILE:havne-cli> sim
+               "mock://sim?modules=2&gateway=1&behind=7E9&sa=key:01020304:0A0B0C0D&sa_delay=200"
+               --elm327 tcp:0 --seconds 1)
         # The emulator on 127.0.0.1, a port the system picks: a host's
         # ELM327 exchange, core's own elm327:// session, a second module's
         # DID, a module behind the gateway, a plugin's DIDs, and python-OBD
