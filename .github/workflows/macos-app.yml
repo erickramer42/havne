@@ -1,0 +1,219 @@
+name: macOS app
+
+# The macOS app for Apple silicon (docs/macos.md) as one zip, built by one
+# workflow for both callers: ci.yml's macos-app (every run, the zip a
+# 14-day artifact that macos-smoke launches) and release.yml's macos-app
+# job (the release's download, named by `file`). Intel Macs are out: the
+# app and every Qt library in the bundle are arm64 alone.
+#
+# There is no Apple Developer account behind it, so the bundle carries an
+# ad hoc signature and no identity: Apple silicon refuses to run an
+# arm64 binary with no signature at all (the linker's own is invalidated
+# once macdeployqt rewrites the bundle), and an ad hoc one satisfies that
+# without a Team ID. It is not notarized, so the first open goes through
+# System Settings > Privacy & Security.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build, empty for the caller's
+        type: string
+        default: ''
+      version:
+        description: The version the bundle must report, empty for project()'s
+        type: string
+        default: ''
+      file:
+        description: The zip's file name
+        type: string
+        default: havne-macos-arm64.zip
+      artifact:
+        description: The artifact the zip is uploaded as
+        type: string
+        default: havne-macos-arm64
+      retention_days:
+        description: Days the artifact is kept
+        type: number
+        default: 14
+      components:
+        description: Also write the SBOM's component list beside the zip (the release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The kit macos-build restores and, on main's pushes, saves: this
+      # job only reads it, so a copy missing from the cache is
+      # downloaded and never saved
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-mac-6.12.0-clang_64-aqt-3.3
+
+      - name: Setup Qt 6.12.0
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
+          version: '6.12.0'
+          host: 'mac'
+          target: 'desktop'
+          arch: 'clang_64'
+
+      - name: Point the build at the kit
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/macos"
+          test -x "$kit/bin/macdeployqt" || { echo "::error::no macdeployqt under $kit"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
+
+      # Qt's deployment target (macOS 14.4 for Qt 6.12) is left alone: the
+      # bundle's LSMinimumSystemVersion is that number
+      - name: Build the app (Release, arm64)
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build build --target havne --parallel 4
+          find build -maxdepth 3 -name Havne.app -type d
+
+      # macdeployqt copies the Qt frameworks and the plugins and QML
+      # modules app/qml imports into the bundle. Then, in this order, as
+      # each step breaks the signature the next one needs unbroken:
+      #  - no qmltooling plugins (the debugger's server, as the Windows
+      #    zip leaves out);
+      #  - every Mach-O file thinned to arm64 (Qt's kit is universal);
+      #  - no rpath that isn't relative (the build tree's and the kit's);
+      #  - the ad hoc signature over the finished bundle.
+      - name: Deploy Qt into the bundle and sign it ad hoc
+        run: |
+          app=$(find build -maxdepth 3 -name Havne.app -type d | head -n 1)
+          [ -n "$app" ] || { echo "::error::no Havne.app under build/"; exit 1; }
+          "$QT_ROOT_DIR/bin/macdeployqt" "$app" -qmldir=app/qml -verbose=1
+          rm -rf "$app/Contents/PlugIns/qmltooling"
+          find "$app" -type f -exec file {} + | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
+          [ -s "$RUNNER_TEMP/macho.txt" ] || { echo "::error::no Mach-O file in the bundle"; exit 1; }
+          while IFS= read -r f; do
+            archs=$(lipo -archs "$f")
+            case " $archs " in
+              *" arm64 "*" x86_64 "*|*" x86_64 "*" arm64 "*)
+                lipo -thin arm64 "$f" -output "$f.thin"
+                mv "$f.thin" "$f"
+                chmod +x "$f" ;;
+            esac
+          done < "$RUNNER_TEMP/macho.txt"
+          while IFS= read -r f; do
+            otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }' | while IFS= read -r rp; do
+              case "$rp" in @*) ;; *) install_name_tool -delete_rpath "$rp" "$f" ;; esac
+            done
+          done < "$RUNNER_TEMP/macho.txt"
+          codesign --force --deep --sign - "$app"
+          echo "APP=$app" >> "$GITHUB_ENV"
+
+      # Fails when the bundle lacks app/macos/Info.plist.in's keys, its
+      # versions aren't project()'s (the release's tag, without its
+      # -rcN), the signature is anything but ad hoc or has a Team ID, a
+      # Mach-O file isn't arm64 alone, or anything links outside the
+      # bundle and the system (a path into the runner's Qt kit).
+      - name: Check the bundle
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          key() { plutil -extract "$1" raw -o - "$APP/Contents/Info.plist" 2>/dev/null; }
+          [ "$(key CFBundleIdentifier)" = io.github.erickramer42.havne ] ||
+            fail "CFBundleIdentifier is '$(key CFBundleIdentifier)'"
+          [ -n "$(key NSLocalNetworkUsageDescription)" ] ||
+            fail "no NSLocalNetworkUsageDescription in Info.plist"
+          [ -n "$(key LSMinimumSystemVersion)" ] || fail "no LSMinimumSystemVersion in Info.plist"
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ -n "$VERSION" ] || fail "no VERSION in project(Havne ...)"
+          want=${EXPECTED_VERSION:-$VERSION}
+          want=${want%%-rc*}
+          [ "$want" = "$VERSION" ] || fail "expected version $want, but project() says $VERSION"
+          for k in CFBundleShortVersionString CFBundleVersion; do
+            [ "$(key $k)" = "$want" ] || fail "$k is '$(key $k)', not $want"
+          done
+          echo "Havne $(key CFBundleShortVersionString), macOS $(key LSMinimumSystemVersion) or later"
+
+          sig=$(codesign -dv "$APP" 2>&1)
+          echo "$sig"
+          grep -q '^Signature=adhoc' <<< "$sig" || fail "the signature isn't ad hoc"
+          grep -q '^TeamIdentifier=not set' <<< "$sig" || fail "the signature carries a Team ID"
+          codesign --verify --deep --strict "$APP" || fail "the signature doesn't verify"
+
+          find "$APP" -type f -exec file {} + | grep 'Mach-O' | sed 's/: *Mach-O.*//' > "$RUNNER_TEMP/macho.txt"
+          bad=0
+          while IFS= read -r f; do
+            [ "$(lipo -archs "$f")" = arm64 ] || { echo "::error::$f isn't arm64 alone: $(lipo -archs "$f")"; bad=1; }
+            # the first line names the file; each other line, a library
+            otool -L "$f" | tail -n +2 | awk '{ print $1 }' | grep -Ev '^(/System/Library/|/usr/lib/|@rpath/|@executable_path/|@loader_path/)' |
+              sed "s|^|::error::$f links |" && bad=1
+            otool -l "$f" | awk '/cmd LC_RPATH/ { getline; getline; print $2 }' | grep -v '^@' |
+              sed "s|^|::error::$f has the rpath |" && bad=1
+          done < "$RUNNER_TEMP/macho.txt"
+          [ "$bad" = 0 ] || exit 1
+          echo "$(wc -l < "$RUNNER_TEMP/macho.txt" | tr -d ' ') Mach-O files, all arm64, none linking outside the bundle"
+
+      # ditto keeps the bundle's symbolic links and its signature, which
+      # zip does not; the extracted copy is checked, as the user gets it
+      - name: Zip the bundle
+        env:
+          ZIP: ${{ inputs.file }}
+        run: |
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          rm -rf "$RUNNER_TEMP/unzipped" && mkdir "$RUNNER_TEMP/unzipped"
+          ditto -x -k "$ZIP" "$RUNNER_TEMP/unzipped"
+          codesign --verify --deep --strict "$RUNNER_TEMP/unzipped/Havne.app"
+          shasum -a 256 "$ZIP"
+          ls -l "$ZIP"
+
+      - name: The SBOM's component list
+        if: inputs.components
+        env:
+          ZIP: ${{ inputs.file }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          zip_ = os.environ["ZIP"]
+          frameworks = sorted(n for n in os.listdir(os.environ["APP"] + "/Contents/Frameworks")
+                              if n.endswith(".framework"))
+          listing = {"download": zip_, "purpose": "APPLICATION", "components": [
+              {"name": "Qt", "version": "6.12.0",
+               "supplier": "Organization: The Qt Company",
+               "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+               "purl": "pkg:generic/qt@6.12.0", "files": frameworks,
+               "comment": "the frameworks, plugins and QML modules macdeployqt copied into the bundle"}]}
+          with open(zip_ + ".components.json", "w") as f:
+              json.dump(listing, f, indent=2)
+          PY
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: |
+            ${{ inputs.file }}
+            ${{ inputs.file }}.components.json
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

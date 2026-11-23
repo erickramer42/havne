@@ -1663,117 +1663,98 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # The unsigned iOS .ipa, built and checked by ios-ipa.yml (release.yml's
+  # ios job calls it too). Only main's pushes save the iOS kit's cache.
   ios-build:
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
+    uses: ./.github/workflows/ios-ipa.yml
+    with:
+      save_cache: ${{ github.ref == 'refs/heads/main' }}
+
+  # The macOS app for Apple silicon, built, ad hoc signed and checked by
+  # macos-app.yml (release.yml's macos-app job calls it too); macos-smoke
+  # launches the zip.
+  macos-app:
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
+    uses: ./.github/workflows/macos-app.yml
+
+  # The macOS app's launch smoke: the zip as a user unpacks it, opened
+  # through Launch Services, checked alive 15 s later, with a screenshot
+  # of the runner's display. The app has no option to connect at start,
+  # so what it draws is Home; there is no mock:// session here. A runner
+  # that draws nothing (a blank or missing screenshot) is not a failure:
+  # the screenshot is evidence to read. It runs wherever macos-app does:
+  # about two minutes beside the app's build.
+  macos-smoke:
+    needs: [scope, macos-app]
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: macos-latest
-    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The iOS kit is the largest cache entry (about 3.5 GiB): a copy
-      # per branch takes the repository past the Actions cache's 10 GB
-      # and evicts the other kits, so only main saves it; every ref
-      # restores it (a restore keeps main's entry recently used). The key
-      # is ours, not install-qt-action's own (that one holds the runner's
-      # kernel version, so a runner update would miss on every branch): it
-      # names what decides the install's bytes, so change it with the
-      # version, target or aqtinstall.
-      - name: Restore the iOS Qt kit from the cache
-        id: qt-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Download the zip
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          path: ${{ github.workspace }}/Qt
-          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-2
+          name: havne-macos-arm64
+          path: macos
 
-      # install-qt-action installs into <dir>/Qt, so dir is the workspace and
-      # the kit lands in the cached folder
-      - name: Install Qt 6.12.0 (ios + macOS host)
-        if: steps.qt-cache.outputs.cache-hit != 'true'
-        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
-        with:
-          cache: false
-          dir: ${{ github.workspace }}
-          version: '6.12.0'
-          host: 'mac'
-          target: 'ios'
-          arch: 'ios'
-          extra: '--autodesktop'
-
-      - name: Save the iOS Qt kit to the cache (main only)
-        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ github.workspace }}/Qt
-          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
-
-      # What install-qt-action exports after an install, for the restored
-      # kit: the build below needs QT_ROOT_DIR and QT_HOST_PATH
-      - name: Point the build at the restored kit
-        if: steps.qt-cache.outputs.cache-hit == 'true'
+      # SIMCTL_CHILD-style variables don't exist here: open --env passes
+      # them. Qt on Apple platforms logs to os_log unless forced to
+      # stderr; QSG_INFO logs the scene graph's backend once the window
+      # is exposed, so no QSG_INFO line means it never got that far.
+      # HAVNE_SETTINGS_DIR keeps the run's preferences out of the runner's
+      - name: Launch and check Havne stays up
         run: |
-          kit="${{ github.workspace }}/Qt/6.12.0"
-          {
-            echo "QT_ROOT_DIR=$kit/ios"
-            echo "QT_HOST_PATH=$kit/macos"
-            echo "QT_PLUGIN_PATH=$kit/ios/plugins"
-            echo "QML2_IMPORT_PATH=$kit/ios/qml"
-          } >> "$GITHUB_ENV"
-          echo "$kit/ios/bin" >> "$GITHUB_PATH"
+          mkdir -p smoke app "$RUNNER_TEMP/settings"
+          ditto -x -k macos/havne-macos-arm64.zip app
+          APP="$PWD/app/Havne.app"
+          codesign --verify --deep --strict "$APP"
+          : > smoke/stdout.log
+          : > smoke/stderr.log
+          sw_vers | tee smoke/host.txt
+          system_profiler SPDisplaysDataType | grep -iE 'chipset|metal|resolution' | tee -a smoke/host.txt || true
+          open -n "$APP" \
+            --env HAVNE_SETTINGS_DIR="$RUNNER_TEMP/settings" \
+            --env QT_FORCE_STDERR_LOGGING=1 --env QSG_INFO=1 \
+            --stdout "$PWD/smoke/stdout.log" --stderr "$PWD/smoke/stderr.log"
+          sleep 15
+          screencapture -x smoke/launch-15s.png || echo "::warning::no screenshot"
+          PID=$(pgrep -x Havne | head -n 1 || true)
+          echo "--- Havne stderr ---"
+          cat smoke/stderr.log || true
+          echo "--- end stderr ---"
+          if grep -q "QML FAILED TO LOAD" smoke/stderr.log; then
+            echo "::error::QML failed to load"
+            exit 1
+          fi
+          if [ -z "$PID" ]; then
+            echo "::error::Havne is not running 15 s after the launch"
+            exit 1
+          fi
+          echo "Havne still running after 15 s, pid $PID"
+          if grep -q "QSG" smoke/stderr.log; then echo "The scene graph initialized"; else echo "::warning::no scene graph line in stderr"; fi
+          sleep 15
+          screencapture -x smoke/launch-30s.png || true
+          kill -0 "$PID" || { echo "::error::Havne exited within 30 s of the launch"; exit 1; }
+          pkill -x Havne || true
 
-      - name: Check the kit is there
+      - name: Collect crash reports
+        if: failure()
         run: |
-          test -x "$QT_ROOT_DIR/bin/qt-cmake" || { echo "::error::no qt-cmake under $QT_ROOT_DIR"; exit 1; }
-          test -d "$QT_HOST_PATH/bin" || { echo "::error::no host Qt at $QT_HOST_PATH"; exit 1; }
+          mkdir -p smoke
+          cp ~/Library/Logs/DiagnosticReports/Havne* smoke/ 2>/dev/null || true
 
-      # qt-cmake applies Qt's iOS toolchain and its minimum deployment
-      # target (iOS 18 for Qt 6.12), so neither is set by hand.
-      - name: Build for device (no code signing)
-        run: |
-          ls "$(dirname "$QT_ROOT_DIR")"
-          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_OSX_ARCHITECTURES=arm64
-          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
-
-      # The device build as an unsigned .ipa, for sideloading
-      # (docs/ios.md): the tester's own tool signs it with their Apple ID,
-      # so the file carries no provisioning profile and no device's ID.
-      # Fails if the bundle lacks app/ios/Info.plist.in's keys, its versions
-      # aren't project()'s, or it holds a signature or a profile.
-      - name: Package unsigned .ipa
-        run: |
-          app=$(find build -type d -name Havne.app -path '*Release-iphoneos*' | head -n 1)
-          fail() { echo "::error::$1"; exit 1; }
-          [ -n "$app" ] || fail "no Release-iphoneos/Havne.app under build/"
-          key() { plutil -extract "$1" raw -o - "$app/Info.plist" 2>/dev/null; }
-          [ "$(key CFBundleIdentifier)" = io.github.erickramer42.havne ] ||
-            fail "CFBundleIdentifier is '$(key CFBundleIdentifier)'"
-          [ -n "$(key NSLocalNetworkUsageDescription)" ] ||
-            fail "no NSLocalNetworkUsageDescription in Info.plist"
-          [ "$(key UIFileSharingEnabled)" = true ] ||
-            fail "UIFileSharingEnabled isn't true in Info.plist"
-          [ "$(key LSSupportsOpeningDocumentsInPlace)" = true ] ||
-            fail "LSSupportsOpeningDocumentsInPlace isn't true in Info.plist"
-          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-          [ -n "$VERSION" ] || fail "no VERSION in project(Havne ...)"
-          for k in CFBundleShortVersionString CFBundleVersion; do
-            [ "$(key $k)" = "$VERSION" ] || fail "$k is '$(key $k)', not $VERSION"
-          done
-          [ ! -e "$app/embedded.mobileprovision" ] || fail "a provisioning profile in the bundle"
-          [ ! -e "$app/_CodeSignature" ] || fail "a signature in the bundle"
-          echo "Havne $(key CFBundleShortVersionString) ($(key CFBundleVersion)), iOS $(key MinimumOSVersion) or later"
-          mkdir -p ipa/Payload
-          ditto "$app" ipa/Payload/Havne.app
-          (cd ipa && zip -qry ../havne-ios-unsigned.ipa Payload)
-          shasum -a 256 havne-ios-unsigned.ipa
-
-      - name: Upload unsigned .ipa
+      - name: Upload smoke artifacts
+        if: success() || failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: havne-ios-arm64-unsigned
-          path: havne-ios-unsigned.ipa
-          if-no-files-found: error
+          name: macos-smoke
+          path: smoke/
+          if-no-files-found: ignore
           retention-days: 14
 
   # Launch smoke on the iOS Simulator: install, launch, and check the app
