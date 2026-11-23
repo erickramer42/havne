@@ -36,6 +36,30 @@
 constexpr int32_t ECUIO_GUEST_ABI = 1;
 constexpr uint32_t ECUIO_GUEST_BUFFER_BYTES = 4096;
 
+/* What accept's kind says is at the buffer (conversation.h hands each) */
+enum ecuio_guest_accept : int32_t {
+    ECUIO_GUEST_REPLY = 1,   /* the reply to the module's request: its
+                                positive or negative reply, whole */
+    ECUIO_GUEST_TIMEOUT = 2, /* no reply: its wait ran out or its write
+                                failed; len 0 */
+    ECUIO_GUEST_SEED = 3,    /* the level, then the seed: the key is
+                                written at the buffer, its length the
+                                answer */
+    ECUIO_GUEST_UNLOCK = 4,  /* an unlock's end: the level, the result
+                                below, the module's code (0 for none) */
+};
+
+/* An unlock's result, ECUIO_GUEST_UNLOCK's second byte */
+enum ecuio_guest_unlock : uint8_t {
+    ECUIO_GUEST_UNLOCKED = 0, /* 67, or a seed of zeroes: the level is open */
+    ECUIO_GUEST_REFUSED = 1,  /* the key was refused, unanswered or its
+                                 write failed, or the session was lost
+                                 with the key on its way: one failed
+                                 attempt, the delay runs */
+    ECUIO_GUEST_ENDED = 2,    /* the attempt ended before any key reached
+                                 the bus: nothing counted */
+};
+
 /* An export's place in ECUIO_GUEST_EXPORTS */
 enum ecuio_guest_export : uint32_t {
     ECUIO_GUEST_EXPORT_ABI = 0,

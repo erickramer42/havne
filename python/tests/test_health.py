@@ -61,7 +61,7 @@ def same_counts(got, line):
     assert (got.ecus, got.codes, got.values, got.since_cleared) == \
         (line["ecus"], line["codes"], line["values"], line["since_cleared"])
     assert got.left_out.identification == line["left_out"]["identification"]
-    assert got.left_out[1:] == (0, 0, 0)
+    assert got.left_out[1:] == (0,) * 5
     assert got.vin_decoded == line["vin_decoded"]
     assert {None: "none", True: "read", False: "unread"}[got.baseline_read] == line["baseline"]
     assert got.settled is None

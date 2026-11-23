@@ -27,6 +27,7 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +50,10 @@ constexpr size_t kWriteChunk = 1u << 16;
 constexpr uint32_t kIdentification = ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION;
 constexpr uint32_t kUnattributable = ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE;
 constexpr uint32_t kTextValues = ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES;
+constexpr uint32_t kVinShaped = ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED;
+constexpr uint32_t kVinMasked = ECUIO_EXPORT_LEFT_OUT_VIN_MASKED;
+/* A folder copy's note on its masks, beside the files it explains */
+constexpr const char* kMaskNoteName = "masks.txt";
 constexpr const char* kUtf8Bom = "\xEF\xBB\xBF"; /* the user CSVs start with one */
 /* The wide CSV's silence (ADR-0056 section 4): a column with no sample
  * for this long, or 3x its usual interval if longer, leaves the rule */
@@ -83,6 +88,16 @@ using fr::message_end;
 using fr::other_id_identification;
 using fr::reassembly;
 using fr::seg;
+
+/* A copy's JSON file (signals.json, conditions.json) as a scrubbed copy
+ * writes it, masked whole in memory so events.log can name its hash */
+struct masked_copy {
+    bool present = false;
+    uint64_t masks = 0;
+    std::string bytes;
+    std::string source_sha; /* the recording's file's */
+    std::string sha;        /* the copy's */
+};
 
 struct wide_column {
     std::string name;     /* as signals.csv names it: a key, or a name */
@@ -322,6 +337,29 @@ private:
     /* The first pass: each frame's fate, the counts, the identity values */
     bool plan(const std::string& folder);
 
+    /* A frame an adapter delivered whole: its fate and its count */
+    bool plan_whole(const ecuio_frame_t& f, const seg& s);
+
+    /* A frame on_the_wire doesn't take, as it crossed the bus */
+    bool plan_other(const ecuio_frame_t& f, const seg& s,
+                    other_id_identification& others,
+                    std::vector<uint8_t>& whole);
+
+    /* A message the VIN window rule takes (scrub::check::window_in): its
+     * bytes kept for the identity values the plan finds by its end */
+    bool vin_window(const uint8_t* p, size_t n);
+
+    /* The joins (any_id_messages) the window rule takes, judged at the
+     * plan's end */
+    void vin_joins(std::vector<joined>& joins);
+
+    /* The plan's end for the window rule: a message it took that holds an
+     * identity value fails the export, as the second check would; so does
+     * a join it took that still has a frame kept, whose frames not yet
+     * left out then are, each once */
+    bool vin_end();
+    bool vin_joined_end();
+
     /* Messages reassembled from the wire: an identification reply's
      * frames left out, a text or hex def's, a torn one's on a reply ID */
     bool judge(std::vector<message_end>& ends);
@@ -347,21 +385,46 @@ private:
         return true;
     }
 
+    /* The file's check: scrub::kMask for text a user wrote (names,
+     * labels, markers), kRefuse for bytes core writes */
+    void start_check(uint32_t mode)
+    {
+        file_check_.reset(new scrub::check(values_, mode));
+        masking_ = (mode & scrub::kMask) != 0;
+        fed_ = 0;
+    }
+
+    /* buf_ to the file, checked: masking, the last kMaskReach bytes wait
+     * for the next chunk, so a mask the next finds can reach them; all
+     * ends the file */
     bool flush(bool all)
     {
-        if (buf_.empty() || (!all && buf_.size() < kWriteChunk)) {
+        if ((buf_.empty() && !all) || (!all && buf_.size() < kWriteChunk)) {
             return true;
         }
-        if (!raw_) {
+        size_t keep = 0;
+        if (!raw_ && masking_) {
+            auto* b = reinterpret_cast<uint8_t*>(&buf_[0]);
+            file_check_->feed_masking(b + fed_, buf_.size() - fed_, fed_);
+            if (all) {
+                (void)file_check_->finish_masking(b + buf_.size(), buf_.size());
+                r_.left_out[kVinMasked] += file_check_->masked();
+            } else {
+                /* a guard: each masking writer flushes at a line's end */
+                keep = (std::min)(scrub::kMaskReach, buf_.size());
+            }
+            file_check_->written(b, buf_.size() - keep);
+        } else if (!raw_) {
             file_check_->feed(reinterpret_cast<const uint8_t*>(buf_.data()),
                               buf_.size());
         }
-        if (std::fwrite(buf_.data(), 1, buf_.size(), file_.get()) !=
-            buf_.size()) {
+        const size_t n = buf_.size() - keep;
+        if (std::fwrite(buf_.data(), 1, n, file_.get()) != n) {
             return fail("the export can't be written: %s",
                         files::errno_words(errno));
         }
-        buf_.clear();
+        buf_.erase(0, n);
+        fed_ = keep;
         return true;
     }
 
@@ -552,7 +615,8 @@ private:
     std::string export_line() const;
 
     /* A file of the copy: written under partial, checked as it goes */
-    bool begin_file(const std::string& partial, const char* name);
+    bool begin_file(const std::string& partial, const char* name,
+                    uint32_t mode);
 
     bool end_file(const char* name);
 
@@ -562,8 +626,22 @@ private:
      * carries checked before segmenting, as the pcapng's second pass */
     bool write_frames(const std::string& folder);
 
-    /* signals.json or conditions.json whole, when the folder has it */
+    /* A file as it is, when the folder has it: a raw copy's JSON files,
+     * a masked copy's note */
     bool copy_file(const std::string& folder, const char* name);
+
+    /* signals.json or conditions.json, up to max bytes, masked whole
+     * (scrub::kJson); past max it's left out. A masked file that no longer
+     * loads where the recording's did refuses the copy. */
+    bool mask_copy(const std::string& folder, const char* name, size_t max,
+                   masked_copy* out);
+
+    /* A masked copy as planned, under a check that refuses */
+    bool write_copy(const char* name, const masked_copy& c);
+
+    /* masks.txt: what the masks are, when the copy holds any or the
+     * recording was a masked copy itself */
+    bool write_note();
 
     bool write_folder(const std::string& folder);
 
@@ -583,6 +661,8 @@ private:
     file_ptr file_;
     std::string buf_;
     std::unique_ptr<scrub::check> file_check_;
+    bool masking_ = false;
+    size_t fed_ = 0; /* buf_'s bytes the check has, held for its masks */
     std::unique_ptr<ecuio_frame_t> made_;
     std::unique_ptr<ecuio_frame_t> probe_;
     std::unique_ptr<isotp_tx> tx_;
@@ -616,6 +696,9 @@ private:
     bool format3_ = false; /* format 3 or later, which have cond lines */
     bool has_markers_ = false;
     bool has_latency_ = false;
+    bool had_note_ = false; /* the recording's own masks.txt */
+    masked_copy signals_copy_;
+    masked_copy conditions_copy_;
     bool held_seen_ = false; /* a cond line before the range */
     std::vector<std::string> events_head_;
     std::vector<std::string> events_body_;
@@ -635,6 +718,9 @@ private:
     std::string made_up_;
     std::string made_up_flow_;
     std::vector<joined> joins_;
+    /* The plan's messages the window rule took, and the joins' frames */
+    std::vector<std::vector<uint8_t>> vin_messages_;
+    std::vector<joined> vin_joined_;
     uint64_t written_ = 0;
 };
 

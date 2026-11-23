@@ -63,6 +63,11 @@ constexpr size_t kSha256Hex = 64;
  * signal file is; one line for each part of a merged set that is a
  * plugin's variant, in merge order (ADR-0065 section 9) */
 constexpr const char* kPluginKey = "plugin  ";
+/* "conversation  <id>,<version>,<SHA-256>,<rx> <rx> ..." after them
+ * (ADR-0066 section 2.4): the plugin part whose code talked to the
+ * session's modules, its module's hash, and the response IDs of the
+ * channels it was bound to, in channel order */
+constexpr const char* kConversationKey = "conversation  ";
 /* "conditions  conditions.json,<SHA-256>" after it (ADR-0063 section 8):
  * the set of conditions the session judged, copied beside it */
 constexpr const char* kConditionsKey = "conditions  ";

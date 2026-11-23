@@ -102,13 +102,15 @@ void ecuio_recorder_hold_states(ecuio_recorder_t* r,
  * condition events it gave (generation's), as one record or none. Events
  * of another set than the recording's are left out; a frame that doesn't
  * fit is dropped and counted, its events carried to go in ahead of the
- * next record. Never blocks, never allocates. */
+ * next record. access_cut flags it ECUIO_FRAME_FLAG_ACCESS_CUT, which the
+ * writer cuts. Never blocks, never allocates. */
 void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
                               const ecuio_value_t* values, uint32_t count,
                               const ecuio_condition_event_t* events = nullptr,
                               uint32_t event_count = 0,
-                              uint32_t generation = 0);
+                              uint32_t generation = 0,
+                              bool access_cut = false);
 
 /* On the worker, pinned: the condition events a change of the link's
  * state gave at time_us (generation's), after its link record, as one

@@ -15,6 +15,7 @@
 #include "mock_drive_cycle.h"
 #include "recording_stretch.h"
 #include "sim_faults.h"
+#include "sim_gateway.h"
 #include "sim_recording.h"
 #include "sim_timing.h"
 #include <cstdint>
@@ -88,6 +89,7 @@ struct ecuio_sim_config {
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     bool sessions = false;      /* mock: sessions=1, the profile's modules */
+    ecuio_sim_gateway_config gateway; /* mock: gateway= and its keys */
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
      * is); empty for none */

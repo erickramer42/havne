@@ -263,8 +263,10 @@ TEST_F(J2534QueryParamTest, MalformedQueriesRejectedAtSessionCreate)
         "?profile=uds-generic&did=7:1E1C",
         "?profile=uds-generic&did=7E8:7E9:1E1C",
         "?profile=uds-generic&did=7E8:1E1C:u8:x:y",
-        /* 17 pairs, one past the most a query holds */
+        /* 33 pairs, one past the most a query holds */
         "?probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
+        "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
+        "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
         "&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1&probe=1"
         "&probe=1",
     };

@@ -36,6 +36,31 @@ inline bool ecuio_engine_session(ecuio_request_engine* e, uint8_t sub,
     return true;
 }
 
+/* A conversation's step (ADR-0066 section 2.4): channel c alone enters
+ * the extended session, through the step ecuio_engine_session starts for
+ * every channel, so its keep-alive, its re-entry bound and the close's
+ * 10 01 are the built-in step's. A channel asked already keeps its step
+ * (an entry refused stands, a custom keep-alive too). A functional
+ * channel is refused: its 10 03 would reach every module. True when the
+ * channel enters or keeps the session. */
+inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
+{
+    if (c >= e->chan_count || e->chans[c].functional) {
+        return false;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (e->session == 0) {
+        e->session = ECUIO_SESSION_EXTENDED;
+    }
+    if (ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED &&
+        ch.session_entries == 0) {
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
+        ++ch.generation;
+    }
+    return ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+           ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+}
+
 /* Whether channel c has a session to enter or keep */
 inline bool ecuio_engine_session_live(const ecuio_request_engine* e,
                                       const ecuio_engine_channel& ch)

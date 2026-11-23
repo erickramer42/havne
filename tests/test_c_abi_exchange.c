@@ -95,7 +95,8 @@ int c_abi_exchange(void)
         offsetof(ecuio_import_report_t, reserved) != 72 ||
         offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||
         ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED != 4u ||
-        ECUIO_EXPORT_LEFT_OUT_COUNT != 5u ||
+        ECUIO_EXPORT_LEFT_OUT_VIN_MASKED != 5u ||
+        ECUIO_EXPORT_LEFT_OUT_COUNT != 6u ||
         ECUIO_FRAME_FLAG_FD_ESI != 0x200u ||
         ecuio_export(NULL, &export_report) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_export(&export_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||

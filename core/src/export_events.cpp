@@ -106,15 +106,24 @@ void recording_export::head_line(const std::string& line)
         if (rows::starts_with(p, n, copy.first)) {
             const size_t k = std::strlen(copy.first);
             std::string hex;
-            if (rows::parse_named_file(p + k, n - k, copy.second, &hex)) {
-                events_head_.push_back(line);
-            } else {
+            const masked_copy& c =
+                std::strcmp(copy.second, rows::kSignalFileName) == 0
+                    ? signals_copy_
+                    : conditions_copy_;
+            if (!rows::parse_named_file(p + k, n - k, copy.second, &hex)) {
                 ++events_left_;
+            } else if (c.masks > 0 && hex == c.source_sha) {
+                /* the masked copy's own hash, so a reader takes it */
+                events_head_.push_back(std::string(copy.first) + copy.second +
+                                       "," + c.sha);
+            } else {
+                events_head_.push_back(line);
             }
             return;
         }
     }
-    if (rows::starts_with(p, n, rows::kPluginKey)) {
+    if (rows::starts_with(p, n, rows::kPluginKey) ||
+        rows::starts_with(p, n, rows::kConversationKey)) {
         events_head_.push_back(line);
         return;
     }

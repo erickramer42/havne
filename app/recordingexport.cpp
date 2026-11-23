@@ -171,6 +171,10 @@ QString leftOutWords(const Job& job, const ecuio_export_report_t& r)
         "text values");
     add(r.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], "activity line",
         "activity lines");
+    add(r.left_out[ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED],
+        "frame of a VIN-shaped message", "frames of VIN-shaped messages");
+    add(r.left_out[ECUIO_EXPORT_LEFT_OUT_VIN_MASKED],
+        "VIN-shaped token masked", "VIN-shaped tokens masked");
     add(r.files_left_out, "other file", "other files");
     return parts.isEmpty() ? QStringLiteral("nothing left out")
                            : QStringLiteral("left out: ") +

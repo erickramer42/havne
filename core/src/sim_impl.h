@@ -1,6 +1,7 @@
 // File/layer: core/src/sim_impl.h | internal, C++17, Qt-free; the bus's
 //             members Linux only (ECUIO_HAVE_SOCKETCAN)
-// Testing: UNIT: SimAskTest (test_obd2); HARNESS: SimBusTest (test_vcan)
+// Testing: UNIT: SimAskTest, SimGatewayTest (test_obd2); HARNESS:
+//          SimBusTest (test_vcan)
 //
 // struct ecuio_sim and what its two files share: a node, the reply under
 // way, and the answer, fate and count every reply goes through. sim.cpp
@@ -20,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <random>
 
 #if ECUIO_HAVE_SOCKETCAN
@@ -36,7 +38,14 @@ struct sim_sending {
     int64_t start_us = 0;
     bool active = false; /* through the sender, Flow Control or frames due */
     bool held = false;   /* stalled: the last frame put off once */
+    /* The ID it goes on: the node's reply ID, or a module's when the
+     * gateway answers for it */
+    uint32_t on_id = 0;
 };
+
+/* What a node answers as: the engine ECU, a module, or the gateway
+ * (sim_gateway_route.h) */
+enum class sim_role : uint8_t { engine, module, gateway };
 
 /* One ECU on the bus: the IDs it hears and answers on, its own ISO-TP
  * receiver and sender, its reply, and its faults' periods and counts, so
@@ -45,7 +54,8 @@ struct sim_sending {
 struct sim_node {
     uint32_t request_id = ECUIO_SIM_REQUEST_ID;
     uint32_t reply_id = ECUIO_SIM_REPLY_ID;
-    int module = 0;          /* 0 the engine ECU, 1 another module */
+    sim_role role = sim_role::engine;
+    bool behind = false;     /* the gateway judges its requests first */
     ecuio_sim_faults faults; /* every module's, with those aimed at it */
     ecuio_sim_counts counts;
     ecuio_sim_timing::sim_timing timing; /* the same, sim_timing.h */
@@ -69,6 +79,13 @@ struct sim_node {
 
 static_assert(ECUIO_SIM_MAX_REPLIES >= 2 * (1 + ECUIO_MAX_CHANNELS),
               "every ECU's reply, each with a 7F xx 78 ahead of it");
+/* The gateway answers no functional request itself and refuses aloud
+ * only in place of a reply from a module behind it */
+static_assert(ECUIO_SIM_BEHIND_MAX <= ECUIO_MAX_CHANNELS,
+              "a gateway's refusals aloud stay inside the replies' bound");
+
+/* The engine ECU, a module for each channel, and the gateway */
+constexpr int ECUIO_SIM_NODES_MAX = 2 + ECUIO_MAX_CHANNELS;
 
 struct ecuio_sim {
     /* The registry's set, held from create (profile_hold.h); first, so
@@ -93,10 +110,17 @@ struct ecuio_sim {
     std::unique_ptr<std::atomic<double>[]> values;
     ecuio_sim_recording recording; /* replay://: the ECU's replies */
     ecuio_sim_ecu ecu;
-    /* the engine ECU, then modules=2's module or the profile's: as many
-     * as answer, sized by build_sim and never after */
+    /* the engine ECU, then modules=2's module or the profile's, then the
+     * gateway: as many as answer, sized by build_sim and never after */
     std::unique_ptr<sim_node[]> nodes;
     int node_count = 1;
+    int gateway = -1; /* the gateway's node, -1 for none */
+    /* The gateway's counts (the worker's or the ask's alone), and its
+     * view, copied under the mutex after each request it routes or
+     * answers, for ecuio_sim_get_gateway from any thread */
+    ecuio_sim_gateway_tally gateway_tally;
+    ecuio_sim_gateway_t gateway_view{};
+    mutable std::mutex gateway_mutex;
     /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
      * the clock to the time it's given (its ticks never go back) */
     bool unbound = false;
@@ -121,6 +145,13 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out);
 ecuio_sim_fate decide(ecuio_sim* s, sim_node& n, const uint8_t* req,
                       uint32_t len, const uint8_t* reply, uint32_t reply_len);
+/* The gateway's verdict on req (at least a byte) for n, a module behind
+ * it, counted and its view copied: in the ask and on the bus, before the
+ * module's busy check, answer, draw and fate */
+ecuio_sim_gateway_verdict route(ecuio_sim* s, const sim_node& n,
+                                const uint8_t* req, bool functional);
+/* The gateway's view copied under its mutex */
+void publish_gateway(ecuio_sim* s);
 
 #if ECUIO_HAVE_SOCKETCAN
 /* ecuio_sim_create_with's bus: ifname judged, its socket opened and the

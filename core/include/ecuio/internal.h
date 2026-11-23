@@ -245,6 +245,12 @@ int ecuio_session_test_talk_result(ecuio_session_t* session, int* offer,
 struct ecuio_sim;
 void ecuio_sim_test_set_strict(struct ecuio_sim* sim, int on);
 
+/* TEST-ONLY: opens (on non-zero) or shuts the door behind which a
+ * session started over a conversation plugin's set binds the plugin's
+ * module (core/src/consent_gate.h), process-wide. Shut by default: the
+ * session is then data only and no byte of the module's code runs. */
+void ecuio_test_conversation_binding(int on);
+
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
  * real controller, and an error frame within quiet_us of the first echo

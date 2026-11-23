@@ -267,7 +267,8 @@ public:
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
     // at url (a local file, or Android's content:// by the content resolver): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification
-    // replies' and text signals' frames, words never naming the path. A
+    // replies', text signals' and VIN-shaped messages' frames, words never
+    // naming the path. A
     // failed check writes nothing. Logs one line
     Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
     // Diagnostics' Save report (ADR-0054's appendix "the health report as

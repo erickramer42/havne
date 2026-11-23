@@ -10,6 +10,8 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "session.h"
+#include "consent_gate.h"
+#include "conversation_bind.h"
 #include "host_awake.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
@@ -79,6 +81,25 @@ namespace {
             used += static_cast<size_t>(w);
         }
     }
+/* The profile chosen, held from create on, and its set's conversation
+ * part with the consent create finds (consent_gate.h) */
+ecuio_status_t take_profile(ecuio_session_t* s, const char* chosen,
+                            const ecuio_signal_set_t** set)
+{
+    const ecuio_status_t found = ecuio_profile_acquire(chosen, set);
+    s->profile_hold.set = *set;
+    if (found != ECUIO_OK) {
+        if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
+            ecuio_detail_set("no profile is named '%s'", chosen);
+        }
+        return found;
+    }
+    s->conversation = ecuio_conversation_of(*set);
+    s->conversation_consent =
+        s->conversation != nullptr && ecuio_plugin_code_may_run(s);
+    return ECUIO_OK;
+}
+
 } // namespace
 
 extern "C" {
@@ -252,12 +273,8 @@ ecuio_status_t ecuio_session_create(
     }
 
     const ecuio_signal_set_t* profile_set = nullptr;
-    const ecuio_status_t found = ecuio_profile_acquire(chosen, &profile_set);
-    s->profile_hold.set = profile_set;
+    const ecuio_status_t found = take_profile(s.get(), chosen, &profile_set);
     if (found != ECUIO_OK) {
-        if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
-            ecuio_detail_set("no profile is named '%s'", chosen);
-        }
         return found;
     }
 
@@ -327,7 +344,7 @@ ecuio_status_t ecuio_session_create(
     }
     /* After attach, which fills the rest of the info; the worker hasn't
      * started, so no lock */
-    if (s->focus_requests) {
+    if (s->focus_requests || ecuio_session_may_talk(s.get())) {
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
     }
     if (s->focus_requests && s->focus_pick_only) {
@@ -354,6 +371,12 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
     }
     if (session->transport == nullptr) {
         return ECUIO_ERR_NO_TRANSPORT;
+    }
+    if (!session->started) {
+        const ecuio_status_t bound = ecuio_conversation_bind(session);
+        if (bound != ECUIO_OK) {
+            return bound;
+        }
     }
     const ecuio_status_t st =
         session->transport->ops->start(session, session->transport->impl);
@@ -384,6 +407,7 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         delete session->transport;
         session->transport = nullptr;
     }
+    ecuio_conversation_unbind(session); /* the worker has joined */
     /* After the detach, so the hold covers the close's 10 01 */
     ecuio_awake_release_all(session);
     /* The worker has stopped: the recorder takes no more frames, and its

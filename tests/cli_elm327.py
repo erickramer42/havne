@@ -5,6 +5,7 @@
 #   python tests/cli_elm327.py reconnect <havne-cli>
 #   python tests/cli_elm327.py session <havne-cli>
 #   python tests/cli_elm327.py modules <havne-cli>
+#   python tests/cli_elm327.py gateway <havne-cli>
 #   python tests/cli_elm327.py plugin <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py aimed <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py car <havne-cli> <plugins/example-sim>
@@ -23,6 +24,9 @@
 # car: the VIN, the mock's three stored codes, the engine speed's values.
 # modules: modules=2's second module answers a uds-generic DID through it
 # (D101, the gear, 03).
+# gateway: a host holds the second module behind the simulated gateway:
+# its read refused 33 until the host unlocks the gateway (10 03, 27 01,
+# the key worked out from sim.h's transform), then answered.
 # plugin: the example plugin's DIDs (sim --plugin), on both its ECUs, read
 # by a session through the same plugin: each answers raw 0, its offset.
 # aimed: the same, with a fault aimed at the tcm alone (silent:1@7E9):
@@ -304,6 +308,38 @@ def car(cli, package):
     emu.end()
 
 
+def made_up_key(seed):
+    """The key for a seed: reversed, each byte XORed with a letter of HAVNE
+    (sim.h's sa=key)"""
+    return bytes(b ^ ord("HAVNE"[i % 5]) for i, b in enumerate(reversed(seed)))
+
+
+def gateway(cli):
+    emu = Emulator(cli, "mock://emu?modules=2&gateway=1&behind=7E9&sa=key"
+                   "&route=reads:gated", seconds=6)
+    h = Host(emu.port)
+    for cmd in ("AT E0", "ATL0", "ATSP6", "AT SH 7E1"):
+        h.send(cmd)
+    out, _ = h.send("22D100")
+    expect(out == "7F 22 33\r\r>", "the module's read held, 33: %r" % out)
+    h.send("AT SH 6F0")
+    out, _ = h.send("1003")
+    expect(out.startswith("50 03"), "the gateway's extended session: %r" % out)
+    out, _ = h.send("2701")
+    seed = bytes.fromhex(out.split("\r")[0])
+    expect(seed[:2] == b"\x67\x01" and len(seed) == 6, "a seed: %r" % out)
+    out, _ = h.send("2702" + made_up_key(seed[2:]).hex().upper())
+    expect(out == "67 02\r\r>", "the key taken: %r" % out)
+    h.send("AT SH 7E1")
+    out, _ = h.send("22D100")
+    expect(out.startswith("62 D1 00 "), "the module answers once unlocked: %r" % out)
+    h.close()
+    lines = emu.end(wait=True)
+    end = [l for l in lines if l["type"] == "end"]
+    expect(len(end) == 1 and end[0]["reason"] == "seconds", "end: %r" % end)
+    return 0
+
+
 def python_obd(cli):
     try:
         import obd  # noqa: F401  (python-OBD, a test-only package)
@@ -333,7 +369,7 @@ def main():
         rc = {"plugin": plugin, "aimed": aimed, "car": car}[mode](cli, sys.argv[3])
     else:
         rc = {"adapter": adapter, "reconnect": reconnect, "session": session,
-              "modules": modules,
+              "modules": modules, "gateway": gateway,
               "python-obd": python_obd}[mode](cli)
     print("ok" if not rc else "skipped")
     return rc or 0

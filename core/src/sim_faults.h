@@ -5,7 +5,8 @@
 // The simulated ECU's faults (ADR-0046, ADR-0041 section 4): which
 // replies the URI's faults= breaks, how each is broken, and the
 // grammar that reads them. A fault is every module's, each on its own
-// count, or aimed at one module by its reply ID (ADR-0065 section 10).
+// count, or aimed at one module by its reply ID (ADR-0065 section 10);
+// relock is the simulated gateway's alone, which its verdict applies.
 
 #ifndef ECUIO_SIM_FAULTS_H
 #define ECUIO_SIM_FAULTS_H
@@ -22,6 +23,9 @@ struct ecuio_sim_faults {
     uint32_t bad_sequence = 0; /* segmented replies only */
     uint32_t stalled = 0;      /* segmented replies only */
     uint32_t pending = 0;      /* 7F <service> 78 first, the reply later */
+    /* The gateway's alone: every nth request it lets through on a gated
+     * route, it locks again first (sim_gateway_route.h) */
+    uint32_t relock = 0;
 };
 
 constexpr uint32_t ECUIO_SIM_FAULT_MAX = 10000;
@@ -52,7 +56,8 @@ enum class ecuio_sim_fault_kind : uint8_t {
     late,
     bad_sequence,
     stalled,
-    pending
+    pending,
+    relock
 };
 
 /* One fault aimed at one module by its reply ID (faults=late:3@7EA) */
@@ -89,9 +94,11 @@ inline const char* ecuio_sim_fault_name(ecuio_sim_fault_kind k)
     case ecuio_sim_fault_kind::stalled:
         return "stalled";
     case ecuio_sim_fault_kind::pending:
+        return "pending";
+    case ecuio_sim_fault_kind::relock:
         break;
     }
-    return "pending";
+    return "relock";
 }
 
 inline uint32_t& ecuio_sim_fault_slot(ecuio_sim_faults& f,
@@ -107,9 +114,11 @@ inline uint32_t& ecuio_sim_fault_slot(ecuio_sim_faults& f,
     case ecuio_sim_fault_kind::stalled:
         return f.stalled;
     case ecuio_sim_fault_kind::pending:
+        return f.pending;
+    case ecuio_sim_fault_kind::relock:
         break;
     }
-    return f.pending;
+    return f.relock;
 }
 
 /* The periods of the module answering on reply_id: every module's, each
@@ -130,8 +139,8 @@ namespace ecuio_sim_fault_detail {
 
 inline bool kind_of(const char* s, size_t n, ecuio_sim_fault_kind* k)
 {
-    for (uint8_t i = 0;
-         i <= static_cast<uint8_t>(ecuio_sim_fault_kind::pending); ++i) {
+    for (uint8_t i = 0; i <= static_cast<uint8_t>(ecuio_sim_fault_kind::relock);
+         ++i) {
         const auto kind = static_cast<ecuio_sim_fault_kind>(i);
         const char* name = ecuio_sim_fault_name(kind);
         if (n == std::strlen(name) && std::strncmp(s, name, n) == 0) {
@@ -223,8 +232,9 @@ inline bool ecuio_sim_parse_faults(const char* text, size_t len,
         if (!ecuio_sim_fault_detail::parse_item(item, item_len, &a, &aimed)) {
             std::snprintf(why, why_cap,
                           "faults: '%.*s' isn't <fault>:<n>[@<reply ID>], the "
-                          "fault one of silent, late, pending, bad_sequence or "
-                          "stalled, n from 1 to %u and the reply ID 11-bit hex",
+                          "fault one of silent, late, pending, bad_sequence, "
+                          "stalled or relock, n from 1 to %u and the reply ID "
+                          "11-bit hex",
                           static_cast<int>(item_len < 40 ? item_len : 40), item,
                           ECUIO_SIM_FAULT_MAX);
             return false;

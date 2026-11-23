@@ -150,6 +150,12 @@ typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reser
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];
+typedef char abi_conversation_size_check[(sizeof(ecuio_channel_conversation_t) == 64) ? 1 : -1];
+typedef char abi_conversation_state_check[(offsetof(ecuio_channel_conversation_t, state) == 12) ? 1 : -1];
+typedef char abi_conversation_level_check[(offsetof(ecuio_channel_conversation_t, level) == 20) ? 1 : -1];
+typedef char abi_conversation_delay_check[(offsetof(ecuio_channel_conversation_t, delay_left_ms) == 24) ? 1 : -1];
+typedef char abi_conversation_failed_check[(offsetof(ecuio_channel_conversation_t, failed) == 36) ? 1 : -1];
+typedef char abi_conversation_reserved_check[(offsetof(ecuio_channel_conversation_t, reserved) == 40) ? 1 : -1];
 typedef char abi_dtc_list_check[(sizeof(ecuio_dtc_list_t) == 68) ? 1 : -1];
 typedef char abi_monitor_check[(sizeof(ecuio_monitor_t) == 4) ? 1 : -1];
 typedef char abi_freeze_value_check[(sizeof(ecuio_freeze_value_t) == 16) ? 1 : -1];
@@ -205,6 +211,24 @@ typedef char abi_sim_reply_reserved_check
 typedef char abi_sim_reply_data_check[(offsetof(ecuio_sim_reply_t, data) == 40)
                                           ? 1
                                           : -1];
+typedef char
+    abi_sim_gateway_size_check[(sizeof(ecuio_sim_gateway_t) == 144) ? 1 : -1];
+typedef char abi_sim_gateway_route_check
+    [(offsetof(ecuio_sim_gateway_t, route) == 14) ? 1 : -1];
+typedef char abi_sim_gateway_now_check
+    [(offsetof(ecuio_sim_gateway_t, now) == 30) ? 1 : -1];
+typedef char abi_sim_gateway_delay_check
+    [(offsetof(ecuio_sim_gateway_t, delayed_until_us) == 40) ? 1 : -1];
+typedef char abi_sim_gateway_forwarded_check
+    [(offsetof(ecuio_sim_gateway_t, forwarded) == 48) ? 1 : -1];
+typedef char abi_sim_gateway_too_early_check
+    [(offsetof(ecuio_sim_gateway_t, too_early) == 120) ? 1 : -1];
+typedef char abi_sim_gateway_overrides_check
+    [(offsetof(ecuio_sim_gateway_t, overrides) == 128) ? 1 : -1];
+typedef char abi_sim_gateway_override_size_check
+    [(sizeof(ecuio_sim_gateway_override_t) == 24) ? 1 : -1];
+typedef char abi_sim_gateway_override_now_check
+    [(offsetof(ecuio_sim_gateway_override_t, now) == 8) ? 1 : -1];
 typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];

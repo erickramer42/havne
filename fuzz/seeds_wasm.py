@@ -1,11 +1,11 @@
 # File/layer: fuzz/seeds_wasm.py | Python 3, no packages; fuzz/seeds.py imports it
-# Testing: FUZZ: CI's fuzz job, fuzz_wasm_module and fuzz_plugin_manifest started
-#          from what it writes
+# Testing: FUZZ: CI's fuzz job, fuzz_wasm_module, fuzz_guest and
+#          fuzz_plugin_manifest started from what it writes
 #
 # The WebAssembly modules among the seeds, written byte by byte
 # (wasm_module()): fuzz_wasm_module's, with the exports the harness calls,
-# and the conversation plugins fuzz_plugin_manifest starts from, each
-# holding a guest module.
+# fuzz_guest's guest modules, and the conversation plugins
+# fuzz_plugin_manifest starts from, each holding a guest module.
 
 import base64
 import hashlib
@@ -82,16 +82,39 @@ def wasm_module(funcs, memory=b"\x01\x01\x01", table=b"", global_=b"", element=b
     return out + tail
 
 
-def guest_module(buffer_at=1024, imports=b""):
+def guest_module(buffer_at=1024, imports=b"", begin=b"\x41\x00",
+                 next_request=b"\x41\x00", accept=b"\x41\x00"):
     """The least module the guest ABI takes (core/src/guest_abi.h): its six
-    exports, each returning a constant, and one page of memory"""
+    exports, each returning a constant unless a body is given, and one
+    page of memory"""
     const = lambda v: b"\x41" + sleb(v)   # i32.const
     return wasm_module([("ecuio_abi", "", "i", const(1)),
                         ("ecuio_buffer", "", "i", const(buffer_at)),
-                        ("begin", "ii", "i", const(0)),
-                        ("next_request", "", "i", const(0)),
-                        ("accept", "ii", "i", const(0)),
+                        ("begin", "ii", "i", begin),
+                        ("next_request", "", "i", next_request),
+                        ("accept", "ii", "i", accept),
                         ("end", "", "", b"")], imports=imports)
+
+
+def guest_seeds():
+    """fuzz_guest's seeds by name: a guest that asks nothing, one in the
+    extended session asking a DID, one answering a seed with a key of
+    zeroes, and one of each fault"""
+    const = lambda v: b"\x41" + sleb(v)   # i32.const
+    byte_at = lambda at, v: const(at) + const(v) + b"\x3a\x00\x00"  # i32.store8
+    did = byte_at(1024, 0x22) + byte_at(1025, 0xF1) + byte_at(1026, 0x90) + const(3)
+    return {
+        "quiet": guest_module(),
+        "extended": guest_module(begin=const(3)),
+        "asks-a-did": guest_module(begin=const(3), next_request=did),
+        "zero-key": guest_module(begin=const(3), accept=const(4)),
+        "declines": guest_module(begin=const(-1)),
+        "traps": guest_module(begin=b"\x00"),                      # unreachable
+        "spins": guest_module(begin=const(3),
+                              next_request=b"\x03\x40\x0c\x00\x0b" + const(0)),
+        "long-request": guest_module(begin=const(3), next_request=const(5000)),
+        "buffer-outside": guest_module(buffer_at=65000),
+    }
 
 
 def conversation_seeds():

@@ -445,3 +445,38 @@ TEST(RecordingExportTest, StartupRemovesOnlyStaleCopies)
         QFileInfo(t.filePath(QStringLiteral("havne-export-Zz99Yy"))).isFile())
         << "a file of that name stays";
 }
+
+// The summary counts a scrubbed export's masks and the frames of the
+// messages it left out for a VIN-shaped token (made up here)
+TEST(RecordingExportTest, TheSummaryCountsTheVinShapedMasksAndMessages)
+{
+    QTemporaryDir dir;
+    const QString folder = dir.filePath(QStringLiteral("glued"));
+    ASSERT_TRUE(QDir().mkpath(folder));
+    writeFile(folder + QStringLiteral("/signals.csv"),
+              "host_us,signal,value,unit\n100,PN_ZZZFAKE11M0000001x,1,rpm\n");
+    const QByteArray glued = "aZZZFAKE11M0000001";
+    writeFile(folder + QStringLiteral("/frames.csv"),
+              "host_us,timestamp_us,id,flags,data\n100,100,0x7E8,0x" +
+                  QByteArray::number(ECUIO_FRAME_FLAG_REASSEMBLED, 16) +
+                  ",62 D8 01 " + glued.toHex(' ').toUpper() + "\n");
+    RecordingExport e;
+    Options csv;
+    csv.longLayout = true;
+    const QVariantMap c = exported(e, folder, csv,
+                                   QUrl::fromLocalFile(dir.filePath(
+                                       QStringLiteral("long.csv"))));
+    ASSERT_TRUE(ok(c)) << text(c, "words").toStdString();
+    EXPECT_TRUE(text(c, "summary").endsWith(
+        QStringLiteral(", left out: 1 VIN-shaped token masked")))
+        << text(c, "summary").toStdString();
+    Options pcapng;
+    pcapng.format = RecordingExport::Pcapng;
+    const QVariantMap p = exported(e, folder, pcapng,
+                                   QUrl::fromLocalFile(dir.filePath(
+                                       QStringLiteral("frames.pcapng"))));
+    ASSERT_TRUE(ok(p)) << text(p, "words").toStdString();
+    EXPECT_TRUE(text(p, "summary").endsWith(
+        QStringLiteral("left out: 1 frame of a VIN-shaped message")))
+        << text(p, "summary").toStdString();
+}

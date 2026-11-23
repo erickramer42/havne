@@ -4,6 +4,7 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "session.h"
+#include "conversation_bind.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
@@ -66,11 +67,20 @@ ecuio_status_t ecuio_session_get_channel_support(
     if (session == nullptr || out_support == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
+    bool bound = false;
+    {
+        const std::lock_guard<std::mutex> calls(session->conversation_mutex);
+        bound = ecuio_bound_channel_of(const_cast<ecuio_session_t*>(session),
+                                       channel) != nullptr;
+    }
     std::lock_guard<std::mutex> lock(session->support_mutex);
     if (channel >= session->support_count) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     *out_support = session->support[channel];
+    if (bound) {
+        out_support->flags |= ECUIO_SUPPORT_CONVERSATION;
+    }
     return ECUIO_OK;
 }
 
