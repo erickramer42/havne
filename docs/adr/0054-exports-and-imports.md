@@ -1903,3 +1903,23 @@ What the scrub doesn't find narrows: a VIN with no check digit whose
 maker code vPIC doesn't list, glued to letters or digits. A typed label
 of the VIN alphabet is masked where it holds a window, at the rates
 above, and never refuses a copy.
+
+## Note of 2026-11-23: what the masking leaves
+
+Three limits of the masking in the note of 2026-11-22, kept as they are:
+
+- **Only the result line counts masked tokens.** A long CSV's `#` comment
+  is written before the file's text has passed the check, so it carries
+  the left-out counts the plan knows (identification and text values) and
+  not `left_out[ECUIO_EXPORT_LEFT_OUT_VIN_MASKED]`; a wide CSV has no
+  comment line. A reader of the file alone sees `*` runs without a count;
+  the report's count and the result line have it.
+- **Lowercase isn't VIN-shaped.** `scrub.cpp`'s `vin_char` is ISO 3779's
+  alphabet in capitals, so a VIN a user typed in lowercase passes in text
+  they wrote, unmasked. Folding case would take every lowercase run of 17
+  letters and digits (a word, a hash) for a window; the masking keeps its
+  false hits to the capitals' rate.
+- **Names can collide once masked.** Two different 17-character VIN-shaped
+  signal names both become `*****************`, so a long CSV's rows or a
+  wide CSV's columns under them read as one name. In signals.json the
+  duplicate names fail the loader's check, and the copy is refused.
