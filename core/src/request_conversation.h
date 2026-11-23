@@ -223,9 +223,12 @@ inline int64_t ecuio_conversations_next_us(ecuio_session_t* s,
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         const ecuio_bound_channel& b = t->bound[k];
-        if (b.word_seq.load(std::memory_order_acquire) != b.word_seen ||
-            b.conversation.report.state == ecuio_conversation_state::unbegun) {
+        if (b.word_seq.load(std::memory_order_acquire) != b.word_seen) {
             return 0;
+        }
+        if (b.conversation.report.state ==
+            ecuio_conversation_state::unbegun) {
+            continue; /* begun at the next pass, whatever it waits for */
         }
         const int64_t at =
             ecuio_conversation_next_us(&b.conversation, e, now_us);
@@ -236,11 +239,22 @@ inline int64_t ecuio_conversations_next_us(ecuio_session_t* s,
     return next;
 }
 
-inline void ecuio_conversations_end(ecuio_session_t* s)
+/* Each module's end, while its channel's session still stands (the
+ * engine's 10 01 comes after): the report says ended */
+inline void ecuio_conversations_end(ecuio_session_t* s,
+                                    const ecuio_request_engine* e)
 {
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
-        ecuio_conversation_end(&t->bound[k].conversation);
+        ecuio_bound_channel& b = t->bound[k];
+        const uint32_t c = b.conversation.channel;
+        b.ended_in_session =
+            c < e->chan_count &&
+            e->chans[c].session_step == ECUIO_SESSION_STATE_ENTERED;
+        ecuio_conversation_end(&b.conversation);
+        const std::lock_guard<std::mutex> lock(s->support_mutex);
+        b.published = b.conversation.report;
+        ++b.generation;
     }
 }
 

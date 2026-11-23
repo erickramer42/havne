@@ -46,12 +46,9 @@ struct ecuio_bound_channel {
     std::atomic<uint8_t> word_level{0};
     std::atomic<uint32_t> word_seq{0};
     uint32_t word_seen = 0; /* the worker's */
-    uint8_t word_taken = 0; /* the level of the word it last took */
     uint32_t ends_seen = 0; /* the report's words_ended last settled */
-    bool rejoined = false;  /* the 33 drops were put back once */
     uint64_t vehicle = 0;   /* the store's key for this module */
     ecuio_security::settle_box box;
-    bool box_attached = false;
     /* The worker's last publish, under the session's support_mutex: the
      * report, and each level's count and delay left at published_at */
     ecuio_conversation_report published;
@@ -75,9 +72,17 @@ struct ecuio_bound_channel {
     int64_t restore_utc = 0;
     std::atomic<uint32_t> restore_seq{0};
     uint32_t restore_seen = 0; /* the worker's */
-    /* The unlock caller's: the store's key known, and the words given */
-    bool vehicle_known = false;
+    /* The unlock caller's: the words given, and the store's key known */
     uint32_t words_given = 0;
+    bool vehicle_known = false;
+    /* The worker's: the level of the word it last took, the 33 drops put
+     * back once, the box on the store, and at its close whether the
+     * module's end came while the channel's session stood (before the
+     * engine's 10 01) */
+    uint8_t word_taken = 0;
+    bool rejoined = false;
+    bool box_attached = false;
+    bool ended_in_session = false;
 };
 
 /* A session's binding: NULL in the session when nothing is bound */
@@ -89,15 +94,21 @@ struct ecuio_session_talk {
     ecuio_security::store_ref store; /* the session's, taken at the bind;
                                         empty: the counts are the session's */
     bool began = false;              /* the worker's */
-    /* The settles saved, the instances and the module freed; the reports
-     * stay for the getters until destroy */
-    void release() noexcept;
-    ~ecuio_session_talk() { release(); }
+    bool kept = false;               /* a store was bound: fixed at the bind */
+    /* The settles saved, the instances and the module freed, the store
+     * handed back; the reports stay for the getters until destroy */
+    ecuio_security::store_ref release() noexcept;
+    ~ecuio_session_talk() { (void)release(); }
 };
 
-/* Whether session's part names one of its set's channels by both IDs on
- * a requesting transport: the session then asks as one with requests,
- * from attach on, bound at start or not */
+/* Whether session's part names one of the channels rx/tx (count of
+ * them, the transport's own, which its module tables copy) by both IDs,
+ * on a requesting transport, with the consent create found: the session
+ * then asks as one with requests from attach on */
+bool ecuio_session_may_talk(const ecuio_session_t* session,
+                            const uint32_t* rx, const uint32_t* tx,
+                            uint32_t count);
+/* The same over the session's module tables, once attach has set them */
 bool ecuio_session_may_talk(const ecuio_session_t* session);
 
 /* At start, before the worker: binds what section 1 says, or nothing.
@@ -110,7 +121,8 @@ ecuio_status_t ecuio_conversation_bind(ecuio_session_t* session);
  * instances and the module freed, the last reports kept */
 void ecuio_conversation_unbind(ecuio_session_t* session) noexcept;
 
-/* The bound channel for session channel c, or NULL */
+/* The bound channel for session channel c, or NULL: the worker's, or a
+ * caller's under conversation_mutex */
 ecuio_bound_channel* ecuio_bound_channel_of(ecuio_session_t* session,
                                             uint32_t c);
 

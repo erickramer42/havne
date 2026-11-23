@@ -560,7 +560,7 @@ bool pass_wait(ecuio_j2534_transport* t, worker_state& w, const read_step& rs)
 void end_worker(ecuio_j2534_transport* t, worker_state& w)
 {
     if (w.requests) {
-        ecuio_conversations_end(t->session);
+        ecuio_conversations_end(t->session, &w.e);
         leave_sessions(t, w.h);
     }
     ecuio_publish_timing(t->session, w.e, nullptr, engine_now_us(t),

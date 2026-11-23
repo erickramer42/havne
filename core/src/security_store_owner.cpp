@@ -163,7 +163,7 @@ void store_owner::settle_held(settle_box& b) noexcept
             (void)ended_held(b.key, b.failed, b.delay, b.utc, nullptr, &why);
         }
     } catch (const std::bad_alloc&) {
-        /* the mark stays on the disk: the next load counts it once */
+        return; /* the mark stays on the disk: the next load counts it once */
     }
 }
 

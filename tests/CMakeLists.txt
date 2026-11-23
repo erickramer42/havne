@@ -288,6 +288,8 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # section 2.4, SocketCanTalkTest).
 # test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
 # pace doesn't wait on another's (SocketCanTurnsTest).
+# test_vcan_conversation.cpp: a plugin's module bound to a session,
+# unlocking the simulated ECU (SocketCanConversationTest).
 # RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
 # every session's ID filter; every vcan0 user takes the lock, so they run
 # one at a time while the rest of the suite runs beside them.
@@ -296,7 +298,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests.cpp test_vcan_requests_focus.cpp
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
+                   test_vcan_conversation.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"

@@ -1324,7 +1324,10 @@ ecuio_status_t ecuio_session_security_store(
  *     *out_wait_ms 0;
  *   ECUIO_ERR_LOAD_FAILED: the store can't save the mark, in its words;
  *   ECUIO_ERR_SESSION_CLOSED, ECUIO_ERR_OUT_OF_MEMORY.
- * out_wait_ms may be NULL. How the attempt ended is the report's. */
+ * out_wait_ms may be NULL. How the attempt ended is the report's. A
+ * close after the seed was asked and before the key's answer leaves the
+ * mark in the store: the next load counts it as a failed attempt, so a
+ * key the ECU may have judged is never left uncounted. */
 ecuio_status_t ecuio_session_security_unlock(
     ecuio_session_t* session,
     uint32_t channel,

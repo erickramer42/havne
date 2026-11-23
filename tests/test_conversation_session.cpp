@@ -352,3 +352,104 @@ TEST(ConversationSessionTest, AMarkSavesThePostedSettlesFirst)
         << text;
     owner->detach(&box);
 }
+
+/* Each call into the module runs under the manifest's budget, never the
+ * sandbox's own: a begin of about 100,000 units faults under 1,000 */
+TEST(ConversationSessionTest, ACallRunsUnderTheManifestsBudget)
+{
+    DoorOpen open;
+    GuestShape spins;
+    spins.begin_spins = true;
+    for (const char* budget : {"1000", "1000000"}) {
+        SCOPED_TRACE(budget);
+        Bound b;
+        ASSERT_NO_FATAL_FAILURE(make_session(&b, made(spins, budget)));
+        ASSERT_EQ(ecuio_conversation_bind(b.session.get()), ECUIO_OK);
+        Bench bench;
+        ASSERT_NO_FATAL_FAILURE(bench.start(b.session.get()));
+        bench.passes(2);
+        const ecuio_conversation_report r = bench.report();
+        if (std::string(budget) == "1000") {
+            EXPECT_EQ(r.state, ecuio_conversation_state::faulted);
+            EXPECT_EQ(r.fault, ecuio_conversation_fault::budget);
+        } else {
+            EXPECT_EQ(r.state, ecuio_conversation_state::talking);
+        }
+    }
+}
+
+/* A request's length past the exchange buffer is judged before a byte
+ * is read from the module: a fault, and the module's bytes never copied */
+TEST(ConversationSessionTest, ALengthPastTheBufferIsJudgedBeforeAnyRead)
+{
+    DoorOpen open;
+    GuestShape longer;
+    longer.long_request = true;
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made(longer)));
+    ASSERT_EQ(ecuio_conversation_bind(b.session.get()), ECUIO_OK);
+    Bench bench;
+    ASSERT_NO_FATAL_FAILURE(bench.start(b.session.get()));
+    for (int i = 0;
+         i < 20 && bench.report().state != ecuio_conversation_state::faulted;
+         ++i) {
+        bench.now += 60 * engine_talk_test::kMs;
+        bench.pass();
+    }
+    const ecuio_conversation_report r = bench.report();
+    EXPECT_EQ(r.state, ecuio_conversation_state::faulted);
+    EXPECT_EQ(r.fault, ecuio_conversation_fault::length);
+    EXPECT_NE(b.session->talk->bound[0].conversation.buffer[0], 0xAB)
+        << "the module's bytes were read";
+}
+
+/* A frame on another channel never reaches the bound channel's
+ * conversation: the seed's reply told of channel 5 leaves the seed
+ * unanswered to the module, and no key goes */
+TEST(ConversationSessionTest, TheFrameHookTellsOnlyItsChannel)
+{
+    DoorOpen open;
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made()));
+    ASSERT_EQ(ecuio_conversation_bind(b.session.get()), ECUIO_OK);
+    Bench bench;
+    ASSERT_NO_FATAL_FAILURE(bench.start(b.session.get()));
+    bench.passes(8);
+    const uint32_t before = bench.report().words_ended;
+    ASSERT_EQ(ecuio_conversation_give_word(b.session.get(), 0, 0x01, 7, 1),
+              ECUIO_OK);
+    bench.hook_channel = 5;
+    bench.until_word_ended(before);
+    EXPECT_EQ(bench.report().unlock, ecuio_unlock_state::ended);
+    EXPECT_EQ(bench.heard({0x27, 0x02}) + bench.ecu.security.unlocked, 0u);
+}
+
+/* The close calls a talking module's end, and never a faulted one's */
+TEST(ConversationSessionTest, TheEndIsCalledUnlessTheModuleFaulted)
+{
+    DoorOpen open;
+    for (const uint8_t begin : {uint8_t{3}, uint8_t{7}}) {
+        SCOPED_TRACE(int{begin});
+        GuestShape marks;
+        marks.end_marks = true;
+        marks.begin = begin; /* 7: begin's fault */
+        Bound b;
+        ASSERT_NO_FATAL_FAILURE(make_session(&b, made(marks)));
+        ASSERT_EQ(ecuio_conversation_bind(b.session.get()), ECUIO_OK);
+        Bench bench;
+        ASSERT_NO_FATAL_FAILURE(bench.start(b.session.get()));
+        bench.passes(4);
+        ecuio_conversations_end(b.session.get(), bench.e.get());
+        const uint8_t* mark = ecuio_wasm::instance_memory(
+            b.session->talk->bound[0].instance, conversation_session::kEndMark,
+            1);
+        if (begin == 7) {
+            EXPECT_EQ(bench.report().fault, ecuio_conversation_fault::begin);
+            ASSERT_NE(mark, nullptr);
+            EXPECT_EQ(*mark, 0) << "a faulted module's end ran";
+        } else {
+            ASSERT_NE(mark, nullptr);
+            EXPECT_EQ(*mark, 1) << "the end never ran";
+        }
+    }
+}

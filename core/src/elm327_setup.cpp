@@ -129,7 +129,8 @@ setup_answer identify(transport* t, const char* cmd, char* version,
 bool asks_nothing(const transport* t)
 {
     return t->engine.count == 0 && t->engine.scan_count == 0 &&
-           !ecuio_session_may_talk(t->session);
+           !ecuio_session_may_talk(t->session, t->rx_ids, t->tx_ids,
+                                   t->chan_count);
 }
 
 /* The setup's contract commands (ADR-0026 section 3), each answered before the

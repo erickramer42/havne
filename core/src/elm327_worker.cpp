@@ -678,7 +678,7 @@ void elm327_worker(transport* t)
             w.h.backoff_ms = link_backoff_next(w.h.backoff_ms);
         }
     }
-    ecuio_conversations_end(t->session);
+    ecuio_conversations_end(t->session, &e);
     leave_sessions(t);
     ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), w.timing_at,
                          true);

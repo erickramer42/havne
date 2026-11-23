@@ -126,7 +126,7 @@ const char* not_in_use(const ecuio_session_t* s)
     if (starts_with(s->uri, "mock://") || starts_with(s->uri, "replay://")) {
         return "the simulated source asks nothing";
     }
-    if (!ecuio_plugin_code_may_run(s)) {
+    if (!s->conversation_consent) {
         return "not enabled";
     }
     return nullptr;
@@ -220,7 +220,7 @@ ecuio_status_t make_all(ecuio_session_t* s, ecuio_session_talk& t)
 
 } // namespace
 
-void ecuio_session_talk::release() noexcept
+ecuio_security::store_ref ecuio_session_talk::release() noexcept
 {
     for (uint32_t k = 0; k < count; ++k) {
         if (bound[k].box_attached) {
@@ -232,7 +232,7 @@ void ecuio_session_talk::release() noexcept
     }
     ecuio_wasm::free_module(module);
     module = nullptr;
-    store.reset();
+    return std::move(store);
 }
 
 void ecuio_session_talk_free(ecuio_session_talk* t) noexcept
@@ -240,21 +240,28 @@ void ecuio_session_talk_free(ecuio_session_talk* t) noexcept
     delete t;
 }
 
-bool ecuio_session_may_talk(const ecuio_session_t* session)
+bool ecuio_session_may_talk(const ecuio_session_t* session,
+                            const uint32_t* rx, const uint32_t* tx,
+                            uint32_t count)
 {
-    const ecuio_signal_set_t* set = session->profile_hold.set;
-    if (session->conversation == nullptr || set == nullptr ||
+    if (session->conversation == nullptr || !session->conversation_consent ||
         starts_with(session->uri, "mock://") ||
         starts_with(session->uri, "replay://")) {
         return false;
     }
-    for (uint32_t c = 0; c < set->channel_count; ++c) {
-        if (ecu_on(*session->conversation, set->channels[c].rx_id,
-                   set->channels[c].tx_id) != nullptr) {
+    for (uint32_t c = 0; c < count; ++c) {
+        if (ecu_on(*session->conversation, rx[c], tx[c]) != nullptr) {
             return true;
         }
     }
     return false;
+}
+
+bool ecuio_session_may_talk(const ecuio_session_t* session)
+{
+    return ecuio_session_may_talk(
+        session, session->module_rx.data(), session->module_tx.data(),
+        static_cast<uint32_t>(session->module_rx.size()));
 }
 
 ecuio_status_t ecuio_conversation_bind(ecuio_session_t* s)
@@ -295,21 +302,26 @@ ecuio_status_t ecuio_conversation_bind(ecuio_session_t* s)
             ecuio_detail_set("plugin %s's module can't be run: %s",
                              p.plugin_id.c_str(), why);
         }
+        s->conversation_store = t->release();
         return loaded == ECUIO_ERR_INVALID_ARGUMENT ? ECUIO_ERR_LOAD_FAILED
                                                     : loaded;
     }
     const ecuio_status_t made = make_all(s, *t);
     if (made != ECUIO_OK) {
-        return made; /* t's destructor frees what was made */
+        s->conversation_store = t->release(); /* the next start's again */
+        return made;
     }
+    t->kept = static_cast<bool>(t->store);
+    const std::lock_guard<std::mutex> lock(s->conversation_mutex);
     s->talk.reset(t.release());
     return ECUIO_OK;
 }
 
 void ecuio_conversation_unbind(ecuio_session_t* s) noexcept
 {
+    const std::lock_guard<std::mutex> lock(s->conversation_mutex);
     if (s->talk != nullptr) {
-        s->talk->release();
+        (void)s->talk->release();
     }
 }
 

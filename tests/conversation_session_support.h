@@ -77,7 +77,13 @@ struct GuestShape {
     bool buffer_inside = true;
     uint8_t begin = 3; /* begin's answer */
     uint8_t flip = 0;  /* a wrong key when not 0 (below 0x40) */
+    bool begin_spins = false; /* begin counts 20,000 down first */
+    bool long_request = false; /* next_request writes AB, answers 5,000 */
+    bool end_marks = false;    /* end stores 1 at kEndMark */
 };
+
+/* Where an end_marks guest's end leaves its 1 */
+constexpr uint32_t kEndMark = 3500;
 
 /* The guest ABI's six exports: begin answers shape.begin, next_request
  * nothing, accept the key of each seed */
@@ -97,19 +103,37 @@ inline wasm_builder::module unlocking_guest(const GuestShape& shape = {})
     two.params = {I32, I32};
     two.results = {I32};
     two.body = {I32_CONST, shape.begin};
+    if (shape.begin_spins) {
+        /* local 2 from 20,000 down to 0, about 100,000 units of work */
+        two.i32_locals = 1;
+        two.body = {I32_CONST, 0xA0, 0x9C, 0x01, 0x21, 2, 0x03, VOID_BLOCK,
+                    0x20, 2, I32_CONST, 1, I32_SUB, 0x22, 2, 0x0D, 0, 0x0B,
+                    I32_CONST, shape.begin};
+    }
     two.exported = "begin";
     m.funcs.push_back(two);
-    m.funcs.push_back(plain_func("next_request", {I32_CONST, 0}));
+    m.funcs.push_back(
+        shape.long_request
+            ? plain_func("next_request", {I32_CONST, kBufferLeb[0],
+                                          kBufferLeb[1], I32_CONST, 0xAB, 0x01,
+                                          0x3A, 0, 0, I32_CONST, 0x88, 0x27})
+            : plain_func("next_request", {I32_CONST, 0}));
     m.funcs.push_back(accept_func(shape.flip));
-    m.funcs.push_back(plain_func("end", {}, false));
+    m.funcs.push_back(
+        shape.end_marks
+            ? plain_func("end", {I32_CONST, 0xAC, 0x1B, I32_CONST, 1, 0x3A, 0, 0},
+                         false)
+            : plain_func("end", {}, false));
     return m;
 }
 
 /* A plugin whose one ECU is 7E8/7E0 at level 01 (the sim's 4 bytes) */
-inline conversation_test::Made made(const GuestShape& shape = {})
+inline conversation_test::Made made(const GuestShape& shape = {},
+                                    const char* budget = "250000")
 {
     conversation_test::Made m;
     m.module = unlocking_guest(shape).build();
+    m.group.budget = budget;
     m.ecus = R"([{"id": "pcm", "rx": "7E8"}])";
     m.group.ecus = R"(["pcm"])";
     m.group.security =
@@ -168,6 +192,7 @@ struct Bench {
     Ecu ecu;
     int64_t now = 0;
     std::vector<Bytes> sent;
+    uint32_t hook_channel = 0; /* the channel the frame hook is told of */
 
     void start(ecuio_session_t* session)
     {
@@ -196,7 +221,7 @@ struct Bench {
         (void)ecuio_engine_on_frame(e.get(), 0, b.data(),
                                     static_cast<uint16_t>(b.size()), now,
                                     nullptr);
-        ecuio_conversations_frame(s, e.get(), 0, b.data(),
+        ecuio_conversations_frame(s, e.get(), hook_channel, b.data(),
                                   static_cast<uint32_t>(b.size()));
     }
 

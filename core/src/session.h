@@ -64,6 +64,9 @@ struct ecuio_session {
      * nothing is bound */
     std::unique_ptr<ecuio_session_talk, void (*)(ecuio_session_talk*)> talk{
         nullptr, ecuio_session_talk_free};
+    /* Held across each conversation call (the unlock, the getters, the
+     * bind's hand-over and close's release); never by a worker */
+    mutable std::mutex conversation_mutex;
     /* The security store a bind hands the conversations, set before
      * start; empty for none */
     ecuio_security::store_ref conversation_store;
@@ -75,6 +78,8 @@ struct ecuio_session {
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
+    /* The consent create found (consent_gate.h): a create-time fact */
+    bool conversation_consent = false;
     /* started's copy for any thread: the conditions' states judge what the
      * session gets only once it runs */
     std::atomic<bool> ran{false};

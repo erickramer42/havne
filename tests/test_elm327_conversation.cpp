@@ -160,6 +160,14 @@ TEST_F(Elm327ConversationTest, TheModulesKeyUnlocksTheEngineEcu)
             }
         }
         EXPECT_TRUE(seed_seen);
+        EXPECT_EQ(ecuio_plugin_free(plugin.get()), ECUIO_ERR_IN_USE)
+            << "free is refused while a session holds the bound set";
+        ASSERT_EQ(ecuio_session_close(s.get()), ECUIO_OK);
+        EXPECT_TRUE(s->talk->bound[0].ended_in_session)
+            << "the module's end came before the engine's 10 01";
+        ASSERT_EQ(ecuio_session_get_channel_conversation(s.get(), 0, &c),
+                  ECUIO_OK);
+        EXPECT_EQ(c.state, ECUIO_CONVERSATION_ENDED);
     }
     std::remove(store.c_str());
 }

@@ -742,7 +742,7 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
 
 void end_worker(ecuio_socketcan_transport* t, worker_state& w)
 {
-    ecuio_conversations_end(w.s);
+    ecuio_conversations_end(w.s, &w.e);
     leave_sessions(t);
     ecuio_publish_timing(w.s, w.e, &w.iso, now_us(t), w.timing_at, true);
 }

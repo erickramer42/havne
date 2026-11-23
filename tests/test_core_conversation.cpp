@@ -14,6 +14,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 using conversation_session::Bench;
@@ -321,4 +322,80 @@ TEST(CoreConversationTest, TheStoreIsNamedBeforeStartAndReadThere)
         ecuio_session_security_store(b.session.get(), file.path.c_str(), ""),
         ECUIO_ERR_INVALID_ARGUMENT);
     b.session->started = false;
+}
+
+/* A delay the store dates from an earlier session runs on: the first
+ * unlock is TOO_SOON with its time, and the module's machine takes the
+ * stored count */
+TEST(CoreConversationTest, AStoredDelayIsRestoredAtTheFirstUnlock)
+{
+    DoorOpen open;
+    TempStore file("core_conversation_restore.json");
+    const long long now = static_cast<long long>(std::time(nullptr));
+    if (FILE* f = std::fopen(file.path.c_str(), "wb")) {
+        std::fprintf(f,
+                     "{\"havne_security_store\": 1, \"entries\": [{\"vehicle\": "
+                     "\"%s\", \"rx\": \"7E8\", \"level\": 1, \"failed\": 2, "
+                     "\"last_utc\": %lld, \"pending_utc\": 0}]}",
+                     hex16(ecuio_security::store_vehicle_of("label:car")).c_str(),
+                     now);
+        std::fclose(f);
+    }
+    Bound b;
+    Bench bench;
+    ASSERT_NO_FATAL_FAILURE(bound_with_store(&b, &bench, {}, file.path, "Car"));
+    uint32_t wait = 0;
+    EXPECT_EQ(ecuio_session_security_unlock(b.session.get(), 0, 0x01,
+                                            generation_of(b.session.get()),
+                                            &wait),
+              ECUIO_ERR_TOO_SOON);
+    EXPECT_GT(wait, 0u);
+    EXPECT_LE(wait, 1000u);
+    bench.passes(2);
+    const ecuio_bound_channel& bound = b.session->talk->bound[0];
+    ASSERT_EQ(bound.level_count, 1u);
+    EXPECT_EQ(bound.levels[0].failed, 2u) << "the machine took the stored count";
+    EXPECT_GT(bound.levels[0].delay_left_us, 0);
+    EXPECT_EQ(bench.heard({0x27, 0x01}), 0u);
+}
+
+/* Consent is a create-time fact: the door opened after create binds
+ * nothing, and the session doesn't ask as one with requests */
+TEST(CoreConversationTest, ConsentIsTakenAtCreate)
+{
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made()));
+    DoorOpen open;
+    EXPECT_FALSE(ecuio_session_may_talk(b.session.get()));
+    ASSERT_EQ(ecuio_conversation_bind(b.session.get()), ECUIO_OK);
+    EXPECT_EQ(b.session->talk, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "plugin talker's conversation part isn't in use: not enabled");
+}
+
+/* After close the unlock is SESSION_CLOSED, and the report keeps its
+ * last state; a fault reads in the report by its code */
+TEST(CoreConversationTest, AfterCloseTheUnlockIsRefusedAndTheReportStays)
+{
+    DoorOpen open;
+    GuestShape faults;
+    faults.begin = 7;
+    Bound b;
+    Bench bench;
+    ASSERT_NO_FATAL_FAILURE(bound_with_store(&b, &bench, faults, "", nullptr));
+    ecuio_channel_conversation_t c{};
+    ASSERT_EQ(ecuio_session_get_channel_conversation(b.session.get(), 0, &c),
+              ECUIO_OK);
+    EXPECT_EQ(c.state, ECUIO_CONVERSATION_FAULTED);
+    EXPECT_EQ(c.fault, ECUIO_CONVERSATION_FAULT_BEGIN);
+    ASSERT_EQ(ecuio_session_close(b.session.get()), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_security_unlock(b.session.get(), 0, 0x01,
+                                            c.generation, nullptr),
+              ECUIO_ERR_SESSION_CLOSED);
+    ecuio_channel_conversation_t after{};
+    ASSERT_EQ(ecuio_session_get_channel_conversation(b.session.get(), 0,
+                                                     &after),
+              ECUIO_OK);
+    EXPECT_EQ(after.state, ECUIO_CONVERSATION_FAULTED);
+    EXPECT_EQ(after.generation, c.generation);
 }

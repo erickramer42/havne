@@ -290,6 +290,7 @@ ecuio_session_get_channel_conversation(const ecuio_session_t* session,
     }
     *out = ecuio_channel_conversation_t{};
     out->rx_id = session->module_rx[channel];
+    const std::lock_guard<std::mutex> calls(session->conversation_mutex);
     ecuio_bound_channel* b =
         ecuio_bound_channel_of(const_cast<ecuio_session_t*>(session), channel);
     if (b == nullptr) {
@@ -297,7 +298,7 @@ ecuio_session_get_channel_conversation(const ecuio_session_t* session,
     }
     const std::lock_guard<std::mutex> lock(session->support_mutex);
     const ecuio_conversation_report& r = b->published;
-    out->flags = session->talk->store ? 0u : ECUIO_CONVERSATION_NOT_KEPT;
+    out->flags = session->talk->kept ? 0u : ECUIO_CONVERSATION_NOT_KEPT;
     out->generation = b->generation;
     out->state = state_code(r.state);
     out->session = r.session;
@@ -362,6 +363,8 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
     if (session == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
+    /* the whole call, so a second caller or close's release waits */
+    const std::lock_guard<std::mutex> calls(session->conversation_mutex);
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
     }
@@ -378,7 +381,7 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
     if (judged != ECUIO_OK) {
         return judged;
     }
-    if (session->talk->store && !b->vehicle_known) {
+    if (session->talk->kept && !b->vehicle_known) {
         const ecuio_status_t first =
             first_unlock(session, *b, channel, level, out_wait_ms);
         if (first != ECUIO_OK) {

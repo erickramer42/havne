@@ -10,6 +10,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "session.h"
+#include "consent_gate.h"
 #include "conversation_bind.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
@@ -79,6 +80,25 @@ namespace {
             used += static_cast<size_t>(w);
         }
     }
+/* The profile chosen, held from create on, and its set's conversation
+ * part with the consent create finds (consent_gate.h) */
+ecuio_status_t take_profile(ecuio_session_t* s, const char* chosen,
+                            const ecuio_signal_set_t** set)
+{
+    const ecuio_status_t found = ecuio_profile_acquire(chosen, set);
+    s->profile_hold.set = *set;
+    if (found != ECUIO_OK) {
+        if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
+            ecuio_detail_set("no profile is named '%s'", chosen);
+        }
+        return found;
+    }
+    s->conversation = ecuio_conversation_of(*set);
+    s->conversation_consent =
+        s->conversation != nullptr && ecuio_plugin_code_may_run(s);
+    return ECUIO_OK;
+}
+
 } // namespace
 
 extern "C" {
@@ -252,15 +272,10 @@ ecuio_status_t ecuio_session_create(
     }
 
     const ecuio_signal_set_t* profile_set = nullptr;
-    const ecuio_status_t found = ecuio_profile_acquire(chosen, &profile_set);
-    s->profile_hold.set = profile_set;
+    const ecuio_status_t found = take_profile(s.get(), chosen, &profile_set);
     if (found != ECUIO_OK) {
-        if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
-            ecuio_detail_set("no profile is named '%s'", chosen);
-        }
         return found;
     }
-    s->conversation = ecuio_conversation_of(profile_set);
 
     /* uds-generic (ADR-0020) reads its DIDs from the query and gets a set
      * of its own, owned by the session; no other profile takes ?did=.
