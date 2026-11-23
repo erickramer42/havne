@@ -335,6 +335,30 @@ def test_a_clear_of_several_channels_is_one_request(monkeypatch):
     assert calls == [[(0, 5), (1, 9)], [(1, 9)]]
 
 
+def test_a_clear_of_several_channels_leaves_a_moved_report_out(monkeypatch):
+    # One moved report refuses the whole request: the moved channel is left
+    # out and the rest asked again, so each keeps its own outcome
+    from havne import session as module
+    calls = []
+    reports = {0: 5, 1: 9, 2: 7}
+
+    def take(handle, targets, count, flags):
+        asked = [(targets[k].channel, targets[k].generation) for k in range(count)]
+        calls.append(asked)
+        reports[1] = 10  # read again before the worker took the request
+        return c.ECUIO_ERR_REPORT_CHANGED if (1, 9) in asked else 0
+    monkeypatch.setattr(module.lib, "ecuio_session_clear_diagnostics_set", take)
+    with havne.Session("mock://py") as s:
+        def diagnostics(channel=0):
+            d = c.ecuio_channel_diagnostics_t()
+            d.generation = reports[channel]
+            d.flags = c.ECUIO_DIAG_COMPLETE
+            return d
+        monkeypatch.setattr(s, "diagnostics", diagnostics)
+        assert s.clear([0, 1, 2], confirm=True) == [5, None, 7]
+    assert calls == [[(0, 5), (1, 9), (2, 7)], [(0, 5), (2, 7)]]
+
+
 def test_a_clear_of_the_simulated_car_goes_through_core_s_gate():
     # The simulated car only: its engine is stopped for the first 15 s
     # after the connect, so core's gate lets 04 out

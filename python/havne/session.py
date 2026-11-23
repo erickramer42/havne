@@ -719,22 +719,43 @@ class Session:
         unless engine_running or moving gives the caller's word for that
         too. Returns at once with the generation each report was read
         at (one for a channel, a list for a list); each report's `clear`
-        field says what became of it. The package's tests clear only the
-        simulated car."""
+        field says what became of it. In a list, a channel whose report
+        moved before the request is left out and the rest asked again,
+        as havne-cli and the app ask: None stands in its place, nothing
+        asked of it (read it again and clear again). The package's tests
+        clear only the simulated car."""
         if not confirm:
             raise ValueError("clear() erases the car's trouble codes: pass confirm=True")
         flags = ((e.ECUIO_CLEAR_ALLOW_RUNNING if engine_running else 0) |
                  (e.ECUIO_CLEAR_ALLOW_MOVING if moving else 0))
         channels = [channel] if isinstance(channel, int) else list(channel)
-        targets = (e.ecuio_clear_target_t * len(channels))()
-        for k, c in enumerate(channels):
-            targets[k].channel = c
-            targets[k].generation = self.diagnostics(c).generation
-        check(lib.ecuio_session_clear_diagnostics_set(self._handle(), targets,
-                                                      len(channels), flags),
-              "ecuio_session_clear_diagnostics_set")
-        generations = [t.generation for t in targets]
+        generations = [self.diagnostics(c).generation for c in channels]
+        asked = list(range(len(channels)))
+        while asked:
+            targets = (e.ecuio_clear_target_t * len(asked))()
+            for k, at in enumerate(asked):
+                targets[k].channel = channels[at]
+                targets[k].generation = generations[at]
+            status = lib.ecuio_session_clear_diagnostics_set(
+                self._handle(), targets, len(asked), flags)
+            if status == e.ECUIO_ERR_REPORT_CHANGED and not isinstance(channel, int):
+                still = [at for at in asked
+                         if self._report_still(channels[at], generations[at])]
+                if len(still) < len(asked):
+                    for at in set(asked) - set(still):
+                        generations[at] = None
+                    asked = still
+                    continue
+            check(status, "ecuio_session_clear_diagnostics_set")
+            break
         return generations[0] if isinstance(channel, int) else generations
+
+    def _report_still(self, channel, generation):
+        """Whether channel's report is still the one generation names: read
+        to the end and not clearing (havne-cli's clear_report_still)"""
+        d = self.diagnostics(channel)
+        return (d.generation == generation and bool(d.flags & e.ECUIO_DIAG_COMPLETE)
+                and not d.flags & e.ECUIO_DIAG_CLEARING)
 
     def reports_settled(self):
         """Whether every channel's diagnostics are complete or were never
