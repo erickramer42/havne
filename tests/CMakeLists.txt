@@ -805,6 +805,13 @@ if(TARGET havne-cli)
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.APickOnlySessionSaysNothingIsAsked
             PROPERTIES TIMEOUT 120)
+        # The host kept awake (ADR-0033's appendix): a live session's line
+        # says so, --allow-sleep doesn't hold, the mock has no key
+        add_test(NAME CliLogRunTest.ALiveSessionLineSaysAwake
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_awake.py
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.ALiveSessionLineSaysAwake
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
@@ -1471,6 +1478,10 @@ if(TARGET havne-cli)
         "--pick takes 'ranked'")
     app_cli_usage_says(StreamPickWithoutAWordIsUsage "stream|mock://x|--pick"
         "--pick takes 'ranked'")
+    app_cli_usage_says(AllowSleepTakesNoValue "stream|mock://x|--allow-sleep=1"
+        "unexpected '--allow-sleep=1'")
+    app_cli_usage_says(AllowSleepIsStreamAndLogOnly "vin|mock://x|--allow-sleep"
+        "--allow-sleep")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")

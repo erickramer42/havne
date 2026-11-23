@@ -49,6 +49,7 @@ struct LogArgs {
     const char* conditions = nullptr; /* --conditions' file */
     bool pick_ranked = false;       /* --pick ranked */
     bool armed = false;             /* --armed */
+    bool allow_sleep = false;       /* --allow-sleep */
 };
 
 // --pick's one word: "ranked", the default pick the CLI can know (the
@@ -122,6 +123,10 @@ inline bool flag_option(const std::string& s, LogArgs& a)
 {
     if (s == "--armed") {
         a.armed = true;
+        return true;
+    }
+    if (s == "--allow-sleep") {
+        a.allow_sleep = true;
         return true;
     }
     return false;
