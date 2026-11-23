@@ -54,6 +54,10 @@ inline uint32_t ecuio_engine_modules_settle(ecuio_request_engine* e,
             continue;
         }
         ch.module_state = ECUIO_MODULE_STATE_CLOSED;
+        if (ch.visiting) {
+            ch.visiting = false; /* the filter kept back is free again */
+            e->visit_now = UINT32_MAX;
+        }
         e->answering &= ~(1u << c);
         ch.quiet_run = 0;
         ch.quiet = false;
@@ -96,12 +100,15 @@ inline void ecuio_engine_module_reopen(ecuio_request_engine* e, uint32_t c)
     }
 }
 
-/* The modules holding a filter: open or closing */
+/* The modules live data holds a filter for: open or closing, a visit's
+ * left out (it holds the one kept back) */
 inline uint32_t ecuio_engine_modules_held(const ecuio_request_engine* e)
 {
     uint32_t n = 0;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        n += ecuio_engine_module_hears(e->chans[c]) ? 1u : 0u;
+        n += ecuio_engine_module_hears(e->chans[c]) && !e->chans[c].visiting
+                 ? 1u
+                 : 0u;
     }
     return n;
 }
@@ -184,7 +191,9 @@ inline void ecuio_engine_modules_apply(ecuio_request_engine* e,
         if (first_take) {
             ch.module_state = ECUIO_MODULE_STATE_CLOSED;
         }
-        ch.reasons = reasons[c];
+        /* a visit under way keeps its reason to its pass's end */
+        ch.reasons = static_cast<uint8_t>(
+            reasons[c] | (ch.reasons & ECUIO_ENGINE_REASON_VISIT));
         if (ch.reasons == 0 && ch.module_state == ECUIO_MODULE_STATE_NO_ROOM) {
             ch.module_state = ECUIO_MODULE_STATE_CLOSED;
             ch.waiting = 0;

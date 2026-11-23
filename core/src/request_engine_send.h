@@ -315,6 +315,54 @@ inline int64_t ecuio_engine_closing_next_us(const ecuio_request_engine* e,
                : INT64_MAX;
 }
 
+/* Whether visiting module ch still owes its pass: identification items
+ * unsettled, a diagnostics read */
+inline bool ecuio_engine_visit_owes(const ecuio_engine_channel& ch)
+{
+    return ch.ident_pending > 0 || ch.identifying || ch.diag_pending > 0 ||
+           ch.diagnosing;
+}
+
+/* When a module that isn't open, or is visiting, next sends: a closing
+ * one's floor while it owes something, a visiting one's while its pass
+ * does; INT64_MAX otherwise */
+inline int64_t ecuio_engine_limited_next_us(const ecuio_request_engine* e,
+                                            const ecuio_engine_channel& ch)
+{
+    if (ch.module_state == ECUIO_MODULE_STATE_OPEN && ch.visiting) {
+        return ch.outstanding == ECUIO_ENGINE_NONE &&
+                       ecuio_engine_visit_owes(ch)
+                   ? ch.next_send_us
+                   : INT64_MAX;
+    }
+    return ecuio_engine_closing_next_us(e, ch);
+}
+
+/* due for a visiting module (request_diag_visit.h): its pass alone, the
+ * identification items unsettled, then the diagnostics read; no walk,
+ * row, scan or session */
+inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
+                                      int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.identifying || ch.diagnosing) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.ident_pending > 0 && ecuio_engine_take_ident(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
 /* due for a module that isn't open: a closing one finishes what it began
  * (a one-shot already in, a clear's next step, the diagnostics read's
  * next item), then leaves its session (10 01); nothing else, and nothing
@@ -412,12 +460,16 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
  * (request_engine_quiet.h) settles its lists unasked and asks a row at
  * each step, with no rows an item. Moves the rotation past the request
  * it returns; ecuio_engine_sent records what became of it. A module that
- * isn't open asks only what ecuio_engine_due_closing gives. */
+ * isn't open asks only what ecuio_engine_due_closing gives, a visiting
+ * one what ecuio_engine_due_visit gives. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
     if (!ecuio_engine_module_open(e->chans[c])) {
         return ecuio_engine_due_closing(e, c, now_us);
+    }
+    if (e->chans[c].visiting) {
+        return ecuio_engine_due_visit(e, c, now_us);
     }
     int32_t r = ECUIO_ENGINE_NONE;
     if (ecuio_engine_due_lead(e, c, now_us, &r)) {
@@ -454,7 +506,7 @@ inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
 {
     const ecuio_engine_channel& ch = e->chans[c];
     if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us ||
-        !ecuio_engine_module_open(ch)) {
+        !ecuio_engine_module_open(ch) || ch.visiting) {
         return ECUIO_ENGINE_NONE;
     }
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
@@ -522,10 +574,10 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
             (full && ch.outstanding == ECUIO_ENGINE_NONE)) {
             continue;
         }
-        if (!ecuio_engine_module_open(ch)) {
+        if (!ecuio_engine_module_open(ch) || ch.visiting) {
             const int64_t at = ch.outstanding != ECUIO_ENGINE_NONE
                                    ? ch.deadline_us
-                                   : ecuio_engine_closing_next_us(e, ch);
+                                   : ecuio_engine_limited_next_us(e, ch);
             const int64_t in = at == INT64_MAX ? INT64_MAX
                                : at > now_us   ? at - now_us
                                                : 0;

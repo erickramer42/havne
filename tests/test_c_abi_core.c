@@ -57,7 +57,8 @@ int c_abi_core(void)
         ECUIO_SUPPORT_CLOSED != 0x80u || ECUIO_SUPPORT_NO_ROOM != 0x100u ||
         ECUIO_MODULE_REASON_RANGE != 0x1u || ECUIO_MODULE_REASON_READ != 0x2u ||
         ECUIO_MODULE_REASON_CONVERSATION != 0x4u ||
-        ECUIO_MODULE_REASON_VISIT != 0x8u) {
+        ECUIO_MODULE_REASON_VISIT != 0x8u ||
+        ECUIO_DIAG_NOT_OPENED != 0x400u) {
         return 1;
     }
     printf("detail '%s'\n", ecuio_last_error_detail());

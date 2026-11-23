@@ -827,6 +827,13 @@ ecuio_status_t ecuio_identity_vin(
                                                           monitors' CYCLE flags
                                                           hold this drive
                                                           cycle */
+#define ECUIO_DIAG_NOT_OPENED            0x00000400u   /* the last read found
+                                                          its closed module
+                                                          could not be opened
+                                                          (no filter free):
+                                                          COMPLETE with every
+                                                          item unasked
+                                                          (ADR-0065 step 5) */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */

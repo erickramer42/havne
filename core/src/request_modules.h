@@ -165,8 +165,9 @@ struct ecuio_modules_seen {
  * for what the picks and conditions read, every module's on a table asked
  * whole with no focus, none on a pick-only table with nothing picked. The
  * engine then opens what fits its budget (ecuio_engine_modules_apply).
- * Every pass, the closing modules that are done close and a freed filter
- * opens the module waiting longest. The modules closed now, a bit each.
+ * Every pass, the closing modules that are done close, a freed filter
+ * opens the module waiting longest, and a visit ends or the next begins
+ * (ecuio_engine_visits_step). The modules closed now, a bit each.
  * No allocation: the worker's thread. */
 inline uint32_t ecuio_take_modules(ecuio_session_t* session,
                                    ecuio_request_engine* e,
@@ -211,6 +212,7 @@ inline uint32_t ecuio_take_modules(ecuio_session_t* session,
     if (closed != 0) {
         ecuio_engine_modules_fill(e);
     }
+    ecuio_engine_visits_step(e);
     return closed;
 }
 

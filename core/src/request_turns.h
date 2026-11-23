@@ -128,8 +128,8 @@ inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
     if (ch.outstanding != ECUIO_ENGINE_NONE) {
         return INT64_MAX;
     }
-    if (!ecuio_engine_module_open(ch)) {
-        return ecuio_engine_closing_next_us(e, ch);
+    if (!ecuio_engine_module_open(ch) || ch.visiting) {
+        return ecuio_engine_limited_next_us(e, ch);
     }
     int64_t at = ecuio_engine_turn_own_us(e, ch);
     const int64_t s = ecuio_engine_session_next_us(e, ch);

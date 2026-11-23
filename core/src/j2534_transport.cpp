@@ -425,6 +425,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     }
     ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
     t->engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* the adapter sends ISO-TP */
+    t->engine.filters_most = J2534_FILTERS_GUARANTEED;
     t->engine.module_budget = J2534_FILTERS_GUARANTEED - 1;
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the

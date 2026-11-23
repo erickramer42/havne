@@ -384,6 +384,10 @@ struct ecuio_engine_channel {
     /* With no room: its place among the modules waiting for a filter, 0
      * otherwise (ecuio_engine_modules_fill opens the lowest first) */
     uint32_t waiting = 0;
+    /* A visit holds the module open for its codes (request_diag_visit.h),
+     * through its close; it was waiting for a filter before (else closed) */
+    bool visiting = false;
+    bool visit_from_no_room = false;
 };
 
 /* Whether module ch asks anything new: open */
@@ -517,6 +521,14 @@ struct ecuio_request_engine {
     uint32_t module_budget = 0;
     bool modules_taken = false;
     uint32_t waiting_last = 0;
+    /* The filters the transport may hold, live data's and a visit's, 0 for
+     * no bound; the visits wanted (a bit each) in the order asked, and the
+     * module visiting (UINT32_MAX: none) */
+    uint32_t filters_most = 0;
+    uint32_t visit_want = 0;
+    uint8_t visit_order[ECUIO_MAX_CHANNELS] = {};
+    uint32_t visit_count = 0;
+    uint32_t visit_now = UINT32_MAX;
 };
 
 /* Whether request r is asked in the rotation: not dropped by the probe

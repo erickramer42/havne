@@ -292,7 +292,8 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     /* A filter for each module up to the cap, one kept back for a visit;
-     * J2534's attach lowers it */
+     * J2534's attach lowers both */
+    e->filters_most = ECUIO_MAX_CHANNELS;
     e->module_budget = ECUIO_MAX_CHANNELS - 1;
     for (uint32_t c = 0; c < chan_count; ++c) {
         e->chans[c].functional = isotp_functional_id(tx_ids[c]);
@@ -548,7 +549,8 @@ inline void ecuio_publish_diagnostics(ecuio_session_t* session,
 
 /* Starts the diagnostics over (ecuio_engine_diagnose_again) when
  * ecuio_session_read_diagnostics has been called since the worker last
- * looked; seen is the worker's count. */
+ * looked, the closed modules' read through a visit each
+ * (ecuio_engine_visit_closed); seen is the worker's count. */
 inline void ecuio_take_diag_request(ecuio_session_t* session,
                                     ecuio_request_engine* e, uint32_t& seen)
 {
@@ -556,6 +558,7 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
     if (asked != seen) {
         seen = asked;
         ecuio_engine_diagnose_again(e);
+        ecuio_engine_visit_closed(e);
     }
 }
 
