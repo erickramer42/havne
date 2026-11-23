@@ -46,7 +46,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
     test_security_store_owner.cpp test_conversation_registry.cpp
-    test_conversation_session.cpp)
+    test_conversation_session.cpp test_core_conversation.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -223,7 +223,8 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_stream.cpp test_elm327_session_links.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
-    test_elm327_pack.cpp test_elm327_gate.cpp)
+    test_elm327_pack.cpp test_elm327_gate.cpp
+    test_elm327_conversation.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -2735,6 +2736,7 @@ if(WIN32)
         test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
+        test_j2534_conversation.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
