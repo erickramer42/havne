@@ -285,9 +285,7 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
     }
     const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
     if (n.behind && m.len > 0) {
-        const ecuio_sim_gateway_verdict v = ecuio_sim_gateway_route(
-            s->ecu.config.gateway, s->nodes[s->gateway].session, n.reply_id,
-            m.data, functional, s->ecu.time_us);
+        const ecuio_sim_gateway_verdict v = route(s, n, m.data, functional);
         if (v.fate == ecuio_sim_gateway_fate::drop) {
             return true;
         }

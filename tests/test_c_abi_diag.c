@@ -40,6 +40,8 @@ int c_abi_diag(void)
     uint32_t can_count = 0;
     ecuio_sim_t* sim = NULL;
     ecuio_sim_stats_t sim_stats;
+    ecuio_sim_gateway_t gateway;
+    ecuio_sim_gateway_override_t route;
     ecuio_inspection_t inspection;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
@@ -132,7 +134,16 @@ int c_abi_diag(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         sim != NULL || ECUIO_SIM_MAX_REPLIES != 66u ||
         ECUIO_SIM_REPLY_PENDING != 1u || ECUIO_SIM_REPLY_LATE != 2u ||
-        ECUIO_SIM_REPLY_BAD_SEQUENCE != 4u || ECUIO_SIM_REPLY_STALLED != 8u) {
+        ECUIO_SIM_REPLY_BAD_SEQUENCE != 4u || ECUIO_SIM_REPLY_STALLED != 8u ||
+        ECUIO_SIM_REPLY_GATEWAY != 16u) {
+        return 1;
+    }
+    /* The simulated gateway's view */
+    if (ecuio_sim_get_gateway(NULL, &gateway) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_sim_get_gateway_override(NULL, 0, &route) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_SIM_CLASS_COUNT != 5u || ECUIO_SIM_ROUTE_GATED_SILENT != 5u ||
+        ECUIO_SIM_GATEWAY_UNSUPPRESSED != 0x80u) {
         return 1;
     }
     ecuio_sim_destroy(NULL);

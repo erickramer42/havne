@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <random>
 
 #if ECUIO_HAVE_SOCKETCAN
@@ -114,6 +115,12 @@ struct ecuio_sim {
     std::unique_ptr<sim_node[]> nodes;
     int node_count = 1;
     int gateway = -1; /* the gateway's node, -1 for none */
+    /* The gateway's counts (the worker's or the ask's alone), and its
+     * view, copied under the mutex after each request it routes or
+     * answers, for ecuio_sim_get_gateway from any thread */
+    ecuio_sim_gateway_tally gateway_tally;
+    ecuio_sim_gateway_t gateway_view{};
+    mutable std::mutex gateway_mutex;
     /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
      * the clock to the time it's given (its ticks never go back) */
     bool unbound = false;
@@ -138,6 +145,13 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out);
 ecuio_sim_fate decide(ecuio_sim* s, sim_node& n, const uint8_t* req,
                       uint32_t len, const uint8_t* reply, uint32_t reply_len);
+/* The gateway's verdict on req (at least a byte) for n, a module behind
+ * it, counted and its view copied: in the ask and on the bus, before the
+ * module's busy check, answer, draw and fate */
+ecuio_sim_gateway_verdict route(ecuio_sim* s, const sim_node& n,
+                                const uint8_t* req, bool functional);
+/* The gateway's view copied under its mutex */
+void publish_gateway(ecuio_sim* s);
 
 #if ECUIO_HAVE_SOCKETCAN
 /* ecuio_sim_create_with's bus: ifname judged, its socket opened and the

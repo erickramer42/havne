@@ -58,10 +58,16 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out)
 {
     if (n.role == sim_role::gateway) {
-        return functional
-                   ? 0
-                   : ecuio_sim_gateway_answer(s->ecu.config.gateway, n.session,
-                                              s->ecu.time_us, req, len, out);
+        if (functional) {
+            return 0;
+        }
+        const bool was = n.session.security.unlocked != 0;
+        const uint32_t m = ecuio_sim_gateway_answer(
+            s->ecu.config.gateway, n.session, s->ecu.time_us, req, len, out);
+        ecuio_sim_gateway_count_answer(s->gateway_tally, was, n.session, req,
+                                       len, out, m);
+        publish_gateway(s);
+        return m;
     }
     /* sessions=1's modules take 10 03 but have no security access */
     const bool engine = n.role == sim_role::engine && !n.from_set;
@@ -98,6 +104,27 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
         return ecuio_sim_answer(s->ecu, n.session, req, len, functional, out);
     }
     return ecuio_sim_module_answer(req, len, functional, out);
+}
+
+ecuio_sim_gateway_verdict route(ecuio_sim* s, const sim_node& n,
+                                const uint8_t* req, bool functional)
+{
+    ecuio_sim_session& gw = s->nodes[s->gateway].session;
+    const bool was = gw.security.unlocked != 0;
+    const ecuio_sim_gateway_verdict v = ecuio_sim_gateway_route(
+        s->ecu.config.gateway, gw, n.reply_id, req, functional, s->ecu.time_us);
+    ecuio_sim_gateway_count_route(s->gateway_tally, v, was, gw);
+    publish_gateway(s);
+    return v;
+}
+
+void publish_gateway(ecuio_sim* s)
+{
+    ecuio_sim_gateway_t v;
+    ecuio_sim_gateway_view(s->ecu.config.gateway, s->nodes[s->gateway].session,
+                           s->gateway_tally, s->ecu.time_us, &v);
+    const std::lock_guard<std::mutex> lock(s->gateway_mutex);
+    s->gateway_view = v;
 }
 
 /* The fate of n's reply to req, a clear and the fault counted */
@@ -329,6 +356,9 @@ ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
     if (!build_nodes(s.get(), p)) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    if (s->gateway >= 0) {
+        publish_gateway(s.get());
+    }
     *out = std::move(s);
     return ECUIO_OK;
 }
@@ -432,13 +462,11 @@ bool ask_gateway(ecuio_sim* sim, const sim_node& node, const uint8_t* request,
                  uint32_t length, bool functional, int64_t t,
                  ecuio_sim_reply_t* replies, uint32_t capacity, uint32_t* n)
 {
-    sim_node& gw = sim->nodes[sim->gateway];
-    const ecuio_sim_gateway_verdict v = ecuio_sim_gateway_route(
-        sim->ecu.config.gateway, gw.session, node.reply_id, request, functional,
-        sim->ecu.time_us);
+    const ecuio_sim_gateway_verdict v = route(sim, node, request, functional);
     if (v.fate == ecuio_sim_gateway_fate::forward) {
         return false;
     }
+    sim_node& gw = sim->nodes[sim->gateway];
     gw.r.on_id = node.reply_id;
     if (v.fate == ecuio_sim_gateway_fate::withhold &&
         !ask_busy(sim, gw, request, t, replies, capacity, n)) {
@@ -711,6 +739,52 @@ ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
     out->clears = sim->clears.load(std::memory_order_relaxed);
     out->pending = sim->pending.load(std::memory_order_relaxed);
     out->flags = sim->flags.load(std::memory_order_acquire);
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_sim_get_gateway(const ecuio_sim_t* sim,
+                                     ecuio_sim_gateway_t* out)
+{
+    ecuio_detail_clear();
+    if (sim == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (sim->gateway < 0) {
+        ecuio_detail_set("the simulated ECU has no gateway (no gateway= in "
+                         "its URI)");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const std::lock_guard<std::mutex> lock(sim->gateway_mutex);
+    *out = sim->gateway_view;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_sim_get_gateway_override(const ecuio_sim_t* sim,
+                                              uint32_t index,
+                                              ecuio_sim_gateway_override_t* out)
+{
+    ecuio_detail_clear();
+    if (sim == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (sim->gateway < 0) {
+        ecuio_detail_set("the simulated ECU has no gateway (no gateway= in "
+                         "its URI)");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const ecuio_sim_gateway_config& g = sim->ecu.config.gateway;
+    if (index >= g.entry_count) {
+        ecuio_detail_set("the gateway has %u route= entries for a service "
+                         "or a module",
+                         static_cast<unsigned>(g.entry_count));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    bool unlocked = false;
+    {
+        const std::lock_guard<std::mutex> lock(sim->gateway_mutex);
+        unlocked = (sim->gateway_view.flags & ECUIO_SIM_GATEWAY_UNLOCKED) != 0;
+    }
+    ecuio_sim_gateway_override_of(g, index, unlocked, out);
     return ECUIO_OK;
 }
 
