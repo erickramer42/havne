@@ -7,6 +7,8 @@
   the key's window, the attempts' machine and its store: the appendices
   below), with no module bound. The rest is v0.9.1's (the note of
   2026-11-19 under Notes); nothing past step 1 is built.
+  The appendix of 2026-11-23 settles the public build, consent and a
+  plugin's publisher.
 - **Date:** 2026-11-16.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary);
@@ -2036,3 +2038,116 @@ until the consent record answers `ecuio_plugin_code_may_run`.
   (test_core), `Elm327ConversationTest`, `J2534ConversationTest`
   (cross-arch too), `fuzz_guest` (a module's bytes bound and stepped
   against the simulated ECU).
+
+### Appendix: the public build, consent and the plugin's publisher (2026-11-23)
+
+This settles the first item of "What stays open" and sets what a plugin
+that writes must say about itself. Like section 3, it is engineering
+considerations, not legal advice. Where sections 3, 3.4 and 4.5, "What
+stays open" and the Consequences leave the compile-out open, and where
+section 2.4 drops a signature altogether, read this appendix.
+
+1. **A public build carries the write and flash services, behind
+   consent.** Option 3 (section 3.2) is not taken: a release build holds
+   tier 3's operations, the dump, the flash and the restore, with the
+   gates of sections 4 to 6, and no release compiles them out. Core ships
+   mechanics and no vehicle knowledge: no write plan, image or key of its
+   own. So nothing writes to a car unless the user installs a plugin that
+   carries the plan and gives it consent (item 3). Section 4.5's "It
+   survives option 3" describes a build that is not made.
+2. **A plugin's manifest names its publisher.** A plugin that declares a
+   session, the conversation tier or an operation names its publisher, a
+   contact, its license and its own terms, in manifest format 3. Core shows them word for word: at
+   consent, and in each write's confirmation beside the write's exposure
+   lines (section 6's per-feature rule). Havne's own lines come first and
+   are the same for every plugin; the plugin's terms follow them and
+   change none of them.
+   - **Word for word** means the text the manifest holds, shown whole, as
+     plain text: never markup, never a link followed or an image fetched
+     (ADR-0052 section 10), never shortened. A name is at most 127 bytes,
+     a contact 255, a license 63 and the terms 64 KiB, all UTF-8.
+   - **What a plugin declares is its publisher's claim**, shown as
+     theirs: its plan, its image, its key computation, its declared
+     ranges, recovery and point of no return. What core enforces
+     regardless is section 3.3's list. Havne is provided as is: the user
+     decides whether to write and is responsible for the result.
+3. **Consent is given to one version of a plugin, by its fingerprint, and
+   asked again when the plugin changes.** The fingerprint is a
+   SHA-256 over the plugin's contents (the manifest without its
+   signature, then each file's path and SHA-256 in path order, so a
+   folder and its packed file agree) and the signing key's fingerprint,
+   where there is one. A changed byte anywhere (the manifest, the terms,
+   a module, a plan, an image), or a different key, is a new plugin to
+   consent to, whatever its `version` says.
+   - **What core enforces:** no conversation module binds to a session and
+     no tier-3 operation starts until the front end's call names the
+     fingerprint of the plugin the session holds, and core refuses a
+     fingerprint that isn't that plugin's. As for a clear (ADR-0038
+     section 2), core cannot see the user's confirmation; it enforces
+     that nothing binds or starts without the call. The in-process
+     simulator, `mock://` and a virtual CAN interface need no consent
+    .
+   - **Where the record lives:** a consent store core reads and writes, at
+     a path the host gives, holding for each consent the plugin's id and
+     version, its contents' hash and its key's fingerprint apart, the
+     publisher's name, the terms' SHA-256 and the UTC second it was given
+    . It holds nothing about a vehicle. The app and `havne-cli` use
+     one store by default, so one consent covers both.
+   - **Only a person gives consent**: in the app's dialog, or with
+     `havne-cli plugins consent --give <fingerprint>` after
+     `plugins terms` has printed the terms. Every other run (a stream, a
+     log, a session, the dump, the flash, the restore) only reads the
+     store and refuses without a record; no option on a run gives
+     consent, and no per-run flag names a fingerprint. This is Havne's
+     policy for its own front ends, not something core proves: core cannot
+     see who called the store's public `give`. Python's store gives
+     consent only as the same named act, with the terms shown first, never
+     silently.
+   - **Consent has three classes**, set by the most a plugin
+     declares: a session declaration (lighter, asked when the plugin is
+     picked), the conversation tier, and operations (a read class and a
+     write class, derived by core from the plan's steps). One consent
+     covers the plugin's version for every class it declares; the words
+     shown differ by class.
+   - **Consent is not a write's confirmation.** It is asked once for each
+     version of the plugin; section 2.3's first `27` to a module and each
+     write's confirmation (section 5's preview, gate 3's lines) are still
+     asked at the point of action, and a write's confirmation binds the
+     fingerprint. Consent does not lapse when Havne's own words change:
+     those are shown in full at every write.
+   - **Without consent** the plugin's data tier loads and decodes as any
+     data plugin's does. A session declaration is inert, and the
+     conversation and operation tiers stay data only.
+   - **The record of a write says what consented to it**: the
+     journal and the request log of a write session, and a recording's
+     header when a module was bound, carry one line,
+     `consent  <fingerprint>,<UTC second>`, in the same form in each, as
+     ADR-0013 has a recording say what decoded it.
+4. **A publisher may sign a plugin; the signature is provenance, never a
+   condition to run.** Section 2.4's trust model stands: the sandbox, the
+   ceilings and the gates are the protection, and an unsigned plugin runs
+   as a signed one does. Section 2.4's "Ed25519 is not adopted" is
+   amended: a signature is allowed, for provenance only, as section 2.4
+   allowed.
+   - **What consent shows:** "not signed", or the signing key's
+     fingerprint, and on a later version whether the same key signed the
+     version consented to before, including "same contents, now signed by
+     a different key". There is no trust store, no list of known
+     publishers and no network lookup: a signature proves the package is
+     unchanged since someone holding that key signed it, not who that is.
+   - **A signature that does not verify refuses the package whole**, as a
+     module whose SHA-256 differs from its manifest's is refused (section
+     2.8).
+   - **Core gains one dependency for it:** an Ed25519 verification,
+     Qt-free and vendored at a pinned tag, with its SBOM and
+     `THIRD_PARTY_NOTICES.txt` entries; section 2.6's license note gains
+     its license. Core verifies and never signs; signing is the
+     publisher's, with tools of their own.
+5. **DISCLAIMER.md states the user's part:** Havne ships the
+   mechanics and no vehicle knowledge, the project distributes no plugin
+   that writes to a vehicle, Havne is provided as is, and the user
+   decides whether to write and is responsible for the result. The
+   repository's example write operation (section 8 item 6) writes only
+   the simulated ECU, and its plan declares the simulated ECU's made-up
+   identifiers as a precondition, so on a real module it stops at core's
+   identification read before its first write.
