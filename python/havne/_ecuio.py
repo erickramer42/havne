@@ -411,13 +411,33 @@ ECUIO_SIGNAL_SET_LAYOUT = 5
 ECUIO_SIGNAL_SET_MAX_BYTES = 0x400000
 ECUIO_SIGNAL_SET_MAX_SIGNALS = 0x4000
 ECUIO_SIM_ALLOW_DESK_BUS = 1
+ECUIO_SIM_CLASS_COUNT = 5
+ECUIO_SIM_CLASS_OTHER = 4
+ECUIO_SIM_CLASS_PROG = 3
+ECUIO_SIM_CLASS_READS = 0
+ECUIO_SIM_CLASS_SESSION = 1
+ECUIO_SIM_CLASS_WRITE = 2
 ECUIO_SIM_FAILED = 1
+ECUIO_SIM_GATEWAY_ALOUD = 64
+ECUIO_SIM_GATEWAY_DELAYED = 4
+ECUIO_SIM_GATEWAY_EXTENDED = 1
+ECUIO_SIM_GATEWAY_KEEP_ANY = 32
+ECUIO_SIM_GATEWAY_NEVER = 8
+ECUIO_SIM_GATEWAY_SECURITY = 16
+ECUIO_SIM_GATEWAY_UNLOCKED = 2
+ECUIO_SIM_GATEWAY_UNSUPPRESSED = 128
 ECUIO_SIM_MAX_REPLIES = 66
 ECUIO_SIM_NOW = -1
 ECUIO_SIM_REPLY_BAD_SEQUENCE = 4
+ECUIO_SIM_REPLY_GATEWAY = 16
 ECUIO_SIM_REPLY_LATE = 2
 ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
+ECUIO_SIM_ROUTE_FORWARD = 1
+ECUIO_SIM_ROUTE_GATED = 4
+ECUIO_SIM_ROUTE_GATED_SILENT = 5
+ECUIO_SIM_ROUTE_REFUSE = 2
+ECUIO_SIM_ROUTE_SILENT = 3
 ECUIO_SIM_YIELDED = 2
 ECUIO_SOURCE_MERGED = 2
 ECUIO_SOURCE_SHARE_ALIKE = 1
@@ -811,6 +831,12 @@ class ecuio_signal_set_t(Structure):
     pass
 
 class ecuio_signal_source_t(Structure):
+    pass
+
+class ecuio_sim_gateway_override_t(Structure):
+    pass
+
+class ecuio_sim_gateway_t(Structure):
     pass
 
 class ecuio_sim_reply_t(Structure):
@@ -1650,6 +1676,40 @@ ecuio_signal_source_t._fields_ = [
     ('license', (c_char * 520)),
     ('modified', (c_char * 520)),
 ]
+ecuio_sim_gateway_override_t._fields_ = [
+    ('reply_id', c_uint32),
+    ('service', c_uint8),
+    ('key', c_uint8),
+    ('route', c_uint8),
+    ('nrc', c_uint8),
+    ('now', c_uint8),
+    ('reserved0', (c_uint8 * 3)),
+    ('reserved', (c_uint32 * 3)),
+]
+ecuio_sim_gateway_t._fields_ = [
+    ('request_id', c_uint32),
+    ('reply_id', c_uint32),
+    ('flags', c_uint32),
+    ('unlocked_level', c_uint8),
+    ('wrong', c_uint8),
+    ('route', (c_uint8 * 8)),
+    ('route_nrc', (c_uint8 * 8)),
+    ('now', (c_uint8 * 8)),
+    ('reserved0', (c_uint8 * 2)),
+    ('delayed_until_us', c_int64),
+    ('forwarded', c_uint64),
+    ('refused', c_uint64),
+    ('dropped', c_uint64),
+    ('seeds', c_uint64),
+    ('keys', c_uint64),
+    ('wrong_keys', c_uint64),
+    ('lockouts', c_uint64),
+    ('unlocks', c_uint64),
+    ('relocks', c_uint64),
+    ('too_early', c_uint64),
+    ('overrides', c_uint32),
+    ('reserved', (c_uint32 * 3)),
+]
 ecuio_sim_reply_t._fields_ = [
     ('reply_id', c_uint32),
     ('flags', c_uint32),
@@ -1917,6 +1977,8 @@ FUNCTIONS = {
     'ecuio_sim_create_unbound': (c_int, [c_char_p, c_uint32, POINTER(POINTER(ecuio_sim_t))]),  # sim.h
     'ecuio_sim_create_with': (c_int, [c_char_p, c_char_p, c_uint32, POINTER(POINTER(ecuio_sim_t))]),  # sim.h
     'ecuio_sim_destroy': (None, [POINTER(ecuio_sim_t)]),  # sim.h
+    'ecuio_sim_get_gateway': (c_int, [POINTER(ecuio_sim_t), POINTER(ecuio_sim_gateway_t)]),  # sim.h
+    'ecuio_sim_get_gateway_override': (c_int, [POINTER(ecuio_sim_t), c_uint32, POINTER(ecuio_sim_gateway_override_t)]),  # sim.h
     'ecuio_sim_get_stats': (c_int, [POINTER(ecuio_sim_t), POINTER(ecuio_sim_stats_t)]),  # sim.h
     'ecuio_sim_set_value': (c_int, [POINTER(ecuio_sim_t), c_uint16, c_double]),  # sim.h
     'ecuio_status_string': (c_char_p, [c_int]),  # core.h

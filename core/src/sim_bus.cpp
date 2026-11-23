@@ -7,7 +7,10 @@
 // through each node's own ISO-TP receiver, each answered (sim.cpp's
 // answer) and sent through that node's ISO-TP sender on its reply ID,
 // broken as the faults say, at the pace the timing says (sim_timing.h),
-// and with bus= one frame at a time across every node. One worker
+// and with bus= one frame at a time across every node. A request for a
+// module behind the gateway meets the gateway's verdict once it is whole
+// (the module's receiver sends its Flow Control), and a refusal goes
+// from the gateway's sender on the module's reply ID. One worker
 // thread ticks the ECU's clock (and the mock's drive cycle) every 50 ms,
 // reads, answers and sends; it allocates nothing.
 
@@ -92,6 +95,13 @@ bool bus_held(const ecuio_sim* s, int64_t now)
     return s->bus_frame_us != 0 && now < s->bus_free_us;
 }
 
+/* The ID n's reply goes on: its own, or the module's the gateway
+ * answers for */
+uint32_t on_id(const sim_node& n)
+{
+    return n.r.on_id != 0 ? n.r.on_id : n.reply_id;
+}
+
 /* Starts n's reply at now: its Single Frame (the send is over) or its
  * First Frame; put off while the bus is held. False when the bus
  * failed. */
@@ -105,7 +115,7 @@ bool start(ecuio_sim* s, sim_node& n, int64_t now)
         return true;
     }
     r.waiting = false;
-    if (!isotp_tx_start(n.tx, n.reply_id, r.data, static_cast<uint16_t>(r.len),
+    if (!isotp_tx_start(n.tx, on_id(n), r.data, static_cast<uint16_t>(r.len),
                         now, &f)) {
         return true; /* a send under way: dropped, as a busy ECU would */
     }
@@ -185,10 +195,11 @@ void yield(ecuio_sim* s)
 }
 
 /* A request to n while its reply waits (busy=21): 7F <service> 21 as a
- * Single Frame; while its frames are under way, nothing, since a Single
- * Frame on its reply ID would cut its own message. False when the bus
- * failed. */
-bool refuse_busy(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
+ * Single Frame on id; while its frames are under way, nothing, since a
+ * Single Frame from its sender would cut its own message. False when the
+ * bus failed. */
+bool refuse_busy(ecuio_sim* s, sim_node& n, uint32_t id, const isotp_message& m,
+                 int64_t now)
 {
     if (n.timing.busy != ecuio_sim_timing::busy_mode::nrc21 || n.r.active ||
         m.len == 0) {
@@ -196,7 +207,7 @@ bool refuse_busy(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
     }
     const uint8_t refusal[3] = {0x7F, m.data[0], 0x21};
     isotp_can f;
-    if (!isotp_tx_start(n.tx, n.reply_id, refusal, 3, now, &f)) {
+    if (!isotp_tx_start(n.tx, id, refusal, 3, now, &f)) {
         return true;
     }
     if (!send(s, f)) {
@@ -207,24 +218,11 @@ bool refuse_busy(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
     return true;
 }
 
-/* A whole request to n: answered, its fate decided, its send started or
+/* n's reply in n.r to m: drawn, its fate decided, its send started or
  * put off. False when the bus failed. */
-bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
+bool send_reply(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
 {
     sim_sending& r = n.r;
-    s->requests.fetch_add(1, std::memory_order_relaxed);
-    if (yielded(s)) {
-        return true;
-    }
-    if (r.active || r.waiting) {
-        /* busy with a reply: a tester sends one at a time */
-        return refuse_busy(s, n, m, now);
-    }
-    const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
-    r.len = answer(s, n, m.data, m.len, functional, r.data);
-    if (r.len == 0) {
-        return true;
-    }
     /* Drawn before the fate, so a fault never moves the next draws */
     const int64_t drawn = ecuio_sim_timing::sim_timing_draw(n.timing, n.rng);
     r.fate = decide(s, n, m.data, m.len, r.data, r.len);
@@ -240,7 +238,7 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
          * whole */
         const uint8_t wait[3] = {0x7F, m.data[0], 0x78};
         isotp_can f;
-        if (isotp_tx_start(n.tx, n.reply_id, wait, 3, now, &f) && !send(s, f)) {
+        if (isotp_tx_start(n.tx, on_id(n), wait, 3, now, &f) && !send(s, f)) {
             return false;
         }
         r.fate = ecuio_sim_fate::intact;
@@ -259,6 +257,52 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
         return true;
     }
     return start(s, n, now);
+}
+
+/* The gateway's refusal v of m for the module on id, as the gateway's
+ * own reply (its busy time, draw and fate). False when the bus failed. */
+bool withhold(ecuio_sim* s, uint32_t id, const ecuio_sim_gateway_verdict& v,
+              const isotp_message& m, int64_t now)
+{
+    sim_node& gw = s->nodes[s->gateway];
+    if (gw.r.active || gw.r.waiting) {
+        return refuse_busy(s, gw, id, m, now);
+    }
+    std::memcpy(gw.r.data, v.out, sizeof v.out);
+    gw.r.len = sizeof v.out;
+    gw.r.on_id = id;
+    return send_reply(s, gw, m, now);
+}
+
+/* A whole request to n: the gateway's verdict first for a module behind
+ * it, then answered and sent. False when the bus failed. */
+bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
+{
+    sim_sending& r = n.r;
+    s->requests.fetch_add(1, std::memory_order_relaxed);
+    if (yielded(s)) {
+        return true;
+    }
+    const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
+    if (n.behind && m.len > 0) {
+        const ecuio_sim_gateway_verdict v = route(s, n, m.data, functional);
+        if (v.fate == ecuio_sim_gateway_fate::drop) {
+            return true;
+        }
+        if (v.fate == ecuio_sim_gateway_fate::withhold) {
+            return withhold(s, n.reply_id, v, m, now);
+        }
+    }
+    if (r.active || r.waiting) {
+        /* busy with a reply: a tester sends one at a time */
+        return refuse_busy(s, n, n.reply_id, m, now);
+    }
+    r.len = answer(s, n, m.data, m.len, functional, r.data);
+    if (r.len == 0) {
+        return true;
+    }
+    r.on_id = 0;
+    return send_reply(s, n, m, now);
 }
 
 /* One frame for n (its own request ID, or the functional one): through
@@ -336,7 +380,8 @@ bool drain(ecuio_sim* s)
                     flow(n, f, now);
                 }
             } else if ((f.id == n.request_id ||
-                        f.id == ECUIO_SIM_FUNCTIONAL_ID) &&
+                        (f.id == ECUIO_SIM_FUNCTIONAL_ID &&
+                         n.role != sim_role::gateway)) &&
                        !feed(s, n, f, now)) {
                 return false;
             }
@@ -413,7 +458,7 @@ int open_socket(int32_t ifindex, const sim_node* nodes, int count)
     if (fd < 0) {
         return -1;
     }
-    struct can_filter f[1 + 2 * (1 + ECUIO_MAX_CHANNELS)];
+    struct can_filter f[1 + 2 * ECUIO_SIM_NODES_MAX];
     int k = 0;
     f[k++].can_id = ECUIO_SIM_FUNCTIONAL_ID;
     for (int i = 0; i < count; ++i) {

@@ -3,7 +3,8 @@
 #
 # The simulated ECU (ADR-0046, sim.h): unbound, asked one request at a
 # time with no bus on any platform (ecuio_sim_ask, ADR-0055), or on a
-# Linux virtual CAN bus answering a session as the engine ECU.
+# Linux virtual CAN bus answering a session as the engine ECU; the
+# simulated gateway's routes, lock and counts (gateway= in the URI).
 
 import ctypes
 import weakref
@@ -17,6 +18,26 @@ Reply.__doc__ = ("One ECU's reply: the CAN ID it's sent on, the whole message fr
                  "service byte, when it starts after the request, ECUIO_SIM_REPLY_*, "
                  "the tester's Flow Control to its first Consecutive Frame (fc=) and "
                  "its least gap between them (cf=), in microseconds")
+
+CLASSES = ("reads", "session", "write", "prog", "other")
+ROUTES = {e.ECUIO_SIM_ROUTE_FORWARD: "forward", e.ECUIO_SIM_ROUTE_REFUSE: "refuse",
+          e.ECUIO_SIM_ROUTE_SILENT: "silent", e.ECUIO_SIM_ROUTE_GATED: "gated",
+          e.ECUIO_SIM_ROUTE_GATED_SILENT: "gated-silent"}
+_COUNTS = ("forwarded", "refused", "dropped", "seeds", "keys", "wrong_keys", "lockouts",
+           "unlocks", "relocks", "too_early")
+
+Gateway = namedtuple("Gateway", ("request_id reply_id extended unlocked delayed never "
+                                 "unlocked_level wrong delayed_until_us routes route_nrc now "
+                                 "overrides ").split() + list(_COUNTS))
+Gateway.__doc__ = ("The simulated gateway as of the last request it routed or answered: "
+                   "its IDs, its session and lock, each class's route as configured "
+                   "(routes, route_nrc: 0 for the default code) and as it stands by the "
+                   "lock (now), its entries for a service or a module (overrides), and "
+                   "its counts since create")
+Override = namedtuple("Override", "reply_id service cls route nrc now")
+Override.__doc__ = ("A route= entry: the module's reply ID (0 for the whole gateway), "
+                    "the service byte or the class's name (the other None), its route "
+                    "and code as configured, and its route now")
 
 
 class Sim:
@@ -71,6 +92,30 @@ class Sim:
         out = e.ecuio_sim_stats_t()
         check(lib.ecuio_sim_get_stats(self._sim, ctypes.byref(out)), "ecuio_sim_get_stats")
         return out
+
+    @property
+    def gateway(self):
+        """The gateway's view (ecuio_sim_get_gateway and its overrides);
+        havne.Error INVALID_ARGUMENT with no gateway= in the URI"""
+        g = e.ecuio_sim_gateway_t()
+        check(lib.ecuio_sim_get_gateway(self._sim, ctypes.byref(g)), "ecuio_sim_get_gateway")
+        overrides = []
+        for i in range(g.overrides):
+            o = e.ecuio_sim_gateway_override_t()
+            check(lib.ecuio_sim_get_gateway_override(self._sim, i, ctypes.byref(o)),
+                  "ecuio_sim_get_gateway_override")
+            overrides.append(Override(o.reply_id, o.key if o.service else None,
+                                      None if o.service else CLASSES[o.key],
+                                      ROUTES[o.route], o.nrc, ROUTES[o.now]))
+        flag = lambda f: (g.flags & f) != 0
+        return Gateway(g.request_id, g.reply_id, flag(e.ECUIO_SIM_GATEWAY_EXTENDED),
+                       flag(e.ECUIO_SIM_GATEWAY_UNLOCKED), flag(e.ECUIO_SIM_GATEWAY_DELAYED),
+                       flag(e.ECUIO_SIM_GATEWAY_NEVER), g.unlocked_level, g.wrong,
+                       g.delayed_until_us,
+                       {c: ROUTES[g.route[i]] for i, c in enumerate(CLASSES)},
+                       {c: g.route_nrc[i] for i, c in enumerate(CLASSES)},
+                       {c: ROUTES[g.now[i]] for i, c in enumerate(CLASSES)},
+                       overrides, *(getattr(g, c) for c in _COUNTS))
 
     def close(self):
         if self._sim is not None:

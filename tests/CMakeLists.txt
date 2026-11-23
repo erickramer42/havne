@@ -181,7 +181,8 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_quiet_reports.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
-    test_sim_timing.cpp
+    test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
+    test_sim_gateway_view.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp)
 
@@ -301,7 +302,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
                    test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
-                   test_vcan_conversation.cpp)
+                   test_vcan_conversation.cpp test_vcan_gateway.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
@@ -401,7 +402,7 @@ if(TARGET havne-cli)
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
-        test_cli_summary.cpp test_cli_emulator.cpp)
+        test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -493,9 +494,17 @@ if(TARGET havne-cli)
         app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
                --elm327 tcp:0)
+        # The gateway's seed and key pairs never reach the output: its
+        # elm327 line shows sa=key:*, the other keys as given
+        app_cli_golden(SimElm327HidesTheGatewaysSeedsAndKeys sim-elm327-sa.jsonl
+            --ignore listen
+            -- $<TARGET_FILE:havne-cli> sim
+               "mock://sim?modules=2&gateway=1&behind=7E9&sa=key:01020304:0A0B0C0D&sa_delay=200"
+               --elm327 tcp:0 --seconds 1)
         # The emulator on 127.0.0.1, a port the system picks: a host's
         # ELM327 exchange, core's own elm327:// session, a second module's
-        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        # DID, a module behind the gateway, a plugin's DIDs, and python-OBD
+        # (skipped without it)
         function(app_cli_elm327 name mode)
             add_test(NAME CliElm327RunTest.${name}
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
@@ -508,6 +517,7 @@ if(TARGET havne-cli)
         app_cli_elm327(AHostThatComesBackAtOnceIsNeverRefused reconnect)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(AGatewayHoldsAModuleUntilItsUnlocked gateway)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
         app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)

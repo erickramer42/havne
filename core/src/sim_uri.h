@@ -1,6 +1,6 @@
 // File/layer: core/src/sim_uri.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: SimEcuTest (the URI), fuzz_sim
+// Testing: UNIT: SimEcuTest, SimGatewayTest (the URI), fuzz_sim
 //
 // The simulated ECU's URI: each key's reading and ecuio_sim_parse_uri.
 
@@ -221,6 +221,26 @@ inline taken take_timing(const ecuio_uri::param& p, ecuio_sim_config* out,
     return ok ? taken::ok : taken::bad;
 }
 
+/* gateway=, behind=, route=, sa=, sa_delay= and gwopt= (sim_gateway.h) */
+inline taken take_gateway(const ecuio_uri::param& p, ecuio_sim_config* out,
+                          char* why, size_t why_cap)
+{
+    using parse =
+        bool (*)(const char*, size_t, ecuio_sim_gateway_config*, char*, size_t);
+    parse read = p.is("gateway")    ? ecuio_sim_parse_gateway
+                 : p.is("behind")   ? ecuio_sim_parse_behind
+                 : p.is("route")    ? ecuio_sim_parse_route
+                 : p.is("gwopt")    ? ecuio_sim_parse_gwopt
+                 : p.is("sa")       ? ecuio_sim_parse_sa
+                 : p.is("sa_delay") ? ecuio_sim_parse_sa_delay
+                                    : nullptr;
+    if (read == nullptr) {
+        return taken::other;
+    }
+    return read(p.val, p.val_len, &out->gateway, why, why_cap) ? taken::ok
+                                                               : taken::bad;
+}
+
 /* One key, through each group in turn: a key belongs to one group only,
  * so their order changes nothing */
 inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
@@ -228,9 +248,9 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 {
     using reader =
         taken (*)(const ecuio_uri::param&, ecuio_sim_config*, char*, size_t);
-    static const reader kReaders[] = {take_mock_shape, take_profile,
-                                      take_vin,        take_replay_span,
-                                      take_faults,     take_timing};
+    static const reader kReaders[] = {
+        take_mock_shape, take_profile, take_vin,    take_replay_span,
+        take_faults,     take_timing,  take_gateway};
     for (const reader r : kReaders) {
         const taken t = r(p, out, why, why_cap);
         if (t != taken::other) {
@@ -244,7 +264,7 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
- *          [&timing]
+ *          [&timing][&gateway][&behind][&route][&sa][&sa_delay][&gwopt]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
  * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
@@ -254,6 +274,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                                                 char* why, size_t why_cap)
 {
     using namespace ecuio_sim_uri_detail;
+    // The gateway's route entries set their own outcome (forward)
+    // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
     *out = ecuio_sim_config{};
     std::memcpy(out->vin, ECUIO_SIM_DEFAULT_VIN, sizeof ECUIO_SIM_DEFAULT_VIN);
     const char* body = nullptr;
@@ -269,26 +291,47 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values", "modules", "sessions", "profile", "vin", "faults", "delay",
-        "fc",     "cf",      "seed",     "busy",    "bus", nullptr};
+        "values", "modules", "sessions", "profile", "vin",
+        "faults", "delay",   "fc",       "cf",      "seed",
+        "busy",   "bus",     "gateway",  "behind",  "route",
+        "gwopt",  "sa",      "sa_delay", nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
-    if (const ecuio_uri::param* p =
-            ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys)) {
+    static const char* const kGatewayKeys[] = {
+        "gateway", "behind", "route", "gwopt", "sa", "sa_delay", nullptr};
+    const ecuio_uri::param* p =
+        ecuio_uri::first_unknown(q, replay ? kReplayKeys : kMockKeys);
+    bool gateway_key = false;
+    for (const char* const* k = kGatewayKeys; p != nullptr && *k != nullptr;
+         ++k) {
+        gateway_key = gateway_key || p->is(*k);
+    }
+    if (replay && gateway_key) {
+        std::snprintf(why, why_cap,
+                      "a gateway is mock://'s: a replay ECU answers as the "
+                      "engine ECU alone, with no module to put behind one");
+        return ecuio_sim_uri_result::bad;
+    }
+    if (p != nullptr) {
         std::snprintf(why, why_cap,
                       "the simulated ECU takes no query key '%.*s' for %s, "
-                      "only %s, vin, faults, delay, fc, cf, seed, busy and bus",
+                      "only %s, vin, faults, delay, fc, cf, seed, busy and "
+                      "bus",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to"
-                             : "values, modules, sessions, profile");
+                             : "values, modules, sessions, profile, "
+                               "gateway, behind, route, sa, sa_delay, gwopt");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {
         if (!take_key(q.params[i], out, why, why_cap)) {
             return ecuio_sim_uri_result::bad;
         }
+    }
+    if (!ecuio_sim_gateway_judge(out->gateway, why, why_cap)) {
+        return ecuio_sim_uri_result::bad;
     }
     if (out->profile_len != 0 && out->second_module) {
         std::snprintf(why, why_cap,

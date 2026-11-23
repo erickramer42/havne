@@ -25,6 +25,9 @@ extern "C" {
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
  *          [&sessions=0|1]
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
+ *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
+ *          [&route=<class or service>:<outcome>[@<reply ID>][,...]]
+ *          [&sa=<form>][&sa_delay=<ms>][&gwopt=<knob>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
@@ -67,6 +70,10 @@ extern "C" {
  * answering on it alone (faults=late:3@7EA), in place of that fault
  * for every module; at most 32 aims. A faults key given twice adds to
  * the first, a later item in place of an earlier, as the timing keys do.
+ * relock, mock:// with gateway= only, is the gateway's alone (no @, or
+ * aimed at its reply ID): every nth request it lets through on a gated
+ * route, on its own count, it locks again first and withholds that
+ * request as the route does while locked.
  * The timing, both: delay is each reply's time from the request to its
  * first frame, a log-normal through its median p50 and its 99th
  * percentile p99 (1 <= p50 <= p99 <= 10000000), drawn on a generator of
@@ -88,6 +95,48 @@ extern "C" {
  * bus's rate (1-1000 kbit/s), each frame 111 bits (stuffing left out): a
  * reply's frames wait for it, while the sim's Flow Control, 7F 78 and
  * 7F 21 go at once and hold it after; a bus's sim only.
+ * gateway, mock:// only: a gateway node of its own, on the 11-bit IDs
+ * given or, with 1, on 0x6F0 answering as 0x6F8 (made up, like every
+ * value of the simulated car), neither one any other node's. It answers
+ * 10 01, 10 03, 3E 00 and 3E 80 on its own request ID, every other
+ * service 7F <service> 11, and no functional request. behind: the
+ * modules behind it by their reply IDs (modules=2's or a profile's, at
+ * most 32, never the engine ECU); the gateway judges each request for
+ * one before the module hears it, so a request it withholds moves
+ * none of the module's counts, draws or busy time. route: what it does
+ * with a request by its service byte's class (reads 01, 02, 03, 06, 07,
+ * 09, 0A, 19, 21, 22, 23, 24; session 10, 27, 28, 3E, 85; write 04, 08,
+ * 14, 2C, 2E, 2F, 31, 3D; prog 11, 34, 35, 36, 37, 38; other the rest)
+ * or by one service byte (01-BF): forward (the default for anything not
+ * named), refuse (7F <service> 22 on the module's reply ID, or the code
+ * .<NRC> names, 10-FE but 78), silent, gated (7F <service> 33, or the
+ * code .<NRC> names, until the gateway is unlocked; forward from then
+ * on) or gated-silent (silent until unlocked). @<reply ID> aims an entry
+ * at one
+ * module behind it; the most specific entry wins: a service for the
+ * module, a class for the module, a service, a class. A later entry for
+ * the same aim replaces the earlier; a second route key adds; at most
+ * 64 entries besides the classes. A refusal is the gateway's reply,
+ * flagged ECUIO_SIM_REPLY_GATEWAY: its faults, timing and busy time
+ * (each aimed at its reply ID), not the module's. A functional request
+ * reaches a module whose entry forwards; one withheld is silent, unless
+ * gwopt=aloud, which refuses it for each module, keeping ISO 14229-1's
+ * suppressed codes (11, 12, 31, 7E, 7F) silent unless gwopt=unsuppressed
+ * too. sa: the gateway's security access in its extended session, on the
+ * engine ECU's levels (01 with 4 bytes, 03 with 16) and refusals, three
+ * wrong keys locking it out: key, the engine ECU's made-up transform
+ * and seeds; key:<seed hex>:<key hex>[,...], fixed pairs (at most 8, a
+ * seed of 4 or 16 bytes and its key as long), each level's handed out
+ * in turn, a level with none refused 12; xor:<hex> or add:<hex> (1 to
+ * 16 bytes), the key the level's seed XORed with or added to them, byte
+ * by byte, repeated; never, every seed answered and no key right.
+ * sa_delay: the lockout's delay in ms (1-600000; 10 s by default), for
+ * any form (never:<ms> says both). The unlock opens every gated entry
+ * at once and lasts the gateway's own session: a 10 01, a 10 03 or S3
+ * with no request on its own request ID locks them all again, unless
+ * gwopt=keep-any, under which a request it lets through keeps the
+ * session too. behind, route, sa, sa_delay and gwopt need gateway, a
+ * gated entry sa, sa_delay sa.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -98,10 +147,10 @@ typedef struct ecuio_sim ecuio_sim_t;
 #define ECUIO_SIM_FAILED  0x00000001u   /* the bus failed (the interface
                                            went down or away): no longer
                                            answering */
-#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8 (or,
-                                           with modules=2, 0x7E9), a reply
-                                           ID: silent from then on,
-                                           requests only counted */
+#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8 (or
+                                           another of its nodes' reply IDs,
+                                           the gateway's too): silent from
+                                           then on, requests only counted */
 
 /* ecuio_sim_create_with's options */
 #define ECUIO_SIM_ALLOW_DESK_BUS 0x00000001u /* a real CAN controller is
@@ -163,9 +212,11 @@ _Static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
  *   engine ECU's pair but not the pair itself, ECUIO_ERR_INVALID_ARGUMENT;
  *   both on every platform, after the URI and before NO_TRANSPORT.
  * - faults=, delay=, fc= or cf= aiming at a reply ID none of the sim's
- *   ECUs answers on: ECUIO_ERR_BAD_URI, the detail naming the IDs they
- *   do; after the profile, whose modules it needs, and before
- *   NO_TRANSPORT.
+ *   ECUs (the gateway's included) answers on, behind= naming a reply ID
+ *   no module answers on, or gateway= meeting a module's ID:
+ *   ECUIO_ERR_BAD_URI, the detail naming the IDs there are; after the
+ *   profile, whose modules it needs, and before NO_TRANSPORT. A gateway's
+ *   key on replay:// is BAD_URI with the URI.
  * - Whatever the bus, a frame another node sends on 0x7E8 silences it
  *   for good (ECUIO_SIM_YIELDED): an ECU already answers there.
  */
@@ -249,6 +300,10 @@ ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
                                                     Consecutive Frame comes
                                                     160 ms after the one
                                                     before */
+#define ECUIO_SIM_REPLY_GATEWAY      0x00000010u /* the gateway wrote it for
+                                                    the module behind it
+                                                    whose reply ID it
+                                                    carries */
 
 /* One ECU's reply to a request. POD, 4136 bytes, no hidden padding;
  * pinned by the assertions below. */
@@ -325,6 +380,144 @@ ecuio_status_t ecuio_sim_ask(ecuio_sim_t* sim, uint32_t request_id,
                              const uint8_t* request, uint32_t length,
                              int64_t time_us, ecuio_sim_reply_t* replies,
                              uint32_t capacity, uint32_t* count);
+
+/* The simulated gateway's classes of service (route=), indexes into
+ * ecuio_sim_gateway_t's route, route_nrc and now */
+#define ECUIO_SIM_CLASS_READS   0u
+#define ECUIO_SIM_CLASS_SESSION 1u
+#define ECUIO_SIM_CLASS_WRITE   2u
+#define ECUIO_SIM_CLASS_PROG    3u
+#define ECUIO_SIM_CLASS_OTHER   4u
+#define ECUIO_SIM_CLASS_COUNT   5u
+
+/* What the gateway does with a request for a module behind it */
+#define ECUIO_SIM_ROUTE_FORWARD      1u
+#define ECUIO_SIM_ROUTE_REFUSE       2u
+#define ECUIO_SIM_ROUTE_SILENT       3u
+#define ECUIO_SIM_ROUTE_GATED        4u /* refused until unlocked */
+#define ECUIO_SIM_ROUTE_GATED_SILENT 5u /* silent until unlocked */
+
+/* ecuio_sim_gateway_t flags */
+#define ECUIO_SIM_GATEWAY_EXTENDED     0x00000001u /* in its extended
+                                                      session */
+#define ECUIO_SIM_GATEWAY_UNLOCKED     0x00000002u
+#define ECUIO_SIM_GATEWAY_DELAYED      0x00000004u /* a lockout's delay
+                                                      runs */
+#define ECUIO_SIM_GATEWAY_NEVER        0x00000008u /* sa=never */
+#define ECUIO_SIM_GATEWAY_SECURITY     0x00000010u /* sa= given */
+#define ECUIO_SIM_GATEWAY_KEEP_ANY     0x00000020u /* gwopt=keep-any */
+#define ECUIO_SIM_GATEWAY_ALOUD        0x00000040u /* gwopt=aloud */
+#define ECUIO_SIM_GATEWAY_UNSUPPRESSED 0x00000080u /* gwopt=unsuppressed */
+
+/* The gateway as of the last request it routed or answered: its IDs,
+ * its lock, each class's route, and its counts since create. POD, 144
+ * bytes, no hidden padding; pinned by the assertions below. */
+typedef struct ecuio_sim_gateway {
+    uint32_t request_id;
+    uint32_t reply_id;
+    uint32_t flags;           /* ECUIO_SIM_GATEWAY_* */
+    uint8_t unlocked_level;   /* 0 while locked */
+    uint8_t wrong;            /* wrong keys counted toward the lockout */
+    uint8_t route[8];         /* each class's ECUIO_SIM_ROUTE_* as
+                                 configured for the whole gateway; zero
+                                 past ECUIO_SIM_CLASS_COUNT */
+    uint8_t route_nrc[8];     /* each class's .<NRC>, 0 for the default */
+    uint8_t now[8];           /* each class's route then: FORWARD, REFUSE
+                                 or SILENT, a gated one by the lock */
+    uint8_t reserved0[2];     /* zero */
+    int64_t delayed_until_us; /* the ECU's time a lockout's delay ends,
+                                 0 for none */
+    uint64_t forwarded;       /* requests for a module behind it, let
+                                 through */
+    uint64_t refused;         /* refused for the module */
+    uint64_t dropped;         /* withheld silently */
+    uint64_t seeds;           /* seeds handed out */
+    uint64_t keys;            /* keys judged, right or wrong */
+    uint64_t wrong_keys;      /* 7F 27 35 and 36 */
+    uint64_t lockouts;        /* 7F 27 36 */
+    uint64_t unlocks;         /* 67 02 or 67 04 */
+    uint64_t relocks;         /* unlocks lost: 10 01, 10 03, S3, the
+                                 relock fault */
+    uint64_t too_early;       /* 27s answered 7F 27 37: a tester that
+                                 didn't wait out the delay */
+    uint32_t overrides;       /* route= entries for a service or a module:
+                                 ecuio_sim_get_gateway_override's count */
+    uint32_t reserved[3];     /* zero; ABI growth space */
+} ecuio_sim_gateway_t;
+
+/* One route= entry for a service byte or for one module. POD, 24 bytes,
+ * no hidden padding; pinned by the assertions below. */
+typedef struct ecuio_sim_gateway_override {
+    uint32_t reply_id;    /* the module's, 0 for the whole gateway */
+    uint8_t service;      /* 1: key is a service byte; 0: a class */
+    uint8_t key;          /* the service byte or ECUIO_SIM_CLASS_* */
+    uint8_t route;        /* ECUIO_SIM_ROUTE_* as configured */
+    uint8_t nrc;          /* its .<NRC>, 0 for the default */
+    uint8_t now;          /* its route then, as ecuio_sim_gateway_t's */
+    uint8_t reserved0[3]; /* zero */
+    uint32_t reserved[3]; /* zero; ABI growth space */
+} ecuio_sim_gateway_override_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_sim_gateway_t) == 144,
+              "ecuio_sim_gateway_t size is ABI");
+static_assert(offsetof(ecuio_sim_gateway_t, route) == 14,
+              "sim gateway route offset is ABI");
+static_assert(offsetof(ecuio_sim_gateway_t, now) == 30,
+              "sim gateway now offset is ABI");
+static_assert(offsetof(ecuio_sim_gateway_t, delayed_until_us) == 40,
+              "sim gateway delayed_until_us offset is ABI");
+static_assert(offsetof(ecuio_sim_gateway_t, too_early) == 120,
+              "sim gateway too_early offset is ABI");
+static_assert(offsetof(ecuio_sim_gateway_t, overrides) == 128,
+              "sim gateway overrides offset is ABI");
+static_assert(sizeof(ecuio_sim_gateway_override_t) == 24,
+              "ecuio_sim_gateway_override_t size is ABI");
+static_assert(offsetof(ecuio_sim_gateway_override_t, now) == 8,
+              "sim gateway override now offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_sim_gateway_t) == 144,
+               "ecuio_sim_gateway_t size is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_t, route) == 14,
+               "sim gateway route offset is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_t, now) == 30,
+               "sim gateway now offset is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_t, delayed_until_us) == 40,
+               "sim gateway delayed_until_us offset is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_t, too_early) == 120,
+               "sim gateway too_early offset is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_t, overrides) == 128,
+               "sim gateway overrides offset is ABI");
+_Static_assert(sizeof(ecuio_sim_gateway_override_t) == 24,
+               "ecuio_sim_gateway_override_t size is ABI");
+_Static_assert(offsetof(ecuio_sim_gateway_override_t, now) == 8,
+               "sim gateway override now offset is ABI");
+#endif
+
+/*
+ * The simulated gateway (gateway= in the URI) as of the last request it
+ * routed or answered, from any thread: an S3 that lapses with no request
+ * since shows at the next one.
+ *
+ * CONTRACTS:
+ * - NULL sim or out: ECUIO_ERR_NULL_ARGUMENT.
+ * - A sim with no gateway: ECUIO_ERR_INVALID_ARGUMENT, out untouched.
+ */
+ecuio_status_t ecuio_sim_get_gateway(const ecuio_sim_t* sim,
+                                     ecuio_sim_gateway_t* out);
+
+/*
+ * The gateway's index-th route= entry for a service byte or a module, in
+ * the URI's order (a later entry for the same aim in its earlier one's
+ * place), its now as of the last request, from any thread.
+ *
+ * CONTRACTS:
+ * - NULL sim or out: ECUIO_ERR_NULL_ARGUMENT.
+ * - A sim with no gateway, or index at or past the gateway's overrides:
+ *   ECUIO_ERR_INVALID_ARGUMENT, out untouched.
+ */
+ecuio_status_t ecuio_sim_get_gateway_override(
+    const ecuio_sim_t* sim, uint32_t index, ecuio_sim_gateway_override_t* out);
 
 #ifdef __cplusplus
 }
