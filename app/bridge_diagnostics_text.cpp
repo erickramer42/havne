@@ -121,6 +121,12 @@ QString BridgeFormats::channelClearText(const ecuio_channel_diagnostics_t& s,
                          .arg(hexByte(s.clear_nrc))
                    : QStringLiteral("not sent: no vehicle speed");
         break;
+    case ECUIO_CLEAR_NOT_EMISSIONS:
+        what = QStringLiteral("not sent: not an emissions module");
+        break;
+    case ECUIO_CLEAR_NOT_OPENED:
+        what = QStringLiteral("not sent: no room to open the module");
+        break;
     default:
         what = QStringLiteral("not asked");
         break;

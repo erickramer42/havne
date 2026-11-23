@@ -6,17 +6,18 @@
 // `havne-cli clear <uri> --yes [--engine-running [--moving]]` clears
 // each ECU's trouble codes through core's own gate (ADR-0038): the
 // report the caller saved (its generation), the engine off by its own
-// 01 0C unless the caller gives its word, each ECU by its own request
-// ID. A script's word is --yes; core's gate is the rest. The report is
-// written first: every ECU's `diagnostics` line goes out and the output
-// is flushed before any clear is asked, and output that fails asks none.
-// Then a `clear` line per ECU as its clear settles, the `diagnostics`
-// line of the read that follows a 44 (or no answer), and the caller's
-// end line from the result.
+// 01 0C unless the caller gives its word, every ECU read in one request
+// (its engine and vehicle speed judged once). A script's word is --yes;
+// core's gate is the rest. The report is written first: every ECU's
+// `diagnostics` line goes out and the output is flushed before any clear
+// is asked, and output that fails asks none. Then a `clear` line per ECU
+// as its clear settles, the `diagnostics` line of the read that follows
+// a 44 (or no answer), and the caller's end line from the result.
 
 #ifndef HAVNE_CLI_CLEAR_RUN_H
 #define HAVNE_CLI_CLEAR_RUN_H
 
+#include "clear_request.h"
 #include "diagnostics_line.h"
 #include "jsonl.h"
 
@@ -55,6 +56,10 @@ inline const char* clear_outcome_word(uint8_t outcome)
         return "moving";
     case ECUIO_CLEAR_NO_VEHICLE_SPEED:
         return "no-vehicle-speed";
+    case ECUIO_CLEAR_NOT_EMISSIONS:
+        return "not-emissions";
+    case ECUIO_CLEAR_NOT_OPENED:
+        return "not-opened";
     default:
         return "unknown";
     }
@@ -93,6 +98,17 @@ inline void clear_line(Line& l, const ecuio_channel_diagnostics_t& d,
         l.raw("null");
     }
     l.ch('}');
+}
+
+/* The word for a clear core refused before anything was sent: the
+ * report moved on since it was written, or core took no clear at all;
+ * nullptr for one it took */
+inline const char* clear_refused_word(ecuio_status_t st)
+{
+    if (st == ECUIO_OK) {
+        return nullptr;
+    }
+    return st == ECUIO_ERR_REPORT_CHANGED ? "report-changed" : "not-asked";
 }
 
 /* Whether d holds the outcome of a clear asked at report generation
@@ -211,27 +227,25 @@ run_clear(ecuio_session_t* s, uint32_t channels, uint32_t flags,
         return r;
     }
 
-    /* 2. Each ECU's clear at the generation written */
+    /* 2. One clear request for every ECU read, at the generation written */
+    std::vector<ecuio_clear_target_t> targets;
     for (uint32_t c = 0; c < channels; ++c) {
         if (state[c] == kUnread) {
             put([&](Line& l) { clear_line(l, d[c], "not-read"); });
             state[c] = kDone;
-            continue;
+        } else {
+            targets.push_back({c, asked[c], {0, 0}});
         }
-        const ecuio_status_t st =
-            ecuio_session_clear_diagnostics_with(s, c, asked[c], flags);
-        if (st == ECUIO_OK) {
-            state[c] = kAsked;
-            continue;
+    }
+    const std::vector<ecuio_status_t> st = ask_clears(s, targets, flags);
+    for (size_t k = 0; k < targets.size(); ++k) {
+        const uint32_t c = targets[k].channel;
+        const char* refused = clear_refused_word(st[k]);
+        state[c] = kAsked;
+        if (refused != nullptr) {
+            put([&](Line& l) { clear_line(l, d[c], refused); });
+            state[c] = kDone;
         }
-        /* refused before anything was sent: the report moved on since
-         * it was written (or core took no clear at all) */
-        put([&](Line& l) {
-            clear_line(l, d[c],
-                       st == ECUIO_ERR_REPORT_CHANGED ? "report-changed"
-                                                      : "not-asked");
-        });
-        state[c] = kDone;
     }
     io.flush();
 

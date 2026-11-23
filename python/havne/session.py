@@ -707,25 +707,34 @@ class Session:
         return out
 
     def clear(self, channel=0, confirm=False, engine_running=False, moving=False):
-        """Asks the channel's ECU to clear its trouble codes (ADR-0038):
-        Service 04, which also erases the freeze frame and sets the
-        readiness monitors back to incomplete. confirm=True is the
-        caller's word, as havne-cli clear --yes. Core's gate applies
-        whatever is asked: the report read first must be complete and
-        still the channel's, and 04 goes out only with the engine stopped
-        (0 rpm) and the car standing still, unless engine_running or
-        moving gives the caller's word for that too. Returns at once; the
-        report's `clear` field says what became of it. The package's
-        tests clear only the simulated car."""
+        """Asks the ECU of channel, or of each channel in a list, to clear
+        its trouble codes (ADR-0038): Service 04, which also erases the
+        freeze frame and sets the readiness monitors back to incomplete.
+        A list is one request: the engine and vehicle speed are judged
+        once for them all, and a second clear while one runs raises
+        IN_USE. confirm=True is the caller's word, as havne-cli clear
+        --yes. Core's gate applies whatever is asked: each report read
+        first must be complete and still the channel's, and 04 goes out
+        only with the engine stopped (0 rpm) and the car standing still,
+        unless engine_running or moving gives the caller's word for that
+        too. Returns at once with the generation each report was read
+        at (one for a channel, a list for a list); each report's `clear`
+        field says what became of it. The package's tests clear only the
+        simulated car."""
         if not confirm:
             raise ValueError("clear() erases the car's trouble codes: pass confirm=True")
         flags = ((e.ECUIO_CLEAR_ALLOW_RUNNING if engine_running else 0) |
                  (e.ECUIO_CLEAR_ALLOW_MOVING if moving else 0))
-        report = self.diagnostics(channel)
-        check(lib.ecuio_session_clear_diagnostics_with(self._handle(), channel,
-                                                       report.generation, flags),
-              "ecuio_session_clear_diagnostics_with")
-        return report.generation
+        channels = [channel] if isinstance(channel, int) else list(channel)
+        targets = (e.ecuio_clear_target_t * len(channels))()
+        for k, c in enumerate(channels):
+            targets[k].channel = c
+            targets[k].generation = self.diagnostics(c).generation
+        check(lib.ecuio_session_clear_diagnostics_set(self._handle(), targets,
+                                                      len(channels), flags),
+              "ecuio_session_clear_diagnostics_set")
+        generations = [t.generation for t in targets]
+        return generations[0] if isinstance(channel, int) else generations
 
     def reports_settled(self):
         """Whether every channel's diagnostics are complete or were never

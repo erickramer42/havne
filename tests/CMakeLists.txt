@@ -694,7 +694,8 @@ if(TARGET havne-cli)
         # ECUIO_VCAN_REQUIRED, and serial: it answers 0x7E0 for the bus)
         if(WIN32)
             foreach(_case EngineRunningIsNotCleared EngineOffIsCleared
-                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears)
+                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears
+                    TwoEcusAreOneRequest)
                 add_test(NAME CliClearRunTest.${_case}
                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
                             ${_case} $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)

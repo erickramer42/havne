@@ -1,7 +1,7 @@
 // File/layer: tests/test_bridge_fake.cpp | GTest + QtCore/Network, app-layer tests
 // Testing: BRIDGE: BridgeTest (test_bridge)
 //
-// Cases for sessions against the fake J2534 DLL: async open, teardown, VIN, the clear, withheld PIDs, the default pick.
+// Cases for sessions against the fake J2534 DLL: async open, teardown, VIN, the clear (one request over the ECUs too), withheld PIDs, the default pick.
 
 #include "test_bridge_fake_support.h"
 
@@ -749,6 +749,51 @@ TEST(BridgeTest, LiveHidesThePidsTheFakeEcuWithholds)
     EXPECT_EQ(hidden, (QStringList{QStringLiteral("Engine Oil Temp"),
                                    QStringLiteral("Fuel Pressure")}));
     EXPECT_EQ(bridge.liveSignalModel()->rowCount(), model->rowCount() - 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Clear codes over two ECUs is one clear request (ADR-0038): the fake's
+ * engine ECU (7E8) clears, and 7E9, the fake's module table, which
+ * answers no OBD service, ends as no emissions module; neither is
+ * refused because the other's request was running */
+TEST(BridgeTest, ClearCodesAsksEveryEcuInOneRequest)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm modules("ECUIO_FAKE_MODULE_DIDS", "7E9:1000=11");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?profile=uds-generic&"
+                                           "identify=0&did=7E8:1E1C,7E9:1000")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return bridge.clearTargets().size() == 2; }, 8000))
+        << log.join('\n').toStdString();
+    EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+    const auto clear_of = [&log](const char* rx) {
+        return log.filter(QStringLiteral("ECU %1 clear: ").arg(rx));
+    };
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return !clear_of("0x7E8").isEmpty() && !clear_of("0x7E9").isEmpty();
+        },
+        8000))
+        << log.join('\n').toStdString();
+    EXPECT_TRUE(clear_of("0x7E8").first().startsWith(
+        QStringLiteral("ECU 0x7E8 clear: cleared")))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(clear_of("0x7E9"),
+              QStringList{QStringLiteral(
+                  "ECU 0x7E9 clear: not sent: not an emissions module")})
+        << log.join('\n').toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 

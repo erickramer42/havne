@@ -301,14 +301,38 @@ def test_a_clear_passes_the_caller_s_word_for_the_engine_and_the_speed(monkeypat
     # case below's and ClearTest's
     from havne import session as module
     calls = []
-    monkeypatch.setattr(module.lib, "ecuio_session_clear_diagnostics_with",
-                        lambda handle, channel, generation, flags: calls.append(flags) or 0)
+    monkeypatch.setattr(module.lib, "ecuio_session_clear_diagnostics_set",
+                        lambda handle, targets, count, flags: calls.append(flags) or 0)
     with havne.Session("mock://py") as s:
         for running in (False, True):
             for moving in (False, True):
                 s.clear(0, confirm=True, engine_running=running, moving=moving)
     assert calls == [0, c.ECUIO_CLEAR_ALLOW_MOVING, c.ECUIO_CLEAR_ALLOW_RUNNING,
                      c.ECUIO_CLEAR_ALLOW_RUNNING | c.ECUIO_CLEAR_ALLOW_MOVING]
+
+
+def test_a_clear_of_several_channels_is_one_request(monkeypatch):
+    # One call for the list, each target at its report's generation, so
+    # the engine and vehicle speed are judged once for them all
+    from havne import session as module
+    calls = []
+
+    def take(handle, targets, count, flags):
+        calls.append([(targets[k].channel, targets[k].generation)
+                      for k in range(count)])
+        return 0
+    monkeypatch.setattr(module.lib, "ecuio_session_clear_diagnostics_set", take)
+    with havne.Session("mock://py") as s:
+        reports = {0: 5, 1: 9}
+
+        def diagnostics(channel=0):
+            d = c.ecuio_channel_diagnostics_t()
+            d.generation = reports[channel]
+            return d
+        monkeypatch.setattr(s, "diagnostics", diagnostics)
+        assert s.clear([0, 1], confirm=True) == [5, 9]
+        assert s.clear(1, confirm=True) == 9
+    assert calls == [[(0, 5), (1, 9)], [(1, 9)]]
 
 
 def test_a_clear_of_the_simulated_car_goes_through_core_s_gate():

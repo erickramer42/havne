@@ -281,6 +281,12 @@ BridgeFormats::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
             clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
         }
         break;
+    case ECUIO_CLEAR_NOT_EMISSIONS:
+        clear = QStringLiteral("notEmissions");
+        break;
+    case ECUIO_CLEAR_NOT_OPENED:
+        clear = QStringLiteral("notOpened");
+        break;
     default:
         clear = QStringLiteral("none");
         break;
