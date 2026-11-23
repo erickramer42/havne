@@ -166,6 +166,9 @@ typedef char abi_diag_clear_check[(offsetof(ecuio_channel_diagnostics_t, clear) 
 typedef char abi_diag_cycle_check[(offsetof(ecuio_channel_diagnostics_t, cycle) == 23) ? 1 : -1];
 typedef char abi_diag_clear_rpm_check[(offsetof(ecuio_channel_diagnostics_t, clear_rpm) == 24) ? 1 : -1];
 typedef char abi_diag_clear_kmh_check[(offsetof(ecuio_channel_diagnostics_t, clear_kmh) == 28) ? 1 : -1];
+typedef char abi_clear_target_size_check[(sizeof(ecuio_clear_target_t) == 16) ? 1 : -1];
+typedef char abi_clear_target_generation_check[(offsetof(ecuio_clear_target_t, generation) == 4) ? 1 : -1];
+typedef char abi_clear_target_reserved_check[(offsetof(ecuio_clear_target_t, reserved) == 8) ? 1 : -1];
 typedef char abi_diag_lists_check[(offsetof(ecuio_channel_diagnostics_t, lists) == 40) ? 1 : -1];
 typedef char abi_diag_monitors_check[(offsetof(ecuio_channel_diagnostics_t, monitors) == 244) ? 1 : -1];
 typedef char abi_diag_freeze_check[(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296) ? 1 : -1];

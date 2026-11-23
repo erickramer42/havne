@@ -153,8 +153,8 @@ TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
 }
 
 /* ADR-0065: a clear asked of a module past the fourth reaches the
- * worker: the module answers no engine speed, so the clear ends there
- * with nothing cleared */
+ * worker: the module answers no OBD service, so its gate ends the clear
+ * there with nothing cleared */
 TEST_F(Elm327SessionTest, AClearReachesAModulePastTheFourth)
 {
     SixModules modules;
@@ -183,7 +183,8 @@ TEST_F(Elm327SessionTest, AClearReachesAModulePastTheFourth)
                    (d.flags & ECUIO_DIAG_CLEARING) == 0;
         },
         8000));
-    EXPECT_EQ(d.clear, ECUIO_CLEAR_NO_ENGINE_SPEED);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NOT_EMISSIONS)
+        << "the module refuses every OBD service: nothing sent";
     EXPECT_EQ(fake_ecu::diagnostics().clears, 0u);
     fake_ecu::reset_diagnostics();
 }

@@ -562,22 +562,30 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
     }
 }
 
-/* Starts a clear (ecuio_engine_clear, ADR-0038) on each channel whose
- * ecuio_session_clear_diagnostics request the worker hasn't taken, at
- * the generation the caller saved and with its flags; seen holds the
- * worker's count per channel. The engine checks the generation again, so a read that
- * settled since makes it ECUIO_CLEAR_REPORT_CHANGED, sending nothing. */
+/* Starts the clear request (ecuio_engine_clear_request, ADR-0038) the
+ * worker hasn't taken, at the generations the caller saved and with its
+ * flags; *seen is the worker's count. The engine checks each generation
+ * again, so a read that settled since makes that target
+ * ECUIO_CLEAR_REPORT_CHANGED. Once the engine has no clear running the
+ * session hears the request ended, and takes the next. */
 inline void ecuio_take_clear_requests(ecuio_session_t* session,
                                       ecuio_request_engine* e, uint32_t* seen)
 {
-    for (uint32_t c = 0; c < e->chan_count && c < session->info.module_count;
-         ++c) {
-        const uint32_t asked = session->clear_requests[c].load();
-        if (asked != seen[c]) {
-            seen[c] = asked;
-            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load(),
-                                     session->clear_flags[c].load());
+    ecuio_clear_target_t targets[ECUIO_MAX_CHANNELS];
+    std::lock_guard<std::mutex> lock(session->clear_mutex);
+    if (session->clear_requests != *seen) {
+        *seen = session->clear_requests;
+        uint32_t count = 0;
+        for (uint32_t k = 0; k < session->clear_count; ++k) {
+            if (session->clear_targets[k].channel < e->chan_count) {
+                targets[count++] = session->clear_targets[k];
+            }
         }
+        (void)ecuio_engine_clear_request(e, targets, count,
+                                         session->clear_flags);
+    }
+    if (!ecuio_engine_clear_running(e)) {
+        session->clear_ended = *seen;
     }
 }
 

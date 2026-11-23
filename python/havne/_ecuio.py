@@ -66,6 +66,7 @@ ECUIO_CLEAR_CLEARED = 1
 ECUIO_CLEAR_ENGINE_RUNNING = 4
 ECUIO_CLEAR_MOVING = 7
 ECUIO_CLEAR_NONE = 0
+ECUIO_CLEAR_NOT_EMISSIONS = 9
 ECUIO_CLEAR_NO_ENGINE_SPEED = 5
 ECUIO_CLEAR_NO_VEHICLE_SPEED = 8
 ECUIO_CLEAR_REFUSED = 2
@@ -615,6 +616,9 @@ class ecuio_check_options_t(Structure):
 class ecuio_check_summary_t(Structure):
     pass
 
+class ecuio_clear_target_t(Structure):
+    pass
+
 class ecuio_computed_t(Structure):
     pass
 
@@ -1039,6 +1043,11 @@ ecuio_check_summary_t._fields_ = [
     ('counts', (c_uint64 * 8)),
     ('torn_rows', c_uint64),
     ('reserved', (c_uint64 * 4)),
+]
+ecuio_clear_target_t._fields_ = [
+    ('channel', c_uint32),
+    ('generation', c_uint32),
+    ('reserved', (c_uint32 * 2)),
 ]
 ecuio_computed_t._fields_ = [
     ('input_ids', (c_uint16 * 4)),
@@ -1919,6 +1928,7 @@ FUNCTIONS = {
     'ecuio_scrub_frames': (c_int, [c_size_t, ecuio_scrub_frame_callback_t, c_void_p, POINTER(ecuio_signal_set_t), c_uint32, POINTER(c_uint8), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_serial_ports': (c_int, [POINTER(ecuio_serial_port_t), c_uint32, POINTER(c_uint32)]),  # serial.h
     'ecuio_session_clear_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32]),  # core.h
+    'ecuio_session_clear_diagnostics_set': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_clear_target_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_with': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_close': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_create': (c_int, [c_char_p, POINTER(POINTER(ecuio_session_t))]),  # core.h

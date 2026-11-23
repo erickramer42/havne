@@ -128,7 +128,7 @@ inline bool ecuio_engine_quiet_unanswered(const ecuio_request_engine* e,
     }
     i -= ch.ident_count;
     if (i < ch.diag_count) {
-        return ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+        return !ecuio_engine_clear_on(ch) &&
                ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED;
     }
     i -= ch.diag_count;

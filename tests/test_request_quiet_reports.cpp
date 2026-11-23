@@ -216,6 +216,18 @@ void to_step_item_out(Adapter& a)
     ASSERT_NE(a.e.chans[0].diag.flags & ECUIO_DIAG_COMPLETE, 0u);
 }
 
+/* Channel 1's 03 as answered at its read, which went quiet after: an
+ * emissions module, so a clear may go */
+void answered_03(Adapter& a)
+{
+    ecuio_engine_channel& ch = a.e.chans[1];
+    for (uint32_t i = 0; i < ch.diag_count; ++i) {
+        if (ch.diag_items[i].request[0] == 0x03) {
+            ch.diag_items[i].outcome = ECUIO_DIAG_ANSWERED;
+        }
+    }
+}
+
 /* A positive answer to the diagnostics item q, padded to six bytes */
 Bytes diag_answer(const ecuio_request& q)
 {
@@ -285,7 +297,9 @@ TEST(RequestQuietTest,
 {
     auto a = quiet_reports();
     to_step_item_out(*a);
+    answered_03(*a);
     const size_t n = a->sent.size();
+    a->e.rpm_module = 1; /* the engine module */
     ASSERT_TRUE(ecuio_engine_clear(&a->e, 1, a->e.chans[1].diag.generation));
     a->until(a->now + 2000 * kMs);
     const std::vector<Bytes> after = asked_after(*a, n);
@@ -302,7 +316,9 @@ TEST(RequestQuietTest, AClearWaitingOnAQuietModulesItemEndsChangedWhenItAnswers)
 {
     auto a = quiet_reports();
     to_step_item_out(*a);
+    answered_03(*a);
     const size_t n = a->sent.size();
+    a->e.rpm_module = 1; /* the engine module */
     ASSERT_TRUE(ecuio_engine_clear(&a->e, 1, a->e.chans[1].diag.generation));
     const Bytes r = diag_answer(a->e.chans[1].once);
     (void)ecuio_engine_on_frame(

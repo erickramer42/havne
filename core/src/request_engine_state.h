@@ -158,11 +158,13 @@ constexpr uint32_t ECUIO_DIAG_FIRST_COUNT =
 constexpr uint32_t ECUIO_DIAG_MAX_ITEMS =
     ECUIO_DIAG_FIRST_COUNT + 1 + ECUIO_DIAG_MAX_FREEZE;
 
-/* A channel's clear: what its one-shot asks next */
+/* A clear's steps: a target's (WAIT, then CLEAR) and the judgment's
+ * request on the module asking it (SPEED, VEHICLE) */
 constexpr uint8_t ECUIO_CLEAR_STEP_NONE = 0;
 constexpr uint8_t ECUIO_CLEAR_STEP_SPEED = 1;   /* 01 0C */
-constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the gate */
+constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the judgment */
 constexpr uint8_t ECUIO_CLEAR_STEP_VEHICLE = 3; /* 01 0D, under ALLOW_RUNNING */
+constexpr uint8_t ECUIO_CLEAR_STEP_WAIT = 4;    /* a target: the judgment */
 
 struct ecuio_diag_item {
     uint8_t request[3];
@@ -329,9 +331,10 @@ struct ecuio_engine_channel {
     uint8_t freeze_bits[4] = {}; /* 02 00 00's answer: PIDs 01 to 20 */
     ecuio_channel_diagnostics_t diag = {}; /* the report, but rx_id */
     /* Clearing (ADR-0038): the one-shot carries the clear's request
-     * while clearing; clear_step is what it asks next. */
+     * while clearing; clear_step is the target's, judge_step the
+     * judgment's request this module asks for the clear request. */
     uint8_t clear_step = ECUIO_CLEAR_STEP_NONE;
-    uint32_t clear_flags = 0; /* the call's ECUIO_CLEAR_ALLOW_* */
+    uint8_t judge_step = ECUIO_CLEAR_STEP_NONE;
     bool clearing = false; /* the one-shot is the clear's request */
     /* Packing (ADR-0039 Appendix A): each PID's data length as its own
      * reply showed it (0 not yet, ECUIO_ENGINE_PID_LONG longer than
@@ -529,7 +532,29 @@ struct ecuio_request_engine {
     uint8_t visit_order[ECUIO_MAX_CHANNELS] = {};
     uint32_t visit_count = 0;
     uint32_t visit_now = UINT32_MAX;
+    /* The clear request's judgment (ADR-0038): its flags and the modules
+     * asked 01 0D so far, a bit each. rpm_module names the engine module
+     * outright (the mock's one ECU), else UINT32_MAX: the table's. */
+    uint32_t clear_flags = 0;
+    uint32_t speed_asked = 0;
+    uint32_t rpm_module = UINT32_MAX;
 };
+
+/* Whether module ch has a clear under way: a target's step, or the
+ * judgment's request on it */
+inline bool ecuio_engine_clear_on(const ecuio_engine_channel& ch)
+{
+    return ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.judge_step != ECUIO_CLEAR_STEP_NONE;
+}
+
+/* Whether module ch has a clear's request to send: the judgment's, or
+ * its own 04 (a target waiting on the judgment sends nothing) */
+inline bool ecuio_engine_clear_asks(const ecuio_engine_channel& ch)
+{
+    return ch.judge_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.clear_step == ECUIO_CLEAR_STEP_CLEAR;
+}
 
 /* Whether request r is asked in the rotation: not dropped by the probe
  * and not parked by a focus (ADR-0056 section 2) */

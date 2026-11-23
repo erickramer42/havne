@@ -677,6 +677,7 @@ TEST(KeyWindowTest, AClearNeverComesBetweenASeedAndItsKey)
         uint32_t generation = 0;
         ASSERT_NO_FATAL_FAILURE(diagnosed(&e, &ecu, &now, &generation));
         seeded(&e, &ecu, &now);
+        e.rpm_module = 0; /* the engine module */
         ASSERT_TRUE(ecuio_engine_clear(&e, 0, generation));
         for (int i = 0; i < 6; ++i) {
             ASSERT_EQ(step(&e, 0, &now, std::ref(ecu)), Bytes{}) << i;
@@ -694,6 +695,7 @@ TEST(KeyWindowTest, AClearNeverComesBetweenASeedAndItsKey)
         int64_t now = 0;
         uint32_t generation = 0;
         ASSERT_NO_FATAL_FAILURE(diagnosed(&e, &ecu, &now, &generation));
+        e.rpm_module = 0; /* the engine module */
         ASSERT_TRUE(ecuio_engine_clear(&e, 0, generation));
         ASSERT_EQ(offer_seed(&e, now), ecuio_talk_offer::taken);
         const std::vector<Bytes> sent =

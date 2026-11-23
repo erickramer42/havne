@@ -486,6 +486,7 @@ TEST(CoreTest, MockEcuClearsOnlyWithTheEngineStopped)
 {
     auto e = std::make_unique<ecuio_request_engine>();
     ecuio_engine_init(e.get(), 1);
+    e->rpm_module = 0; /* the mock ECU is the engine module */
     ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
     const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
     ecuio_mock::DriveCycle car;
@@ -518,6 +519,7 @@ TEST(CoreTest, MockEcuClearsAMovingCarOnlyWithTheCallersWord)
 {
     auto e = std::make_unique<ecuio_request_engine>();
     ecuio_engine_init(e.get(), 1);
+    e->rpm_module = 0; /* the mock ECU is the engine module */
     ecuio_engine_diagnose(e.get(), ecuio_obd2_signal_set());
     const ecuio_channel_diagnostics_t& d = e->chans[0].diag;
     ecuio_mock::DriveCycle car;

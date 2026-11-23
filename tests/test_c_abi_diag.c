@@ -86,7 +86,10 @@ int c_abi_diag(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         (ECUIO_DIAG_CLEAR_RPM & ECUIO_DIAG_CLEARING) != 0 ||
         (ECUIO_DIAG_CLEAR_KMH & ECUIO_DIAG_CLEAR_RPM) != 0 ||
+        ecuio_session_clear_diagnostics_set(NULL, NULL, 0, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ECUIO_CLEAR_MOVING != 7u || ECUIO_CLEAR_NO_VEHICLE_SPEED != 8u ||
+        ECUIO_CLEAR_NOT_EMISSIONS != 9u || ECUIO_ERR_IN_USE != 20 ||
         ECUIO_ERR_REPORT_CHANGED != 17 ||
         (ECUIO_DIAG_ASKED & ECUIO_DIAG_FREEZE_FRAME) != 0 ||
         (ECUIO_DIAG_CLEARING & ECUIO_DIAG_ASKED) != 0 ||

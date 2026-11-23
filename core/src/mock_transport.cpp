@@ -50,7 +50,7 @@ struct ecuio_mock_transport {
     ecuio_mock_ecu ecu;          /* car's engine, cleared or not */
     int64_t diag_now_us = 0;     /* the engine's clock (mock_ecu.h) */
     uint32_t diag_seen = 0;      /* ecuio_take_diag_request's count */
-    uint32_t clear_seen[1] = {}; /* ecuio_take_clear_requests' count */
+    uint32_t clear_seen = 0;     /* ecuio_take_clear_requests' count */
     uint32_t diag_published = 0; /* the report's last generation out */
     /* The channels: the engine ECU's first, then each other the set
      * declares (attach's, read-only after) */
@@ -220,7 +220,8 @@ void mock_worker(ecuio_mock_transport* t)
         if (t->diag) {
             const uint32_t before = t->diag->chans[0].diag.generation;
             ecuio_take_diag_request(t->session, t->diag.get(), t->diag_seen);
-            ecuio_take_clear_requests(t->session, t->diag.get(), t->clear_seen);
+            ecuio_take_clear_requests(t->session, t->diag.get(),
+                                      &t->clear_seen);
             if (t->diag->chans[0].diag.generation != before) {
                 read_diagnostics(t);
             }
@@ -405,6 +406,7 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         if (!ecuio_engine_init(impl->diag.get(), 1)) {
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
+        impl->diag->rpm_module = 0; /* the one ECU is the engine module */
         ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
         read_diagnostics(impl);
     }

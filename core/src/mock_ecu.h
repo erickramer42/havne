@@ -137,8 +137,7 @@ inline void ecuio_mock_ecu_read(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
     const ecuio_engine_channel& ch = e->chans[0];
     for (int step = 0; step < 256; ++step) {
         if (ch.diag_pending == 0 && !ch.diagnosing &&
-            ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
-            ch.outstanding == ECUIO_ENGINE_NONE) {
+            !ecuio_engine_clear_on(ch) && ch.outstanding == ECUIO_ENGINE_NONE) {
             return;
         }
         const int32_t r = ecuio_engine_due(e, 0, *now_us);

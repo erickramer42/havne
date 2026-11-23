@@ -22,8 +22,7 @@
 
 /* The session's modules as attach resolved them: every one's IDs, the
  * info's count and its first ECUIO_SESSION_INFO_MAX_CHANNELS, and room
- * for each one's reports and clear requests, each report naming its
- * ECU. Before create returns; nothing sizes them afterwards. Out of
+ * for each one's reports, each report naming its ECU. Before create returns; nothing sizes them afterwards. Out of
  * memory is ECUIO_ERR_OUT_OF_MEMORY, the session unchanged. */
 inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
                                                 const uint32_t* rx_ids,
@@ -37,18 +36,12 @@ inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
     std::vector<ecuio_channel_support_t> support;
     std::vector<ecuio_channel_identity_t> identity;
     std::vector<ecuio_channel_diagnostics_t> diagnostics;
-    std::unique_ptr<std::atomic<uint32_t>[]> generation;
-    std::unique_ptr<std::atomic<uint32_t>[]> flags;
-    std::unique_ptr<std::atomic<uint32_t>[]> requests;
     try {
         rx.assign(rx_ids, rx_ids + count);
         tx.assign(tx_ids, tx_ids + count);
         support.assign(count, ecuio_channel_support_t{});
         identity.assign(count, ecuio_channel_identity_t{});
         diagnostics.assign(count, ecuio_channel_diagnostics_t{});
-        generation.reset(new std::atomic<uint32_t>[count]());
-        flags.reset(new std::atomic<uint32_t>[count]());
-        requests.reset(new std::atomic<uint32_t>[count]());
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -58,9 +51,6 @@ inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
     session->support.swap(support);
     session->identity.swap(identity);
     session->diagnostics.swap(diagnostics);
-    session->clear_generation = std::move(generation);
-    session->clear_flags = std::move(flags);
-    session->clear_requests = std::move(requests);
     session->support_count = count;
     session->info.module_count = count;
     session->info.channel_count =

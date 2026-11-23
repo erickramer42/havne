@@ -385,7 +385,7 @@ struct worker_state {
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
-    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    uint32_t clear_seen = 0;     /* ecuio_take_clear_requests' count */
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     int64_t timing_at = 0;
@@ -520,7 +520,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
     const bool requests = w.requests;
     if (requests) {
         ecuio_take_diag_request(t->session, &e, w.diag_seen);
-        ecuio_take_clear_requests(t->session, &e, w.clear_seen);
+        ecuio_take_clear_requests(t->session, &e, &w.clear_seen);
         ecuio_take_test_talk(t->session, &e, engine_now_us(t));
         ecuio_take_focus(t->session, &e, w.focus_seen);
         (void)ecuio_take_modules(t->session, &e, w.modules_seen,

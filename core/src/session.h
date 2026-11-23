@@ -188,13 +188,16 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
-    /* ecuio_session_clear_diagnostics's requests, per channel, from any
-     * thread: the generation the caller saved, then the count moved on;
-     * a worker that reads diagnostics takes each new one
-     * (ecuio_take_clear_requests) */
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_generation;
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_flags;
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_requests;
+    /* ecuio_session_clear_diagnostics_set's request, from any thread,
+     * under clear_mutex: its targets and flags, the requests made, and
+     * the last one the worker has seen to its end
+     * (ecuio_take_clear_requests); a request runs while the two differ */
+    std::mutex clear_mutex;
+    ecuio_clear_target_t clear_targets[ECUIO_MAX_CHANNELS] = {};
+    uint32_t clear_count = 0;
+    uint32_t clear_flags = 0;
+    uint32_t clear_requests = 0;
+    uint32_t clear_ended = 0;
     /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
      * caller's order and one byte per def (1 picked), under the mutex;
      * focus_generation moves with each call and a requesting worker takes

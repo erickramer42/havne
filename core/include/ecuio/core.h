@@ -874,6 +874,10 @@ ecuio_status_t ecuio_identity_vin(
                                                  or unanswered and the call
                                                  didn't allow a moving
                                                  vehicle: 04 not sent */
+#define ECUIO_CLEAR_NOT_EMISSIONS        9u   /* the report holds no
+                                                 positive answer to 01 00
+                                                 or 03: no emissions
+                                                 module, 04 not sent */
 
 /* ecuio_session_clear_diagnostics_with's flags */
 #define ECUIO_CLEAR_ALLOW_RUNNING        0x00000001u   /* send 04 at any engine
@@ -1124,10 +1128,11 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
  * first (ecuio_session_get_channel_diagnostics): it must be read to the
  * end, with no clear running, and still be the channel's, or the call
  * is ECUIO_ERR_REPORT_CHANGED and nothing is sent. On its next pass the
- * worker checks the generation again and asks the ECU's engine speed
+ * worker checks the generation again and asks the engine module's speed
  * (01 0C); 04 goes out only at 0 rpm. The report's clear field says
  * what became of it (ECUIO_CLEAR_*), and after a clear the report is
- * read again. Returns at once, from any thread.
+ * read again. Returns at once, from any thread. A clear request of one
+ * target (ecuio_session_clear_diagnostics_set's rules).
  * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past the session info's
  * module_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
  * ecuio_session_clear_diagnostics_with and flags 0. */
@@ -1150,6 +1155,40 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
     ecuio_session_t* session,
     uint32_t channel,
     uint32_t generation,
+    uint32_t flags
+);
+
+/* One target of a clear request: the channel, and the generation of its
+ * report the caller saved */
+typedef struct ecuio_clear_target {
+    uint32_t channel;
+    uint32_t generation;
+    uint32_t reserved[2]; /* zero */
+} ecuio_clear_target_t;
+
+/* One clear request over count targets (ADR-0038): the engine and the
+ * vehicle speed are judged once for them all, then each target's 04
+ * goes out. The rpm is the engine module's (the channel the session's
+ * signals read PID 0C from), target or not; none open reads as no rpm.
+ * The vehicle speed is the first answer to 01 0D, asked of the engine
+ * module, then of the targets in channel order. flags are
+ * ecuio_session_clear_diagnostics_with's, for the whole request, and
+ * every target ends as one judgment says. A target whose report holds
+ * no positive answer to 01 00 or 03 ends ECUIO_CLEAR_NOT_EMISSIONS; one
+ * whose report moved before the worker took the request ends
+ * ECUIO_CLEAR_REPORT_CHANGED; nothing is sent for either, and the other
+ * targets go on. Returns at once, from any thread.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL targets; ECUIO_ERR_INVALID_ARGUMENT
+ * for count 0 or past ECUIO_MAX_CHANNELS, a channel at or past the
+ * session info's module_count or named twice, nonzero reserved, or any
+ * other flag; ECUIO_ERR_REPORT_CHANGED when a target's report isn't read
+ * to the end, is clearing or has another generation, nothing requested;
+ * ECUIO_ERR_IN_USE while the session's last request still runs;
+ * ECUIO_ERR_SESSION_CLOSED after close. */
+ecuio_status_t ecuio_session_clear_diagnostics_set(
+    ecuio_session_t* session,
+    const ecuio_clear_target_t* targets,
+    uint32_t count,
     uint32_t flags
 );
 

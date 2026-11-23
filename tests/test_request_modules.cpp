@@ -244,6 +244,7 @@ TEST(RequestModulesTest, AModuleStaysOpenWhileItsClearRuns)
     ecuio_channel_diagnostics_t d;
     ecuio_engine_diagnostics(&m.e, 0, &d);
     ASSERT_TRUE(d.flags & ECUIO_DIAG_COMPLETE);
+    m.e.rpm_module = 0; /* the engine module */
     ASSERT_TRUE(ecuio_engine_clear(&m.e, 0, d.generation));
     ecuio_engine_module_want(&m.e, 0, 0);
     bool closed_mid_clear = false;

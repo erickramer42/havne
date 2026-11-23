@@ -116,15 +116,16 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
     return false;
 }
 
-/* A clear's next request into channel c's one-shot */
+/* A clear's next request into channel c's one-shot: the judgment's
+ * first, else the target's 04 */
 inline void ecuio_engine_take_clear(ecuio_engine_channel& ch, uint32_t c)
 {
     ch.once = ecuio_request{};
-    if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
+    if (ch.judge_step == ECUIO_CLEAR_STEP_SPEED) {
         ch.once.bytes[0] = ECUIO_CLEAR_SPEED_REQUEST[0];
         ch.once.bytes[1] = ECUIO_CLEAR_SPEED_REQUEST[1];
         ch.once.len = 2;
-    } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
+    } else if (ch.judge_step == ECUIO_CLEAR_STEP_VEHICLE) {
         ch.once.bytes[0] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0];
         ch.once.bytes[1] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[1];
         ch.once.len = 2;
@@ -263,7 +264,7 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
     ecuio_engine_channel& ch = e->chans[c];
     const bool once_turn = ch.requests == 0 || ch.scan_turn ||
                            (e->scan_first && ch.scan_pending > 0);
-    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE && once_turn) {
+    if (ecuio_engine_clear_asks(ch) && once_turn) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
     }
@@ -298,9 +299,8 @@ inline bool ecuio_engine_closing_leaves(const ecuio_request_engine* e,
 inline bool ecuio_engine_closing_owes(const ecuio_request_engine* e,
                                       const ecuio_engine_channel& ch)
 {
-    return ch.clear_step != ECUIO_CLEAR_STEP_NONE || ch.diag_pending > 0 ||
-           ch.diagnosing || ch.clearing || ch.sessioning ||
-           ecuio_engine_closing_leaves(e, ch);
+    return ecuio_engine_clear_on(ch) || ch.diag_pending > 0 || ch.diagnosing ||
+           ch.clearing || ch.sessioning || ecuio_engine_closing_leaves(e, ch);
 }
 
 /* When closing module ch next sends: its floor while it owes something
@@ -378,7 +378,7 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
     if (ch.diagnosing || ch.clearing || ch.sessioning) {
         return ECUIO_ENGINE_ONCE;
     }
-    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+    if (ecuio_engine_clear_asks(ch)) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
     }
@@ -523,7 +523,7 @@ inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
 inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 {
     return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
-           ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.diag_pending > 0 || ecuio_engine_clear_asks(ch) ||
            ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
            ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
            ch.talk.offered || ch.talk.out;
@@ -588,16 +588,16 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         const bool items = ch.quiet && ecuio_engine_quiet_asks_items(e, ch);
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 && !items &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
-            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+            ch.diag_pending == 0 && !ecuio_engine_clear_asks(ch) &&
             !ch.talk.offered && !ecuio_engine_session_live(e, ch) && !window) {
             continue;
         }
         int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
                                                            : ch.next_send_us;
-        const bool asks_more =
-            ch.requests > 0 || items || ch.scan_pending > 0 ||
-            ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
-            ch.talk.offered || ch.clear_step != ECUIO_CLEAR_STEP_NONE;
+        const bool asks_more = ch.requests > 0 || items ||
+                               ch.scan_pending > 0 || ch.ident_pending > 0 ||
+                               ch.diag_pending > 0 || ch.walking ||
+                               ch.talk.offered || ecuio_engine_clear_asks(ch);
         if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
             !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
             at = ch.next_sweep_us;

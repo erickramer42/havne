@@ -268,33 +268,73 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t* session,
                                                     uint32_t generation,
                                                     uint32_t flags)
 {
-    if (session == nullptr) {
+    const ecuio_clear_target_t target = {channel, generation, {0, 0}};
+    return ecuio_session_clear_diagnostics_set(session, &target, 1, flags);
+}
+
+namespace {
+
+/* A clear request's targets as the call's rules take them: each channel
+ * in the table, once, its reserved room zero */
+bool clear_targets_valid(const ecuio_session_t* session,
+                         const ecuio_clear_target_t* targets, uint32_t count)
+{
+    uint32_t named = 0;
+    for (uint32_t k = 0; k < count; ++k) {
+        const ecuio_clear_target_t& t = targets[k];
+        if (t.channel >= session->support_count ||
+            t.channel >= ECUIO_MAX_CHANNELS || t.reserved[0] != 0 ||
+            t.reserved[1] != 0 || ((named >> t.channel) & 1u) != 0) {
+            return false;
+        }
+        named |= 1u << t.channel;
+    }
+    return true;
+}
+
+} // namespace
+
+ecuio_status_t
+ecuio_session_clear_diagnostics_set(ecuio_session_t* session,
+                                    const ecuio_clear_target_t* targets,
+                                    uint32_t count, uint32_t flags)
+{
+    if (session == nullptr || targets == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
     }
     if ((flags & ~(ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING)) !=
-        0) {
+            0 ||
+        count == 0 || count > ECUIO_MAX_CHANNELS) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     {
         std::lock_guard<std::mutex> lock(session->support_mutex);
-        if (channel >= session->support_count) {
+        if (!clear_targets_valid(session, targets, count)) {
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
-        const ecuio_channel_diagnostics_t& d = session->diagnostics[channel];
-        if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 ||
-            (d.flags & ECUIO_DIAG_CLEARING) != 0 ||
-            d.generation != generation) {
-            return ECUIO_ERR_REPORT_CHANGED;
+        for (uint32_t k = 0; k < count; ++k) {
+            const ecuio_channel_diagnostics_t& d =
+                session->diagnostics[targets[k].channel];
+            if ((d.flags & ECUIO_DIAG_COMPLETE) == 0 ||
+                (d.flags & ECUIO_DIAG_CLEARING) != 0 ||
+                d.generation != targets[k].generation) {
+                return ECUIO_ERR_REPORT_CHANGED;
+            }
         }
     }
-    /* The generation and flags first: a worker that sees the count moved
-     * reads them */
-    session->clear_generation[channel].store(generation);
-    session->clear_flags[channel].store(flags);
-    session->clear_requests[channel].fetch_add(1);
+    std::lock_guard<std::mutex> lock(session->clear_mutex);
+    if (session->clear_requests != session->clear_ended) {
+        return ECUIO_ERR_IN_USE;
+    }
+    for (uint32_t k = 0; k < count; ++k) {
+        session->clear_targets[k] = targets[k];
+    }
+    session->clear_count = count;
+    session->clear_flags = flags;
+    ++session->clear_requests;
     return ECUIO_OK;
 }
 

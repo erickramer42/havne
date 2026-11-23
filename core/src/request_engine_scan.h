@@ -234,8 +234,7 @@ inline void ecuio_engine_ask_again(ecuio_request_engine* e, uint32_t c)
             ++ch.ident_pending;
         }
     }
-    for (uint32_t i = 0;
-         i < ch.diag_count && ch.clear_step == ECUIO_CLEAR_STEP_NONE; ++i) {
+    for (uint32_t i = 0; i < ch.diag_count && !ecuio_engine_clear_on(ch); ++i) {
         if (ch.diag_items[i].outcome == ECUIO_DIAG_UNANSWERED) {
             ch.diag_items[i].outcome = ECUIO_DIAG_UNASKED;
             ++ch.diag_pending;
