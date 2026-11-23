@@ -1201,10 +1201,17 @@ ecuio_status_t ecuio_recording_check(const char* folder_utf8,
 #define ECUIO_EXPORT_LEFT_OUT_ACTIVITY       3u /* activity lines of a kind
                                                    the export doesn't know */
 #define ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED     4u /* the check alone: a token
-                                                   of 17 VIN characters; an
-                                                   export holding one fails,
+                                                   of 17 VIN characters in a
+                                                   message or in bytes core
+                                                   writes fails the export,
                                                    so its count stays 0 */
-#define ECUIO_EXPORT_LEFT_OUT_COUNT          5u
+#define ECUIO_EXPORT_LEFT_OUT_VIN_MASKED     5u /* the VIN-shaped tokens of
+                                                   text a user wrote (names,
+                                                   labels, markers) a CSV or
+                                                   a folder copy writes as
+                                                   '*', one each; never a
+                                                   failed check's class */
+#define ECUIO_EXPORT_LEFT_OUT_COUNT          6u
 
 /* ecuio_export_options_t.layout, the CSV's (ADR-0056 section 5) */
 #define ECUIO_CSV_WIDE 0u /* a column a signal, a row a sweep or a grid */

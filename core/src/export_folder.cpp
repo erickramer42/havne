@@ -3,16 +3,42 @@
 //          ExportCancelTest, ConditionRecordingTest (test_core)
 
 #include "export_engine.h"
+#include "sha256.h"
+
+#include "ecuio/conditions.h"
 
 #include <new>
 
 namespace ecuio_export_detail {
 
+namespace {
+
+/* A copy's JSON file loads as a reader of the copy loads it */
+bool loads(const char* name, const std::string& b)
+{
+    bool ok = false;
+    if (std::strcmp(name, rows::kSignalFileName) == 0) {
+        ecuio_signal_file_t* f = nullptr;
+        ok = ecuio_signal_file_load_with(b.data(), b.size(),
+                                         ECUIO_SIGNAL_FILE_LOAD_SET,
+                                         &f) == ECUIO_OK;
+        ecuio_signal_file_free(f);
+    } else {
+        ecuio_condition_set_t* s = nullptr;
+        ok = ecuio_condition_set_load(b.data(), b.size(), &s) == ECUIO_OK;
+        ecuio_condition_set_free(s);
+    }
+    ecuio_detail_clear();
+    return ok;
+}
+
+} // namespace
+
 void recording_export::count_unknown(const std::string& folder)
 {
     static const char* const kKnown[] = {
         "events.log",  "frames.csv",   "signals.csv",    "markers.csv",
-        "latency.csv", "signals.json", "conditions.json"};
+        "latency.csv", "signals.json", "conditions.json", kMaskNoteName};
     std::vector<std::string> names;
     if (!files::list_folder(folder, &names)) {
         return;
@@ -57,7 +83,8 @@ std::string recording_export::export_line() const
     return buf;
 }
 
-bool recording_export::begin_file(const std::string& partial, const char* name)
+bool recording_export::begin_file(const std::string& partial, const char* name,
+                                  uint32_t mode)
 {
     if (canceled(true)) {
         return false;
@@ -71,7 +98,7 @@ bool recording_export::begin_file(const std::string& partial, const char* name)
         written_paths_.pop_back();
         return fail("the export can't be written: %s", why);
     }
-    file_check_.reset(new scrub::check(values_));
+    start_check(mode);
     buf_.clear();
     return true;
 }
@@ -182,7 +209,7 @@ bool recording_export::copy_file(const std::string& folder, const char* name)
     if (!f) {
         return true;
     }
-    if (!begin_file(partial_, name)) {
+    if (!begin_file(partial_, name, scrub::kRefuse)) {
         return false;
     }
     char chunk[1u << 14];
@@ -212,7 +239,8 @@ bool recording_export::write_folder(const std::string& folder)
         if (!placed) {
             head.push_back(export_line());
         }
-        if (!begin_file(partial_, "events.log") || !put_lines(head)) {
+        if (!begin_file(partial_, "events.log", scrub::kMask) ||
+            !put_lines(head)) {
             return false;
         }
         buf_ += '\n';
@@ -220,14 +248,15 @@ bool recording_export::write_folder(const std::string& folder)
             return false;
         }
     }
-    if (has_frames_ && (!begin_file(partial_, "frames.csv") ||
-                        !write_frames(folder) || !end_file("frames.csv"))) {
+    if (has_frames_ &&
+        (!begin_file(partial_, "frames.csv", scrub::kRefuse) ||
+         !write_frames(folder) || !end_file("frames.csv"))) {
         return false;
     }
     if (has_values_) {
         written_ = 0;
-        if (!begin_file(partial_, "signals.csv") || !values(folder, true) ||
-            !end_file("signals.csv")) {
+        if (!begin_file(partial_, "signals.csv", scrub::kMask) ||
+            !values(folder, true) || !end_file("signals.csv")) {
             return false;
         }
         if (written_ != r_.values) {
@@ -235,17 +264,107 @@ bool recording_export::write_folder(const std::string& folder)
         }
     }
     if (has_markers_ &&
-        (!begin_file(partial_, "markers.csv") || !put_lines(markers_) ||
-         !end_file("markers.csv"))) {
+        (!begin_file(partial_, "markers.csv", scrub::kMask) ||
+         !put_lines(markers_) || !end_file("markers.csv"))) {
         return false;
     }
     if (has_latency_ &&
-        (!begin_file(partial_, "latency.csv") || !put_lines(latency_) ||
-         !end_file("latency.csv"))) {
+        (!begin_file(partial_, "latency.csv", scrub::kRefuse) ||
+         !put_lines(latency_) || !end_file("latency.csv"))) {
         return false;
     }
-    return copy_file(folder, rows::kSignalFileName) &&
-           copy_file(folder, rows::kConditionsName);
+    if (raw_) {
+        return copy_file(folder, rows::kSignalFileName) &&
+               copy_file(folder, rows::kConditionsName) &&
+               copy_file(folder, kMaskNoteName);
+    }
+    return write_copy(rows::kSignalFileName, signals_copy_) &&
+           write_copy(rows::kConditionsName, conditions_copy_) && write_note();
+}
+
+bool recording_export::mask_copy(const std::string& folder, const char* name,
+                                 size_t max, masked_copy* out)
+{
+    std::string why;
+    file_ptr f(files::open_file(folder + "/" + name, false, &why));
+    if (!f) {
+        return true;
+    }
+    masked_copy& c = *out;
+    c.bytes.assign(max + 1, '\0');
+    c.bytes.resize(std::fread(&c.bytes[0], 1, c.bytes.size(), f.get()));
+    if (c.bytes.size() > max) {
+        c.bytes.clear(); /* no reader takes it: left out */
+        ++r_.files_left_out;
+        return true;
+    }
+    c.present = true;
+    c.source_sha = ecuio_sha256::hex_of(c.bytes.data(), c.bytes.size());
+    const std::string source = c.bytes;
+    scrub::check check(values_, scrub::kMask | scrub::kJson);
+    auto* b = reinterpret_cast<uint8_t*>(&c.bytes[0]);
+    check.feed_masking(b, c.bytes.size(), 0);
+    (void)check.finish_masking(b + c.bytes.size(), c.bytes.size());
+    check.written(b, c.bytes.size());
+    const uint32_t found = check.finish();
+    if (found != 0) {
+        r_.failed_class = found;
+        ecuio_detail_set("the check found %s in the copy's %s: nothing was "
+                         "written",
+                         scrub::failed_words(found), name);
+        return false;
+    }
+    c.masks = check.masked();
+    r_.left_out[kVinMasked] += c.masks;
+    c.sha = ecuio_sha256::hex_of(c.bytes.data(), c.bytes.size());
+    if (c.masks > 0 && loads(name, source) && !loads(name, c.bytes)) {
+        return fail("the copy's %s doesn't load with its VIN-shaped tokens "
+                    "masked: nothing was written",
+                    name);
+    }
+    return true;
+}
+
+bool recording_export::write_copy(const char* name, const masked_copy& c)
+{
+    if (!c.present) {
+        return true;
+    }
+    if (!begin_file(partial_, name, scrub::kRefuse | scrub::kJson)) {
+        return false;
+    }
+    buf_ = c.bytes;
+    return end_file(name);
+}
+
+bool recording_export::write_note()
+{
+    const uint64_t masks = r_.left_out[kVinMasked];
+    const uint64_t frames = r_.left_out[kVinShaped];
+    if (masks == 0 && frames == 0 && !had_note_) {
+        return true;
+    }
+    char buf[1024];
+    std::snprintf(
+        buf, sizeof buf,
+        "Havne %s, a scrubbed copy (ADR-0054): %llu VIN-shaped tokens "
+        "masked, %llu frames of messages holding one left out.\n"
+        "A VIN-shaped token is 17 letters and digits that could be a "
+        "vehicle's VIN. In events.log, signals.csv, markers.csv, "
+        "signals.json and conditions.json each is written as *, with the "
+        "letters and digits beside it that could be part of one; a name or "
+        "label may show them. frames.csv leaves out each frame of a message "
+        "holding one. Nothing else is changed.\n%s",
+        ecuio_version_string(), static_cast<unsigned long long>(masks),
+        static_cast<unsigned long long>(frames),
+        had_note_ ? "The recording this copy was made from was a masked "
+                    "copy itself: its masks are kept.\n"
+                  : "");
+    if (!begin_file(partial_, kMaskNoteName, scrub::kRefuse)) {
+        return false;
+    }
+    buf_ = buf;
+    return end_file(kMaskNoteName);
 }
 
 bool recording_export::run_folder(const std::string& folder, const std::string& out)
@@ -263,7 +382,14 @@ bool recording_export::run_folder(const std::string& folder, const std::string& 
     for (uint32_t c = 0; c < ECUIO_EXPORT_LEFT_OUT_COUNT; ++c) {
         frames_left_[c] = r_.left_out[c];
     }
-    if ((has_values_ && !values(folder, false)) || !plan_events(folder) ||
+    had_note_ = files::exists(folder + "/" + kMaskNoteName);
+    if ((has_values_ && !values(folder, false)) ||
+        (!raw_ && (!mask_copy(folder, rows::kSignalFileName,
+                              ECUIO_SIGNAL_SET_MAX_BYTES, &signals_copy_) ||
+                   !mask_copy(folder, rows::kConditionsName,
+                              ECUIO_CONDITION_FILE_MAX_BYTES,
+                              &conditions_copy_))) ||
+        !plan_events(folder) ||
         !plan_rows(folder, "markers.csv", true, markers_, &has_markers_) ||
         !plan_rows(folder, "latency.csv", false, latency_, &has_latency_)) {
         return false;

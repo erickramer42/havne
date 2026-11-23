@@ -423,7 +423,7 @@ bool recording_export::write(const std::string& folder)
     if (canceled(true)) {
         return false;
     }
-    file_check_.reset(new scrub::check(values_));
+    start_check(scrub::kRefuse);
     made_up_ = kMadeUp;
     made_up_flow_ = kMadeUpFlow;
     pc::section_header(buf_, section_comment(),

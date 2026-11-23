@@ -44,7 +44,8 @@ TEST(CsvExportTest, TextAndIdentificationSignalsAreLeftOut)
 }
 
 /* The check over the written bytes: a unit echoing an identification
- * reply's value from frames.csv, a name shaped as a VIN */
+ * reply's value from frames.csv. A name shaped as a VIN is masked
+ * (test_export_mask.cpp). */
 TEST(CsvExportTest, AnIdentityValueInTheFileFailsTheExport)
 {
     {
@@ -61,16 +62,6 @@ TEST(CsvExportTest, AnIdentityValueInTheFileFailsTheExport)
         EXPECT_EQ(e.detail,
                   "the check found an identification reply's value in the "
                   "export's file: nothing was written");
-        expect_no_file(f, "out.csv");
-    }
-    {
-        SCOPED_TRACE("a VIN-shaped name");
-        Folder f;
-        recording(f, "", std::string("2000,") + kVin + ",1,\n");
-        CsvExported e(f);
-        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
-        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
-        EXPECT_EQ(e.detail.find(kVin), std::string::npos);
         expect_no_file(f, "out.csv");
     }
 }

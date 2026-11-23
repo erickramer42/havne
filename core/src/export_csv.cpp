@@ -181,7 +181,7 @@ std::string recording_export::csv_comment() const
 
 bool recording_export::write_csv(const std::string& folder)
 {
-    file_check_.reset(new scrub::check(values_));
+    start_check(scrub::kMask);
     buf_ = kUtf8Bom; /* Excel reads a CSV without one as ANSI */
     buf_ += csv_comment();
     buf_ += header_.keyed ? "time_s,signal,unit,value,key\n"

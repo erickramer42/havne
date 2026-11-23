@@ -19,10 +19,13 @@ from ._asks import _Asks
 from ._core import check, lib, text, utf8
 from .errors import CheckFailed, Error
 
-LeftOut = namedtuple("LeftOut", "identification unattributable text_values activity")
+LeftOut = namedtuple("LeftOut", "identification unattributable text_values activity "
+                                "vin_shaped vin_masked")
 LeftOut.__doc__ = ("What a scrubbed export left out, by class: the frames (pcapng) or values "
                    "(CSV) of identification replies, of messages no ECU could be told from, of "
-                   "text signals, and the activity lines of a kind the export doesn't know")
+                   "text signals, the activity lines of a kind the export doesn't know, the "
+                   "frames of messages holding a VIN-shaped token, and the VIN-shaped tokens "
+                   "of names and labels written as '*'")
 Exported = namedtuple("Exported", "path format scrubbed frames made_up values signal_count rows "
                                   "files files_left_out left_out missing")
 Exported.__doc__ = ("What an export wrote: its path and format ('pcapng', 'csv' or 'folder'), "
@@ -36,7 +39,8 @@ Estimate.__doc__ = ("What estimate_csv found: the columns, missing as Exported's
                     "EstimatedSize for each interval asked, in order")
 
 # The words of ECUIO_EXPORT_LEFT_OUT_*, by index (havne-cli's)
-_CLASS_WORDS = ("identification", "unattributable", "text_values", "activity", "vin_shaped")
+_CLASS_WORDS = ("identification", "unattributable", "text_values", "activity", "vin_shaped",
+                "vin_masked")
 ROW_MS_MAX = 86400000
 SIZES_MAX = 64
 _LAYOUTS = ("wide", "long")

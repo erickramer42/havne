@@ -14,3 +14,4 @@ ECUIO_SIGNAL_SET_LAYOUT  v0.9.0 is layout 5: ecuio_channel_decl_t grows to 16 by
 ecuio_channel_decl  v0.9.0 adds flags and a reserved word, 8 to 16 bytes (ADR-0065, CHANGELOG.md)
 ECUIO_SIM_MAX_REPLIES  v0.9.0 raises it to 66 with the modules: a caller that sized 10 replies and reads to *count runs past its array, and 66 replies are 273 KB (ADR-0065, CHANGELOG.md)
 ECUIO_SIGNAL_FILE_FORMAT  v0.9.1 is format 3: a file's needs and a merged set's parts (ADR-0065, CHANGELOG.md)
+ECUIO_EXPORT_LEFT_OUT_COUNT  v0.9.1 is 6: ECUIO_EXPORT_LEFT_OUT_VIN_MASKED counts the VIN-shaped tokens an export masks (ADR-0054, CHANGELOG.md)
