@@ -878,6 +878,11 @@ ecuio_status_t ecuio_identity_vin(
                                                  positive answer to 01 00
                                                  or 03: no emissions
                                                  module, 04 not sent */
+#define ECUIO_CLEAR_NOT_OPENED                                                 \
+    10u /* the module wasn't open
+                                                 and no filter was free to
+                                                 visit it for the clear:
+                                                 04 not sent */
 
 /* ecuio_session_clear_diagnostics_with's flags */
 #define ECUIO_CLEAR_ALLOW_RUNNING        0x00000001u   /* send 04 at any engine
@@ -1177,7 +1182,10 @@ typedef struct ecuio_clear_target {
  * no positive answer to 01 00 or 03 ends ECUIO_CLEAR_NOT_EMISSIONS; one
  * whose report moved before the worker took the request ends
  * ECUIO_CLEAR_REPORT_CHANGED; nothing is sent for either, and the other
- * targets go on. Returns at once, from any thread.
+ * targets go on. A target that isn't open is visited for its 04 and the
+ * read after it, one at a time, in the filter kept back from live data;
+ * with none free it ends ECUIO_CLEAR_NOT_OPENED, nothing sent. Returns at
+ * once, from any thread.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL targets; ECUIO_ERR_INVALID_ARGUMENT
  * for count 0 or past ECUIO_MAX_CHANNELS, a channel at or past the
  * session info's module_count or named twice, nonzero reserved, or any

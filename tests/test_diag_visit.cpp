@@ -1,7 +1,8 @@
 // File/layer: tests/test_diag_visit.cpp | test_obd2, Qt-free
 // Testing: UNIT: DiagVisitTest (a read of a closed module's codes opens it
 //          in the filter kept back, one module at a time, asks its pass and
-//          closes it after: request_diag_visit.h; ADR-0065 step 5)
+//          closes it after, and a clear of one: request_diag_visit.h;
+//          ADR-0065 step 5)
 
 #include "test_obd2_support.h"
 
@@ -308,4 +309,100 @@ TEST_F(DiagVisitTest, AVisitedModuleWaitingForAFilterWaitsAgain)
     EXPECT_EQ(v.state(1), ECUIO_MODULE_STATE_NO_ROOM);
     EXPECT_EQ(v.e.visit_now, UINT32_MAX);
     EXPECT_EQ(v.e.chans[1].reasons, kRead);
+}
+
+namespace {
+
+/* A Visits whose engine module (channel 0) reads 0 rpm, the rest the
+ * fake's; module 1 read by a visit and closed again */
+void read_and_close(Visits& v, std::vector<uint8_t> reasons)
+{
+    ASSERT_NO_FATAL_FAILURE(v.make(reasons, 31, 32));
+    v.e.rpm_module = 0;
+    v.respond = [](uint32_t, const Bytes& q) {
+        return q == Bytes{0x01, 0x0C} ? Bytes{0x41, 0x0C, 0x00, 0x00}
+                                      : fake_reply(q);
+    };
+    v.until(500 * kMs);
+    ecuio_engine_visit_closed(&v.e);
+    v.until(v.now + 6000 * kMs);
+    for (uint32_t c = 1; c < reasons.size(); ++c) {
+        ASSERT_TRUE(v.report(c).flags & ECUIO_DIAG_COMPLETE) << c;
+        ASSERT_EQ(v.state(c), ECUIO_MODULE_STATE_CLOSED) << c;
+    }
+}
+
+bool sent_04(const Visits& v, uint32_t c, int64_t from_us)
+{
+    for (const Sent& s : v.sent) {
+        if (s.c == c && s.at >= from_us && s.bytes == Bytes{0x04}) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+/* A clear of a module that reported and closed visits it: the 04 goes,
+ * the read after it, and it closes again; the request ends, so the next
+ * is taken */
+TEST_F(DiagVisitTest, AClearOfAClosedModuleVisitsItAndClosesItAfter)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(read_and_close(v, {kRange, 0}));
+    const int64_t from = v.now;
+    ASSERT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation));
+    v.until(v.now + 6000 * kMs);
+    const ecuio_channel_diagnostics_t d = v.report(1);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_TRUE(sent_04(v, 1, from));
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE) << "read again after";
+    EXPECT_EQ(v.state(1), ECUIO_MODULE_STATE_CLOSED) << "closed after";
+    EXPECT_FALSE(ecuio_engine_clear_running(&v.e));
+    EXPECT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation))
+        << "a later clear refused";
+}
+
+/* With no filter free for the visit the target ends NOT_OPENED, nothing
+ * sent, its report's read untouched; the request ends */
+TEST_F(DiagVisitTest, AClearOfAClosedModuleWithNoFilterEndsNotOpened)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(read_and_close(v, {kRange, 0}));
+    v.e.filters_most = 1;
+    const int64_t from = v.now;
+    ASSERT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation));
+    v.until(v.now + 1000 * kMs);
+    const ecuio_channel_diagnostics_t d = v.report(1);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NOT_OPENED);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_CLEARING);
+    EXPECT_FALSE(d.flags & ECUIO_DIAG_NOT_OPENED) << "its read stands";
+    EXPECT_EQ(v.sent_on(1, from), 0u);
+    EXPECT_FALSE(ecuio_engine_clear_running(&v.e));
+    EXPECT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation))
+        << "a later clear refused";
+}
+
+/* Two closed targets and the engine running: the judgment ends both
+ * ENGINE_RUNNING while the first is visiting, and the second, queued,
+ * owes nothing then and is never opened */
+TEST_F(DiagVisitTest, AQueuedVisitOwingNothingNowNeverOpens)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(read_and_close(v, {kRange, 0, 0}));
+    v.respond = [](uint32_t, const Bytes& q) {
+        return q == Bytes{0x01, 0x0C} ? Bytes{0x41, 0x0C, 0x0B, 0xB8}
+                                      : fake_reply(q);
+    };
+    const uint32_t generation = v.e.chans[2].generation;
+    const ecuio_clear_target_t targets[2] = {
+        {1, v.report(1).generation, {0, 0}},
+        {2, v.report(2).generation, {0, 0}}};
+    ASSERT_TRUE(ecuio_engine_clear_request(&v.e, targets, 2, 0));
+    v.until(v.now + 2000 * kMs);
+    EXPECT_EQ(v.report(1).clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(v.report(2).clear, ECUIO_CLEAR_ENGINE_RUNNING);
+    EXPECT_EQ(v.e.chans[2].generation, generation) << "module 2 opened";
+    EXPECT_EQ(v.state(2), ECUIO_MODULE_STATE_CLOSED);
 }

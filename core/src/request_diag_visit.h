@@ -6,7 +6,9 @@
 // pass (identification still unsettled, then the diagnostics read; never
 // the walk, a row, a scanned DID or a session), and closes it after. A
 // visit that finds no filter free ends the read at once: COMPLETE, every
-// item unasked, ECUIO_DIAG_NOT_OPENED. The visiting module's own due is
+// item unasked, ECUIO_DIAG_NOT_OPENED. A clear of a module that isn't open
+// visits it too, for its 04 and the read after; with no filter free the
+// target ends ECUIO_CLEAR_NOT_OPENED. The visiting module's own due is
 // ecuio_engine_due_visit (_send.h); the worker queues and steps visits
 // from request_setup.h and request_modules.h. A filter the adapter
 // refuses (J2534) lowers the filters to those held here too.
@@ -56,6 +58,43 @@ inline void ecuio_engine_visit_not_opened(ecuio_request_engine* e, uint32_t c)
     ++ch.diag.generation;
 }
 
+/* Module c's clear can't open it: the target ends NOT_OPENED, nothing
+ * sent, so the request can end */
+inline void ecuio_engine_clear_not_opened(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.clear_step = ECUIO_CLEAR_STEP_NONE;
+    ch.judge_step = ECUIO_CLEAR_STEP_NONE;
+    ch.diag.flags &= ~ECUIO_DIAG_CLEARING;
+    ch.diag.clear = ECUIO_CLEAR_NOT_OPENED;
+    ++ch.diag.generation;
+}
+
+/* A visit to module c found no filter: its read ends NOT_OPENED, its
+ * clear NOT_OPENED, whichever it was wanted for */
+inline void ecuio_engine_visit_refused(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ecuio_engine_clear_on(ch)) {
+        ecuio_engine_clear_not_opened(e, c);
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_visit_not_opened(e, c);
+    }
+}
+
+/* Each clear target that isn't open is visited for its clear: the visit
+ * ends at once, and the module, closing, sends the request's (ADR-0038)
+ * 04 and the read after it in the filter kept back, then closes */
+inline void ecuio_engine_clear_visits(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (ecuio_engine_clear_on(e->chans[c])) {
+            ecuio_engine_visit_want(e, c);
+        }
+    }
+}
+
 /* The first queued visit, taken off the queue; UINT32_MAX for none */
 inline uint32_t ecuio_engine_visit_next(ecuio_request_engine* e)
 {
@@ -99,6 +138,7 @@ inline void ecuio_engine_visit_end(ecuio_request_engine* e, uint32_t c)
  * tried. A module opened meanwhile reads in place and leaves the queue. */
 inline void ecuio_engine_visits_step(ecuio_request_engine* e)
 {
+    ecuio_engine_clear_visits(e);
     if (e->visit_now != UINT32_MAX) {
         const uint32_t c = e->visit_now;
         ecuio_engine_channel& ch = e->chans[c];
@@ -115,12 +155,13 @@ inline void ecuio_engine_visits_step(ecuio_request_engine* e)
             return;
         }
         ecuio_engine_channel& ch = e->chans[c];
-        if (ecuio_engine_module_hears(ch)) {
-            continue;
+        if (ecuio_engine_module_hears(ch) ||
+            (ch.diag_pending == 0 && !ecuio_engine_clear_on(ch))) {
+            continue; /* open meanwhile, or owing nothing now */
         }
         if (e->filters_most != 0 &&
             ecuio_engine_modules_held(e) >= e->filters_most) {
-            ecuio_engine_visit_not_opened(e, c);
+            ecuio_engine_visit_refused(e, c);
             continue;
         }
         ch.visit_from_no_room = ch.module_state == ECUIO_MODULE_STATE_NO_ROOM;
@@ -154,7 +195,7 @@ inline void ecuio_engine_filter_refused(ecuio_request_engine* e, uint32_t c,
         e->visit_now = UINT32_MAX;
         ch.reasons =
             static_cast<uint8_t>(ch.reasons & ~ECUIO_ENGINE_REASON_VISIT);
-        ecuio_engine_visit_not_opened(e, c);
+        ecuio_engine_visit_refused(e, c);
         if (ch.reasons == 0) {
             ch.module_state = ECUIO_MODULE_STATE_CLOSED;
             return;
