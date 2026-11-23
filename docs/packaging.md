@@ -166,6 +166,15 @@ A version tag publishes these downloads through
   ([ADR-0053](adr/0053-python-bindings.md)). An `-rcN` tag's wheel is
   `<version>rcN` (PEP 440).
 
+- **iOS arm64,** an unsigned `.ipa` for sideloading with the tester's
+  own Apple ID ([ios.md](ios.md)). It holds no signature and no
+  device's ID, so it is never replaced by a signed copy.
+- **macOS arm64,** a zip of `Havne.app` for Apple silicon, macOS 14.4 or
+  later ([macos.md](macos.md)). Ad hoc signed and not notarized, since
+  no Apple Developer account stands behind it, so the first open goes
+  through System Settings > Privacy & Security. Intel Macs are not
+  supported.
+
 Beside them: the Windows PDBs and `havne-cli`'s Linux debug info, an
 SPDX SBOM of every download, `SHA256SUMS.txt`, and one build
 provenance over every file.
@@ -305,8 +314,31 @@ that each hold `build`, `build-win32` and `dist`.
   `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` (Qt 6.12 needs 14.4, core no more
   than 13.0); the only build at 13.0, so a release candidate is its
   first run.
+- **`ios`: the unsigned `.ipa`.** `ios-ipa.yml`, the workflow `ci.yml`'s
+  `ios-build` calls too, so the release ships what CI built: Qt's iOS
+  kit, the Xcode generator, no code signing. It fails unless the bundle's
+  `CFBundleShortVersionString` and `CFBundleVersion` are the tag's
+  version (without `-rcN`), `Info.plist` has the keys of
+  `app/ios/Info.plist.in`, and the bundle holds neither a
+  `_CodeSignature` nor an `embedded.mobileprovision` (a profile lists
+  device IDs). Its component list is a job artifact for the SBOM.
+- **`macos-app`: the macOS app.** `macos-app.yml`, the workflow `ci.yml`'s
+  `macos-app` calls too (and `macos-smoke` launches). A Release build at
+  Qt's own minimum macOS, arm64, then `macdeployqt` with the app's QML
+  folder, no `qmltooling` plugins, every Mach-O file thinned to arm64
+  and stripped of absolute rpaths, then one ad hoc signature
+  (`codesign --force --deep --sign -`: Apple silicon won't run an
+  unsigned arm64 binary, and `macdeployqt` breaks the linker's own).
+  It fails unless the bundle's versions are the tag's, `Info.plist` has
+  `NSLocalNetworkUsageDescription` and `LSMinimumSystemVersion`,
+  `codesign -dv` says `Signature=adhoc` with no Team ID, the signature
+  verifies (also on a copy unzipped from the finished file), and no
+  library links outside the bundle and the system (`otool -L`: nothing
+  into the runner's Qt kit). The zip is `ditto -c -k --keepParent`,
+  which keeps the bundle's links and signature.
 - **`publish`: the SBOM.** `sbom.py build` over the zip, the APK,
-  each architecture's AppImage, deb and tarball, and the four wheels (the symbols and debug files carry
+  each architecture's AppImage, deb and tarball, the four wheels, the
+  `.ipa` and the macOS zip (the symbols and debug files carry
   no component of their own), dated by the commit, then validated by
   `pyspdxtools` before anything is published.
 - **`publish`: checksums and provenance.** `SHA256SUMS.txt` lists every
