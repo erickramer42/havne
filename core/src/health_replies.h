@@ -10,8 +10,9 @@
 // ECU, the last reply of each kind taken wins. Pure: the caller reads the
 // frames and reassembles them.
 //
-// An ECU is a reply ID with at least one positive reply of a kind the
-// report shows (41 01, 41 41, 43, 47, 4A, 42, an identification item); a
+// An ECU is a diagnostic reply ID (scrub::reply_id), or one the
+// recording's set declares (ADR-0065 section 6), with at least one
+// positive reply of a kind the report shows (41 01, 41 41, 43, 47, 4A, 42, an identification item); a
 // refusal alone makes none, since a listener's recording hears every
 // module's. A refusal of 03, 07 or 0A is that list's; any other refusal
 // says nothing of which request it answers, and 7F xx 78 (still working)
@@ -33,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace ecuio_health_replies {
@@ -41,17 +43,27 @@ class builder
 {
 public:
     /* obd2 decodes the freeze frame's values (ADR-0037 section 4); NULL
-     * leaves them out */
-    explicit builder(const ecuio_signal_set_t* obd2) : obd2_(obd2) {}
+     * leaves them out. set is the recording's: each reply ID it declares
+     * is a module's too (NULL: none) */
+    explicit builder(const ecuio_signal_set_t* obd2,
+                     const ecuio_signal_set_t* set = nullptr)
+        : obd2_(obd2)
+    {
+        for (uint32_t c = 0; set != nullptr && c < set->channel_count; ++c) {
+            const uint32_t rx = set->channels[c].rx_id;
+            declared_.insert((rx > 0x7FFu ? (1ull << 32) : 0ull) | rx);
+        }
+    }
 
     /* A whole message on id, its service byte first */
     void take(uint32_t id, bool extended, const uint8_t* data, size_t n)
     {
-        if (n < 2 || !ecuio_scrub::reply_id(id, extended)) {
+        const uint64_t key = (extended ? (1ull << 32) : 0ull) | id;
+        if (n < 2 || (!ecuio_scrub::reply_id(id, extended) &&
+                      declared_.count(key) == 0)) {
             return;
         }
         const std::vector<uint8_t> msg(data, data + n);
-        const uint64_t key = (extended ? (1ull << 32) : 0ull) | id;
         switch (data[0]) {
         case 0x41:
             /* PID 01 and PID 41 at the reply's start, as diagnostics'
@@ -282,6 +294,7 @@ private:
 
     const ecuio_signal_set_t* obd2_;
     std::map<uint64_t, ecu> ecus_;
+    std::set<uint64_t> declared_; /* the set's reply IDs, keyed as ecus_ */
 };
 
 } // namespace ecuio_health_replies
