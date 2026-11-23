@@ -89,6 +89,44 @@ inline bool parse_whole(const char* text, uint64_t& out)
     return true;
 }
 
+// log's checks across its options, once they are read
+inline bool check_log_args(const LogArgs& a, std::string* why)
+{
+    if (a.uri == nullptr || a.folder == nullptr) {
+        *why = "log needs a URI and a folder for the recording";
+        return false;
+    }
+    if (*a.folder == '\0') {
+        *why = "log takes a folder";
+        return false;
+    }
+    if (a.min_sweep_ms != 0 && a.names.empty() && !a.pick_ranked) {
+        *why = "--min-sweep goes with --signal or --pick ranked: it paces "
+               "the picked signals";
+        return false;
+    }
+    if (a.signals != nullptr && a.plugin != nullptr) {
+        *why = "--signals and --plugin each give the profile: one at a time";
+        return false;
+    }
+    if (a.armed && a.conditions == nullptr) {
+        *why = "--armed goes with --conditions: a condition with record "
+               "opens each window";
+        return false;
+    }
+    return true;
+}
+
+// log's options that take no value; false for any other word
+inline bool flag_option(const std::string& s, LogArgs& a)
+{
+    if (s == "--armed") {
+        a.armed = true;
+        return true;
+    }
+    return false;
+}
+
 // The arguments after `log`; false with *why, a usage error
 inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
 {
@@ -129,8 +167,7 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
                 return false;
             }
             a.conditions = argv[++i];
-        } else if (s == "--armed") {
-            a.armed = true;
+        } else if (flag_option(s, a)) {
         } else if (s == "--pick") {
             if (!has_value || !parse_pick(argv[++i])) {
                 *why = pick_why();
@@ -149,29 +186,7 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
             return false;
         }
     }
-    if (a.uri == nullptr || a.folder == nullptr) {
-        *why = "log needs a URI and a folder for the recording";
-        return false;
-    }
-    if (*a.folder == '\0') {
-        *why = "log takes a folder";
-        return false;
-    }
-    if (a.min_sweep_ms != 0 && a.names.empty() && !a.pick_ranked) {
-        *why = "--min-sweep goes with --signal or --pick ranked: it paces "
-               "the picked signals";
-        return false;
-    }
-    if (a.signals != nullptr && a.plugin != nullptr) {
-        *why = "--signals and --plugin each give the profile: one at a time";
-        return false;
-    }
-    if (a.armed && a.conditions == nullptr) {
-        *why = "--armed goes with --conditions: a condition with record "
-               "opens each window";
-        return false;
-    }
-    return true;
+    return check_log_args(a, why);
 }
 
 // The picks' ids in the names' order, each name a signal's key or a name

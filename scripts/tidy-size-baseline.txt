@@ -39,10 +39,9 @@ cli/elm327_emulator.h	from_host	-	41
 cli/health_lines.h	parse_health	110	61
 cli/layout_check.h	check	190	124
 cli/layout_json.h	value	94	53
-cli/log_lines.h	parse_log	81	49
 cli/signal_file_lines.h	def_line	102	-
 cli/transfer_lines.h	parse_export	121	69
-cli/usage.cpp	usage	331	-
+cli/usage.cpp	usage	273	-
 core/src/candump.h	parse_line	176	77
 core/src/computed.h	ecuio_computed_check	-	43
 core/src/computed.h	ecuio_computed_run	121	85

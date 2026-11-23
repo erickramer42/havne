@@ -117,6 +117,23 @@ const char* backend_name(uint32_t backend)
     }
 }
 
+// The session info's flags a reader can't tell from the rest
+void flag_keys(cli::Line& l, const ecuio_session_info_t& info)
+{
+    if (info.flags & ECUIO_SESSION_INFO_PENDING_OFF) {
+        l.key("pending_off");
+        l.raw("true");
+    }
+    if (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) {
+        l.key("listen_only");
+        l.raw("true");
+    }
+    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
+        l.key("pick_only");
+        l.raw("true");
+    }
+}
+
 } // namespace
 
 void write_session(Output& out, const ecuio_session_t* session,
@@ -162,18 +179,7 @@ void write_session(Output& out, const ecuio_session_t* session,
         l.key("api_version");
         l.string(info.api_version, sizeof info.api_version);
     }
-    if (info.flags & ECUIO_SESSION_INFO_PENDING_OFF) {
-        l.key("pending_off");
-        l.raw("true");
-    }
-    if (info.flags & ECUIO_SESSION_INFO_LISTEN_ONLY) {
-        l.key("listen_only");
-        l.raw("true");
-    }
-    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
-        l.key("pick_only");
-        l.raw("true");
-    }
+    flag_keys(l, info);
     if (info.backend == ECUIO_BACKEND_REPLAY) {
         l.key("replay");
         l.ch('{');
