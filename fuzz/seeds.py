@@ -637,6 +637,12 @@ def main(argv):
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
 
+    # fuzz_request_bus: a clear under way on a held channel with rows, the
+    # one-shots' turn not come (ecuio_engine_due answered NONE where
+    # next_event_us said due now)
+    write(out, "fuzz_request_bus", "held-clear-due",
+          bytes.fromhex("8f2ea8a8a8a800000000000000a8a8a8a8a8a8a8a8a8a8a8a8ff6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c01f7dedea3ded4a2a2a2a2a2a2000ba2a20a"))
+
     # The security store (security_store.h): no entry, a failure kept, a
     # delay with no failure, an attempt marked and never ended, another
     # vehicle's entry of the same address and level, each value at its

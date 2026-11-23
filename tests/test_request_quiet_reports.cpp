@@ -330,3 +330,51 @@ TEST(RequestQuietTest, AClearAfterAReadAgainWaitingOnTheStepsItemIsRefused)
     EXPECT_EQ(a->e.chans[1].diag.clear, ECUIO_CLEAR_REPORT_CHANGED);
     EXPECT_EQ(a->e.chans[1].clear_step, ECUIO_CLEAR_STEP_NONE);
 }
+
+/* A clear under way on a held channel with rows, its one-shots' turn not
+ * come: next_event_us says due now, so the next due hands the clear's
+ * request over, never NONE (a worker would pass again at once, and the
+ * fuzzer calls it a spin). The live channel is on its floor and the held
+ * rotation waits for its step. */
+TEST(RequestQuietTest, AClearOnAHeldChannelIsDueWhenTheNextEventSaysSo)
+{
+    SideBySide s(2);
+    s.now = 570 * kMs;
+    ecuio_engine_channel& live = s.e.chans[0];
+    ecuio_engine_channel& held = s.e.chans[1];
+    live.heard = true;
+    live.next_send_us = s.now + 5 * kMs;
+    held.quiet = true;
+    held.quiet_next_us = s.now + 175 * kMs;
+    held.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
+    held.scan_turn = false;
+    ASSERT_TRUE(ecuio_engine_quiet_held(&s.e, held));
+    ASSERT_EQ(ecuio_engine_next_event_us(&s.e, s.now), 0);
+
+    EXPECT_EQ(ecuio_engine_due(&s.e, 0, s.now), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_due(&s.e, 1, s.now), ECUIO_ENGINE_ONCE);
+    EXPECT_EQ(Bytes(held.once.bytes, held.once.bytes + held.once.len),
+              (Bytes{0x01, 0x0D}));
+    EXPECT_EQ(held.quiet_asks, 0u) << "no row of the rotation went";
+    EXPECT_EQ(live.cursor, 0u) << "the live channel's rotation is its own";
+}
+
+/* The same for a channel that isn't held, its rotation waiting for a
+ * focus's next sweep: a clear under way is due now, and due hands it over */
+TEST(RequestQuietTest, AClearBeforeAFocusSweepIsDueWhenTheNextEventSaysSo)
+{
+    SideBySide s(1);
+    s.now = 570 * kMs;
+    s.e.min_sweep_us = 100 * kMs;
+    ecuio_engine_channel& ch = s.e.chans[0];
+    ch.next_sweep_us = s.now + 50 * kMs;
+    ch.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
+    ch.scan_turn = false;
+    ASSERT_FALSE(ecuio_engine_quiet_held(&s.e, ch));
+    ASSERT_EQ(ecuio_engine_next_event_us(&s.e, s.now), 0);
+
+    EXPECT_EQ(ecuio_engine_due(&s.e, 0, s.now), ECUIO_ENGINE_ONCE);
+    EXPECT_EQ(Bytes(ch.once.bytes, ch.once.bytes + ch.once.len),
+              (Bytes{0x01, 0x0D}));
+    EXPECT_EQ(ch.cursor, 0u) << "no row of the rotation went";
+}

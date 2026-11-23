@@ -50,7 +50,7 @@ structured format (`fuzz_json`, `fuzz_signal_file`,
 `fuzz_plugin_manifest`, `fuzz_obdb_import`, `fuzz_elm327_emulator`,
 `fuzz_candump`, `fuzz_csv_import`, `fuzz_export`,
 `fuzz_condition_file`, `fuzz_plugin_wrap`, `fuzz_wasm_module`,
-`fuzz_security_store`, `fuzz_signal_merge`), and of
+`fuzz_security_store`, `fuzz_signal_merge`, `fuzz_request_bus`), and of
 `fuzz_computed`, whose seeds are programs where its two machines would
 part (no coverage shows a wrong value),
 into `<folder>/<harness>/`,
