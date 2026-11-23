@@ -442,7 +442,7 @@ bool asserted(const char* name)
         const auto* a =
             static_cast<CFDictionaryRef>(CFArrayGetValueAtIndex(mine, i));
         const auto* n = static_cast<CFStringRef>(
-            CFDictionaryGetValue(a, CFSTR(kIOPMAssertionNameKey)));
+            CFDictionaryGetValue(a, kIOPMAssertionNameKey));
         found = found || (n != nullptr && CFEqual(n, want));
     }
     CFRelease(want);
