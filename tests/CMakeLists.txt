@@ -293,7 +293,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests.cpp test_vcan_requests_focus.cpp
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
+                   test_vcan_gateway.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
