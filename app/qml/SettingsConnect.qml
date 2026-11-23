@@ -125,6 +125,7 @@ ColumnLayout {
         ThemedCheckBox {
             id: awakeBox
             objectName: "keepAwakeBox"
+            Layout.fillWidth: true
             text: Theme.mobile ? qsTr("Keep the phone awake while connected")
                                : qsTr("Keep the computer awake while connected")
             checked: Bridge.keepAwake
