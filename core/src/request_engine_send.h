@@ -286,6 +286,68 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
     return ECUIO_ENGINE_NONE;
 }
 
+/* Whether closing module ch, in its session, still owes its 10 01 */
+inline bool ecuio_engine_closing_leaves(const ecuio_request_engine* e,
+                                        const ecuio_engine_channel& ch)
+{
+    return e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+}
+
+/* Whether closing module ch has what it began still to send: a clear's
+ * steps, a diagnostics read (the read after a clear's 44 too), its 10 01 */
+inline bool ecuio_engine_closing_owes(const ecuio_request_engine* e,
+                                      const ecuio_engine_channel& ch)
+{
+    return ch.clear_step != ECUIO_CLEAR_STEP_NONE || ch.diag_pending > 0 ||
+           ch.diagnosing || ch.clearing || ch.sessioning ||
+           ecuio_engine_closing_leaves(e, ch);
+}
+
+/* When closing module ch next sends: its floor while it owes something
+ * and has nothing out, else INT64_MAX (a closed module never sends) */
+inline int64_t ecuio_engine_closing_next_us(const ecuio_request_engine* e,
+                                            const ecuio_engine_channel& ch)
+{
+    return ch.module_state == ECUIO_MODULE_STATE_CLOSING &&
+                   ch.outstanding == ECUIO_ENGINE_NONE &&
+                   ecuio_engine_closing_owes(e, ch)
+               ? ch.next_send_us
+               : INT64_MAX;
+}
+
+/* due for a module that isn't open: a closing one finishes what it began
+ * (a one-shot already in, a clear's next step, the diagnostics read's
+ * next item), then leaves its session (10 01); nothing else, and nothing
+ * at all once closed */
+inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
+                                        int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.module_state != ECUIO_MODULE_STATE_CLOSING ||
+        ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.diagnosing || ch.clearing || ch.sessioning) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+        ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_closing_leaves(e, ch) &&
+        ecuio_engine_session_leave(e, c, &ch.once)) {
+        ch.sessioning = true;
+        return ECUIO_ENGINE_ONCE;
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
 /* The driver's check (ecuio_engine_ask_check), once: its row, else
  * ECUIO_ENGINE_NONE. No sweep counts it, and a pick taken since it fell
  * due withdraws it. */
@@ -349,10 +411,14 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
  * walk out of budget ends here. A quiet channel held back
  * (request_engine_quiet.h) settles its lists unasked and asks a row at
  * each step, with no rows an item. Moves the rotation past the request
- * it returns; ecuio_engine_sent records what became of it. */
+ * it returns; ecuio_engine_sent records what became of it. A module that
+ * isn't open asks only what ecuio_engine_due_closing gives. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
+    if (!ecuio_engine_module_open(e->chans[c])) {
+        return ecuio_engine_due_closing(e, c, now_us);
+    }
     int32_t r = ECUIO_ENGINE_NONE;
     if (ecuio_engine_due_lead(e, c, now_us, &r)) {
         return r;
@@ -382,12 +448,13 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
 /* Channel c's session request alone (the J2534 hold's gate, where a row
  * in its place would pass the hold): a one-shot already in, else the
  * entry, else the keep-alive; ECUIO_ENGINE_NONE while one is outstanding,
- * before the floor or with neither due */
+ * before the floor, on a module not open or with neither due */
 inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
                                         int64_t now_us)
 {
     const ecuio_engine_channel& ch = e->chans[c];
-    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us ||
+        !ecuio_engine_module_open(ch)) {
         return ECUIO_ENGINE_NONE;
     }
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
@@ -441,8 +508,9 @@ inline bool ecuio_engine_slots_full(const ecuio_request_engine* e)
  * is. A channel whose window is open with nothing to send after it
  * reports the window's end too: a driver counts quiet reads only at
  * INT64_MAX, and a link judged silent would end the window. With every
- * slot taken only the waits count. The channels with a bit in skip are
- * left out. */
+ * slot taken only the waits count; a module not open counts only its
+ * wait and what it owes as it closes. The channels with a bit in skip
+ * are left out. */
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us, uint32_t skip = 0)
 {
@@ -452,6 +520,16 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         const ecuio_engine_channel& ch = e->chans[c];
         if (((skip >> c) & 1u) != 0 ||
             (full && ch.outstanding == ECUIO_ENGINE_NONE)) {
+            continue;
+        }
+        if (!ecuio_engine_module_open(ch)) {
+            const int64_t at = ch.outstanding != ECUIO_ENGINE_NONE
+                                   ? ch.deadline_us
+                                   : ecuio_engine_closing_next_us(e, ch);
+            const int64_t in = at == INT64_MAX ? INT64_MAX
+                               : at > now_us   ? at - now_us
+                                               : 0;
+            next = in < next ? in : next;
             continue;
         }
         const bool window = ecuio_key_window_open(ch.key, now_us);

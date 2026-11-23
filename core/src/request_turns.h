@@ -120,12 +120,16 @@ inline int64_t ecuio_engine_turn_own_us(const ecuio_request_engine* e,
 
 /* When channel ch next has something to ask: its own time, its session's
  * and a key's window that holds it (none holds a key offered); INT64_MAX
- * while a request is out or with nothing to ask */
+ * while a request is out or with nothing to ask. A module not open asks
+ * only what it owes as it closes. */
 inline int64_t ecuio_engine_turn_next_us(const ecuio_request_engine* e,
                                          const ecuio_engine_channel& ch)
 {
     if (ch.outstanding != ECUIO_ENGINE_NONE) {
         return INT64_MAX;
+    }
+    if (!ecuio_engine_module_open(ch)) {
+        return ecuio_engine_closing_next_us(e, ch);
     }
     int64_t at = ecuio_engine_turn_own_us(e, ch);
     const int64_t s = ecuio_engine_session_next_us(e, ch);

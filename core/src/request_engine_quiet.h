@@ -93,11 +93,11 @@ inline void ecuio_engine_quiet_expired(ecuio_request_engine* e, uint32_t c,
     ch.quiet_next_us = now_us + ECUIO_ENGINE_QUIET_STEPS_US[0];
 }
 
-/* Whether channel ch is live (rule 2): not quiet, with rows in its
- * rotation or a request out */
+/* Whether channel ch is live (rule 2): open and not quiet, with rows in
+ * its rotation or a request out */
 inline bool ecuio_engine_quiet_live(const ecuio_engine_channel& ch)
 {
-    return !ch.quiet &&
+    return !ch.quiet && ecuio_engine_module_open(ch) &&
            (ch.requests > 0 || ch.outstanding != ECUIO_ENGINE_NONE);
 }
 

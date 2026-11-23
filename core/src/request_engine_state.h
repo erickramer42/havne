@@ -209,6 +209,22 @@ struct ecuio_scan_entry {
                            a recovery's rescan clears it */
 };
 
+/* Why a module is open (ADR-0065 step 5): any reason holds it. RANGE: it
+ * answered the start's emissions probe; READ: a signal on it is read;
+ * CONVERSATION: a conversation is bound to it; VISIT: a read or clear of
+ * its codes runs on it (request_engine_modules.h) */
+constexpr uint8_t ECUIO_ENGINE_REASON_RANGE = 0x1;
+constexpr uint8_t ECUIO_ENGINE_REASON_READ = 0x2;
+constexpr uint8_t ECUIO_ENGINE_REASON_CONVERSATION = 0x4;
+constexpr uint8_t ECUIO_ENGINE_REASON_VISIT = 0x8;
+
+/* A module's state: open; closing, finishing what it began; closed; or
+ * wanted with no filter free for it */
+constexpr uint8_t ECUIO_MODULE_STATE_OPEN = 0;
+constexpr uint8_t ECUIO_MODULE_STATE_CLOSING = 1;
+constexpr uint8_t ECUIO_MODULE_STATE_CLOSED = 2;
+constexpr uint8_t ECUIO_MODULE_STATE_NO_ROOM = 3;
+
 /* What a module's replies did (ADR-0065 section 11), each saturating:
  * a table row's or a pack's wait run out with nothing (lost), each
  * 7F xx 21 (busy), each 7F xx 78 (pending), and a reply that completed
@@ -355,7 +371,23 @@ struct ecuio_engine_channel {
     ecuio_key_window key;
     ecuio_request session_refused = {};
     ecuio_engine_counts counts;
+    /* The reasons that want the module (ECUIO_ENGINE_REASON_*), and its
+     * state (ECUIO_MODULE_STATE_*): only an open module asks anything new */
+    uint8_t reasons = ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ;
+    uint8_t module_state = ECUIO_MODULE_STATE_OPEN;
 };
+
+/* Whether module ch asks anything new: open */
+inline bool ecuio_engine_module_open(const ecuio_engine_channel& ch)
+{
+    return ch.module_state == ECUIO_MODULE_STATE_OPEN;
+}
+
+/* Whether module ch is open or closing: a frame from it is still its own */
+inline bool ecuio_engine_module_hears(const ecuio_engine_channel& ch)
+{
+    return ch.module_state <= ECUIO_MODULE_STATE_CLOSING;
+}
 
 /* Sets channel ch's session step. A key's window lasts only while the
  * session is entered: every other step ends it (request_talk.h). */

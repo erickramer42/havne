@@ -444,11 +444,16 @@ inline void ecuio_engine_write_refused(ecuio_request_engine* e)
 
 /* The driver's call for a frame received on channel c:
  * ecuio_engine_take_frame, and the channel's ECU is answering and heard,
- * whatever the frame answered, which ends a quiet state */
+ * whatever the frame answered, which ends a quiet state. A closed
+ * module's frame is no reply: the driver dispatches it, the engine
+ * takes nothing from it. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
 {
+    if (!ecuio_engine_module_hears(e->chans[c])) {
+        return ecuio_reply::none;
+    }
     e->answering |= 1u << c;
     const ecuio_reply r =
         ecuio_engine_take_frame(e, c, data, len, now_us, out_nrc);
