@@ -222,6 +222,32 @@ SettingsKit {
         verify(find(page, "recordBox").checked)
     }
 
+    // Keep-awake: on by default; switched off it sets the bridge at once
+    // and comes back off; the desktop's words name the computer and the lid
+    // (the phone's are Theme.mobile's, which only a phone build reads)
+    function test_theKeepAwakeSwitchComesBack() {
+        let page = createPage()
+        let box = find(page, "keepAwakeBox")
+        verify(Bridge.keepAwake, "on by default")
+        verify(box.checked)
+        compare(box.text, "Keep the computer awake while connected")
+        compare(find(page, "keepAwakeNote").text,
+                "For an adapter. A closed lid still sleeps it.")
+        box.toggle()
+        box.toggled()
+        verify(!Bridge.keepAwake, "the bridge follows the switch")
+
+        page.destroy()
+        wait(10)
+        Bridge.keepAwake = true   // a fresh bridge starts with it on
+
+        page = createPage()
+        verify(!Bridge.keepAwake, "the switch comes back off")
+        verify(!find(page, "keepAwakeBox").checked)
+        Bridge.keepAwake = true
+        verify(find(page, "keepAwakeBox").checked, "bound to the bridge")
+    }
+
     // An adapter's URI on every platform: havne-cli's ELM327 emulator on
     // loopback (Harness), since the mock and a replay are never kept. A
     // tree with havne-cli fails when it won't start, never skips
