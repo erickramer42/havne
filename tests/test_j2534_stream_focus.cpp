@@ -192,13 +192,18 @@ struct CarSession {
         }
         return last;
     }
-    /* Whether both modules' identification and diagnostics have an
-     * outcome for every item */
+    /* Whether each open module's identification and diagnostics have an
+     * outcome for every item (a closed one is never asked) */
     bool settled() const
     {
         for (uint32_t c = 0; c < 2; ++c) {
             ecuio_channel_identity_t id{};
             ecuio_channel_diagnostics_t diag{};
+            ecuio_channel_support_t sup{};
+            if (ecuio_session_get_channel_support(s, c, &sup) == ECUIO_OK &&
+                (sup.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+                continue; /* no answer to the start's probe, nothing picked */
+            }
             if (ecuio_session_get_channel_identity(s, c, &id) != ECUIO_OK ||
                 ecuio_session_get_channel_diagnostics(s, c, &diag) !=
                     ECUIO_OK ||
@@ -304,11 +309,12 @@ TEST_F(J2534AdoptionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     }
     EXPECT_GE(silent_items, 1u)
         << "the case needs an item the live ECU leaves unanswered";
-    ecuio_channel_identity_t module{};
-    ASSERT_EQ(ecuio_session_get_channel_identity(car.s, 1, &module), ECUIO_OK);
-    for (uint32_t i = 0; i < module.items; ++i) {
-        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
-    }
+    /* The start's probe heard nothing (off in this binary): the engine
+     * ECU stands in, and the other module is closed with nothing picked,
+     * so its silence is never asked */
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(car.s, 1, &module), ECUIO_OK);
+    EXPECT_NE(module.flags & ECUIO_SUPPORT_CLOSED, 0u);
     uint32_t episodes = 0;
     EXPECT_EQ(car.state(&episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
@@ -351,10 +357,11 @@ TEST_F(J2534AdoptionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
 /* A vehicle that answers none of it (its ignition off) isn't
  * responding, and the link says so for as long as nothing answers: an
  * idle pass never turns that into OK. While it is down the worker
- * writes one request an interval (here kCheckMs), a module in turn, the
- * first a whole interval after the items settled. The first answered
- * ends the timeout, the identification is read after all, and the
- * checks end. */
+ * writes one request an interval (here kCheckMs) to the module standing
+ * in for the silent start's probe (the first: the car asks no PID 0C),
+ * the first a whole interval after the items settled. The first
+ * answered (a refusal is an answer) ends the timeout, the identification
+ * is read after all, and the checks end. */
 TEST_F(J2534AdoptionTest,
        AnUnpickedSessionOnASilentVehicleChecksItAndFindsItAwake)
 {
@@ -414,23 +421,24 @@ TEST_F(J2534AdoptionTest,
         << "its silence changes nothing";
     EXPECT_EQ(cap.count.load(), 0);
 
-    /* The ignition on: the next check, the other module's, is answered
-     * (0x7E9 a module with the car's first DID) */
+    /* The ignition on: the next check, the engine ECU's next row, is
+     * answered, refused; 0x7E9 answers the car's first DID but stays
+     * closed with nothing picked */
     KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E9:1000=11");
     ASSERT_TRUE(
         fake_control::set(fake_page(), "ECUIO_FAKE_ABSENT_ECU", nullptr));
     ASSERT_TRUE(within(8000, [&] { return car.state() == ECUIO_OK; }))
         << "no check found the vehicle awake";
     get_recorded_write(1, wbuf, &wlen, &wflags);
-    const unsigned char module_first[7] = {0, 0, 0x07, 0xE1, 0x22, 0x10, 0x00};
+    const unsigned char engine_next[7] = {0, 0, 0x07, 0xE0, 0x22, 0x10, 0x01};
     ASSERT_EQ(wlen, 7u);
-    EXPECT_EQ(memcmp(wbuf, module_first, 7), 0) << "the next module's";
+    EXPECT_EQ(memcmp(wbuf, engine_next, 7), 0) << "the engine ECU's again";
     /* Its reply is a frame like any, the first this session got */
     ASSERT_GE(cap.count.load(), 1);
-    EXPECT_EQ(cap.arbitration_ids[0], 0x7E9u);
-    const unsigned char answer[4] = {0x62, 0x10, 0x00, 0x11};
-    ASSERT_EQ(cap.payload_lens[0], 4u);
-    EXPECT_EQ(memcmp(cap.payloads[0], answer, 4), 0);
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E8u);
+    const unsigned char answer[3] = {0x7F, 0x22, 0x31};
+    ASSERT_EQ(cap.payload_lens[0], 3u);
+    EXPECT_EQ(memcmp(cap.payloads[0], answer, 3), 0);
     /* The recovery: what went unanswered is asked again, and the engine
      * ECU's VIN is in */
     ASSERT_TRUE(within(10000, [&] {

@@ -306,10 +306,15 @@ bool goes_quiet(Count count, int64_t quiet_ms, int64_t limit_ms)
 }
 
 /* Whether a request is 22 10 00, the car-sized set's first DID */
-bool asks_the_first_did(const Asked& a)
+bool asks_did(const Asked& a, uint8_t low)
 {
     return a.data.size() >= 4 && a.data[0] == 0x03 && a.data[1] == 0x22 &&
-           a.data[2] == 0x10 && a.data[3] == 0x00;
+           a.data[2] == 0x10 && a.data[3] == low;
+}
+
+bool asks_the_first_did(const Asked& a)
+{
+    return asks_did(a, 0x00);
 }
 
 } // namespace
@@ -402,10 +407,11 @@ TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
 
 /* On a bus with no ECU the link says not responding and keeps saying
  * so: an idle pass never turns that into OK. While it is down the
- * worker asks one request an interval (here kCheckMs), a module in
- * turn, the first a whole interval after the items settled. The first
- * answered ends the timeout, the identification is read after all, and
- * the checks end. */
+ * worker asks one request an interval (here kCheckMs) of the module
+ * standing in for the silent start's probe (the first: the car asks no
+ * PID 0C), the first a whole interval after the items settled. The
+ * first answered (a refusal is an answer) ends the timeout, the
+ * identification is read after all, and the checks end. */
 TEST_F(SocketCanRequestTest,
        AnUnpickedSessionOnASilentBusChecksItAndFindsItAwake)
 {
@@ -460,8 +466,8 @@ TEST_F(SocketCanRequestTest,
     EXPECT_EQ(state_of(s), ECUIO_ERR_VEHICLE_TIMEOUT)
         << "its silence changes nothing";
 
-    /* The ECUs on the bus: the next check, the other module's, is
-     * answered */
+    /* The ECUs on the bus: the next check, the engine ECU's next row, is
+     * answered, refused; the other module stays closed */
     vcan_bus::Ecu engine;
     vcan_bus::Ecu module(-1, vcan_bus::interface_name(), 0x7E1, 0x7E9);
     ASSERT_TRUE(engine.ok());
@@ -470,9 +476,9 @@ TEST_F(SocketCanRequestTest,
         << "no check found the vehicle awake";
     take_asked(listener.get(), asked);
     ASSERT_GT(asked.size(), settled + 1);
-    EXPECT_EQ(asked[settled + 1].id, 0x7E1u) << "the next module's";
-    EXPECT_TRUE(asks_the_first_did(asked[settled + 1]));
-    EXPECT_GE(module.answered(), 1u);
+    EXPECT_EQ(asked[settled + 1].id, 0x7E0u) << "the engine ECU's again";
+    EXPECT_TRUE(asks_did(asked[settled + 1], 0x01)) << "its next row";
+    EXPECT_EQ(module.answered(), 0u) << "the module not standing in";
     /* The recovery: what went unanswered is asked again, and the engine
      * ECU's VIN is in */
     ASSERT_TRUE(wait_for(

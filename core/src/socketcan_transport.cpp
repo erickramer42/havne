@@ -202,7 +202,8 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
             return st;
         }
     }
-    session->module_range = ecuio_probe_range(p, r.rx_ids, r.chan_count);
+    session->module_range = ecuio_probe_range(
+        p, r.rx_ids, r.chan_count, ecuio_engine_rpm_module_of(&r.engine));
     return ECUIO_OK;
 }
 

@@ -6,9 +6,10 @@
 // 11-bit (7DF) the eight replies 7E8-7EF are heard, and an answerer no set
 // declares joins the table. On 29-bit (18DB33F1) only the declared
 // 18DAF1xx modules are heard, in groups no larger than the live budget,
-// one request a group. No answer at all learns nothing: the declared
-// modules in the emissions range stand in. Each transport does its own
-// wire; the rules are here.
+// one request a group. No answer at all learns nothing: the engine
+// module (PID 0C's channel), else the first, stands in alone. Each
+// transport does its own wire and writes the probe's line in its session
+// log; the rules are here.
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: ProbeRangeTest (test_obd2); the transports' own cases
 
@@ -138,26 +139,21 @@ inline uint32_t ecuio_probe_join(const ecuio_probe& p, uint32_t* rx_ids,
     return joined;
 }
 
-/* Whether rx is in J1979's emissions range: 7E8-7EF, or 18DAF1xx */
-inline bool ecuio_probe_emissions_id(uint32_t rx)
-{
-    return (rx >= ECUIO_PROBE_FIRST_11 && rx <= ECUIO_PROBE_LAST_11) ||
-           ecuio_probe_candidate_29(rx);
-}
-
 /* The table's RANGE: a bit for each module that answered. With no answer
  * at all (the ignition off at the start, the bus silent) nothing is
- * learned, and the declared modules in the emissions range stand in, so
- * the session still reads and judges its link as before. */
+ * learned, and one module stands in alone, so the session still reads and
+ * judges its link: the engine module (the channel asking PID 0C, engine),
+ * else the first; the rest open by the picks. */
 inline uint32_t ecuio_probe_range(const ecuio_probe& p, const uint32_t* rx_ids,
-                                  uint32_t count)
+                                  uint32_t count, uint32_t engine)
 {
+    if (p.answered_count == 0) {
+        const uint32_t in = engine < count ? engine : 0u;
+        return count > 0 && in < ECUIO_MAX_CHANNELS ? 1u << in : 0u;
+    }
     uint32_t range = 0;
     for (uint32_t c = 0; c < count && c < ECUIO_MAX_CHANNELS; ++c) {
-        const bool in = p.answered_count == 0
-                            ? ecuio_probe_emissions_id(rx_ids[c])
-                            : ecuio_probe_answered(p, rx_ids[c]);
-        if (in) {
+        if (ecuio_probe_answered(p, rx_ids[c])) {
             range |= 1u << c;
         }
     }

@@ -88,4 +88,13 @@ TEST_F(J2534ProbeTest, AnUndeclaredAnswererJoinsTheTable)
     EXPECT_EQ(info.module_count, 1u);
 }
 
+/* A probe no module answers (the engine ECU absent) leaves the engine
+ * module, the channel asking PID 0C, RANGE alone */
+TEST_F(J2534ProbeTest, ASilentProbeLeavesTheEngineModuleInRange)
+{
+    KnobGuard absent("ECUIO_FAKE_ABSENT_ECU", "7E8");
+    ASSERT_NO_FATAL_FAILURE(create("?identify=0&diagnose=0"));
+    EXPECT_NE(reasons(0) & ECUIO_MODULE_REASON_RANGE, 0u);
+}
+
 #endif /* _WIN32 */

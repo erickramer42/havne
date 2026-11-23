@@ -25,9 +25,11 @@ std::vector<uint32_t> group_of(const std::vector<uint32_t>& rx, bool ext29,
     return std::vector<uint32_t>(out, out + n);
 }
 
-uint32_t range_of(const ecuio_probe& p, const std::vector<uint32_t>& rx)
+uint32_t range_of(const ecuio_probe& p, const std::vector<uint32_t>& rx,
+                  uint32_t engine = UINT32_MAX)
 {
-    return ecuio_probe_range(p, rx.data(), static_cast<uint32_t>(rx.size()));
+    return ecuio_probe_range(p, rx.data(), static_cast<uint32_t>(rx.size()),
+                             engine);
 }
 
 } // namespace
@@ -93,7 +95,7 @@ TEST(ProbeRangeTest, AModuleThatAnswersTheProbeIsInRange)
     ASSERT_EQ(count, 4u);
     EXPECT_EQ(rx[3], 0x7E9u);
     EXPECT_EQ(tx[3], 0x7E1u);
-    EXPECT_EQ(ecuio_probe_range(p, rx, count), 0x1u | 0x8u);
+    EXPECT_EQ(ecuio_probe_range(p, rx, count, 0), 0x1u | 0x8u);
 }
 
 /* A 29-bit candidate that answers is in range, one that doesn't is left
@@ -108,20 +110,29 @@ TEST(ProbeRangeTest, A29BitCandidateThatAnswersJoinsTheRange)
     uint32_t count = 2;
     EXPECT_EQ(ecuio_probe_join(p, rx, tx, &count), 0u);
     EXPECT_EQ(count, 2u);
-    EXPECT_EQ(ecuio_probe_range(p, rx, count), 0x1u)
+    EXPECT_EQ(ecuio_probe_range(p, rx, count, 0), 0x1u)
         << "the candidate that kept silent is left to the picks";
 }
 
-/* No answer at all learns nothing: the declared modules in the emissions
- * range stand in (the ignition off at the start) */
-TEST(ProbeRangeTest, NoAnswerLeavesTheDeclaredEmissionsModules)
+/* No answer at all learns nothing: the engine module (the channel asking
+ * PID 0C), else the first, stands in alone (the ignition off at the
+ * start), never every declared emissions module */
+TEST(ProbeRangeTest, NoAnswerLeavesTheEngineModuleAlone)
 {
     const ecuio_probe none;
-    EXPECT_EQ(range_of(none, {0x7E8, 0x7EF, 0x7E7, 0x7F0, 0x726}), 0x3u);
-    EXPECT_EQ(range_of(none, {0x18DAF110u, 0x18DA10F1u}), 0x1u);
+    EXPECT_EQ(range_of(none, {0x7E9, 0x7E8, 0x7EF, 0x7F0, 0x726}, 1), 0x2u);
+    std::vector<uint32_t> wide;
+    for (uint32_t k = 0; k < 12; ++k) {
+        wide.push_back(0x18DAF110u + k);
+    }
+    EXPECT_EQ(range_of(none, wide, 0), 0x1u)
+        << "the declared 29-bit modules are left to the picks";
+    EXPECT_EQ(range_of(none, {0x7E9, 0x7E8}), 0x1u) << "no engine module";
+    EXPECT_EQ(range_of(none, {0x7E9, 0x7E8}, 2), 0x1u) << "past the table";
+    EXPECT_EQ(range_of(none, {}), 0u) << "no module at all";
     ecuio_probe one;
     ecuio_probe_take(one, 0x7E9, kAnswer, sizeof kAnswer);
-    EXPECT_EQ(range_of(one, {0x7E8, 0x7E9}), 0x2u)
+    EXPECT_EQ(range_of(one, {0x7E8, 0x7E9}, 0), 0x2u)
         << "an answer anywhere and the silent are left to the picks";
 }
 
