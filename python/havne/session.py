@@ -614,6 +614,25 @@ class Session:
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
 
+    def keep_awake(self, on=True, why=None):
+        """Hold the host from sleeping on its idle timer while this session
+        is open (on=False releases at once). Only a live adapter holds: a
+        mock or a replay holds nothing. Raises where the platform can't
+        hold (Android, iOS, a Linux with neither logind nor a desktop's
+        inhibit); the session runs on either way"""
+        what = e.ECUIO_AWAKE_SYSTEM if on else 0
+        check(lib.ecuio_session_keep_awake(self._handle(), what,
+                                           utf8(why) if why else None),
+              "ecuio_session_keep_awake")
+
+    @property
+    def awake(self):
+        """Whether the host is held awake for this session now"""
+        out = ctypes.c_uint32(0)
+        check(lib.ecuio_session_get_awake(self._handle(), ctypes.byref(out)),
+              "ecuio_session_get_awake")
+        return out.value != 0
+
     @property
     def signals(self):
         """{signal id: (name, unit)} of the session's set"""

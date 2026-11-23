@@ -98,6 +98,13 @@ class SessionBridge : public QObject, public BridgeFormats, public BridgeSeams
     // Log page Pause: frames still count and their values still arrive,
     // but none are added to the frame log. Every session starts unpaused.
     Q_PROPERTY(bool logPaused READ logPaused WRITE setLogPaused NOTIFY logPausedChanged)
+    // Keep-awake (ADR-0033's appendix), on by default: the Settings switch.
+    // A desktop's connect holds the host from sleeping on its idle timer
+    // for a live session; cleared, it releases at once. Set while
+    // connected, or after a connect's take passed it by, it holds from the
+    // next connect. On Android AndroidSession gates the service's wake
+    // lock on it instead.
+    Q_PROPERTY(bool keepAwake READ keepAwake WRITE setKeepAwake NOTIFY keepAwakeChanged)
     // Session recording (ADR-0017), off by default: the Settings switch.
     // It takes effect at the next connect and can't change while a
     // session is up or in flight, so a recording always covers a whole
@@ -594,6 +601,8 @@ public:
     int errorEpisodes() const { return static_cast<int>(m_errorEpisodes); }
     bool logPaused() const { return m_logPaused; }
     void setLogPaused(bool paused);
+    bool keepAwake() const { return m_keepAwake.load(); }
+    void setKeepAwake(bool on);
     bool recording() const { return m_recording; }
     void setRecording(bool on);
     QString recordingFolder() const;
@@ -753,6 +762,7 @@ signals:
     void linkStateChanged();
     void replayFinishedChanged();
     void logPausedChanged();
+    void keepAwakeChanged();
     void recordingChanged();
     void recordingStateChanged();
     void markCountChanged();
@@ -876,6 +886,11 @@ private:
     // An activity line core's recording writes in its own form (a link
     // transition, a sleep): shown, never noted
     void logUnnoted(const QString& line);
+    // The connect thread's take for a created session, and the apply's
+    // half: the refusal's line, and a release if the switch went off
+    // meanwhile (bridge_awake.cpp)
+    void holdAwake(ecuio_session_t* session);
+    void applyAwake(ecuio_session_t* session);
     void writePickLine();
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved

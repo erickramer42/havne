@@ -12,6 +12,7 @@
 #include "session.h"
 #include "consent_gate.h"
 #include "conversation_bind.h"
+#include "host_awake.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
@@ -408,6 +409,8 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         session->transport = nullptr;
     }
     ecuio_conversation_unbind(session); /* the worker has joined */
+    /* After the detach, so the hold covers the close's 10 01 */
+    ecuio_awake_release_all(session);
     /* The worker has stopped: the recorder takes no more frames, and its
      * notes go on until the caller closes it (ADR-0049 section 1) */
     ecuio_record_detach(*session->record_link);

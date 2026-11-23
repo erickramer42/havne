@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsConnect.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.phone_* (test_qml)
-// The connect bar (the status line, the URI field and Connect): one part of SettingsPage, which holds the state
+// The connect bar (the status line, the URI field and Connect) and the keep-awake switch: one part of SettingsPage, which holds the state
 
 import QtQuick
 import QtQuick.Controls
@@ -111,6 +111,46 @@ ColumnLayout {
             text: qsTr("Show activity")
             Layout.alignment: Qt.AlignTop
             onClicked: root.host.logRequested()
+        }
+    }
+
+    // Keep-awake (ADR-0033's appendix "the host kept awake while a
+    // session reads"): on by default and kept between runs; it changes
+    // during a session too (off releases at once, on holds from the next
+    // connect). On a phone it gates the session service's wake lock,
+    // which a relay holds whatever it says
+    ColumnLayout {
+        Layout.fillWidth: true
+        spacing: 0
+        ThemedCheckBox {
+            id: awakeBox
+            objectName: "keepAwakeBox"
+            Layout.fillWidth: true
+            text: Theme.mobile ? qsTr("Keep the phone awake while connected")
+                               : qsTr("Keep the computer awake while connected")
+            checked: Bridge.keepAwake
+            onToggled: {
+                Bridge.keepAwake = checked
+                checked = Qt.binding(() => Bridge.keepAwake)
+            }
+            contentItem: Label {
+                textFormat: Text.PlainText
+                text: awakeBox.text
+                color: Theme.text
+                wrapMode: Text.Wrap
+                leftPadding: awakeBox.indicator.width + awakeBox.spacing
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+        Label {
+            textFormat: Text.PlainText
+            objectName: "keepAwakeNote"
+            text: !Theme.mobile ? qsTr("For an adapter. A closed lid still sleeps it.")
+                  : Relay.running ? qsTr("A relay keeps the phone awake whatever this says.")
+                  : qsTr("Reads on with the screen off")
+            color: Theme.textDim
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
         }
     }
 }

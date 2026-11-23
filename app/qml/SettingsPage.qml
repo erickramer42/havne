@@ -418,6 +418,7 @@ Pane {
         property string uri: ""
         property string recentUris: "[]"
         property bool recording: false
+        property bool keepAwake: true
         property string adapterVersions: "{}"
     }
     Settings {
@@ -449,6 +450,7 @@ Pane {
         if (JSON.stringify(connectFrom.recentUris) !== sessionSettings.recentUris)
             sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
         Bridge.recording = sessionSettings.recording
+        Bridge.keepAwake = sessionSettings.keepAwake
     }
 
     Connections {
@@ -498,6 +500,10 @@ Pane {
 
         function onRecordingChanged() {
             sessionSettings.recording = Bridge.recording
+        }
+
+        function onKeepAwakeChanged() {
+            sessionSettings.keepAwake = Bridge.keepAwake
         }
 
     }

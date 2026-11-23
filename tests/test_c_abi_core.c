@@ -28,6 +28,8 @@
 
 #include "test_c_abi_parts.h"
 
+static int c_abi_awake(void);
+
 int c_abi_core(void)
 {
     const ecuio_signal_set_t* set = NULL;
@@ -113,5 +115,28 @@ int c_abi_core(void)
     if (ecuio_decode_text(NULL, NULL, 0, NULL, 0) != ECUIO_DECODE_ERR_NULL) {
         return 1;
     }
-    return 0;
+    return c_abi_awake();
+}
+
+/* The keep-awake calls: a mock holds nothing, and the refusals */
+static int c_abi_awake(void)
+{
+    ecuio_session_t* session = NULL;
+    uint32_t what = 99u;
+    int bad = 0;
+    if (ECUIO_AWAKE_SYSTEM != 0x1u || ECUIO_AWAKE_WHY_MAX != 128 ||
+        ecuio_session_keep_awake(NULL, ECUIO_AWAKE_SYSTEM, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_awake(NULL, &what) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_create("mock://", &session) != ECUIO_OK) {
+        return 1;
+    }
+    bad = ecuio_session_keep_awake(session, ECUIO_AWAKE_SYSTEM, "c_abi") !=
+              ECUIO_OK ||
+          ecuio_session_get_awake(session, &what) != ECUIO_OK || what != 0u ||
+          ecuio_session_keep_awake(session, 0x2u, NULL) !=
+              ECUIO_ERR_INVALID_ARGUMENT ||
+          ecuio_session_get_awake(session, NULL) != ECUIO_ERR_NULL_ARGUMENT;
+    ecuio_session_destroy(session);
+    return bad;
 }

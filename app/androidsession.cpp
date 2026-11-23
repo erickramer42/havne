@@ -33,6 +33,8 @@ AndroidSession::AndroidSession(SessionBridge* bridge, AdapterRelay* relay,
             &AndroidSession::update);
     connect(bridge, &SessionBridge::recordingStateChanged, this,
             &AndroidSession::update);
+    connect(bridge, &SessionBridge::keepAwakeChanged, this,
+            &AndroidSession::update);
 }
 
 AndroidSession::~AndroidSession()
@@ -59,7 +61,8 @@ void AndroidSession::update()
             text = tr("%1 · recording").arg(text);
         }
     }
-    if (text == m_shown) {
+    const bool hold = relaying || m_bridge->keepAwake();
+    if (text == m_shown && hold == m_held) {
         return;
     }
     const QJniObject context = appContext();
@@ -69,9 +72,11 @@ void AndroidSession::update()
                                            context.object());
     }
     QJniObject::callStaticMethod<void>(
-        kService, "start", "(Landroid/content/Context;Ljava/lang/String;)V",
-        context.object(), QJniObject::fromString(text).object<jstring>());
+        kService, "start", "(Landroid/content/Context;Ljava/lang/String;Z)V",
+        context.object(), QJniObject::fromString(text).object<jstring>(),
+        static_cast<jboolean>(hold));
     m_shown = text;
+    m_held = hold;
 }
 
 void AndroidSession::stop()

@@ -4,8 +4,8 @@
 // What a channel sends next (ecuio_engine_due), a talk's offer and turn,
 // and the next event.
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: RequestEngineTest, EngineTalkTest, RequestTurnsTest
-//          (test_obd2); HARNESS: every transport's suites
+// Testing: UNIT: RequestEngineTest, EngineTalkTest, RequestTurnsTest,
+//          RequestQuietTest (test_obd2); HARNESS: every transport's suites
 
 #ifndef ECUIO_REQUEST_ENGINE_SEND_H
 #define ECUIO_REQUEST_ENGINE_SEND_H
@@ -491,6 +491,14 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     r = held && e->chans[c].requests == 0
             ? ecuio_engine_due_quiet_item(e, c, now_us)
             : ecuio_engine_due_rotation(e, c, now_us, held);
+    const ecuio_engine_channel& ch = e->chans[c];
+    if (r == ECUIO_ENGINE_NONE && ch.requests > 0 &&
+        (held || (e->min_sweep_us > 0 && now_us < ch.next_sweep_us))) {
+        /* The rotation's own gate (a held step, a focus's sweep) refused,
+         * and next_event_us counts a clear as due then: the one-shots get
+         * the turn set above. */
+        r = ecuio_engine_due_once(e, c);
+    }
     if (r == ECUIO_ENGINE_NONE && ecuio_engine_keepalive_due(e, c, now_us)) {
         return ECUIO_ENGINE_ONCE; /* nothing stood in for it */
     }

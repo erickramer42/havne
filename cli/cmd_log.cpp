@@ -243,7 +243,7 @@ int log_connect(Output& out, const cli::LogArgs& args, LogRun& r)
 }
 
 // The start and session lines, and the conditions attached
-int log_session_lines(Output& out, const cli::LogArgs&, LogRun& r)
+int log_session_lines(Output& out, const cli::LogArgs& args, LogRun& r)
 {
     ecuio_session_t* session = r.session;
     ecuio_condition_set_t* conditions = r.conditions;
@@ -253,7 +253,7 @@ int log_session_lines(Output& out, const cli::LogArgs&, LogRun& r)
     ecuio_session_get_info(session, &info);
     r.replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
                     !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, session, info);
+    write_held_session(out, session, info, args.allow_sleep);
     r.channels = module_count(info);
     ShownConditions& shown = r.shown;
     if (conditions != nullptr &&

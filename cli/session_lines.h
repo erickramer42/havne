@@ -84,6 +84,16 @@ bool session_asks(ecuio_session_t* session);
 
 // Whether a session is asked only what is picked: no focus asks nothing
 bool session_pick_only(ecuio_session_t* session);
+
+// Whether a session reads a vehicle (an adapter or a CAN interface): only
+// such a session holds the host awake, and only its session line says so
+bool session_live(const ecuio_session_info_t& info);
+
+// stream's and log's session line, after their hold on the host's idle
+// sleep (ADR-0033's appendix "the host kept awake while a session
+// reads"): a live session holds unless --allow-sleep
+void write_held_session(Output& out, ecuio_session_t* session,
+                        const ecuio_session_info_t& info, bool allow_sleep);
 bool replay_done(const ecuio_session_t* session,
                  const ecuio_session_info_t& info, uint64_t covered);
 

@@ -75,6 +75,31 @@ on a device are all untested. [STATUS.md](STATUS.md) tracks what is
 and isn't verified. Do not rely on its readings for safety-related
 decisions.
 
+## Plugins
+
+Anything Havne may write to a vehicle comes from a plugin: a file you
+import yourself. Havne ships the mechanics (the transport, the session,
+the safety gates, the confirmations) and no vehicle's knowledge: no write
+sequence, image or security-access key of any vehicle. **The project
+distributes no plugin that writes to a vehicle.** The only one in its
+source tree writes to Havne's simulated ECU, which is made up.
+
+A plugin holds what Havne sends for it: its signals, its key
+computation, its write plan and its firmware image. A plugin that talks
+to a module, declares a session or writes names its publisher, a
+contact, its license and its own terms, and Havne shows them word for
+word before you consent to that version of the plugin, and again with
+each write's warnings. Consent covers one version: a plugin that changes
+in any way, or is signed by a different key, asks again. Only you give
+consent, in the app's dialog or with `havne-cli plugins consent`; no
+option on a run does it for you. A plugin may be signed by its
+publisher; Havne shows the signature as where the plugin came from, and
+a signature is not a sign that a plugin is safe or correct. Havne's own
+warnings and the terms in [Warranty and liability](#warranty-and-liability)
+apply whatever a plugin's terms say. Havne is provided as is: you decide
+whether to use a plugin and to write, and you are responsible for the
+result.
+
 ## Using it on a vehicle
 
 - **Don't operate the app while driving.** Set up the session before

@@ -515,6 +515,21 @@ void ecuio_session_test_before_record_attach(void (*hook)(void* user),
 void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
                                              void* user);
 
+/* Test-only (ADR-0033's appendix "the host kept awake while a session
+ * reads"): take and release stand in for the platform's hold
+ * (core/src/host_awake.h), so a test counts them. take gets the level (0
+ * idle, 1 sleep) and the reason; it returns ECUIO_OK with *out_handle
+ * set, or a refusal with *out_detail the words core puts in the detail.
+ * A hold keeps the release it was taken under; NULL for both restores the
+ * platform's. One for the process. */
+typedef ecuio_status_t (*ecuio_test_awake_take_t)(uint32_t level,
+                                                  const char* why,
+                                                  void** out_handle,
+                                                  const char** out_detail);
+typedef void (*ecuio_test_awake_release_t)(void* handle);
+void ecuio_test_set_awake_platform(ecuio_test_awake_take_t take,
+                                   ecuio_test_awake_release_t release);
+
 #ifdef __cplusplus
 }
 #endif
