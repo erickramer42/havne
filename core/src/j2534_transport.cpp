@@ -479,16 +479,15 @@ void run_probe(ecuio_j2534_handle_t* handle, unsigned long channel,
                      .count();
 }
 
-/* The probe on a session that asks anything: its answerers are RANGE,
- * and an undeclared 11-bit one joins the channels (never under ?filter=
- * or ?poll=), whose requests are then built again; the range, a bit for
- * each channel, into *range */
+/* The probe on a session that asks anything: its answerers are RANGE
+ * (the session's module_range), and an undeclared 11-bit one joins the
+ * channels (never under ?filter= or ?poll=), whose requests are then
+ * built again */
 ecuio_status_t probe_modules(ecuio_session_t* session,
                              const ecuio_signal_set_t* set,
                              const j2534_uri_params& params,
                              ecuio_j2534_transport* t, unsigned long wide,
-                             uint32_t* rx_ids, uint32_t* tx_ids,
-                             uint32_t* range)
+                             uint32_t* rx_ids, uint32_t* tx_ids)
 {
     if (t->engine.count == 0 && t->engine.scan_count == 0) {
         return ECUIO_OK;
@@ -511,7 +510,7 @@ ecuio_status_t probe_modules(ecuio_session_t* session,
             return st;
         }
     }
-    *range = ecuio_probe_range(p, rx_ids, t->chan_count);
+    session->module_range = ecuio_probe_range(p, rx_ids, t->chan_count);
     return ECUIO_OK;
 }
 
@@ -620,25 +619,19 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->session = session;
     t->handle = handle;
     t->channel = channel;
-    uint32_t range = UINT32_MAX;
     st = probe_modules(session, set, params, t.get(),
                        wide_chans != 0 ? ECUIO_PT_CAN_29BIT_ID : 0UL, rx_ids,
-                       tx_ids, &range);
+                       tx_ids);
+    if (st == ECUIO_OK) {
+        describe_session(t.get(), params.baud, connect_flags, &session->info);
+        st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
+    }
     if (st != ECUIO_OK) {
         delete wrap;
         ecuio_j2534_disconnect_channel(handle, channel);
         ecuio_j2534_close(handle);
         return st;
     }
-    describe_session(t.get(), params.baud, connect_flags, &session->info);
-    st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
-    if (st != ECUIO_OK) {
-        delete wrap;
-        ecuio_j2534_disconnect_channel(handle, channel);
-        ecuio_j2534_close(handle);
-        return st;
-    }
-    session->module_range = range;
     ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
     t->epoch = host_clock::now();   /* as mock: end of attach */
     session->judges_link = true;

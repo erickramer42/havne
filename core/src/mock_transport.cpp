@@ -406,7 +406,6 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         if (!ecuio_engine_init(impl->diag.get(), 1)) {
             return ECUIO_ERR_OUT_OF_MEMORY;
         }
-        impl->diag->rpm_module = 0; /* the one ECU is the engine module */
         ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
         read_diagnostics(impl);
     }

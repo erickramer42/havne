@@ -563,6 +563,62 @@ inline bool ecuio_engine_slots_full(const ecuio_request_engine* e)
  * slot taken only the waits count; a module not open counts only its
  * wait and what it owes as it closes. The channels with a bit in skip
  * are left out. */
+/* next_event_us's wait for module ch while it isn't open or is visiting:
+ * its reply's deadline, else its own floor, from now (INT64_MAX: never) */
+inline int64_t ecuio_engine_limited_in_us(const ecuio_request_engine* e,
+                                          const ecuio_engine_channel& ch,
+                                          int64_t now_us)
+{
+    const int64_t at = ch.outstanding != ECUIO_ENGINE_NONE
+                           ? ch.deadline_us
+                           : ecuio_engine_limited_next_us(e, ch);
+    return at == INT64_MAX ? INT64_MAX : at > now_us ? at - now_us : 0;
+}
+
+/* Whether open module ch asks anything besides the session's keepalive
+ * (items: its quiet items are due) */
+inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
+{
+    return ch.requests > 0 || items || ch.scan_pending > 0 ||
+           ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
+           ch.talk.offered || ecuio_engine_clear_asks(ch);
+}
+
+/* next_event_us's moment for open module ch: its reply's deadline, else
+ * its next send behind the sweep floor, the quiet pace, the session's
+ * keepalive and the key's hold (window: its key's window is open) */
+inline int64_t ecuio_engine_open_at_us(const ecuio_request_engine* e,
+                                       const ecuio_engine_channel& ch,
+                                       bool asks_more, bool window)
+{
+    if (ch.outstanding != ECUIO_ENGINE_NONE) {
+        return window && ch.deadline_us == INT64_MAX ? ch.key.until_us
+                                                     : ch.deadline_us;
+    }
+    int64_t at = ch.next_send_us;
+    if (e->min_sweep_us > 0 && !ecuio_engine_once_waiting(ch) &&
+        ch.next_sweep_us > at) {
+        at = ch.next_sweep_us;
+    }
+    if (!ch.check_due && !ecuio_engine_once_waiting(ch) &&
+        ecuio_engine_quiet_held(e, ch)) {
+        const int64_t q = ecuio_engine_quiet_due_us(e, ch);
+        at = q > at ? q : at;
+    }
+    if (!asks_more) {
+        at = INT64_MAX; /* only the session's keepalive is left */
+    }
+    const int64_t s = ecuio_engine_session_next_us(e, ch);
+    at = s < at ? s : at;
+    if (at != INT64_MAX && !ecuio_talk_key_waits(ch.talk)) {
+        const int64_t held = ecuio_engine_key_held_until(e, ch);
+        at = held > at ? held : at;
+    } else if (window && at == INT64_MAX) {
+        at = ch.key.until_us;
+    }
+    return at;
+}
+
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us, uint32_t skip = 0)
 {
@@ -575,54 +631,18 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
             continue;
         }
         if (!ecuio_engine_module_open(ch) || ch.visiting) {
-            const int64_t at = ch.outstanding != ECUIO_ENGINE_NONE
-                                   ? ch.deadline_us
-                                   : ecuio_engine_limited_next_us(e, ch);
-            const int64_t in = at == INT64_MAX ? INT64_MAX
-                               : at > now_us   ? at - now_us
-                                               : 0;
+            const int64_t in = ecuio_engine_limited_in_us(e, ch, now_us);
             next = in < next ? in : next;
             continue;
         }
         const bool window = ecuio_key_window_open(ch.key, now_us);
         const bool items = ch.quiet && ecuio_engine_quiet_asks_items(e, ch);
-        if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 && !items &&
-            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
-            ch.diag_pending == 0 && !ecuio_engine_clear_asks(ch) &&
-            !ch.talk.offered && !ecuio_engine_session_live(e, ch) && !window) {
+        const bool asks_more = ecuio_engine_asks_more(ch, items);
+        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more &&
+            !ecuio_engine_session_live(e, ch) && !window) {
             continue;
         }
-        int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
-                                                           : ch.next_send_us;
-        const bool asks_more = ch.requests > 0 || items ||
-                               ch.scan_pending > 0 || ch.ident_pending > 0 ||
-                               ch.diag_pending > 0 || ch.walking ||
-                               ch.talk.offered || ecuio_engine_clear_asks(ch);
-        if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
-            !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
-            at = ch.next_sweep_us;
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && !ch.check_due &&
-            !ecuio_engine_once_waiting(ch) && ecuio_engine_quiet_held(e, ch)) {
-            const int64_t q = ecuio_engine_quiet_due_us(e, ch);
-            at = q > at ? q : at;
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more) {
-            at = INT64_MAX; /* only the session's keepalive is left */
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE) {
-            const int64_t s = ecuio_engine_session_next_us(e, ch);
-            if (s < at) {
-                at = s;
-            }
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && at != INT64_MAX &&
-            !ecuio_talk_key_waits(ch.talk)) {
-            const int64_t held = ecuio_engine_key_held_until(e, ch);
-            at = held > at ? held : at;
-        } else if (window && at == INT64_MAX) {
-            at = ch.key.until_us;
-        }
+        const int64_t at = ecuio_engine_open_at_us(e, ch, asks_more, window);
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {
             next = in;

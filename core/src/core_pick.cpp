@@ -60,6 +60,30 @@ uint32_t rotation_rows(const ecuio_session_t* session,
 } // namespace
 
 namespace {
+void store_modules(ecuio_session_t* session);
+
+/* The picks handed over, under focus_mutex, with the modules they read */
+void store_picks(ecuio_session_t* session, std::vector<uint16_t>& ids,
+                 std::vector<uint8_t>& picked, uint32_t min_sweep_ms,
+                 uint32_t flags)
+{
+    session->focus_ids.swap(ids);
+    session->focus_defs.swap(picked);
+    session->focus_min_sweep_ms = min_sweep_ms;
+    session->focus_flags = flags;
+    store_modules(session);
+}
+
+/* The conditions' signals handed over, under focus_mutex, with the
+ * modules they read; whether the map moved */
+bool store_watched(ecuio_session_t* session, std::vector<uint8_t>& watched)
+{
+    const bool moved = watched != session->condition_defs;
+    session->condition_defs.swap(watched);
+    store_modules(session);
+    return moved;
+}
+
 /* The modules the stored picks and conditions read (ADR-0065 step 5),
  * under focus_mutex, before focus_generation moves */
 void store_modules(ecuio_session_t* session)
@@ -203,11 +227,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
                 return ECUIO_ERR_INVALID_ARGUMENT;
             }
         }
-        session->focus_ids.swap(ids);
-        session->focus_defs.swap(picked);
-        session->focus_min_sweep_ms = min_sweep_ms;
-        session->focus_flags = flags;
-        store_modules(session);
+        store_picks(session, ids, picked, min_sweep_ms, flags);
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);
@@ -362,10 +382,7 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
          * only a changed map moves it, under a focus or on such a session;
          * otherwise the next focus call moves it. */
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        const bool moved = watched != session->condition_defs;
-        session->condition_defs.swap(watched);
-        store_modules(session);
-        if (moved &&
+        if (store_watched(session, watched) &&
             (!session->focus_ids.empty() || session->focus_pick_only)) {
             session->focus_generation.fetch_add(1);
         }

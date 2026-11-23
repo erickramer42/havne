@@ -240,6 +240,19 @@ inline bool ecuio_pack_frames_fit(const request_params& params)
  * hardware is touched. ?session=03 (ADR-0060) belongs to uds-generic too,
  * and ?keepalive_ms= to it. tx_ids marks each channel whose requests go
  * to a functional address (ecuio_engine_channel::functional). */
+/* The channels' addressing (functional by tx_ids) and the transport's
+ * filters: a filter for each module up to the cap, one kept back for a
+ * visit (J2534's attach lowers both) */
+inline void ecuio_setup_channels(ecuio_request_engine* e,
+                                 const uint32_t* tx_ids, uint32_t chan_count)
+{
+    e->filters_most = ECUIO_MAX_CHANNELS;
+    e->module_budget = ECUIO_MAX_CHANNELS - 1;
+    for (uint32_t c = 0; c < chan_count; ++c) {
+        e->chans[c].functional = isotp_functional_id(tx_ids[c]);
+    }
+}
+
 inline ecuio_status_t
 ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      const request_params& params, const uint32_t* rx_ids,
@@ -291,13 +304,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     if (!ecuio_engine_init(e, chan_count, static_cast<uint32_t>(room))) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    /* A filter for each module up to the cap, one kept back for a visit;
-     * J2534's attach lowers both */
-    e->filters_most = ECUIO_MAX_CHANNELS;
-    e->module_budget = ECUIO_MAX_CHANNELS - 1;
-    for (uint32_t c = 0; c < chan_count; ++c) {
-        e->chans[c].functional = isotp_functional_id(tx_ids[c]);
-    }
+    ecuio_setup_channels(e, tx_ids, chan_count);
     /* More than a session asks: nothing until a focus picks (section 2) */
     const bool pick_only =
         session->uds == nullptr && derived.total > ECUIO_PROFILE_MAX_REQUESTS;
