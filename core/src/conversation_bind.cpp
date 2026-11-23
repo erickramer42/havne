@@ -264,6 +264,13 @@ bool ecuio_session_may_talk(const ecuio_session_t* session)
         static_cast<uint32_t>(session->module_rx.size()));
 }
 
+bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)
+{
+    return c < session->module_rx.size() &&
+           ecuio_session_may_talk(session, &session->module_rx[c],
+                                  &session->module_tx[c], 1);
+}
+
 ecuio_status_t ecuio_conversation_bind(ecuio_session_t* s)
 {
     if (s->conversation == nullptr || s->talk != nullptr) {

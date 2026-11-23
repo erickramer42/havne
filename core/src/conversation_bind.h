@@ -110,6 +110,9 @@ bool ecuio_session_may_talk(const ecuio_session_t* session,
                             uint32_t count);
 /* The same over the session's module tables, once attach has set them */
 bool ecuio_session_may_talk(const ecuio_session_t* session);
+/* Whether the part talks on module channel c alone: the channels the
+ * bind makes, by the same rule */
+bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c);
 
 /* At start, before the worker: binds what section 1 says, or nothing.
  * ECUIO_ERR_LOAD_FAILED or ECUIO_ERR_OUT_OF_MEMORY with nothing bound;

@@ -4,17 +4,24 @@
 // The public calls of a bound module (core.h; core_conversation.cpp):
 // the report's copy, the store with its key (the module's serial, the
 // car's VIN, else the label), and the unlock's refusals, TOO_SOON's two
-// causes told apart by the time left alone.
+// causes told apart by the time left alone; and a recording's
+// conversation line, read back and kept by the folder export.
 
 #include "conversation_session_support.h"
 
 #include "../core/src/security_store.h"
+#include "../core/src/sha256.h"
+#include "ecuio/recording.h"
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 using conversation_session::Bench;
@@ -398,4 +405,106 @@ TEST(CoreConversationTest, AfterCloseTheUnlockIsRefusedAndTheReportStays)
               ECUIO_OK);
     EXPECT_EQ(after.state, ECUIO_CONVERSATION_FAULTED);
     EXPECT_EQ(after.generation, c.generation);
+}
+
+/* A recording of a bound session names the part that talked, its
+ * module's hash and the channels bound, in channel order; the reader
+ * flags it, and the folder export keeps the line */
+TEST(CoreConversationTest, ARecordingNamesThePartThatTalked)
+{
+    namespace fs = std::filesystem;
+    DoorOpen open;
+    const conversation_test::Made m = made();
+    Bound bound;
+    make_session(&bound, m);
+    std::string ids;
+    for (size_t c = 0; c < bound.session->module_rx.size(); ++c) {
+        const uint32_t rx = bound.session->module_rx[c];
+        if ((rx == 0x7E8 || rx == 0x7E9 || rx == 0x7EA) &&
+            bound.session->module_tx[c] == rx - 8) {
+            char id[16];
+            std::snprintf(id, sizeof id, "%s0x%X", ids.empty() ? "" : " ",
+                          rx);
+            ids += id;
+        }
+    }
+    const std::string line =
+        "conversation  talker,1.2.0," +
+        ecuio_sha256::hex_of(m.module.data(), m.module.size()) + "," + ids;
+    const fs::path root =
+        fs::u8path(testing::TempDir()) / "conversation_recording";
+    fs::remove_all(root);
+    const std::string root_text = root.u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root_text.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char folder[1024] = {};
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(bound.session.get(), rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    bound.session.reset();
+    ASSERT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+    const auto events_of = [](const fs::path& f) {
+        std::ifstream in(f / "events.log", std::ios::binary);
+        std::stringstream all;
+        all << in.rdbuf();
+        std::string text = all.str(); /* CRLF on Windows */
+        text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+        return text;
+    };
+    EXPECT_NE(events_of(fs::u8path(folder)).find("\n" + line + "\n"),
+              std::string::npos)
+        << line << "\n"
+        << events_of(fs::u8path(folder));
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open(folder, nullptr, nullptr, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_info_t info{};
+    EXPECT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+    EXPECT_NE(info.flags & ECUIO_RECORDING_INFO_CONVERSATION, 0u);
+    ecuio_recording_close(r);
+    const std::string copy = (root / "copy").u8string();
+    ecuio_export_options_t x{};
+    x.format = ECUIO_EXPORT_FOLDER;
+    x.folder_utf8 = folder;
+    x.out_path_utf8 = copy.c_str();
+    ASSERT_EQ(ecuio_export(&x, nullptr), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_NE(events_of(fs::u8path(copy)).find("\n" + line + "\n"),
+              std::string::npos);
+    fs::remove_all(root);
+}
+
+/* A session whose part talks on none of its channels records no line */
+TEST(CoreConversationTest, ARecordingOfAnUnboundSessionHasNoConversationLine)
+{
+    namespace fs = std::filesystem;
+    DoorOpen open;
+    Bound bound;
+    make_session(&bound, made(), "mock://x");
+    const fs::path root =
+        fs::u8path(testing::TempDir()) / "conversation_unbound";
+    fs::remove_all(root);
+    const std::string root_text = root.u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root_text.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    char folder[1024] = {};
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(bound.session.get(), rec), ECUIO_OK);
+    bound.session.reset();
+    ASSERT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open(folder, nullptr, nullptr, &r), ECUIO_OK);
+    ecuio_recording_info_t info{};
+    EXPECT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
+    EXPECT_EQ(info.flags & ECUIO_RECORDING_INFO_CONVERSATION, 0u);
+    ecuio_recording_close(r);
+    fs::remove_all(root);
 }

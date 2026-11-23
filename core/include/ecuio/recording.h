@@ -285,6 +285,10 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
     0x4u /* events.log holds more cond lines than
             ECUIO_RECORDING_MAX_CONDITION_EVENTS: the first that many are
             kept, and condition_events counts them all */
+#define ECUIO_RECORDING_INFO_CONVERSATION                                      \
+    0x8u /* events.log's header has a conversation line: a plugin's code
+            talked to the vehicle's modules in the session (ADR-0066
+            section 2.4), so its requests are among the frames */
 
 /* The most cond lines the reader keeps (40 bytes each, so about 40 MiB,
  * beside a table of at most ECUIO_CONDITION_MAX_CONDITIONS keys): a
