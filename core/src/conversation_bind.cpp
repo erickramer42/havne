@@ -7,6 +7,7 @@
 
 #include "conversation_bind.h"
 
+#include "access_cut.h"
 #include "consent_gate.h"
 #include "error_detail.h"
 #include "guest_abi.h"
@@ -269,6 +270,22 @@ bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)
     return c < session->module_rx.size() &&
            ecuio_session_may_talk(session, &session->module_rx[c],
                                   &session->module_tx[c], 1);
+}
+
+bool ecuio_session_cuts_access(const ecuio_session_t* session,
+                               const ecuio_frame_t* frame)
+{
+    if (!ecuio_access_cut(frame->data, frame->data_length)) {
+        return false;
+    }
+    const uint32_t id = frame->arbitration_id;
+    for (uint32_t c = 0; c < session->module_rx.size(); ++c) {
+        if ((session->module_rx[c] == id || session->module_tx[c] == id) &&
+            ecuio_session_talks_on(session, c)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 ecuio_status_t ecuio_conversation_bind(ecuio_session_t* s)

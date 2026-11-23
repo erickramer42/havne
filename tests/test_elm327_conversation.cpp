@@ -8,6 +8,7 @@
 // strict: the module's begin enters the extended session, the unlock
 // call's word asks the seed, the module's key is typed straight after
 // it under the ECU's physical ID, and the store counts under the label.
+// The wire log keeps the seed and the key out (access_cut.h).
 
 #include <gtest/gtest.h>
 
@@ -15,7 +16,9 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "fake_elm327.h"
+#include "sha256.h"       /* core/src */
 #include "sim_security.h" /* core/src */
+#include "test_elm327_support.h"
 
 #include <chrono>
 #include <cstdio>
@@ -24,12 +27,6 @@
 #include <vector>
 
 namespace {
-
-#ifdef _WIN32
-constexpr char kPort[] = "COM7";
-#else
-constexpr char kPort[] = "/dev/fake-elm327";
-#endif
 
 std::vector<std::string> typed()
 {
@@ -105,6 +102,8 @@ TEST_F(Elm327ConversationTest, TheModulesKeyUnlocksTheEngineEcu)
               ECUIO_OK);
     const std::string store = testing::TempDir() + "elm327_conversation.json";
     std::remove(store.c_str());
+    const EnvSet frame_logging("ECUIO_SUR_LOG_FRAMES", "1");
+    const LogDir logs("elm327-conversation");
     {
         ecuio_session_t* raw = nullptr;
         const std::string uri = std::string("elm327://") + kPort +
@@ -170,4 +169,25 @@ TEST_F(Elm327ConversationTest, TheModulesKeyUnlocksTheEngineEcu)
         EXPECT_EQ(c.state, ECUIO_CONVERSATION_ENDED);
     }
     std::remove(store.c_str());
+    const ecuio_sim_security_level* l = ecuio_sim_security_find(0x01);
+    uint8_t key[16] = {};
+    ecuio_sim_security_key(l->seed, l->bytes, key);
+    std::string seed_spaced;
+    std::string seed_bare;
+    for (uint32_t i = 0; i < l->bytes; ++i) {
+        char b[4];
+        std::snprintf(b, sizeof b, "%02X", l->seed[i]);
+        seed_spaced += std::string(i > 0 ? " " : "") + b;
+        seed_bare += b;
+    }
+    const std::string log = logs.only_log();
+    EXPECT_EQ(log.find(key_text(0x01)), std::string::npos) << log;
+    EXPECT_EQ(log.find(seed_spaced), std::string::npos) << log;
+    EXPECT_EQ(log.find(seed_bare), std::string::npos) << log;
+    EXPECT_NE(log.find("> 2702 (4 bytes cut, SHA-256 " +
+                       ecuio_sha256::hex_of(key, l->bytes) + ")"),
+              std::string::npos)
+        << log;
+    EXPECT_NE(log.find("< (a security access's line, cut: "), std::string::npos)
+        << log;
 }

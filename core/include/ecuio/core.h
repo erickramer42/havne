@@ -40,6 +40,16 @@ typedef struct ecuio_session ecuio_session_t;
                                                          state indicator: its
                                                          sender was error
                                                          passive (ADR-0054) */
+#define ECUIO_FRAME_FLAG_ACCESS_CUT       0x00000400u /* a recording's: a
+                                                         security access's
+                                                         27 or 67 on a bound
+                                                         channel, its bytes
+                                                         after the
+                                                         sub-function zeroes,
+                                                         their length and
+                                                         SHA-256 in events.log's
+                                                         cut line (ADR-0066
+                                                         section 5) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled

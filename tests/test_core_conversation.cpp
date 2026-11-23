@@ -21,8 +21,10 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using conversation_session::Bench;
 using conversation_session::Bound;
@@ -507,4 +509,88 @@ TEST(CoreConversationTest, ARecordingOfAnUnboundSessionHasNoConversationLine)
     EXPECT_EQ(info.flags & ECUIO_RECORDING_INFO_CONVERSATION, 0u);
     ecuio_recording_close(r);
     fs::remove_all(root);
+}
+
+namespace {
+
+/* frames.csv and events.log of a recording of b's session, which is
+ * handed each of frames on 0x7E8 and then destroyed */
+void recorded(Bound& b, const char* name,
+              const std::vector<std::vector<uint8_t>>& frames,
+              std::string* rows, std::string* events)
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::u8path(testing::TempDir()) / name;
+    fs::remove_all(root);
+    const std::string root_text = root.u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root_text.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    char folder[1024] = {};
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(b.session.get(), rec), ECUIO_OK);
+    auto f = std::make_unique<ecuio_frame_t>();
+    for (const std::vector<uint8_t>& bytes : frames) {
+        *f = ecuio_frame_t{};
+        f->arbitration_id = 0x7E8;
+        f->flags = ECUIO_FRAME_FLAG_REASSEMBLED;
+        f->data_length = static_cast<uint16_t>(bytes.size());
+        std::memcpy(f->data, bytes.data(), bytes.size());
+        ecuio_session_dispatch_callbacks(b.session.get(), f.get());
+    }
+    b.session.reset();
+    ASSERT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+    const auto text_of_file = [&](const char* file) {
+        std::ifstream in(fs::u8path(folder) / file, std::ios::binary);
+        std::stringstream all;
+        all << in.rdbuf();
+        std::string t = all.str(); /* CRLF on Windows */
+        t.erase(std::remove(t.begin(), t.end(), '\r'), t.end());
+        return t;
+    };
+    *rows = text_of_file("frames.csv");
+    *events = text_of_file("events.log");
+    fs::remove_all(root);
+}
+
+} // namespace
+
+/* On a bound channel a seed's bytes past the sub-function are zeroes in
+ * frames.csv, the frame flagged, and events.log says their length and
+ * SHA-256; any other reply, and the same seed on a session whose part
+ * talks on no channel, is recorded whole */
+TEST(CoreConversationTest, ASecurityAccessIsCutFromTheRecording)
+{
+    DoorOpen open;
+    const std::vector<std::vector<uint8_t>> frames = {
+        {0x67, 0x01, 0x11, 0x22, 0x33, 0x44}, {0x62, 0xF4, 0x0D, 0x5A}};
+    std::string rows;
+    std::string events;
+    {
+        Bound bound;
+        make_session(&bound, made());
+        ASSERT_NO_FATAL_FAILURE(
+            recorded(bound, "conversation_cut", frames, &rows, &events));
+    }
+    EXPECT_NE(rows.find(",0x7E8,0x500,67 01 00 00 00 00\n"), std::string::npos)
+        << rows;
+    EXPECT_EQ(rows.find("11 22 33 44"), std::string::npos) << rows;
+    EXPECT_NE(rows.find(",0x7E8,0x100,62 F4 0D 5A\n"), std::string::npos);
+    EXPECT_NE(events.find("  cut  0x7E8 67 01: 4 bytes cut, SHA-256 "
+                          "1a835ed8734f86355ca5b835d824d486993aabf1913cd3a011b"
+                          "7446c0514b7c9\n"),
+              std::string::npos)
+        << events;
+    {
+        Bound bound;
+        make_session(&bound, made(), "mock://x");
+        ASSERT_NO_FATAL_FAILURE(
+            recorded(bound, "conversation_uncut", frames, &rows, &events));
+    }
+    EXPECT_NE(rows.find(",0x7E8,0x100,67 01 11 22 33 44\n"), std::string::npos)
+        << rows;
+    EXPECT_EQ(events.find("  cut  "), std::string::npos);
 }

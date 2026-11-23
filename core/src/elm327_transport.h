@@ -12,6 +12,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "access_cut.h"
 #include "session.h"
 #include "elm327_log.h"
 #include "elm327_port.h"
@@ -169,6 +170,10 @@ struct ecuio_elm327_transport {
     /* A request's exchange, or a monitor, is under way: the wire log
      * takes its lines only with frame logging */
     bool in_ask = false;
+    /* The command out is a security access's: its key and every line of
+     * its reply are cut from the wire log (access_cut.h) */
+    bool cutting = false;
+    char cut_sent[ELM327_CMD_MAX + ECUIO_ACCESS_CUT_TEXT + 4] = {};
     /* BUFFER FULL came: the next frame dispatched carries
      * ECUIO_FRAME_FLAG_OVERFLOW */
     bool overflow_pending = false;
@@ -196,6 +201,7 @@ void copy_text(char* dst, size_t cap, const char* src);
 bool logging(const transport* t);
 void log_line(transport* t, const char* sent, const elm327_reader& r);
 void log_prompt(transport* t, const char* sent);
+void cut_command(transport* t, const char* sent);
 elm327_io drain(transport* t, uint32_t timeout_ms);
 
 /* Feeds what has been read to the reader, calling on_line for each line
@@ -320,8 +326,9 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
     }
     char sent[ELM327_CMD_MAX];
     bare_command(cmd, sent);
+    cut_command(t, sent);
     if (logging(t)) {
-        elm327_log_write(t->log, "> %s", sent);
+        elm327_log_write(t->log, "> %s", t->cutting ? t->cut_sent : sent);
     }
     t->sent_at = std::chrono::steady_clock::now();
     t->slept_at = slept_us();
