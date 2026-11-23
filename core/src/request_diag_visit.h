@@ -84,8 +84,8 @@ inline void ecuio_engine_visit_refused(ecuio_request_engine* e, uint32_t c)
 }
 
 /* Each clear target that isn't open is visited for its clear: the visit
- * ends at once, and the module, closing, sends the request's (ADR-0038)
- * 04 and the read after it in the filter kept back, then closes */
+ * sends the request's (ADR-0038) judgment on it, its 04 and the read
+ * after in the filter kept back, and ends once all of it has settled */
 inline void ecuio_engine_clear_visits(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {

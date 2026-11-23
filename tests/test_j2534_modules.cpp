@@ -50,11 +50,13 @@ uint32_t wide_id(int i)
     return 0x18DAF140u + static_cast<uint32_t>(i);
 }
 
-std::string wide_dids()
+/* The first named of them answer from their DID alone; the rest answer
+ * as the engine ECU (the emissions services, a clear) */
+std::string wide_dids(int named = kWide)
 {
     std::string spec;
     char row[48];
-    for (int i = 0; i < kWide; ++i) {
+    for (int i = 0; i < named; ++i) {
         snprintf(row, sizeof row, "%s%08X:4A00=%02X", i == 0 ? "" : ";",
                  static_cast<unsigned>(wide_id(i)), i);
         spec += row;
@@ -148,9 +150,9 @@ protected:
     }
 
     /* The eleven 29-bit modules, with no probe: every one RANGE */
-    void wide_session(bool diagnose)
+    void wide_session(bool diagnose, int named = kWide)
     {
-        spec_ = wide_dids();
+        spec_ = wide_dids(named);
         dids_ = std::make_unique<j2534_backends::EnvSwap>(
             "ECUIO_FAKE_MODULE_DIDS", spec_.c_str());
         create(wide_query(diagnose));
@@ -186,17 +188,20 @@ protected:
         return sup.open_reasons;
     }
 
-    uint32_t diagnostics(uint32_t c)
+    uint32_t diagnostics(uint32_t c) { return report(c).flags; }
+
+    ecuio_channel_diagnostics_t report(uint32_t c)
     {
         ecuio_channel_diagnostics_t d{};
         EXPECT_EQ(ecuio_session_get_channel_diagnostics(session, c, &d),
                   ECUIO_OK);
-        return d.flags;
+        return d;
     }
 
     uint32_t active() const { return fake_control::filters_active(page); }
     uint32_t peak() const { return fake_control::filters_peak(page); }
     uint32_t refused() const { return fake_control::filters_refused(page); }
+    uint32_t started() const { return fake_control::filters_started(page); }
 
     static bool wait_for(const std::function<bool()>& done, int ms = 5000)
     {
@@ -441,6 +446,58 @@ TEST_F(J2534ModulesTest, AVisitAfterARefusalEndsNotOpened)
     EXPECT_GT(heard.of(wide_id(0)), before);
     EXPECT_EQ(active(), 9u);
     EXPECT_EQ(refused(), 1u) << "the second visit asked for a filter again";
+}
+
+/* A clear of a module waiting for a live filter (the tenth, answering as
+ * the engine ECU) takes one visit, the 04 and the read after: its filter
+ * starts once and stops once, the clear ends CLEARED, and the next clear
+ * is taken. No set's signal reads 0C, so the clear allows a running
+ * engine and a moving vehicle. */
+TEST_F(J2534ModulesTest, AClearOfAModuleWaitingForAFilterStartsItsFilterOnce)
+{
+    constexpr uint32_t kFlags =
+        ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING;
+    ASSERT_NO_FATAL_FAILURE(wide_session(true, 9));
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] {
+        for (uint32_t c = 0; c < 9; ++c) {
+            if ((diagnostics(c) & ECUIO_DIAG_COMPLETE) == 0) {
+                return false;
+            }
+        }
+        return true;
+    }));
+    ASSERT_EQ(ecuio_session_read_diagnostics(session), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] {
+        return (diagnostics(9) & ECUIO_DIAG_COMPLETE) != 0 &&
+               (diagnostics(10) & ECUIO_DIAG_COMPLETE) != 0 && active() == 9u;
+    }));
+    ASSERT_NE(support(9) & ECUIO_SUPPORT_NO_ROOM, 0u);
+    fake_control::clear_filters_peak(page);
+    ASSERT_EQ(ecuio_session_clear_diagnostics_with(
+                  session, 9, report(9).generation, kFlags),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_TRUE(wait_for([&] {
+        const ecuio_channel_diagnostics_t d = report(9);
+        return d.clear == ECUIO_CLEAR_CLEARED &&
+               (d.flags & ECUIO_DIAG_CLEARING) == 0 &&
+               (d.flags & ECUIO_DIAG_COMPLETE) != 0 && active() == 9u;
+    })) << "clear "
+        << int{report(9).clear} << ", filters " << active();
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(started(), 1u) << "the visit's filter started again";
+    EXPECT_EQ(active(), 9u) << "the visit's filter not stopped once";
+    EXPECT_NE(support(9) & ECUIO_SUPPORT_NO_ROOM, 0u) << "waiting again";
+    ecuio_status_t again = ECUIO_ERR_IN_USE;
+    EXPECT_TRUE(wait_for(
+        [&] {
+            again = ecuio_session_clear_diagnostics_with(
+                session, 9, report(9).generation, kFlags);
+            return again != ECUIO_ERR_IN_USE;
+        },
+        2000));
+    EXPECT_EQ(again, ECUIO_OK) << "a later clear refused";
 }
 
 #endif /* _WIN32 */

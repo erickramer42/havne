@@ -315,32 +315,41 @@ inline int64_t ecuio_engine_closing_next_us(const ecuio_request_engine* e,
                : INT64_MAX;
 }
 
-/* Whether visiting module ch still owes its pass: identification items
- * unsettled, a diagnostics read */
+/* Whether visiting module ch still sends something of its pass: a clear's
+ * request, identification items unsettled, a diagnostics read (a target
+ * waiting on the judgment sends nothing) */
+inline bool ecuio_engine_visit_sends(const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_clear_asks(ch) || ch.clearing || ch.ident_pending > 0 ||
+           ch.identifying || ch.diag_pending > 0 || ch.diagnosing;
+}
+
+/* Whether visiting module ch still owes its pass: what it sends, and a
+ * clear under way to its end */
 inline bool ecuio_engine_visit_owes(const ecuio_engine_channel& ch)
 {
-    return ch.ident_pending > 0 || ch.identifying || ch.diag_pending > 0 ||
-           ch.diagnosing;
+    return ecuio_engine_clear_on(ch) || ecuio_engine_visit_sends(ch);
 }
 
 /* When a module that isn't open, or is visiting, next sends: a closing
  * one's floor while it owes something, a visiting one's while its pass
- * does; INT64_MAX otherwise */
+ * sends something; INT64_MAX otherwise */
 inline int64_t ecuio_engine_limited_next_us(const ecuio_request_engine* e,
                                             const ecuio_engine_channel& ch)
 {
     if (ch.module_state == ECUIO_MODULE_STATE_OPEN && ch.visiting) {
         return ch.outstanding == ECUIO_ENGINE_NONE &&
-                       ecuio_engine_visit_owes(ch)
+                       ecuio_engine_visit_sends(ch)
                    ? ch.next_send_us
                    : INT64_MAX;
     }
     return ecuio_engine_closing_next_us(e, ch);
 }
 
-/* due for a visiting module (request_diag_visit.h): its pass alone, the
- * identification items unsettled, then the diagnostics read; no walk,
- * row, scan or session */
+/* due for a visiting module (request_diag_visit.h): its pass alone, a
+ * clear's requests first (the judgment's, the 04; the read after is the
+ * diagnostics read), the identification items unsettled, then the
+ * diagnostics read; no walk, row, scan or session */
 inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
                                       int64_t now_us)
 {
@@ -348,7 +357,11 @@ inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
     if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
         return ECUIO_ENGINE_NONE;
     }
-    if (ch.identifying || ch.diagnosing) {
+    if (ch.identifying || ch.diagnosing || ch.clearing) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_clear_asks(ch)) {
+        ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.ident_pending > 0 && ecuio_engine_take_ident(e, c)) {

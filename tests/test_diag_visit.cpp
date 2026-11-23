@@ -364,6 +364,70 @@ TEST_F(DiagVisitTest, AClearOfAClosedModuleVisitsItAndClosesItAfter)
         << "a later clear refused";
 }
 
+namespace {
+
+/* The 04s sent to module c from from_us on */
+size_t count_04(const Visits& v, uint32_t c, int64_t from_us)
+{
+    size_t n = 0;
+    for (const Sent& s : v.sent) {
+        n += s.c == c && s.at >= from_us && s.bytes == Bytes{0x04} ? 1u : 0u;
+    }
+    return n;
+}
+
+/* Module 1 picked and waiting for a live filter (module 0 holds the one
+ * live data has, the engine module at 0 rpm), its codes read by a visit
+ * in the filter kept back */
+void read_waiting(Visits& v)
+{
+    ASSERT_NO_FATAL_FAILURE(v.make({kRead, kRead}, 1, 2));
+    v.e.rpm_module = 0;
+    v.respond = [](uint32_t, const Bytes& q) {
+        return q == Bytes{0x01, 0x0C} ? Bytes{0x41, 0x0C, 0x00, 0x00}
+                                      : fake_reply(q);
+    };
+    v.until(500 * kMs);
+    ecuio_engine_visit_closed(&v.e);
+    v.until(v.now + 4000 * kMs);
+    ASSERT_TRUE(v.report(1).flags & ECUIO_DIAG_COMPLETE);
+    ASSERT_EQ(v.state(1), ECUIO_MODULE_STATE_NO_ROOM);
+}
+
+} // namespace
+
+/* A clear of a module waiting for a live filter visits it once: the 04
+ * and the read after go in the one visit, which opens it once and leaves
+ * it waiting again; the request ends, so the next is taken */
+TEST_F(DiagVisitTest, AClearOfAModuleWaitingForAFilterTakesOneVisit)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(read_waiting(v));
+    const int64_t from = v.now;
+    ASSERT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation));
+    uint32_t opened = 0;
+    uint32_t left = 0;
+    uint8_t was = v.state(1);
+    while (v.now < from + 6000 * kMs) {
+        v.step();
+        const uint8_t now = v.state(1);
+        opened += now == ECUIO_MODULE_STATE_OPEN && was != now ? 1u : 0u;
+        left += was == ECUIO_MODULE_STATE_OPEN && was != now ? 1u : 0u;
+        was = now;
+    }
+    const ecuio_channel_diagnostics_t d = v.report(1);
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_EQ(count_04(v, 1, from), 1u);
+    EXPECT_TRUE(d.flags & ECUIO_DIAG_COMPLETE) << "read again after";
+    EXPECT_EQ(opened, 1u) << "the visit's filter started more than once";
+    EXPECT_EQ(left, 1u) << "the visit's filter stopped more than once";
+    EXPECT_EQ(v.state(1), ECUIO_MODULE_STATE_NO_ROOM) << "waiting again";
+    EXPECT_EQ(v.e.visit_now, UINT32_MAX);
+    EXPECT_FALSE(ecuio_engine_clear_running(&v.e));
+    EXPECT_TRUE(ecuio_engine_clear(&v.e, 1, v.report(1).generation))
+        << "a later clear refused";
+}
+
 /* With no filter free for the visit the target ends NOT_OPENED, nothing
  * sent, its report's read untouched; the request ends */
 TEST_F(DiagVisitTest, AClearOfAClosedModuleWithNoFilterEndsNotOpened)
