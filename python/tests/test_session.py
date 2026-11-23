@@ -711,3 +711,32 @@ def test_a_list_that_grew_between_the_count_and_the_fill_is_read_again():
 
     assert havne.Session._listed(Stub(), getter, "stub") == [100, 101, 102, 103, 104]
     assert asks == [0, 3, 5]
+
+
+def test_a_mock_session_holds_the_host_awake_for_nothing():
+    """keep_awake() on a desk transport returns and holds nothing; a bit
+    core doesn't know, through the binding, and a reason too long are
+    refused"""
+    with havne.Session("mock://py") as s:
+        s.keep_awake(why="a desk")
+        assert s.awake is False
+        with pytest.raises(havne.Error) as e:
+            s.keep_awake(why="w" * c.ECUIO_AWAKE_WHY_MAX)
+        assert e.value.name == "INVALID_ARGUMENT"
+        status = lib.ecuio_session_keep_awake(s._handle(), 2, None)
+        assert status == c.ECUIO_ERR_INVALID_ARGUMENT
+
+
+def test_a_live_session_holds_the_host_awake_until_released():
+    """Through the ELM327 emulator: the platform's own hold, released at
+    once by keep_awake(False); a platform with none is said, not held"""
+    with elm327_emulator() as address:
+        with havne.Session(address) as s:
+            try:
+                s.keep_awake(why="test_session")
+            except havne.Error as e:
+                assert e.name == "NOT_IMPLEMENTED"
+                pytest.skip("no hold on this host: " + e.detail)
+            assert s.awake is True
+            s.keep_awake(False)
+            assert s.awake is False
