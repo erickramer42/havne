@@ -362,7 +362,7 @@ TEST(RequestQuietTest, AClearOnAHeldChannelIsDueWhenTheNextEventSaysSo)
     live.next_send_us = s.now + 5 * kMs;
     held.quiet = true;
     held.quiet_next_us = s.now + 175 * kMs;
-    held.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
+    held.judge_step = ECUIO_CLEAR_STEP_VEHICLE; /* a judgment asks 01 0D */
     held.scan_turn = false;
     ASSERT_TRUE(ecuio_engine_quiet_held(&s.e, held));
     ASSERT_EQ(ecuio_engine_next_event_us(&s.e, s.now), 0);
@@ -384,7 +384,7 @@ TEST(RequestQuietTest, AClearBeforeAFocusSweepIsDueWhenTheNextEventSaysSo)
     s.e.min_sweep_us = 100 * kMs;
     ecuio_engine_channel& ch = s.e.chans[0];
     ch.next_sweep_us = s.now + 50 * kMs;
-    ch.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
+    ch.judge_step = ECUIO_CLEAR_STEP_VEHICLE;
     ch.scan_turn = false;
     ASSERT_FALSE(ecuio_engine_quiet_held(&s.e, ch));
     ASSERT_EQ(ecuio_engine_next_event_us(&s.e, s.now), 0);
