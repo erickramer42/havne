@@ -68,6 +68,10 @@ constexpr const char* kPluginKey = "plugin  ";
  * session's modules, its module's hash, and the response IDs of the
  * channels it was bound to, in channel order */
 constexpr const char* kConversationKey = "conversation  ";
+/* "module  <rx>,<state>" (ADR-0065 step 5): a module not open when the
+ * recording began, closed or no-room; the timed `module` lines say each
+ * change after it */
+constexpr const char* kModuleKey = "module  ";
 /* "conditions  conditions.json,<SHA-256>" after it (ADR-0063 section 8):
  * the set of conditions the session judged, copied beside it */
 constexpr const char* kConditionsKey = "conditions  ";

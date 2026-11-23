@@ -139,7 +139,35 @@ ecuio_modules_wanted(const ecuio_signal_set_t* set, const uint32_t* module_rx,
 struct ecuio_modules_seen {
     uint32_t generation = 0;
     bool taken = false;
+    uint32_t closed = 0; /* the states last published */
+    uint32_t no_room = 0;
 };
+
+/* The modules' states published when one changed: the session's masks,
+ * and a record for a recording, with each module's reasons */
+inline void ecuio_publish_modules(ecuio_session_t* session,
+                                  const ecuio_request_engine* e,
+                                  ecuio_modules_seen& seen)
+{
+    uint32_t closed = 0;
+    uint32_t no_room = 0;
+    uint8_t reasons[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t c = 0; c < e->chan_count && c < ECUIO_MAX_CHANNELS; ++c) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        closed |= ch.module_state == ECUIO_MODULE_STATE_CLOSED ? 1u << c : 0u;
+        no_room |= ch.module_state == ECUIO_MODULE_STATE_NO_ROOM ? 1u << c : 0u;
+        reasons[c] = ch.reasons;
+    }
+    if (closed == seen.closed && no_room == seen.no_room) {
+        return;
+    }
+    seen.closed = closed;
+    seen.no_room = no_room;
+    session->modules_closed.store(closed);
+    session->modules_no_room.store(no_room);
+    ecuio_record_modules(session->record_link.get(), closed, no_room, reasons,
+                         e->chan_count);
+}
 
 /* Each module's reasons, worked out again when the picks or the
  * conditions moved (and once before the worker's loop): RANGE for the
@@ -195,6 +223,7 @@ inline uint32_t ecuio_take_modules(ecuio_session_t* session,
         ecuio_engine_modules_fill(e);
     }
     ecuio_engine_visits_step(e);
+    ecuio_publish_modules(session, e, seen);
     return closed;
 }
 

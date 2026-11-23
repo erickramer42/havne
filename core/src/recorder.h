@@ -132,6 +132,15 @@ void ecuio_recorder_put_events(ecuio_recorder_t* r, uint64_t host_us,
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
                              uint32_t episodes, uint64_t t_us = 0);
 
+/* On a requesting worker, when a module's state changed (ADR-0065 step
+ * 5): the modules closed and those with no room, a bit each, and each
+ * module's reasons (count of them), pinned here; link may be NULL. One
+ * that doesn't fit is carried, the latest states, as a link transition
+ * is. Never blocks, never allocates. */
+void ecuio_record_modules(ecuio_record_link* link, uint32_t closed,
+                          uint32_t no_room, const uint8_t* reasons,
+                          uint32_t count);
+
 /* On a requesting worker, as it publishes reply timing: the rows every
  * 10 s of session time and when final, pinned here; link may be NULL.
  * The final one, the worker's last record, waits up to 1 s for room and

@@ -58,12 +58,21 @@ constexpr uint32_t kRecordFrame = 1;
 constexpr uint32_t kRecordLink = 2;
 constexpr uint32_t kRecordTiming = 3;
 constexpr uint32_t kRecordConditions = 4;
+constexpr uint32_t kRecordModules = 5;
 
 struct link_body {
     uint64_t host_us;
     int32_t state;
     uint32_t episodes;
     uint64_t t_us; /* its session time; 0 for none known */
+};
+
+/* The modules' states after a change, a bit each, and their reasons */
+struct modules_body {
+    uint64_t host_us;
+    uint32_t closed;
+    uint32_t no_room;
+    uint8_t reasons[ECUIO_MAX_CHANNELS];
 };
 
 struct timing_body {
@@ -189,6 +198,8 @@ struct ecuio_recorder {
     uint64_t pending_dropped = 0;
     bool link_pending = false;
     link_body pending_link{};
+    bool modules_pending = false;
+    modules_body pending_modules{};
     uint64_t timing_next_us = kTimingEveryUs;
 
     /* The recording's set of conditions (NULL: none) and its attach, fixed
@@ -226,6 +237,9 @@ struct ecuio_recorder {
     std::vector<def_entry> defs; /* sorted by id */
     std::vector<uint32_t> rx_ids; /* each module's reply ID */
     uint32_t channels = 0;
+    /* The modules' states the writer last wrote (the header's at attach) */
+    uint32_t written_closed = 0;
+    uint32_t written_no_room = 0;
     std::chrono::system_clock::time_point start_wall{};
     std::atomic<bool> attached{false};
     std::atomic<bool> detached{false};
@@ -376,6 +390,8 @@ struct ecuio_recorder {
     void take_conditions(const uint8_t* body, size_t size);
 
     void take_link(const uint8_t* body, size_t size);
+    void take_modules(const uint8_t* body, size_t size);
+    void take_carried();
 
     void take_timing(const uint8_t* body, size_t size);
 

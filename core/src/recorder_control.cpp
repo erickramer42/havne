@@ -314,11 +314,7 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
         if (r->carry_lost > 0) {
             r->lost_line(r->carry_lost_us, r->carry_lost);
         }
-        if (r->link_pending) {
-            r->event_line(
-                r->pending_link.host_us, "link",
-                link_text(r->pending_link.state, r->pending_link.episodes));
-        }
+        r->take_carried();
         if (r->pending_dropped > 0) {
             r->drop_line(host_us, r->pending_dropped);
         }

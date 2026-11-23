@@ -590,6 +590,28 @@ TEST(FolderExportTest, AScrubbedCopyKeepsOnlyHeaderLinesAndClocksThatRead)
               std::string::npos);
 }
 
+/* A scrubbed copy keeps the modules' lines (ADR-0065 step 5): the header's
+ * module not open at the start and the timed change after it */
+TEST(FolderExportTest, AScrubbedCopyKeepsTheModuleLines)
+{
+    Folder f;
+    conditions_recording(f, "22:13:24.360  +4.110  module  0x7E9,open,read\n");
+    std::string events = read_file(f.path / "rec" / "events.log");
+    const size_t at = events.find("conditions  conditions.json,");
+    ASSERT_NE(at, std::string::npos);
+    events.insert(at, "module  0x7E9,closed\n");
+    f.write("rec/events.log", events);
+
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::string& out = e.files["events.log"];
+    EXPECT_NE(out.find("\nmodule  0x7E9,closed\n"), std::string::npos) << out;
+    EXPECT_NE(out.find("22:13:24.360  +4.110  module  0x7E9,open,read"),
+              std::string::npos)
+        << out;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 0u);
+}
+
 /* A range's held lines take a set's most keys, as the reader does: with
  * coolant_high and boost_low first, k61 is the 64th key before the range
  * and held, k62 the 65th and not */

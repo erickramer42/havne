@@ -243,6 +243,12 @@ struct ecuio_session {
      * request_probe.h), a bit each; every module when no probe ran (the
      * mock, ?poll=). Set by attach, read-only afterwards. */
     uint32_t module_range = UINT32_MAX;
+    /* The modules closed and those with no room, a bit each, as the
+     * requesting worker's last take left them (ecuio_take_modules); a
+     * recording's attach reads them for its header. None for a transport
+     * that sends no request. */
+    std::atomic<uint32_t> modules_closed{0};
+    std::atomic<uint32_t> modules_no_room{0};
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

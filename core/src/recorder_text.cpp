@@ -408,6 +408,31 @@ std::string absolute(const std::string& path)
 #endif
 }
 
+/* A module's state in a module line's words: "0x7E9,closed", "0x7E9,no-room",
+ * or open with the reasons that want it, "0x7E9,open,range+read" */
+std::string module_text(uint32_t rx, bool closed, bool no_room, uint8_t reasons)
+{
+    char id[16];
+    std::snprintf(id, sizeof id, "0x%X,", rx);
+    std::string out = id;
+    if (closed || no_room) {
+        return out + (closed ? "closed" : "no-room");
+    }
+    out += "open";
+    /* the bits of ECUIO_MODULE_REASON_*, in their order */
+    static const char* const kReasons[] = {"range", "read", "conversation",
+                                           "visit"};
+    const char* sep = ",";
+    for (uint32_t k = 0; k < 4; ++k) {
+        if (((reasons >> k) & 1u) != 0) {
+            out += sep;
+            out += kReasons[k];
+            sep = "+";
+        }
+    }
+    return out;
+}
+
 /* A link state in the words the reader and a person both take:
  * "adapter fault (state 9, 3 episodes)" */
 std::string link_text(int32_t state, uint32_t episodes)

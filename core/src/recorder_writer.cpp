@@ -286,6 +286,43 @@ void ecuio_recorder::take_link(const uint8_t* body, size_t size)
     event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
 }
 
+/* A line for each module whose state moved since the last written, in
+ * channel order */
+void ecuio_recorder::take_modules(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(modules_body)) {
+        return;
+    }
+    modules_body mb;
+    std::memcpy(&mb, body, sizeof mb);
+    const uint32_t moved =
+        (mb.closed ^ written_closed) | (mb.no_room ^ written_no_room);
+    for (uint32_t c = 0; c < channels && c < ECUIO_MAX_CHANNELS; ++c) {
+        const uint32_t bit = 1u << c;
+        if ((moved & bit) != 0) {
+            event_line(mb.host_us, "module",
+                       module_text(rx_ids[c], (mb.closed & bit) != 0,
+                                   (mb.no_room & bit) != 0, mb.reasons[c]));
+        }
+    }
+    written_closed = mb.closed;
+    written_no_room = mb.no_room;
+}
+
+/* The link transition and module states the worker carried and never
+ * put, written at the close */
+void ecuio_recorder::take_carried()
+{
+    if (link_pending) {
+        event_line(pending_link.host_us, "link",
+                   link_text(pending_link.state, pending_link.episodes));
+    }
+    if (modules_pending) {
+        take_modules(reinterpret_cast<const uint8_t*>(&pending_modules),
+                     sizeof pending_modules);
+    }
+}
+
 /* latency.csv's rows whose counts changed since their last row
  * (ADR-0017's appendix of 2026-10-31), the file made with the first */
 void ecuio_recorder::take_timing(const uint8_t* body, size_t size)
@@ -487,6 +524,9 @@ bool ecuio_recorder::drain_ring()
             break;
         case kRecordConditions:
             take_conditions(scratch.data(), body);
+            break;
+        case kRecordModules:
+            take_modules(scratch.data(), body);
             break;
         default:
             break;
