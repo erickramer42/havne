@@ -88,12 +88,15 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "$kit/bin" >> "$GITHUB_PATH"
 
-      # Qt's deployment target (macOS 14.4 for Qt 6.12) is left alone: the
-      # bundle's LSMinimumSystemVersion is that number
+      # Qt 6.12's own minimum, macOS 14.4, as the deployment target: it is
+      # also the bundle's LSMinimumSystemVersion (Qt leaves the variable
+      # empty, and so the plist's key), and the check below prints what
+      # the executable and Qt's libraries were built for
       - name: Build the app (Release, arm64)
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+            -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=14.4 \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
           cmake --build build --target havne --parallel 4
           find build -maxdepth 3 -name Havne.app -type d
 
@@ -157,6 +160,8 @@ jobs:
             [ "$(key $k)" = "$want" ] || fail "$k is '$(key $k)', not $want"
           done
           echo "Havne $(key CFBundleShortVersionString), macOS $(key LSMinimumSystemVersion) or later"
+          vtool -show-build "$APP/Contents/MacOS/Havne" | grep -E 'platform|minos' || true
+          vtool -show-build "$APP/Contents/Frameworks/QtCore.framework/Versions/A/QtCore" | grep -E 'minos' || true
 
           sig=$(codesign -dv "$APP" 2>&1)
           echo "$sig"
