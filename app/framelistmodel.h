@@ -122,6 +122,7 @@ public:
         quint64 identification = 0;
         quint64 textValues = 0;
         quint64 unattributed = 0;
+        quint64 vinShaped = 0; /* frames of messages holding a VIN */
     };
     ScrubbedCsv scrubbedCsv() const;
 
