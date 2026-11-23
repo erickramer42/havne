@@ -32,26 +32,31 @@ import android.util.Log;
 // the Nearby devices permission is switched on after Android stopped
 // asking. It needs no service running.
 //
-// It also holds a partial wake lock while it runs: the service keeps
+// It also holds a partial wake lock while asked to: the service keeps
 // Android from freezing the app, not the CPU from sleeping, and with the
 // screen off the CPU slept about 100 s of a session, no request going out
-// (docs/bench-sessions/2026-10-28-android-9.md). The screen still goes off
+// (docs/bench-sessions/2026-10-28-android-9.md). Settings' keep-awake
+// switch asks for it, and a relay always does (ADR-0033's appendix "the
+// host kept awake while a session reads"). The screen still goes off
 public class SessionService extends Service
 {
     private static final String TAG = "Havne";
     private static final String CHANNEL = "session";
     private static final String EXTRA_TEXT = "text";
+    private static final String EXTRA_HOLD = "hold";
     private static final int NOTIFICATION_ID = 1;
 
     private PowerManager.WakeLock wakeLock;
 
-    // Starts the service, or updates its notification's text. The app is
-    // in the foreground at a connect, where Android allows the start
-    public static void start(Context context, String text)
+    // Starts the service, or updates its notification's text and whether
+    // it holds the wake lock. The app is in the foreground at a connect,
+    // where Android allows the start
+    public static void start(Context context, String text, boolean hold)
     {
         try {
             Intent intent = new Intent(context, SessionService.class);
             intent.putExtra(EXTRA_TEXT, text);
+            intent.putExtra(EXTRA_HOLD, hold);
             context.startForegroundService(intent);
         } catch (RuntimeException e) {
             // Refused (the app in the background): the session runs on
@@ -104,10 +109,14 @@ public class SessionService extends Service
     public int onStartCommand(Intent intent, int flags, int startId)
     {
         String text = intent != null ? intent.getStringExtra(EXTRA_TEXT) : null;
+        boolean hold = intent == null || intent.getBooleanExtra(EXTRA_HOLD, true);
         try {
             startForeground(NOTIFICATION_ID, notification(text != null ? text : ""),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
-            holdWakeLock();
+            if (hold)
+                holdWakeLock();
+            else
+                releaseWakeLock();
         } catch (RuntimeException e) {
             Log.w(TAG, "the session's foreground service was refused: " + e);
             stopSelf();
@@ -127,12 +136,17 @@ public class SessionService extends Service
         wakeLock.acquire();
     }
 
-    @Override
-    public void onDestroy()
+    private void releaseWakeLock()
     {
         if (wakeLock != null && wakeLock.isHeld())
             wakeLock.release();
         wakeLock = null;
+    }
+
+    @Override
+    public void onDestroy()
+    {
+        releaseWakeLock();
         super.onDestroy();
     }
 
