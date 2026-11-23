@@ -367,6 +367,8 @@ inline const char* left_out_word(uint32_t cls)
         return "activity";
     case ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED:
         return "vin_shaped";
+    case ECUIO_EXPORT_LEFT_OUT_VIN_MASKED:
+        return "vin_masked";
     default:
         return "unknown";
     }
@@ -479,9 +481,6 @@ inline void exported_line(Line& l, const ExportArgs& a,
     l.key("left_out");
     l.ch('{');
     for (uint32_t c = 0; c < ECUIO_EXPORT_LEFT_OUT_COUNT; ++c) {
-        if (c == ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED) {
-            continue; /* the check's alone: never anything left out */
-        }
         if (c > 0) {
             l.ch(',');
         }

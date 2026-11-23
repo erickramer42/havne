@@ -42,12 +42,17 @@ TEST(CoreTest, CreateFailuresNameTheirCause) {
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "?profile= needs a profile name of 1 to 63 characters");
     std::string long_query = "mock://x?profile=mock";
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < 31; ++i) {
         long_query += "&profile=mock";
     }
+    ASSERT_EQ(ecuio_session_create(long_query.c_str(), &s), ECUIO_OK)
+        << "32 pairs, the most a query holds: " << ecuio_last_error_detail();
+    ecuio_session_destroy(s);
+    s = nullptr;
+    long_query += "&profile=mock";
     EXPECT_EQ(ecuio_session_create(long_query.c_str(), &s), ECUIO_ERR_BAD_URI);
     EXPECT_STREQ(ecuio_last_error_detail(),
-                 "the query has more than 16 key=value pairs");
+                 "the query has more than 32 key=value pairs");
     EXPECT_EQ(ecuio_session_create("mock://x?profile=bogus", &s),
               ECUIO_ERR_UNKNOWN_PROFILE);
     EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'bogus'");

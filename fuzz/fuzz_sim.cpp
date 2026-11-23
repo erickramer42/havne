@@ -110,9 +110,9 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         uint32_t n = 0;
         bool handled = false;
         if (!functional && rec == nullptr) {
-            n = ecuio_sim_session_answer(session, true, e.time_us, data + at,
-                                         static_cast<uint32_t>(len), reply,
-                                         &handled);
+            n = ecuio_sim_session_answer(session, true, true, e.time_us,
+                                         data + at, static_cast<uint32_t>(len),
+                                         reply, &handled);
         }
         if (!handled) {
             n = ecuio_sim_answer(e, session, data + at,

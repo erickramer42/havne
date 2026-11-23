@@ -23,34 +23,41 @@ struct ecuio_sim_session {
     ecuio_sim_security security;
 };
 
+/* S3 of silence at the ECU's time now_us leaves the extended session and
+ * locks its security access */
+inline void ecuio_sim_session_lapse(ecuio_sim_session& s, int64_t now_us)
+{
+    if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
+        s.extended = false;
+        ecuio_sim_security_lock(s.security);
+    }
+}
+
 /* A physical request at the ECU's time now_us: S3 lapses the session
  * first, then the request counts as heard. Services 10 and 3E are
  * answered here (handled true; the length, 0 for none): 10 03 enters the
  * extended session when has_extended (else 7F 10 12), 10 01 leaves it,
  * any other 10 is 7F 10 12; 3E 00 is 7E 00, 3E 80 is silent, any other
- * 3E 7F 3E 12; a wrong length 7F <service> 13. A node with an extended
- * session answers 27 here too (sim_security.h), every session entered
- * or left locks it, and any other request comes between a strict one's
- * seed and its key. Another service: handled false, the
- * caller's answer. A functional request never reaches this: session
- * control and security access to 0x7DF go unanswered and change
- * nothing. */
+ * 3E 7F 3E 12; a wrong length 7F <service> 13. A node with security
+ * access (has_security, an extended session too) answers 27 here
+ * (sim_security.h), every session entered or left locks it, and any
+ * other request comes between a strict one's seed and its key. Another
+ * service: handled false, the caller's answer. A functional request
+ * never reaches this: session control and security access to 0x7DF go
+ * unanswered and change nothing. */
 inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
-                                         bool has_extended, int64_t now_us,
-                                         const uint8_t* req, uint32_t len,
-                                         uint8_t* out, bool* handled)
+                                         bool has_extended, bool has_security,
+                                         int64_t now_us, const uint8_t* req,
+                                         uint32_t len, uint8_t* out,
+                                         bool* handled)
 {
     using namespace ecuio_sim_detail;
-    if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
-        s.extended = false;
-        ecuio_sim_security_lock(s.security);
-    }
+    ecuio_sim_session_lapse(s, now_us);
     s.heard_us = now_us;
-    if (has_extended && len > 0 && req[0] == 0x27) {
+    if (has_extended && has_security && len > 0 && req[0] == 0x27) {
         *handled = true;
-        return ecuio_sim_security_answer(s.security, s.extended,
-                                         ECUIO_SIM_SECURITY_DELAY_US, now_us,
-                                         req, len, out);
+        return ecuio_sim_security_answer(
+            s.security, s.extended, s.security.delay_us, now_us, req, len, out);
     }
     ecuio_sim_security_between(s.security);
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);

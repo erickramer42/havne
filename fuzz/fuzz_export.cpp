@@ -3,22 +3,25 @@
 
 // The exports and the health report over a recording folder
 // (ADR-0054): fuzz_recording's input, 'F' or '3' then events.log,
-// signals.csv, markers.csv, frames.csv and conditions.json cut at 0x1E
-// bytes, written to a scratch folder, then exported as a folder, CSV and
-// pcapng, scrubbed and raw, whole and over a range, and reported as JSON
-// and text, whole and over a range. The CSV is also written long, as a
-// wide grid of several row intervals in both unit systems and with
-// picked columns, and each wide export's size is checked against
-// ecuio_export_estimate's exact answer. A folder export also runs from a
-// start the input's last byte picks, and every cond line in a scrubbed
-// copy must be what the recorder writes for its fields (ADR-0063
-// section 8). A baseline recording is read for the health report.
+// signals.csv, markers.csv, frames.csv, conditions.json and signals.json
+// cut at 0x1E bytes, written to a scratch folder, then exported as a
+// folder, CSV and pcapng, scrubbed and raw, whole and over a range, and
+// reported as JSON and text, whole and over a range. The CSV is also
+// written long, as a wide grid of several row intervals in both unit
+// systems and with picked columns, and each wide export's size is checked
+// against ecuio_export_estimate's exact answer. A folder export also runs
+// from a start the input's last byte picks, and every cond line in a
+// scrubbed copy must be what the recorder writes for its fields (ADR-0063
+// section 8). Each scrubbed export's files, checked again by scrub.h's
+// check with no values (JSON as JSON), hold no VIN-shaped token: a mask
+// leaves none. A baseline recording is read for the health report.
 
 #include <ecuio/core.h>
 #include <ecuio/recording.h>
 #include <ecuio/signals.h>
 
 #include "recording_rows.h"
+#include "scrub.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -232,6 +235,27 @@ void cond_lines_rewritten(const std::string& events)
     }
 }
 
+/* A scrubbed export's file, or each of a folder's, checked again: no
+ * VIN-shaped token, masked or refused as it was written */
+void checked_again(const fs::path& p)
+{
+    std::error_code ec;
+    if (fs::is_directory(p, ec)) {
+        for (const auto& e : fs::directory_iterator(p, ec)) {
+            checked_again(e.path());
+        }
+        return;
+    }
+    const std::string bytes = read_tree(p);
+    const ecuio_scrub::values none;
+    ecuio_scrub::check c(none, p.extension() == ".json" ? ecuio_scrub::kJson
+                                                       : ecuio_scrub::kRefuse);
+    c.feed(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size());
+    if (c.finish() != 0) {
+        abort();
+    }
+}
+
 /* One export; a wide CSV's size and rows are then checked against the
  * estimate's, which promises the file's exact size */
 result export_with(ecuio_export_options_t o, bool may_be_invalid = false)
@@ -247,6 +271,9 @@ result export_with(ecuio_export_options_t o, bool may_be_invalid = false)
     judge(r.rc, report.failed_class, out, may_be_invalid);
     if (r.rc == ECUIO_OK) {
         r.bytes = read_tree(fs::u8path(out));
+        if ((o.flags & ECUIO_EXPORT_RAW) == 0) {
+            checked_again(fs::u8path(out));
+        }
         if (o.format == ECUIO_EXPORT_FOLDER &&
             (o.flags & ECUIO_EXPORT_RAW) == 0) {
             cond_lines_rewritten(out + "/events.log");
@@ -385,11 +412,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     g_input_holds_folder =
         std::string_view(reinterpret_cast<const char*>(data), size)
             .find(folder()) != std::string_view::npos;
-    const uint8_t* parts[5] = {};
-    size_t lens[5] = {};
+    const uint8_t* parts[6] = {};
+    size_t lens[6] = {};
     size_t count = 0;
     size_t start = 1;
-    for (size_t i = 1; i <= size && count < 5; ++i) {
+    for (size_t i = 1; i <= size && count < 6; ++i) {
         if (i == size || data[i] == 0x1E) {
             parts[count] = data + start;
             lens[count] = i - start;
@@ -410,6 +437,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("markers.csv", parts[2], lens[2], count > 2);
     write_file("frames.csv", parts[3], lens[3], count > 3);
     write_file("conditions.json", parts[4], lens[4], count > 4);
+    write_file("signals.json", parts[5], lens[5], count > 5);
     for (const uint32_t format :
          {ECUIO_EXPORT_FOLDER, ECUIO_EXPORT_CSV, ECUIO_EXPORT_PCAPNG}) {
         for (const uint32_t flags : {0U, ECUIO_EXPORT_RAW}) {

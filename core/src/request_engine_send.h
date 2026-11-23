@@ -18,10 +18,20 @@
 #include "request_engine_session.h"
 #include "request_engine_quiet.h"
 
+/* The longest talk channel c of the engine takes: the transport's bound,
+ * one frame on a functional channel */
+inline uint32_t ecuio_engine_talk_bound(const ecuio_request_engine* e,
+                                        uint32_t c)
+{
+    return e->chans[c].functional && e->pdu_max > ECUIO_ENGINE_PDU_SINGLE
+               ? ECUIO_ENGINE_PDU_SINGLE
+               : e->pdu_max;
+}
+
 /* Offers q as channel c's talk at now_us (request_talk.h's door, with the
- * channel's window). A functional channel's bound is one frame, and
- * security access goes to a module's own address: a seed or a key there
- * is refused, and so is a channel the engine lacks, and a seed anywhere
+ * channel's window and ecuio_engine_talk_bound). Security access goes to
+ * a module's own address: a seed or a key to a functional one is
+ * refused, and so is a channel the engine lacks, and a seed anywhere
  * while a functional channel has a session
  * (ecuio_engine_functional_session). */
 inline ecuio_talk_offer ecuio_engine_offer_talk(ecuio_request_engine* e,
@@ -39,10 +49,8 @@ inline ecuio_talk_offer ecuio_engine_offer_talk(ecuio_request_engine* e,
     if (q.kind == ecuio_talk_kind::seed && ecuio_engine_functional_session(e)) {
         return ecuio_talk_offer::refused;
     }
-    const uint32_t bound = ch.functional && e->pdu_max > ECUIO_ENGINE_PDU_SINGLE
-                               ? ECUIO_ENGINE_PDU_SINGLE
-                               : e->pdu_max;
-    return ecuio_engine_talk(ch.talk, ch.key, bound, q, now_us);
+    return ecuio_engine_talk(ch.talk, ch.key, ecuio_engine_talk_bound(e, c), q,
+                             now_us);
 }
 
 /* The offered talk takes channel c's one-shot */

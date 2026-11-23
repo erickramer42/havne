@@ -10,6 +10,8 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
+#include "conversation_registry.h"
+#include "security_store_owner.h"
 #include "frame_decoder.h"
 #include "profile_hold.h"
 #include "pull_queue.h"
@@ -47,15 +49,37 @@ struct ecuio_test_talk_slot {
     ecuio_talk_result result;
 };
 
+struct ecuio_session_talk; /* conversation_bind.h */
+void ecuio_session_talk_free(ecuio_session_talk* t) noexcept;
+
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
      * it's released after every member that reads the set */
     ecuio_profile_hold profile_hold;
+    /* The set's plugin's conversation part (conversation_registry.h),
+     * taken with the hold; NULL for none */
+    ecuio_conversation_part_ref conversation;
+    /* The part bound at start (conversation_bind.h): its instances freed
+     * at close once the worker joined, its reports at destroy; NULL when
+     * nothing is bound */
+    std::unique_ptr<ecuio_session_talk, void (*)(ecuio_session_talk*)> talk{
+        nullptr, ecuio_session_talk_free};
+    /* Held across each conversation call (the unlock, the getters, the
+     * bind's hand-over and close's release); never by a worker */
+    mutable std::mutex conversation_mutex;
+    /* The security store a bind hands the conversations, set before
+     * start; empty for none */
+    ecuio_security::store_ref conversation_store;
+    /* The store's fallback name for the car (ecuio_session_security_store),
+     * used when the module gives no serial and the car no VIN */
+    std::string security_label;
     std::atomic<bool> closed{false};
     /* The worker was started: a start after it is the transport's no-op,
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
+    /* The consent create found (consent_gate.h): a create-time fact */
+    bool conversation_consent = false;
     /* started's copy for any thread: the conditions' states judge what the
      * session gets only once it runs */
     std::atomic<bool> ran{false};

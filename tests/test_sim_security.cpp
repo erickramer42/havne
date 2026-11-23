@@ -304,9 +304,9 @@ struct Node {
     Bytes ask(const Bytes& req)
     {
         uint8_t out[ECUIO_SIM_REPLY_MAX] = {};
-        uint32_t n = ecuio_sim_session_answer(s, has_extended, now, req.data(),
-                                              static_cast<uint32_t>(req.size()),
-                                              out, &handled);
+        uint32_t n = ecuio_sim_session_answer(
+            s, has_extended, has_extended, now, req.data(),
+            static_cast<uint32_t>(req.size()), out, &handled);
         if (!handled) {
             n = ecuio_sim_answer(ecu, s, req.data(),
                                  static_cast<uint32_t>(req.size()), false, out);

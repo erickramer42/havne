@@ -163,8 +163,8 @@ TEST(SimEcuTest, AnAimsRefusalsNameTheirCause)
 {
     const std::string shape =
         "faults: 'late:3@' isn't <fault>:<n>[@<reply ID>], the fault one of "
-        "silent, late, pending, bad_sequence or stalled, n from 1 to 10000 "
-        "and the reply ID 11-bit hex";
+        "silent, late, pending, bad_sequence, stalled or relock, n from 1 to "
+        "10000 and the reply ID 11-bit hex";
     EXPECT_EQ(refusal("mock://sim?faults=late:3@"), shape);
     for (const char* bad :
          {"mock://sim?faults=late:3@800", "mock://sim?faults=late:3@7EG",
@@ -443,6 +443,19 @@ TEST(SimTest, AFaultsAimIsJudgedAfterTheProfileAndBeforeTheInterface)
         ECUIO_ERR_BAD_URI)
         << "judged before NO_TRANSPORT off Linux and the interface on it";
     EXPECT_NE(std::string(ecuio_last_error_detail()).find("aims at a module"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(sim, nullptr);
+
+    /* behind= is judged there too, beside the aims */
+    EXPECT_EQ(ecuio_sim_create("mock://sim?profile=sim-car-none&gateway=1&"
+                               "behind=7EA",
+                               "nosuchcan9", &sim),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_EQ(
+        ecuio_sim_create("mock://sim?gateway=1&behind=7EA", "nosuchcan9", &sim),
+        ECUIO_ERR_BAD_URI);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("is no module"),
               std::string::npos)
         << ecuio_last_error_detail();
     EXPECT_EQ(sim, nullptr);

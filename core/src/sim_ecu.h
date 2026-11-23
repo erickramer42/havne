@@ -20,10 +20,14 @@
 // (sim_recording.h). Faults break every Nth reply, as ADR-0041 section
 // 4's ECU does, and pending puts a reply off behind a 7F <service> 78.
 //
+// mock://'s gateway= adds a gateway node that routes each request for the
+// modules behind it by service (sim_gateway.h, sim_gateway_route.h).
+//
 // The parts: sim_types.h (what a node is, and refuse), sim_pids.h (the PID
 // answers), sim_session.h (a node's session and its answer), sim_engine.h
-// (the engine ECU's answer), sim_module.h (the second module's) and
-// sim_uri.h (the URI). This header includes them all and keeps the fate.
+// (the engine ECU's answer), sim_module.h (the second module's),
+// sim_gateway_route.h (the gateway's verdict and answer) and sim_uri.h
+// (the URI). This header includes them all and keeps the fate.
 
 #ifndef ECUIO_SIM_ECU_H
 #define ECUIO_SIM_ECU_H
@@ -52,6 +56,7 @@
 #include "sim_session.h"
 #include "sim_engine.h"
 #include "sim_module.h"
+#include "sim_gateway_route.h"
 #include "sim_uri.h"
 
 /* The fate of a module's next reply from its periods f, counting it in

@@ -308,7 +308,8 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
                               const ecuio_value_t* values, uint32_t count,
                               const ecuio_condition_event_t* events,
-                              uint32_t event_count, uint32_t generation)
+                              uint32_t event_count, uint32_t generation,
+                              bool access_cut)
 {
     const uint16_t length = frame->data_length <= ECUIO_FRAME_DATA_MAX
                                 ? frame->data_length
@@ -382,7 +383,7 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     frame_body fb{host_us,
                   frame->timestamp_us,
                   frame->arbitration_id,
-                  frame->flags,
+                  frame->flags | (access_cut ? ECUIO_FRAME_FLAG_ACCESS_CUT : 0u),
                   length,
                   nvalues,
                   nevents};

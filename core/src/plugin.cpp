@@ -1,6 +1,7 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
 // Testing: UNIT: PluginTest, PluginWrapTest, PluginConversationTest
-//          (test_signals); HARNESS: RecorderTest (test_core); FUZZ:
+//          (test_signals), ConversationRegistryTest (test_core); HARNESS:
+//          RecorderTest (test_core); FUZZ:
 //          fuzz_plugin_manifest
 //
 // The plugin loader's C API (ADR-0052's data tier): a plugin loaded
@@ -10,6 +11,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/plugin.h"
 #include "ecuio/profile.h"
+#include "conversation_registry.h"
 #include "error_detail.h"
 #include "json.h"
 #include "least_core.h"
@@ -144,6 +146,37 @@ std::vector<ecuio_plugin_value_t> read_values(const ecuio_plugin& p,
                      std::to_string(r.column) + ": " + r.words};
     }
     return out;
+}
+
+/* The plugin's conversation part, copied once, kept under set; OK with
+ * nothing kept for a plugin without the tier */
+ecuio_status_t keep_conversation(ecuio_plugin& p, const ecuio_signal_set_t* set,
+                                 bool* added)
+{
+    *added = false;
+    if (p.conversation == nullptr) {
+        return ECUIO_OK;
+    }
+    if (p.conversation_part == nullptr) {
+        try {
+            auto part = std::make_shared<ecuio_conversation_part>();
+            const ecuio_plugin_loader::conversation& c = *p.conversation;
+            part->plugin_id = p.id;
+            part->plugin_version = p.version;
+            part->code = c.code;
+            std::memcpy(part->sha256, c.sha256, sizeof part->sha256);
+            part->budget = c.budget;
+            for (const ecuio_plugin_loader::conversation_ecu& e : c.ecus) {
+                part->ecus.push_back({e.id, e.rx, e.tx});
+            }
+            part->services = c.services;
+            part->levels = c.levels;
+            p.conversation_part = std::move(part);
+        } catch (const std::bad_alloc&) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+    }
+    return ecuio_conversation_keep(set, p.conversation_part, added);
 }
 
 } // namespace
@@ -452,9 +485,18 @@ ecuio_status_t ecuio_plugin_register(ecuio_plugin_t* plugin, uint32_t index,
     if (name != nullptr && cap < v.profile.size() + 1) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    const ecuio_status_t rc = ecuio_profile_register(
-        v.profile.c_str(), ecuio_signal_file_set(v.file.get()), nullptr);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(v.file.get());
+    bool added = false;
+    const ecuio_status_t kept = keep_conversation(*plugin, set, &added);
+    if (kept != ECUIO_OK) {
+        return kept;
+    }
+    const ecuio_status_t rc =
+        ecuio_profile_register(v.profile.c_str(), set, nullptr);
     if (rc != ECUIO_OK) {
+        if (added) {
+            ecuio_conversation_forget(set);
+        }
         return rc;
     }
     v.registered = true;
@@ -487,6 +529,9 @@ ecuio_status_t ecuio_plugin_free(ecuio_plugin_t* plugin)
                     plugin->id.c_str());
             }
             return rc;
+        }
+        for (const ecuio_signal_set_t* set : sets) {
+            ecuio_conversation_forget(set);
         }
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;

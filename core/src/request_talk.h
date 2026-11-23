@@ -329,6 +329,20 @@ inline void ecuio_talk_sent(ecuio_engine_talk_state& t, ecuio_key_window& w,
     }
 }
 
+/* Withdraws a talk offered and not yet taken by the one-shot: true, and
+ * nothing of it reaches the bus. False while it is out, settled or none
+ * is offered. A seed's window stays as its offer left it (none). */
+inline bool ecuio_talk_withdraw(ecuio_engine_talk_state& t)
+{
+    if (!t.offered) {
+        return false;
+    }
+    const bool after_scan = t.after_scan;
+    t = ecuio_engine_talk_state{};
+    t.after_scan = after_scan;
+    return true;
+}
+
 /* Reads the settle once: true and *out filled when the talk has ended,
  * after which the next may be offered; false while it is offered or out,
  * or there is none. */

@@ -88,6 +88,12 @@ threads onto the GUI thread.
   dropped frame misses the frame log, and its values, staged from the
   worker, don't. The recording misses neither: core writes it from the
   worker, before the bridge's callbacks.
+- **A plugin's module on the worker:** on a channel a conversation
+  plugin's module is bound to, a requesting worker hands each frame to
+  the module after the engine takes it, before step 2, and steps the
+  module each pass ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)'s
+  appendix of 2026-11-22). A security access's seed and key reach the
+  module whole and the recording cut (`core/src/access_cut.h`).
 - **Decode on the worker:** core runs the match and decode, so every
   front end gets values without a loop of its own, and the GUI thread's
   cost per frame doesn't grow with the profile

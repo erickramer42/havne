@@ -108,7 +108,7 @@ Pane {
         exportFailed = !r.ok
         exportNote = r.ok ? (r.written === 1 ? qsTr("1 frame exported; ")
                                              : qsTr("%1 frames exported; ").arg(r.written))
-                            + qsTr("%n left out (identification and text signals)", "", r.leftOut)
+                            + qsTr("%n left out (identification, text signals and VIN-shaped messages)", "", r.leftOut)
                           : r.words
         return r.ok
     }

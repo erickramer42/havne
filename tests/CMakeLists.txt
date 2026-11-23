@@ -34,7 +34,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_recording_stretches.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_export_csv.cpp test_export_folder.cpp test_export_range.cpp
-    test_export_frames.cpp test_export_cancel.cpp
+    test_export_frames.cpp test_export_cancel.cpp test_scrub_mask.cpp
+    test_export_mask.cpp test_export_vin_messages.cpp
     test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_health_recording.cpp
     test_health_baseline.cpp test_csv_import.cpp test_csv_import_recording.cpp
@@ -45,7 +46,9 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
-    test_security_store_owner.cpp)
+    test_security_store_owner.cpp test_conversation_registry.cpp
+    test_conversation_session.cpp test_core_conversation.cpp
+    test_access_cut.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -170,6 +173,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_obd2_sim_ask.cpp
     test_obd2_focus.cpp
     test_session_control.cpp test_session_control_late.cpp
+    test_session_enter.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_turns_session.cpp
@@ -177,8 +181,10 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_quiet_reports.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
-    test_sim_timing.cpp
-    test_scan_retry.cpp test_security_access.cpp)
+    test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
+    test_sim_gateway_view.cpp
+    test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
+    test_conversation_requests.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -220,7 +226,8 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_stream.cpp test_elm327_session_links.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
-    test_elm327_pack.cpp test_elm327_gate.cpp)
+    test_elm327_pack.cpp test_elm327_gate.cpp
+    test_elm327_conversation.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -284,6 +291,8 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # section 2.4, SocketCanTalkTest).
 # test_vcan_turns.cpp: two ECUs' requests overlapping, so a busy ECU's
 # pace doesn't wait on another's (SocketCanTurnsTest).
+# test_vcan_conversation.cpp: a plugin's module bound to a session,
+# unlocking the simulated ECU (SocketCanConversationTest).
 # RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
 # every session's ID filter; every vcan0 user takes the lock, so they run
 # one at a time while the rest of the suite runs beside them.
@@ -292,7 +301,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests.cpp test_vcan_requests_focus.cpp
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
+                   test_vcan_conversation.cpp test_vcan_gateway.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
@@ -392,7 +402,7 @@ if(TARGET havne-cli)
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
-        test_cli_summary.cpp test_cli_emulator.cpp)
+        test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -484,9 +494,17 @@ if(TARGET havne-cli)
         app_cli_golden(SimElm327RefusesABadUri sim-bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> sim "mock://sim?faults=silent:0"
                --elm327 tcp:0)
+        # The gateway's seed and key pairs never reach the output: its
+        # elm327 line shows sa=key:*, the other keys as given
+        app_cli_golden(SimElm327HidesTheGatewaysSeedsAndKeys sim-elm327-sa.jsonl
+            --ignore listen
+            -- $<TARGET_FILE:havne-cli> sim
+               "mock://sim?modules=2&gateway=1&behind=7E9&sa=key:01020304:0A0B0C0D&sa_delay=200"
+               --elm327 tcp:0 --seconds 1)
         # The emulator on 127.0.0.1, a port the system picks: a host's
         # ELM327 exchange, core's own elm327:// session, a second module's
-        # DID, a plugin's DIDs, and python-OBD (skipped without it)
+        # DID, a module behind the gateway, a plugin's DIDs, and python-OBD
+        # (skipped without it)
         function(app_cli_elm327 name mode)
             add_test(NAME CliElm327RunTest.${name}
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_elm327.py
@@ -499,6 +517,7 @@ if(TARGET havne-cli)
         app_cli_elm327(AHostThatComesBackAtOnceIsNeverRefused reconnect)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
+        app_cli_elm327(AGatewayHoldsAModuleUntilItsUnlocked gateway)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
         app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
@@ -2732,6 +2751,7 @@ if(WIN32)
         test_j2534_hold_bus.cpp
         test_j2534_talk.cpp
         test_j2534_car.cpp
+        test_j2534_conversation.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core

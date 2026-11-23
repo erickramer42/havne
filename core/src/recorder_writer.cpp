@@ -10,6 +10,7 @@
 // and the row helpers it alone calls, kept in its unit so a frame's
 // row inlines them.
 
+#include "access_cut.h"
 #include "recorder_impl.h"
 #include "recorder_text.h"
 #include "recording_rows.h"
@@ -39,6 +40,21 @@ void append_u64(std::string& out, uint64_t v)
     const int n = std::snprintf(buf, sizeof buf, "%llu",
                                 static_cast<unsigned long long>(v));
     out.append(buf, static_cast<size_t>(n));
+}
+
+/* A frame's bytes as frames.csv holds them, "67 01 00 00": zeroes past
+ * the sub-function where the frame is a security access cut */
+void append_bytes(std::string& out, const uint8_t* p, uint16_t n, bool cut)
+{
+    static const char kHex[] = "0123456789ABCDEF";
+    for (uint16_t i = 0; i < n; ++i) {
+        if (i > 0) {
+            out += ' ';
+        }
+        const uint8_t b = cut && i >= ECUIO_ACCESS_KEPT ? 0 : p[i];
+        out += kHex[b >> 4];
+        out += kHex[b & 0x0F];
+    }
 }
 
 void append_hex(std::string& out, uint32_t v)
@@ -378,16 +394,18 @@ void ecuio_recorder::take_frame(const uint8_t* body, size_t size)
     frame_out += ',';
     append_hex(frame_out, fb.flags);
     frame_out += ',';
-    static const char kHex[] = "0123456789ABCDEF";
-    for (uint16_t i = 0; i < fb.length; ++i) {
-        if (i > 0) {
-            frame_out += ' ';
-        }
-        const uint8_t b = body[at + i];
-        frame_out += kHex[b >> 4];
-        frame_out += kHex[b & 0x0F];
-    }
+    const bool cut = (fb.flags & ECUIO_FRAME_FLAG_ACCESS_CUT) != 0 &&
+                     ecuio_access_cut(body + at, fb.length);
+    append_bytes(frame_out, body + at, fb.length, cut);
     frame_out += '\n';
+    if (cut) {
+        char text[ECUIO_ACCESS_CUT_TEXT + 32];
+        const int n = std::snprintf(text, sizeof text, "0x%X %02X %02X: ",
+                                    fb.id, body[at], body[at + 1]);
+        ecuio_access_cut_text(body + at, fb.length, text + n,
+                              sizeof text - static_cast<size_t>(n));
+        event_line(fb.host_us, "cut", text);
+    }
     at += fb.length;
     frame_rows.fetch_add(1, std::memory_order_relaxed);
 

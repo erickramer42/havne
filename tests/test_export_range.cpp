@@ -133,24 +133,26 @@ TEST(FolderExportTest, AnEventsLogOfAnotherFormatIsLeftOut)
 }
 
 /* A value the classes don't catch, in any file, fails the whole copy:
- * the VIN typed as a marker's label, a calibration ID in signals.json,
- * a DID echoing the VIN across the frames of a segmented reply (which
- * no row holds whole, so the check reassembles it), a VIN's shape in a
- * message delivered whole (each message checked as bytes, not only the
- * rows as text) */
+ * the recording's VIN typed as a marker's label (another VIN's shape
+ * there is masked: test_export_mask.cpp), a calibration ID in
+ * signals.json, a DID echoing the VIN across the frames of a segmented
+ * reply (which no row holds whole, so the check reassembles it), a VIN's
+ * shape in a message delivered whole (each message checked as bytes, not
+ * only the rows as text) */
 TEST(FolderExportTest, AnIdentityValueInAnyFileFailsTheCopy)
 {
     {
-        SCOPED_TRACE("a VIN's shape as a marker's label");
+        SCOPED_TRACE("the recording's VIN as a marker's label");
         Folder f;
         whole_recording(f);
-        /* not the recording's VIN, which the check finds as its value */
         f.write("rec/markers.csv",
-                "host_us,label\n1500000,ZZZFAKE22M0000002\n");
+                std::string("host_us,label\n1500000,") + kVin + "\n");
         FolderExported e(f);
         EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
-        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
-        EXPECT_EQ(e.detail, "the check found a VIN-shaped token in the "
+        /* the VIN signal's value too, which the check meets first */
+        EXPECT_EQ(e.report.failed_class,
+                  ECUIO_EXPORT_LEFT_OUT_TEXT_VALUES + 1);
+        EXPECT_EQ(e.detail, "the check found a text signal's value in the "
                             "copy's markers.csv: nothing was written");
         EXPECT_EQ(e.report.files, 0u);
         EXPECT_FALSE(fs::exists(f.path / "copy"));

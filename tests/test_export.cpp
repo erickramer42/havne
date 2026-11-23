@@ -110,8 +110,9 @@ TEST(ScrubTest, AVinShapedTokenIsSeventeenOfTheAlphabetAlone)
 }
 
 /* Inside a longer run a window is a VIN only when its ninth character is
- * its check digit, and it has the shape: a letter, a digit, not all hex */
-TEST(ScrubTest, AVinInsideALongerRunIsFoundByItsCheckDigit)
+ * its check digit or its maker code is one vPIC lists, and it has the
+ * shape: a letter, a digit, not all hex */
+TEST(ScrubTest, AVinInsideALongerRunIsFoundByItsCheckDigitOrItsMaker)
 {
     ecuio_scrub::values none;
     auto vin = [&](const std::string& text) {
@@ -124,13 +125,27 @@ TEST(ScrubTest, AVinInsideALongerRunIsFoundByItsCheckDigit)
     EXPECT_TRUE(vin(std::string("B") + kVin + "C")); /* between */
     EXPECT_TRUE(vin(std::string("zz") + kVin));      /* after lower case */
     EXPECT_TRUE(vin(std::string("x ") + kVin + "2 y"));
-    /* ZZZFAKE12M0000001: its ninth isn't its check digit */
+    /* ZZZFAKE12M0000001: its ninth isn't its check digit, and vPIC lists
+     * no code of its windows (ZFA, Fiat, would start ZZZFAKE12M...345's) */
     EXPECT_FALSE(vin("ZZZFAKE12M00000012"));
     EXPECT_FALSE(vin("AZZZFAKE12M0000001"));
-    EXPECT_FALSE(vin("ZZZFAKE12M00000012345"));
-    /* windows whose ninth is their check digit, without the shape */
+    EXPECT_FALSE(vin("ZZZBAKE12M00000012345"));
+    /* no check digit, a code vPIC lists (WVW): a made-up VIN as one
+     * outside North America is written, at a run's start, end or middle */
+    EXPECT_TRUE(vin("WVWFAKE12M000000123"));
+    EXPECT_TRUE(vin("ABCWVWFAKE12M0000001"));
+    EXPECT_TRUE(vin("zzWVWFAKE12M0000001zz"));
+    EXPECT_TRUE(vin("1WVWFAKE12M00000012")); /* 1WV's window first */
+    /* a six-character code (a 9 third, positions 1-3 and 12-14): 1A9097
+     * listed, AB9...XX not */
+    EXPECT_TRUE(vin("zz1A9FAKE12MA097001zz"));
+    EXPECT_FALSE(vin("AB9FAKE12M0000001XX"));
+    /* windows whose ninth is their check digit, or of a listed code,
+     * without the shape (1A4 and 102 are listed) */
     EXPECT_FALSE(vin("1234567890123456789012345678901234567890"));
     EXPECT_FALSE(vin("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"));
+    EXPECT_FALSE(vin("1A4F0C9B2D7E3A5C8B1D"));
+    EXPECT_FALSE(vin("10200000000000000000"));
     /* the VIN alphabet broken inside the window */
     EXPECT_FALSE(vin("ZZZFAKE11M000000I1"));
     EXPECT_FALSE(vin("ZZZFAKE11m00000012"));
@@ -202,7 +217,8 @@ TEST(ExportTest, FramesAsTheyArrivedAreWrittenAsSocketCanHoldsThem)
                   "from messages an adapter delivered whole; left out: 0 "
                   "frames of identification replies, 0 of text signals' "
                   "messages, 0 segments of messages that couldn't be "
-                  "reassembled");
+                  "reassembled, 0 frames of messages holding a VIN-shaped "
+                  "token");
     ASSERT_EQ(e.pcap.packets.size(), 6u);
     const std::vector<Packet>& k = e.pcap.packets;
     for (size_t i = 0; i < k.size(); ++i) {

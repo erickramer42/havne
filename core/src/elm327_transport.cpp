@@ -402,6 +402,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     if (t == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    t->session = session; /* asks_nothing reads it in the setup */
     request_params req;
     ecuio_status_t st = read_uri(uri, query, t.get(), &req);
     if (st != ECUIO_OK) {

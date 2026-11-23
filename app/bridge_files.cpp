@@ -116,11 +116,13 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
     if (!written) {
         dropPickedDocument(url, removable);
     }
-    const qulonglong leftOut = csv.identification + csv.textValues;
+    const qulonglong leftOut =
+        csv.identification + csv.textValues + csv.vinShaped;
     emit logMessage(
         written ? QStringLiteral("Frames exported: %1 written, %2 left out "
-                                 "(identification and text signals), %3 "
-                                 "segments unattributed")
+                                 "(identification, text signals and "
+                                 "VIN-shaped messages), %3 segments "
+                                 "unattributed")
                       .arg(csv.written)
                       .arg(leftOut)
                       .arg(qulonglong{csv.unattributed})

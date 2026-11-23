@@ -16,6 +16,7 @@
 
 #include "base64.h"
 #include "guest_abi.h"
+#include "request_talk.h" /* the door's window bounds */
 #include "sha256.h"
 #include "tier2_ceiling.h"
 #include "wasm_check.h"
@@ -39,6 +40,9 @@ constexpr int64_t kKeyWindowMsMin = 50;
  * after its seed request would find the session gone */
 constexpr int64_t kKeyWindowMsMax = 4000;
 constexpr uint32_t kKeyWindowMsDefault = 1000;
+static_assert(kKeyWindowMsMin * 1000 == ECUIO_KEY_WINDOW_MIN_US &&
+                  kKeyWindowMsMax * 1000 == ECUIO_KEY_WINDOW_MAX_US,
+              "a window the loader takes is one the door takes");
 constexpr uint8_t kSecurityAccess = 0x27;
 /* The longest text MODULE_MAX_BYTES take as base64 */
 constexpr size_t kBase64Max = (ecuio_wasm::MODULE_MAX_BYTES + 2) / 3 * 4;

@@ -40,6 +40,16 @@ typedef struct ecuio_session ecuio_session_t;
                                                          state indicator: its
                                                          sender was error
                                                          passive (ADR-0054) */
+#define ECUIO_FRAME_FLAG_ACCESS_CUT       0x00000400u /* a recording's: a
+                                                         security access's
+                                                         27 or 67 on a bound
+                                                         channel, its bytes
+                                                         after the
+                                                         sub-function zeroes,
+                                                         their length and
+                                                         SHA-256 in events.log's
+                                                         cut line (ADR-0066
+                                                         section 5) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled
@@ -164,6 +174,11 @@ typedef enum {
     ECUIO_ERR_STREAM_ENDED = 21,      /* a pull queue's session has nothing
                                          more to give: a replay played its
                                          last frame (queue.h) */
+    ECUIO_ERR_TOO_SOON = 22,          /* not yet: a module's delay after a
+                                         refused key runs (its time left
+                                         given), or its identity is still
+                                         being read (no time given): ask
+                                         again later (ADR-0066) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;
@@ -492,6 +507,12 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_SUPPORT_EXTENDED           0x00000020u   /* the channel reads in
                                                           the extended session
                                                           (ADR-0060) */
+#define ECUIO_SUPPORT_CONVERSATION       0x00000040u   /* a plugin's code talks
+                                                          to the channel's
+                                                          module (ADR-0066),
+                                                          its report
+                                                          ecuio_session_get_
+                                                          channel_conversation's */
 
 /* session_state: a channel's session (ADR-0060), with ?session=03 */
 #define ECUIO_SESSION_STATE_NOT_ASKED    0u   /* no session asked: default */
@@ -569,9 +590,11 @@ typedef struct ecuio_channel_support {
     uint16_t pids_through;    /* the last PID the answered bitmaps cover,
                                  0x20 * (i + 1) for ranges' highest bit
                                  i; 0 with none answered */
-    /* The session (ADR-0060): what the URI asked, and what this channel
+    /* The session (ADR-0060): what was asked of this channel, and what it
      * reads in. 0 for both before its first report. */
-    uint8_t session_asked;    /* 0 none (the default), 3 (?session=03) */
+    uint8_t session_asked;    /* 0 none (the default), 3 (?session=03 for
+                                 every channel, or a conversation's
+                                 module for its own) */
     uint8_t session;          /* in force: 1 default, 3 extended */
     uint8_t session_state;    /* ECUIO_SESSION_STATE_* */
     uint8_t session_nrc;      /* REFUSED or ABANDONED: the code */
@@ -1170,6 +1193,157 @@ ecuio_status_t ecuio_session_set_focus_with(
     uint32_t count,
     uint32_t min_sweep_ms,
     uint32_t flags
+);
+
+/* A plugin's code talking to one channel's module (ADR-0066 section
+ * 2.4): bound at start behind the conversation tier's consent, each
+ * unlock attempt the caller's word. */
+
+/* ecuio_channel_conversation_t's state */
+#define ECUIO_CONVERSATION_NONE          0u   /* no plugin's code talks here */
+#define ECUIO_CONVERSATION_UNBEGUN       1u   /* bound, not yet begun */
+#define ECUIO_CONVERSATION_TALKING       2u   /* its begin took a session */
+#define ECUIO_CONVERSATION_DECLINED      3u   /* its begin declined: data only */
+#define ECUIO_CONVERSATION_FAULTED       4u   /* a fault ended it (fault says
+                                                 which); the rotation reads on */
+#define ECUIO_CONVERSATION_ENDED         5u   /* the session closed */
+
+/* ecuio_channel_conversation_t's flags */
+#define ECUIO_CONVERSATION_NOT_KEPT      0x00000001u   /* no security store:
+                                                          the counts are the
+                                                          session's alone */
+
+/* ecuio_channel_conversation_t's unlock: where the last word stands */
+#define ECUIO_UNLOCK_NONE                0u   /* no word given */
+#define ECUIO_UNLOCK_WAITING             1u   /* given, not yet taken */
+#define ECUIO_UNLOCK_SEED                2u   /* its seed is asked */
+#define ECUIO_UNLOCK_KEY                 3u   /* its key is out: its end
+                                                 counts */
+#define ECUIO_UNLOCK_UNLOCKED            4u   /* the level is open */
+#define ECUIO_UNLOCK_FAILED              5u   /* the key's end was no 67:
+                                                 counted, the delay runs */
+#define ECUIO_UNLOCK_ENDED               6u   /* ended before a key went:
+                                                 nothing counted (nrc a
+                                                 refused seed's code) */
+#define ECUIO_UNLOCK_LOST                7u   /* the session was lost: every
+                                                 level is locked again */
+#define ECUIO_UNLOCK_NO_LEVEL            8u   /* refused: no such level */
+#define ECUIO_UNLOCK_KEY_TOO_LONG        9u   /* refused: the key doesn't
+                                                 fit one request */
+#define ECUIO_UNLOCK_BUSY                10u  /* refused: an attempt ran */
+#define ECUIO_UNLOCK_DELAYED             11u  /* refused: the delay ran */
+#define ECUIO_UNLOCK_ALREADY_UNLOCKED    12u  /* refused: open already */
+#define ECUIO_UNLOCK_REFUSED             13u  /* refused: no seed may be
+                                                 asked (a functional
+                                                 channel's session, or the
+                                                 code not talking) */
+
+/* ecuio_channel_conversation_t's fault */
+#define ECUIO_CONVERSATION_FAULT_NONE        0u
+#define ECUIO_CONVERSATION_FAULT_BUDGET      1u   /* a call ran out of
+                                                     instructions */
+#define ECUIO_CONVERSATION_FAULT_TRAP        2u
+#define ECUIO_CONVERSATION_FAULT_BUFFER      3u   /* its exchange buffer left
+                                                     its memory */
+#define ECUIO_CONVERSATION_FAULT_BEGIN       4u   /* begin's answer */
+#define ECUIO_CONVERSATION_FAULT_LENGTH      5u   /* a request's length */
+#define ECUIO_CONVERSATION_FAULT_BOUND       6u   /* past the channel's bound */
+#define ECUIO_CONVERSATION_FAULT_SERVICE     7u   /* outside the guest's list */
+#define ECUIO_CONVERSATION_FAULT_UNDECLARED  8u   /* not in its manifest */
+#define ECUIO_CONVERSATION_FAULT_DOOR        9u   /* the engine's door refused */
+#define ECUIO_CONVERSATION_FAULT_KEY         10u  /* a key of the wrong length */
+#define ECUIO_CONVERSATION_FAULT_WINDOW      11u  /* the door refused the key
+                                                     inside its window */
+#define ECUIO_CONVERSATION_FAULT_CHANNEL     12u  /* no such channel */
+
+/* POD, 64 bytes, the same on every pointer width */
+typedef struct ecuio_channel_conversation {
+    uint32_t flags;          /* ECUIO_CONVERSATION_NOT_KEPT */
+    uint32_t rx_id;          /* the channel's receive ID: its module */
+    uint32_t generation;     /* moves with every change of the report;
+                                ecuio_session_security_unlock names it */
+    uint8_t state;           /* ECUIO_CONVERSATION_* */
+    uint8_t session;         /* what begin asked: 0 default, 3 extended */
+    uint8_t fault;           /* ECUIO_CONVERSATION_FAULT_* */
+    uint8_t fault_len;       /* of fault_bytes */
+    uint8_t fault_bytes[4];  /* a refused request's first bytes */
+    uint8_t level;           /* the last word's level */
+    uint8_t unlock;          /* ECUIO_UNLOCK_* */
+    uint8_t nrc;             /* a refused seed's or key's code; 0 none */
+    uint8_t reserved0;       /* zero */
+    uint32_t delay_left_ms;  /* level's delay left now; 0 for none */
+    uint32_t words_ended;    /* each word's end */
+    uint32_t requests;       /* the code's requests the door took */
+    uint32_t failed;         /* level's failed attempts since its last
+                                right key, as Havne counted them */
+    uint32_t reserved[6];    /* zero; ABI growth space */
+} ecuio_channel_conversation_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_channel_conversation_t) == 64, "ecuio_channel_conversation_t size is ABI");
+static_assert(offsetof(ecuio_channel_conversation_t, state) == 12, "conversation state offset is ABI");
+static_assert(offsetof(ecuio_channel_conversation_t, level) == 20, "conversation level offset is ABI");
+static_assert(offsetof(ecuio_channel_conversation_t, delay_left_ms) == 24, "conversation delay offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_channel_conversation_t) == 64, "ecuio_channel_conversation_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_conversation_t, state) == 12, "conversation state offset is ABI");
+_Static_assert(offsetof(ecuio_channel_conversation_t, level) == 20, "conversation level offset is ABI");
+_Static_assert(offsetof(ecuio_channel_conversation_t, delay_left_ms) == 24, "conversation delay offset is ABI");
+#endif
+
+/* Copies channel `channel`'s conversation report into *out: state NONE,
+ * and the rest zero but rx_id, where no plugin's code talks. NULL
+ * session or out: ECUIO_ERR_NULL_ARGUMENT; a channel at or past the
+ * info's module_count: ECUIO_ERR_INVALID_ARGUMENT, out untouched. Any
+ * thread until destroy; after close it keeps the last report. */
+ecuio_status_t ecuio_session_get_channel_conversation(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_channel_conversation_t* out
+);
+
+/* Names the security store (ADR-0066 section 2.3) the session's
+ * conversations count their attempts in, before start. label is the
+ * car's name the host gives: the store's key for a module only when the
+ * module answers no serial (22 F18C) and the car no VIN, trimmed and
+ * case folded (NULL or "" for none). The file is read here: one that
+ * doesn't read is ECUIO_ERR_LOAD_FAILED with words naming no path. NULL
+ * session or path: ECUIO_ERR_NULL_ARGUMENT; after start:
+ * ECUIO_ERR_INVALID_ARGUMENT. With no store the counts live in the
+ * session and the report says ECUIO_CONVERSATION_NOT_KEPT. A label can
+ * be found again from the file by trying names, a VIN by trying VINs:
+ * the store stays on this machine, never in a report. */
+ecuio_status_t ecuio_session_security_store(
+    ecuio_session_t* session,
+    const char* path,
+    const char* label
+);
+
+/* The caller's word for one attempt at security access level `level`
+ * on channel `channel`, against the report it was shown (`generation`,
+ * else ECUIO_ERR_REPORT_CHANGED): the attempt's mark is saved in the
+ * store, then the worker asks the seed, the plugin's code computes the
+ * key and core sends it once. Never asked again by core. Any thread.
+ * Refused, with nothing sent and nothing counted:
+ *   ECUIO_ERR_INVALID_ARGUMENT with words: no code talks on the channel,
+ *     it isn't talking, no such level, a key that doesn't fit one
+ *     request on the adapter, a functional channel's session, an attempt
+ *     under way, or no name for the module in the store;
+ *   ECUIO_ERR_TOO_SOON: the level's delay runs, *out_wait_ms its time
+ *     left (above 0); or the module's identity is still being read,
+ *     *out_wait_ms 0;
+ *   ECUIO_ERR_LOAD_FAILED: the store can't save the mark, in its words;
+ *   ECUIO_ERR_SESSION_CLOSED, ECUIO_ERR_OUT_OF_MEMORY.
+ * out_wait_ms may be NULL. How the attempt ended is the report's. A
+ * close after the seed was asked and before the key's answer leaves the
+ * mark in the store: the next load counts it as a failed attempt, so a
+ * key the ECU may have judged is never left uncounted. */
+ecuio_status_t ecuio_session_security_unlock(
+    ecuio_session_t* session,
+    uint32_t channel,
+    uint8_t level,
+    uint32_t generation,
+    uint32_t* out_wait_ms
 );
 
 #ifdef __cplusplus

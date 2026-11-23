@@ -3,6 +3,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "conversation_bind.h"
 #include "session.h"
 #include "core_callbacks.h"
 #include "condition_eval.h"
@@ -264,15 +265,14 @@ void ecuio_session_dispatch_callbacks(
                                 session->decoder.values.data(), count)
             : 0;
     if (recorder != nullptr) {
-        if (now == 0) {
-            now = ecuio_record_clock_us(); /* attached since the first look */
-        }
+        now = now != 0 ? now : ecuio_record_clock_us(); /* attached since */
         const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
         const uint64_t host_us = now > zero ? now - zero : 0;
         ecuio_recorder_put_frame(
             recorder, host_us, frame, session->decoder.values.data(), count,
             changed > 0 ? conditions->events.data() : nullptr, changed,
-            conditions != nullptr ? conditions->generation : 0);
+            conditions != nullptr ? conditions->generation : 0,
+            ecuio_session_cuts_access(session, frame));
         ecuio_record_unpin(*link);
     }
     if (want_values && count > 0) {

@@ -6,13 +6,14 @@
 // emulator listens (cli/elm327_listener.h), 127.0.0.1 unless the user
 // names another IPv4 address (a listener the LAN can reach is the
 // user's choice), port 0 for one the system picks. Lines: `elm327`
-// {uri, listen} once listening, `client` {event connected|closed|
-// refused, peer}.
+// {uri, listen} once listening (the URI as the sim line shows it),
+// `client` {event connected|closed|refused, peer}.
 
 #ifndef HAVNE_CLI_ELM327_LINES_H
 #define HAVNE_CLI_ELM327_LINES_H
 
 #include "jsonl.h"
+#include "sim_line.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -106,12 +107,14 @@ inline std::string address_text(uint32_t ip, uint16_t port)
     return b;
 }
 
-/* {"type":"elm327", uri, listen}: the emulator is listening */
+/* {"type":"elm327", uri, listen}: the emulator is listening, the URI
+ * as sim_shown_uri gives it */
 inline void elm327_line(Line& l, const char* uri, const std::string& listen)
 {
     l.raw("{\"type\":\"elm327\"");
     l.key("uri");
-    l.string(uri, SIZE_MAX, 256);
+    const std::string shown = sim_shown_uri(uri);
+    l.string(shown.c_str(), SIZE_MAX, 256);
     l.key("listen");
     l.string(listen.c_str(), SIZE_MAX, 32);
     l.ch('}');

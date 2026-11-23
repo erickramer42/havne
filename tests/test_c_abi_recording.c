@@ -138,6 +138,7 @@ int c_abi_recording(void)
         offsetof(ecuio_recording_info_t, condition_events) != 56 ||
         offsetof(ecuio_recording_info_t, reserved) != 64 ||
         ECUIO_RECORDING_INFO_CONDITIONS_CUT != 0x4u ||
+        ECUIO_RECORDING_INFO_CONVERSATION != 0x8u ||
         ECUIO_RECORDING_MAX_CONDITION_EVENTS != 1048576u ||
         sizeof(ecuio_recording_conditions_t) != 128 ||
         offsetof(ecuio_recording_conditions_t, lines_skipped) != 4 ||

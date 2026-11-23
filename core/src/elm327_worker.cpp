@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_worker.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
-// Testing: HARNESS: Elm327SessionTest, Elm327TalkTest, Elm327TurnsTest
-//          (test_elm327); BENCH
+// Testing: HARNESS: Elm327SessionTest, Elm327TalkTest, Elm327TurnsTest,
+//          Elm327ConversationTest (test_elm327); BENCH
 //
 // The worker and a request's exchange: the I/O under every command,
 // the header switch, a reply's lines into frames, a cut reply's hold.
@@ -10,10 +10,13 @@
 #include "elm327_transport.h"
 
 #include "request_setup.h"
+#include "request_conversation.h"
 #include "request_turns.h"
 #include "precise_wait.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 
 namespace ecuio_elm327 {
@@ -70,15 +73,71 @@ bool logging(const transport* t)
     return elm327_log_is_open(t->log) && (!t->in_ask || t->log.requests);
 }
 
+/* A hex digit's value, or -1 */
+int hex_value(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+/* Whether sent is a security access's command, and its form for the
+ * log: "27NN" and its key's length and SHA-256 */
+void cut_command(transport* t, const char* sent)
+{
+    t->cutting = sent[0] == '2' && sent[1] == '7';
+    if (!t->cutting) {
+        return;
+    }
+    uint8_t pdu[ELM327_CMD_MAX / 2] = {};
+    size_t n = 0;
+    for (; n < sizeof pdu; ++n) {
+        const int hi = hex_value(sent[2 * n]);
+        const int lo = hi < 0 ? -1 : hex_value(sent[2 * n + 1]);
+        if (lo < 0) {
+            break;
+        }
+        pdu[n] = static_cast<uint8_t>(hi << 4 | lo);
+    }
+    const int k = std::snprintf(t->cut_sent, sizeof t->cut_sent, "%.4s", sent);
+    if (ecuio_access_cut(pdu, n)) {
+        std::snprintf(t->cut_sent + k, sizeof t->cut_sent - k, " (");
+        ecuio_access_cut_text(pdu, n, t->cut_sent + k + 2,
+                              sizeof t->cut_sent - k - 3);
+        const size_t end = strlen(t->cut_sent);
+        std::snprintf(t->cut_sent + end, sizeof t->cut_sent - end, ")");
+    }
+}
+
 /* A line read, as the log shows it: "<" for a command's, "unasked:"
- * when no command was out (sent nullptr), which always goes in */
+ * when no command was out (sent nullptr), which always goes in; a
+ * security access's line as its length and SHA-256 alone */
 void log_line(transport* t, const char* sent, const elm327_reader& r)
 {
     if (!elm327_log_is_open(t->log) || (sent != nullptr && !logging(t))) {
         return;
     }
     char text[ELM327_LINE_MAX * 4 + 1];
-    elm327_log_text(r.line, r.len, text, sizeof(text));
+    if (t->cutting) {
+        ecuio_sha256::hasher h;
+        h.add(r.line, r.len);
+        uint8_t d[32];
+        h.finish(d);
+        int n = std::snprintf(text, sizeof text,
+                              "(a security access's line, cut: %u "
+                              "characters, SHA-256 ",
+                              static_cast<unsigned>(r.len));
+        for (uint8_t b : d) {
+            n += std::snprintf(text + n, sizeof text - n, "%02x", b);
+        }
+        std::snprintf(text + n, sizeof text - n, ")");
+    } else {
+        elm327_log_text(r.line, r.len, text, sizeof(text));
+    }
     elm327_log_write(t->log, "%s %s%s", sent == nullptr ? "unasked:" : "<",
                      text,
                      r.overflow ? " (cut: longer than a line holds)" : "");
@@ -100,7 +159,7 @@ void log_prompt(transport* t, const char* sent)
             std::chrono::steady_clock::now() - t->sent_at)
             .count());
     elm327_log_write(t->log, "prompt %lld.%lld ms after %s", us / 1000,
-                     (us % 1000) / 100, sent);
+                     (us % 1000) / 100, t->cutting ? t->cut_sent : sent);
 }
 
 /* What arrived while no command was out: nothing should have, so a line
@@ -205,6 +264,8 @@ void take_frame(transport* t, const elm327_can_line& f, reply_seen& seen,
         if (to_engine) {
             (void)ecuio_engine_on_frame(&t->engine, c, frame.data,
                                         frame.data_length, at, nullptr);
+            ecuio_conversations_frame(t->session, &t->engine, c, frame.data,
+                                      frame.data_length);
         }
         seen.matched = true;
         return;
@@ -528,6 +589,8 @@ elm327_io idle_pass(transport* t, worker_state& w, int64_t now,
         /* what's due is a held channel's: until its hold ends */
         next_us = held_left;
     }
+    next_us =
+        (std::min)(next_us, ecuio_conversations_next_us(t->session, &e, now));
     const bool asking = next_us != INT64_MAX;
     uint32_t wait = ELM327_IDLE_READ_MS;
     if (asking) {
@@ -605,6 +668,7 @@ void serve_session(transport* t, worker_state& w)
     ecuio_take_clear_requests(t->session, &e, w.clear_seen);
     ecuio_take_test_talk(t->session, &e, now_us(t));
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    ecuio_step_conversations(t->session, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->rx_ids[c], w.published[c]);
         ecuio_publish_identity(t->session, e, c, t->rx_ids[c],
@@ -648,6 +712,7 @@ void elm327_worker(transport* t)
     }
     /* A focus set before start applies from the first request */
     ecuio_take_focus(t->session, &e, w.focus_seen);
+    ecuio_conversations_start(t->session, &e);
 
     while (!t->stop_requested.load()) {
         const int64_t now = expire_waits(t, w);
@@ -670,6 +735,7 @@ void elm327_worker(transport* t)
             w.h.backoff_ms = link_backoff_next(w.h.backoff_ms);
         }
     }
+    ecuio_conversations_end(t->session, &e);
     leave_sessions(t);
     ecuio_publish_timing(t->session, e, &t->isotp, now_us(t), w.timing_at,
                          true);
