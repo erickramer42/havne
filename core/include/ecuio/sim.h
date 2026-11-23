@@ -25,6 +25,9 @@ extern "C" {
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
  *          [&sessions=0|1]
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
+ *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
+ *          [&route=<class or service>:<outcome>[@<reply ID>][,...]]
+ *          [&gwopt=<knob>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
@@ -88,6 +91,31 @@ extern "C" {
  * bus's rate (1-1000 kbit/s), each frame 111 bits (stuffing left out): a
  * reply's frames wait for it, while the sim's Flow Control, 7F 78 and
  * 7F 21 go at once and hold it after; a bus's sim only.
+ * gateway, mock:// only: a gateway node of its own, on the 11-bit IDs
+ * given or, with 1, on 0x6F0 answering as 0x6F8 (made up, like every
+ * value of the simulated car), neither one any other node's. It answers
+ * 10 01, 10 03, 3E 00 and 3E 80 on its own request ID, every other
+ * service 7F <service> 11, and no functional request. behind: the
+ * modules behind it by their reply IDs (modules=2's or a profile's, at
+ * most 32, never the engine ECU); the gateway judges each request for
+ * one before the module hears it, so a request it withholds moves
+ * none of the module's counts, draws or busy time. route: what it does
+ * with a request by its service byte's class (reads 01, 02, 03, 06, 07,
+ * 09, 0A, 19, 21, 22, 23, 24; session 10, 27, 28, 3E, 85; write 04, 08,
+ * 14, 2C, 2E, 2F, 31, 3D; prog 11, 34, 35, 36, 37, 38; other the rest)
+ * or by one service byte (01-BF): forward (the default for anything not
+ * named), refuse (7F <service> 22 on the module's reply ID, or the code
+ * .<NRC> names, 10-FE but 78) or silent. @<reply ID> aims an entry at one
+ * module behind it; the most specific entry wins: a service for the
+ * module, a class for the module, a service, a class. A later entry for
+ * the same aim replaces the earlier; a second route key adds; at most
+ * 64 entries besides the classes. A refusal is the gateway's reply,
+ * flagged ECUIO_SIM_REPLY_GATEWAY: its faults, timing and busy time
+ * (each aimed at its reply ID), not the module's. A functional request
+ * reaches a module whose entry forwards; one withheld is silent, unless
+ * gwopt=aloud, which refuses it for each module, keeping ISO 14229-1's
+ * suppressed codes (11, 12, 31, 7E, 7F) silent unless gwopt=unsuppressed
+ * too. behind, route and gwopt need gateway.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -98,10 +126,10 @@ typedef struct ecuio_sim ecuio_sim_t;
 #define ECUIO_SIM_FAILED  0x00000001u   /* the bus failed (the interface
                                            went down or away): no longer
                                            answering */
-#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8 (or,
-                                           with modules=2, 0x7E9), a reply
-                                           ID: silent from then on,
-                                           requests only counted */
+#define ECUIO_SIM_YIELDED 0x00000002u   /* another node sent on 0x7E8 (or
+                                           another of its nodes' reply IDs,
+                                           the gateway's too): silent from
+                                           then on, requests only counted */
 
 /* ecuio_sim_create_with's options */
 #define ECUIO_SIM_ALLOW_DESK_BUS 0x00000001u /* a real CAN controller is
@@ -163,9 +191,11 @@ _Static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
  *   engine ECU's pair but not the pair itself, ECUIO_ERR_INVALID_ARGUMENT;
  *   both on every platform, after the URI and before NO_TRANSPORT.
  * - faults=, delay=, fc= or cf= aiming at a reply ID none of the sim's
- *   ECUs answers on: ECUIO_ERR_BAD_URI, the detail naming the IDs they
- *   do; after the profile, whose modules it needs, and before
- *   NO_TRANSPORT.
+ *   ECUs (the gateway's included) answers on, behind= naming a reply ID
+ *   no module answers on, or gateway= meeting a module's ID:
+ *   ECUIO_ERR_BAD_URI, the detail naming the IDs there are; after the
+ *   profile, whose modules it needs, and before NO_TRANSPORT. A gateway's
+ *   key on replay:// is BAD_URI with the URI.
  * - Whatever the bus, a frame another node sends on 0x7E8 silences it
  *   for good (ECUIO_SIM_YIELDED): an ECU already answers there.
  */
@@ -249,6 +279,10 @@ ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
                                                     Consecutive Frame comes
                                                     160 ms after the one
                                                     before */
+#define ECUIO_SIM_REPLY_GATEWAY      0x00000010u /* the gateway wrote it for
+                                                    the module behind it
+                                                    whose reply ID it
+                                                    carries */
 
 /* One ECU's reply to a request. POD, 4136 bytes, no hidden padding;
  * pinned by the assertions below. */

@@ -687,7 +687,7 @@ TEST(SimEcuTest, SessionControlEntersKeepsAndLeaves)
                           std::initializer_list<uint8_t> req) {
         const std::vector<uint8_t> q(req);
         const uint32_t n = ecuio_sim_session_answer(
-            s, has, t, q.data(), static_cast<uint32_t>(q.size()), out,
+            s, has, has, t, q.data(), static_cast<uint32_t>(q.size()), out,
             &handled);
         return std::vector<uint8_t>(out, out + n);
     };

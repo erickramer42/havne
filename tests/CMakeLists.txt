@@ -177,7 +177,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_request_quiet_reports.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
-    test_sim_timing.cpp
+    test_sim_timing.cpp test_sim_gateway.cpp
     test_scan_retry.cpp test_security_access.cpp)
 
 target_include_directories(test_obd2 PRIVATE

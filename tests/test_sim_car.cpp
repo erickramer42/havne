@@ -446,4 +446,17 @@ TEST(SimTest, AFaultsAimIsJudgedAfterTheProfileAndBeforeTheInterface)
               std::string::npos)
         << ecuio_last_error_detail();
     EXPECT_EQ(sim, nullptr);
+
+    /* behind= is judged there too, beside the aims */
+    EXPECT_EQ(ecuio_sim_create("mock://sim?profile=sim-car-none&gateway=1&"
+                               "behind=7EA",
+                               "nosuchcan9", &sim),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_EQ(
+        ecuio_sim_create("mock://sim?gateway=1&behind=7EA", "nosuchcan9", &sim),
+        ECUIO_ERR_BAD_URI);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("is no module"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(sim, nullptr);
 }

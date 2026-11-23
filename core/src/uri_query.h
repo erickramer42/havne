@@ -14,9 +14,9 @@
 #include <cstddef>
 #include <cstring>
 
-/* The most segments a query may have: every key of the busiest scheme,
- * and a repeat of most of them. */
-constexpr size_t ECUIO_URI_MAX_PARAMS = 16;
+/* The most segments a query may have: every key of the busiest scheme
+ * (the simulated car's mock://), and a repeat of most of them. */
+constexpr size_t ECUIO_URI_MAX_PARAMS = 32;
 
 namespace ecuio_uri {
 
