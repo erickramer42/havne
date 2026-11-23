@@ -1748,14 +1748,15 @@ jobs:
           fi
           echo "Havne still running after 15 s, pid $PID"
           if grep -q "Created QRhi" smoke/stderr.log; then echo "The scene graph initialized"; else echo "::warning::no QRhi line in stderr"; fi
-          # The app can't connect at start: click Home's mock://demo row
-          # and Connect (a 1024x768 display puts the window at its
-          # top-left, as the 15 s shot shows). Mouse events need the
-          # runner's permission, so a refusal is a warning and the
-          # shots below say what happened
+          # The app can't connect at start: click Home's mock://demo row,
+          # then Connect, which moves up once a row is picked (the
+          # runner's 1024x768 display puts the window at its top-left, as
+          # the 15 s shot shows). Mouse events need the runner's
+          # permission, so a refusal is a warning and the shots below say
+          # what happened
           osascript -l JavaScript smoke/click.js 600 335 || echo "::warning::the first click failed"
           sleep 1
-          osascript -l JavaScript smoke/click.js 822 407 || echo "::warning::the second click failed"
+          osascript -l JavaScript smoke/click.js 822 382 || echo "::warning::the second click failed"
           sleep 10
           screencapture -x smoke/connected-27s.png || true
           sleep 5
