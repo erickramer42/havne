@@ -1,0 +1,183 @@
+name: iOS device build
+
+# The unsigned iOS arm64 .ipa (docs/ios.md), built by one workflow for
+# both callers: ci.yml's ios-build (a build check on every run, the .ipa a
+# 14-day artifact) and release.yml's ios job (the release's download,
+# named by `file`). The file carries no provisioning profile and no
+# device's ID: the tester's sideloading tool signs it with their own
+# Apple ID.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build, empty for the caller's
+        type: string
+        default: ''
+      version:
+        description: The version the bundle must report, empty for project()'s
+        type: string
+        default: ''
+      file:
+        description: The .ipa's file name
+        type: string
+        default: havne-ios-unsigned.ipa
+      artifact:
+        description: The artifact the .ipa is uploaded as
+        type: string
+        default: havne-ios-arm64-unsigned
+      retention_days:
+        description: Days the artifact is kept
+        type: number
+        default: 14
+      save_cache:
+        description: Save the iOS Qt kit to the Actions cache when it missed (main's CI only)
+        type: boolean
+        default: false
+      components:
+        description: Also write the SBOM's component list beside the .ipa (the release)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      # The iOS kit is the largest cache entry (about 3.5 GiB): a copy
+      # per branch takes the repository past the Actions cache's 10 GB
+      # and evicts the other kits, so only main saves it; every ref
+      # restores it (a restore keeps main's entry recently used). The key
+      # is ours, not install-qt-action's own (that one holds the runner's
+      # kernel version, so a runner update would miss on every branch): it
+      # names what decides the install's bytes, so change it with the
+      # version, target or aqtinstall.
+      - name: Restore the iOS Qt kit from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-2
+
+      # install-qt-action installs into <dir>/Qt, so dir is the workspace and
+      # the kit lands in the cached folder
+      - name: Install Qt 6.12.0 (ios + macOS host)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
+        with:
+          cache: false
+          dir: ${{ github.workspace }}
+          version: '6.12.0'
+          host: 'mac'
+          target: 'ios'
+          arch: 'ios'
+          extra: '--autodesktop'
+
+      - name: Save the iOS Qt kit to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && inputs.save_cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, for the restored
+      # kit: the build below needs QT_ROOT_DIR and QT_HOST_PATH
+      - name: Point the build at the restored kit
+        if: steps.qt-cache.outputs.cache-hit == 'true'
+        run: |
+          kit="${{ github.workspace }}/Qt/6.12.0"
+          {
+            echo "QT_ROOT_DIR=$kit/ios"
+            echo "QT_HOST_PATH=$kit/macos"
+            echo "QT_PLUGIN_PATH=$kit/ios/plugins"
+            echo "QML2_IMPORT_PATH=$kit/ios/qml"
+          } >> "$GITHUB_ENV"
+          echo "$kit/ios/bin" >> "$GITHUB_PATH"
+
+      - name: Check the kit is there
+        run: |
+          test -x "$QT_ROOT_DIR/bin/qt-cmake" || { echo "::error::no qt-cmake under $QT_ROOT_DIR"; exit 1; }
+          test -d "$QT_HOST_PATH/bin" || { echo "::error::no host Qt at $QT_HOST_PATH"; exit 1; }
+
+      # qt-cmake applies Qt's iOS toolchain and its minimum deployment
+      # target (iOS 18 for Qt 6.12), so neither is set by hand.
+      - name: Build for device (no code signing)
+        run: |
+          ls "$(dirname "$QT_ROOT_DIR")"
+          "$QT_ROOT_DIR/bin/qt-cmake" -B build -G Xcode \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_OSX_ARCHITECTURES=arm64
+          cmake --build build --config Release -- CODE_SIGNING_ALLOWED=NO
+
+      # The device build as an unsigned .ipa, for sideloading
+      # (docs/ios.md). Fails if the bundle lacks app/ios/Info.plist.in's
+      # keys, its versions aren't project()'s (the release's tag, without
+      # its -rcN), or it holds a signature or a profile.
+      - name: Package unsigned .ipa
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          IPA: ${{ inputs.file }}
+        run: |
+          app=$(find build -type d -name Havne.app -path '*Release-iphoneos*' | head -n 1)
+          fail() { echo "::error::$1"; exit 1; }
+          [ -n "$app" ] || fail "no Release-iphoneos/Havne.app under build/"
+          key() { plutil -extract "$1" raw -o - "$app/Info.plist" 2>/dev/null; }
+          [ "$(key CFBundleIdentifier)" = io.github.erickramer42.havne ] ||
+            fail "CFBundleIdentifier is '$(key CFBundleIdentifier)'"
+          [ -n "$(key NSLocalNetworkUsageDescription)" ] ||
+            fail "no NSLocalNetworkUsageDescription in Info.plist"
+          [ "$(key UIFileSharingEnabled)" = true ] ||
+            fail "UIFileSharingEnabled isn't true in Info.plist"
+          [ "$(key LSSupportsOpeningDocumentsInPlace)" = true ] ||
+            fail "LSSupportsOpeningDocumentsInPlace isn't true in Info.plist"
+          VERSION=$(sed -n '/^project(Havne/,/)/s/^ *VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          [ -n "$VERSION" ] || fail "no VERSION in project(Havne ...)"
+          want=${EXPECTED_VERSION:-$VERSION}
+          want=${want%%-rc*}
+          [ "$want" = "$VERSION" ] || fail "expected version $want, but project() says $VERSION"
+          for k in CFBundleShortVersionString CFBundleVersion; do
+            [ "$(key $k)" = "$want" ] || fail "$k is '$(key $k)', not $want"
+          done
+          [ ! -e "$app/embedded.mobileprovision" ] || fail "a provisioning profile in the bundle"
+          [ ! -e "$app/_CodeSignature" ] || fail "a signature in the bundle"
+          echo "Havne $(key CFBundleShortVersionString) ($(key CFBundleVersion)), iOS $(key MinimumOSVersion) or later"
+          mkdir -p ipa/Payload
+          ditto "$app" ipa/Payload/Havne.app
+          (cd ipa && zip -qry "../$IPA" Payload)
+          shasum -a 256 "$IPA"
+
+      # Qt is linked statically into the executable, so there is no
+      # library file to list
+      - name: The SBOM's component list
+        if: inputs.components
+        env:
+          IPA: ${{ inputs.file }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          ipa = os.environ["IPA"]
+          listing = {"download": ipa, "purpose": "APPLICATION", "components": [
+              {"name": "Qt", "version": "6.12.0",
+               "supplier": "Organization: The Qt Company",
+               "license": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+               "purl": "pkg:generic/qt@6.12.0",
+               "comment": "linked statically into the executable"}]}
+          with open(ipa + ".components.json", "w") as f:
+              json.dump(listing, f, indent=2)
+          PY
+
+      - name: Upload unsigned .ipa
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.artifact }}
+          path: |
+            ${{ inputs.file }}
+            ${{ inputs.file }}.components.json
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

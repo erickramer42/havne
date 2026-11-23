@@ -354,6 +354,14 @@ TEST(SimGatewayTest, TheSecurityAccessKeys)
     EXPECT_EQ(parsed(kBase + "&sa=key&sa=never").gateway.never, true)
         << "a later sa= replaces the earlier";
     EXPECT_EQ(parsed(kBase + "&sa=never&sa=key").gateway.never, false);
+    // never:<ms>'s delay is that sa='s own; sa_delay='s outlives a later sa=
+    const ecuio_sim_config again = parsed(kBase + "&sa=never:5000&sa=key");
+    EXPECT_FALSE(again.gateway.delay_given);
+    EXPECT_EQ(again.gateway.delay_us, 0);
+    const ecuio_sim_config kept =
+        parsed(kBase + "&sa=never:5000&sa_delay=7&sa=key");
+    EXPECT_TRUE(kept.gateway.delay_given);
+    EXPECT_EQ(kept.gateway.delay_us, 7LL * 1000);
 
     std::string nine = kBase + "&sa=key:";
     for (int i = 0; i < 9; ++i) {

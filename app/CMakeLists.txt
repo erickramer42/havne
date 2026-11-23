@@ -334,6 +334,12 @@ if(APPLE)
         MACOSX_BUNDLE_GUI_IDENTIFIER io.github.erickramer42.havne
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${Havne_VERSION}"
         MACOSX_BUNDLE_BUNDLE_VERSION "${Havne_VERSION}")
+    # macOS: Qt's template plus the local network's prompt (iOS's
+    # plist is set below)
+    if(NOT IOS)
+        set_target_properties(havne PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in")
+    endif()
 endif()
 # The app icon (packaging/icons/make_icons.py writes both). Android: an
 # adaptive launcher icon, vector drawables in the package source's res/;

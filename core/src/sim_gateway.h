@@ -128,6 +128,7 @@ struct ecuio_sim_gateway_config {
     ecuio_sim_keying keying;
     bool never = false;
     bool delay_given = false;
+    bool delay_key = false; /* the delay is sa_delay='s, not sa=never:'s */
     int64_t delay_us = 0;
     /* faults=relock's period, the gateway's own (plan_sim), 0 for none */
     uint32_t relock = 0;
@@ -283,7 +284,8 @@ inline bool route_item(const char* s, size_t n, ecuio_sim_route_entry* e,
 } // namespace ecuio_sim_gateway_detail
 
 /* gateway=<request ID>:<reply ID> (11-bit hex) or gateway=1 (6F0:6F8);
- * false with why. Neither ID 0x7DF, nor the two the same. */
+ * false with why. Neither ID 0 (a route entry's "the whole gateway") or
+ * 0x7DF, nor the two the same. */
 inline bool ecuio_sim_parse_gateway(const char* text, size_t len,
                                     ecuio_sim_gateway_config* g, char* why,
                                     size_t why_cap)
@@ -300,7 +302,8 @@ inline bool ecuio_sim_parse_gateway(const char* text, size_t len,
     const size_t at =
         colon != nullptr ? static_cast<size_t>(colon - text) : len;
     if (colon == nullptr || !id_of(text, at, &g->request_id) ||
-        !id_of(text + at + 1, len - at - 1, &g->reply_id)) {
+        !id_of(text + at + 1, len - at - 1, &g->reply_id) ||
+        g->request_id == 0 || g->reply_id == 0) {
         std::snprintf(why, why_cap,
                       "gateway: <request ID>:<reply ID>, each 11-bit hex "
                       "(gateway=6F0:6F8), or 1 for 6F0:6F8");
@@ -495,6 +498,10 @@ inline bool ecuio_sim_parse_sa(const char* text, size_t len,
     g->sa_given = true;
     g->never = false;
     g->keying = ecuio_sim_keying{};
+    if (!g->delay_key) {
+        g->delay_given = false; /* an earlier never:<ms>'s delay is its own */
+        g->delay_us = 0;
+    }
     ecuio_sim_keying& k = g->keying;
     const auto starts = [&](const char* word) {
         const size_t n = std::strlen(word);
@@ -508,6 +515,7 @@ inline bool ecuio_sim_parse_sa(const char* text, size_t len,
     } else if (starts("never:")) {
         g->never = true;
         g->delay_given = true;
+        g->delay_key = false;
         ok = delay_of(text + 6, len - 6, &g->delay_us);
     } else if (starts("key:")) {
         k.kind = ecuio_sim_keying_kind::pairs;
@@ -537,6 +545,7 @@ inline bool ecuio_sim_parse_sa_delay(const char* text, size_t len,
                                      size_t why_cap)
 {
     g->delay_given = true;
+    g->delay_key = true;
     if (!ecuio_sim_gateway_detail::delay_of(text, len, &g->delay_us)) {
         std::snprintf(why, why_cap,
                       "sa_delay: the lockout's delay in ms, 1 to %lld",

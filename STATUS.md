@@ -17,7 +17,7 @@ This file is the present state: what works, how far it's verified, what's planne
 | Conditions and alerts | Condition files judged on the frames' own time; a banner, colored values and on Android a tone; armed recording that writes a window when a condition fires | [condition-files.md](docs/condition-files.md), [ADR-0063](docs/adr/0063-conditions.md) |
 | Recordings | Every frame and value, with the link's health and reply timing; a viewer with chart panes, cursors, statistics, pulls and cruises, and comparison; CSV, pcapng and folder exports, scrubbed for sharing; CSV and candump imports; a health report | [ADR-0049](docs/adr/0049-recordings-in-core.md), [ADR-0054](docs/adr/0054-exports-and-imports.md) |
 | `havne-cli` and Python | Every session, recording, export, condition and plugin command the app has, as JSON lines; Python's `havne` package over the same C ABI, as wheels for Windows, Linux and macOS | [ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md) |
-| Platforms | Windows (zip), Linux (AppImage, `.deb` and tarball for x86_64 and 64-bit ARM), Android 12+ (APK); macOS builds in CI; iOS runs on the Simulator and has launched on one iPhone (sideloaded) | [linux.md](docs/linux.md), [docs/development.md](docs/development.md) |
+| Platforms | Windows (zip), Linux (AppImage, `.deb` and tarball for x86_64 and 64-bit ARM), Android 12+ (APK); macOS on Apple silicon (a zip; launched in CI, unvalidated on a person's Mac); iOS (an unsigned `.ipa` for sideloading; runs on the Simulator and has launched on one iPhone) | [linux.md](docs/linux.md), [macos.md](docs/macos.md), [ios.md](docs/ios.md), [docs/development.md](docs/development.md) |
 
 **Verified:** 3491 tests on Windows and the cross-arch subset (127) at v0.9.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
 
@@ -47,8 +47,10 @@ an issue is resolved it is removed, and its number is not reused.
    cross-builds an unsigned iOS arm64 device build and, on request,
    launches the app on the Simulator and screenshots it
    (`ios-simulator-smoke`); it has launched on one device (a tester's
-   iPhone, sideloaded; no adapter, so no session was tried). Each run's
-   `havne-ios-arm64-unsigned` artifact can be sideloaded with a
+   iPhone, sideloaded; no adapter, so no session was tried:
+   [2026-11-17-ios](docs/bench-sessions/2026-11-17-ios.md)). Each
+   release's `havne-X.Y.Z-ios-arm64-unsigned.ipa`, and each CI run's
+   `havne-ios-arm64-unsigned` artifact, can be sideloaded with a
    tester's own Apple ID ([docs/ios.md](docs/ios.md)). The Android app has run on one phone (Android 16) and one
    car, with the MX+ over classic Bluetooth, in the background and with
    the screen off ([2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
@@ -134,6 +136,15 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
+- **#50. The macOS app is unvalidated.** CI builds it, signs it ad hoc
+   and launches it on a runner (`macos-smoke`: still running after
+   30 s, `mock://demo` connected by a synthetic click, with
+   screenshots), and each release carries it as a zip
+   ([docs/macos.md](docs/macos.md)); no person has run it on a Mac.
+   It is not notarized, so the first open goes through Privacy &
+   Security > Open Anyway. Intel Macs are not built for. A USB serial
+   or WiFi ELM327 is untried on macOS
+   ([BENCH prep #41](docs/bench-sessions/bench-prep.md)).
 
 ## Roadmap
 
@@ -198,14 +209,24 @@ The conversation tier is v0.9.1's; v0.9.0 ships what is built.
   - the safety gates, then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
 - **The release gate:** the consent gate is in; until then a conversation-tier plugin is data only, pinned by a test.
 
-### Waiting on a tester: an iPhone download
+### The iPhone and Mac downloads
 
-No version until a tester has run CI's unsigned `.ipa` on an iPhone
-and the run is filed as a session sheet. Then the release workflow
-builds and publishes `havne-X.Y.Z-ios-arm64-unsigned.ipa` with the
-other downloads (provenance, the SBOM and the checksums), the release
-checks read its version and that it carries no signature, and the
-notes' Try it points at [docs/ios.md](docs/ios.md).
+Each release from v0.9.1 publishes `havne-X.Y.Z-ios-arm64-unsigned.ipa`
+and `havne-X.Y.Z-macos-arm64.zip` with the other downloads
+(provenance, the SBOM and the checksums), built by the workflows CI
+runs on every commit (`ios-ipa.yml`, `macos-app.yml`). The release
+checks read each bundle's version, that the `.ipa` carries no
+signature and no provisioning profile, and that the Mac app's
+signature is ad hoc with no Team ID and nothing in it links outside
+it. The notes' Try it points at [docs/ios.md](docs/ios.md) and
+[docs/macos.md](docs/macos.md). The gate for the `.ipa` was a tester's
+launch on an iPhone ([2026-11-17-ios](docs/bench-sessions/2026-11-17-ios.md)).
+The Mac app has no such run, and is published unvalidated so that
+people can file issues on either platform.
+- **Left:** a session on an iPhone (`mock://demo`, then a WiFi adapter,
+  [BENCH prep #40](docs/bench-sessions/bench-prep.md)) and the first
+  launch on a Mac (#41). No Apple Developer account stands behind
+  either download: no Developer ID, no notarization, no TestFlight.
 
 ### 1.0.0: the finished reader
 

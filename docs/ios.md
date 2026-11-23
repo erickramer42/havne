@@ -1,7 +1,8 @@
 # Havne on iOS
 
 Havne builds for iPhone (iOS 18 or later), but there's no App Store or
-TestFlight build. CI makes an **unsigned** `.ipa` on every run, and a
+TestFlight build. Each release carries an **unsigned** `.ipa`,
+`havne-X.Y.Z-ios-arm64-unsigned.ipa`, and CI makes one on every run. A
 tester installs it with a sideloading tool that signs it with their own
 Apple ID. The file holds no signature and no device's ID, so anyone can
 use the same one.
@@ -20,10 +21,12 @@ own, and what it shows is worth reporting, whatever it is.
   Developer Program works the same way and lasts longer
   ([below](#with-a-paid-developer-account)).
 - A **Windows or Mac computer** and a USB cable for the first install.
-- The file, `havne-ios-unsigned.ipa`: from a CI run's
-  `havne-ios-arm64-unsigned` artifact (Actions, a CI run, Artifacts; a
-  GitHub login is needed, and the zip holds the `.ipa`), or from the
-  developer.
+- The file: `havne-X.Y.Z-ios-arm64-unsigned.ipa` from the
+  [latest release](https://github.com/erickramer42/havne/releases/latest).
+  A CI run's `havne-ios-arm64-unsigned` artifact (Actions, a CI run,
+  Artifacts; a GitHub login is needed, and the zip holds
+  `havne-ios-unsigned.ipa`) is the same app for a commit that isn't
+  released yet.
 
 ## Installing it with Sideloadly
 
@@ -36,7 +39,7 @@ own, and what it shows is worth reporting, whatever it is.
    bring.
 2. Install Sideloadly.
 3. Connect the iPhone, unlock it and tap **Trust This Computer**.
-4. Open Sideloadly, drag `havne-ios-unsigned.ipa` into it, pick the
+4. Open Sideloadly, drag the `.ipa` into it, pick the
    iPhone, enter the Apple ID and press **Start**. Enter the two-factor
    code if Apple asks for one. Sideloadly signs the app and installs it.
 5. **The first time:** on the iPhone, open Settings > General > VPN &

@@ -188,7 +188,8 @@ TEST(SimGatewayTest, TheGatewaysKeysAndWhatEachNeeds)
     EXPECT_EQ(named.gateway.reply_id, 0x7F8u);
 
     for (const char* bad : {"2", "6F0", "6F0:", ":6F8", "800:6F8", "6F0:6F8:1",
-                            "6F0;6F8", "1FFF:6F8", "", "0x6F0:6F8"}) {
+                            "6F0;6F8", "1FFF:6F8", "", "0x6F0:6F8", "0:6F8",
+                            "6F0:0", "000:6F8"}) {
         EXPECT_NE(refusal(std::string("mock://gw?gateway=") + bad)
                       .find("gateway: <request ID>:<reply ID>"),
                   std::string::npos)
