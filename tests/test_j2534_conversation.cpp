@@ -6,7 +6,8 @@
 // (ADR-0066 section 2.4), end to end through the public calls and the
 // surrogate against the fake DLL's engine ECU, strict: the module's key
 // is the write straight after its seed, to the physical ID, and unlocks;
-// the session log keeps the seed and the key out (access_cut.h).
+// the session log keeps the seed and the key out (access_cut.h), and
+// names a consent applied or a part withheld for want of one.
 
 #include <gtest/gtest.h>
 
@@ -170,4 +171,70 @@ TEST_F(J2534ConversationTest, TheModulesKeyUnlocksTheEngineEcu)
                         log.find(cut_seed) != std::string::npos);
     }
     EXPECT_TRUE(ours) << "no session log holds the cut key and seed";
+}
+
+namespace {
+
+/* The surrogate's session logs since one session over m's plugin on base
+ * (the fake's URI), consented or not, started and closed; prefix: its
+ * fingerprint's 16 digits */
+std::vector<std::string> session_logs_of(const std::string& base,
+                                         const conversation_test::Made& m,
+                                         bool consented, std::string* prefix)
+{
+    const auto since =
+        std::filesystem::file_time_type::clock::now() - std::chrono::seconds(2);
+    conversation_test::Plugin plugin = conversation_test::load_packed(m.json());
+    EXPECT_NE(plugin, nullptr) << ecuio_last_error_detail();
+    if (plugin == nullptr) {
+        return {};
+    }
+    *prefix = conversation_session::print_prefix_of(plugin.get());
+    char name[64] = {};
+    EXPECT_EQ(ecuio_plugin_register(plugin.get(), 0, name, sizeof name),
+              ECUIO_OK);
+    {
+        const std::string u =
+            base + "?profile=" + name + "&identify=0&diagnose=0";
+        ecuio_session_t* raw = nullptr;
+        EXPECT_EQ(ecuio_session_create(u.c_str(), &raw), ECUIO_OK)
+            << u << ": " << ecuio_last_error_detail();
+        conversation_session::Session s(raw);
+        if (consented) {
+            conversation_session::give_and_apply("j2534-consent.json",
+                                                 plugin.get(), s.get());
+        }
+        EXPECT_EQ(ecuio_session_start(s.get()), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_session_close(s.get()), ECUIO_OK);
+    }
+    EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
+    return logs_since(since);
+}
+
+bool any_holds(const std::vector<std::string>& logs, const std::string& line)
+{
+    for (const std::string& log : logs) {
+        if (log.find(line) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
+/* The client writes the consent line at start: applied with the
+ * fingerprint's 16 digits, or withheld for want of one */
+TEST_F(J2534ConversationTest, TheSessionLogNamesAConsentAppliedOrWithheld)
+{
+    std::string prefix;
+    std::vector<std::string> logs =
+        session_logs_of(uri(""), conversation_session::made3(), true, &prefix);
+    EXPECT_TRUE(any_holds(logs, "consent applied  talker 1.2.0  " + prefix))
+        << "no session log names the consent";
+    logs =
+        session_logs_of(uri(""), conversation_session::made3(), false, &prefix);
+    EXPECT_TRUE(any_holds(logs, "consent withheld  talker 1.2.0"))
+        << "no session log names the part withheld";
 }

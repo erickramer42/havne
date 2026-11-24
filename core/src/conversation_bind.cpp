@@ -13,6 +13,7 @@
 #include "guest_abi.h"
 #include "session.h"
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <new>
@@ -276,6 +277,34 @@ bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c)
            !starts_with(session->uri, "replay://") &&
            ecu_on(*session->conversation, session->module_rx[c],
                   session->module_tx[c]) != nullptr;
+}
+
+bool ecuio_consent_log_line(const ecuio_session_t* session, char* out,
+                            size_t cap)
+{
+    out[0] = '\0';
+    if (session->conversation == nullptr) {
+        return false;
+    }
+    const ecuio_conversation_part& p = *session->conversation;
+    if (session->consent_applied) {
+        char prefix[17];
+        for (int i = 0; i < 8; ++i) {
+            snprintf(prefix + 2 * i, 3, "%02x",
+                     session->consent_fingerprint[i]);
+        }
+        snprintf(out, cap, "consent applied  %s %s  %s", p.plugin_id.c_str(),
+                 p.plugin_version.c_str(), prefix);
+        return true;
+    }
+    for (uint32_t c = 0; c < session->module_rx.size(); ++c) {
+        if (ecuio_session_wants_consent(session, c)) {
+            snprintf(out, cap, "consent withheld  %s %s", p.plugin_id.c_str(),
+                     p.plugin_version.c_str());
+            return true;
+        }
+    }
+    return false;
 }
 
 bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)

@@ -233,7 +233,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
     test_elm327_conversation.cpp test_elm327_modules.cpp
-    test_elm327_awake.cpp)
+    test_elm327_awake.cpp test_elm327_consent.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )

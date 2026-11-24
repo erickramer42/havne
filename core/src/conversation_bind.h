@@ -32,6 +32,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -118,6 +119,17 @@ bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c);
  * consent its plugin can be given (a publisher named; consent_gate.h):
  * the unlock's ECUIO_ERR_CONSENT_REQUIRED */
 bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c);
+/* The session log's consent line at start (ADR-0066 section 2.4), into
+ * out (cap bytes): "consent applied  <id> <version>  <16 hex>" for a
+ * consent applied, "consent withheld  <id> <version>" for a part that
+ * would bind but for one (ecuio_session_wants_consent); false and ""
+ * for neither. Allocates nothing. */
+constexpr size_t ECUIO_CONSENT_LOG_LINE_MAX = 96;
+static_assert(ECUIO_CONSENT_LOG_LINE_MAX >
+                  17 + ECUIO_PLUGIN_ID_MAX + 1 + 15 + 2 + 16,
+              "the line holds the longest id, version and prefix");
+bool ecuio_consent_log_line(const ecuio_session_t* session, char* out,
+                            size_t cap);
 /* Whether frame is a security access (access_cut.h) on the request or
  * response ID of a channel the part talks on: cut from the recording */
 bool ecuio_session_cuts_access(const ecuio_session_t* session,

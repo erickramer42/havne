@@ -16,6 +16,7 @@
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "session.h"
+#include "conversation_bind.h"
 #include "elm327_log.h"
 #include "elm327_port.h"
 #include "elm327_tcp.h"
@@ -156,10 +157,13 @@ namespace {
 
 ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
 {
-    (void)session;
     auto* t = static_cast<transport*>(impl);
     if (t->worker.joinable()) {
         return ECUIO_OK; /* internal.h: a second start is OK */
+    }
+    char line[ECUIO_CONSENT_LOG_LINE_MAX];
+    if (ecuio_consent_log_line(session, line, sizeof line)) {
+        elm327_log_write(t->log, "%s", line);
     }
     t->stop_requested.store(false);
     try {
