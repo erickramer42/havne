@@ -80,6 +80,11 @@ std::string store_text(const std::vector<record>& records);
  * empty */
 store_io store_load(const std::string& path, store* out, std::string* why);
 
+/* *s loaded again when the file isn't what *s last read or wrote (another
+ * program changed it; no file is a store of none); on a refusal or
+ * out_of_memory *s is as it was */
+store_io store_refresh(const std::string& path, store* s, std::string* why);
+
 /* *s over the file at path, merged with the file first when it isn't
  * what *s last read or wrote; *s then holds what the file holds. refused:
  * the lock, the file there not read (never overwritten unread), past

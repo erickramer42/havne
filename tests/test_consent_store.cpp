@@ -5,8 +5,8 @@
 // record made from the plugin, the first second kept, a withdraw of one
 // or all, the newest of an id, the file's refusals in words that name no
 // path, two opens sharing one owner, a merge with another writer and
-// with a removed file, each failing step of a save, and the
-// out-of-memory loop.
+// with a removed file, each call reading a file another program
+// changed, each failing step of a save, and the out-of-memory loop.
 
 #include "consent_store.h"
 #include "folder_files.h"
@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 unsigned long news_on_this_thread();
 void fail_new_on_this_thread(unsigned long n);
@@ -444,6 +445,121 @@ TEST(ConsentStoreTest, AFileRemovedBetweenTwoSavesBringsNothingBack)
     ASSERT_EQ(after.records.size(), 1u);
     EXPECT_EQ(after.records[0].version, "1.1.0");
     EXPECT_EQ(s.records.size(), 1u) << "the store holds what it wrote";
+}
+
+namespace {
+
+/* The file as another program writes it, holding records */
+void others_write(const std::string& path,
+                  std::vector<ecuio_consent::record> records)
+{
+    ecuio_consent::store them;
+    std::string why;
+    ASSERT_EQ(ecuio_consent::store_load(path, &them, &why),
+              ecuio_consent::store_io::ok);
+    them.records = std::move(records);
+    ASSERT_EQ(ecuio_consent::store_save(path, &them, &why),
+              ecuio_consent::store_io::ok)
+        << why;
+}
+
+/* r with another fingerprint, version and second */
+ecuio_consent::record record_as(const ecuio_consent::record& r,
+                                const std::string& print,
+                                const std::string& version, uint64_t utc)
+{
+    ecuio_consent::record out = r;
+    std::memcpy(out.fingerprint, bytes_of(print), 32);
+    out.version = version;
+    out.given_utc = static_cast<int64_t>(utc);
+    return out;
+}
+
+size_t records_in(const std::string& path)
+{
+    ecuio_consent::store s;
+    std::string why;
+    EXPECT_EQ(ecuio_consent::store_load(path, &s, &why),
+              ecuio_consent::store_io::ok);
+    return s.records.size();
+}
+
+} // namespace
+
+/* Another program's gives and withdraws, written under an open store just
+ * before each call: every call reads the file again, and one that no
+ * longer reads refuses find, give and withdraw in words while the getters
+ * answer from memory */
+TEST(ConsentStoreTest, EachCallReadsAFileAnotherProgramChanged)
+{
+    Folder f;
+    const std::string path = path_in(f);
+    const Plugin v1 = plugin("1.0.0");
+    const Plugin v2 = plugin("1.1.0");
+    const Plugin v3 = plugin("1.2.0");
+    const std::string print1 = print_of(v1.get());
+    const std::string print2 = print_of(v2.get());
+    const std::string print3 = print_of(v3.get());
+    const Store s = open_store(path);
+    ASSERT_EQ(ecuio_consent_store_give(s.get(), v1.get(), kUtc), ECUIO_OK);
+    ecuio_consent::store first;
+    std::string why;
+    ASSERT_EQ(ecuio_consent::store_load(path, &first, &why),
+              ecuio_consent::store_io::ok);
+    const ecuio_consent::record r1 = first.records.at(0);
+    const ecuio_consent::record r2 = record_as(r1, print2, "1.1.0", kUtc + 60);
+    const ecuio_consent::record r3 = record_as(r1, print3, "1.2.0", kUtc + 90);
+    ecuio_consent_record_t out = blank();
+
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {}));
+    EXPECT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print1), &out),
+              ECUIO_ERR_CONSENT_REQUIRED);
+
+    ASSERT_EQ(ecuio_consent_store_give(s.get(), v1.get(), kUtc), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {}));
+    ASSERT_EQ(ecuio_consent_store_give(s.get(), v1.get(), kUtc + 9), ECUIO_OK);
+    EXPECT_EQ(records_in(path), 1u) << "a give again writes the record";
+
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {r1, r2}));
+    ASSERT_EQ(ecuio_consent_store_latest(s.get(), "talker", &out), ECUIO_OK);
+    EXPECT_STREQ(out.version, "1.1.0");
+
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {r2}));
+    EXPECT_EQ(count_of(s.get()), 1u);
+
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {r1, r2}));
+    out = blank();
+    ASSERT_EQ(ecuio_consent_store_get(s.get(), 1, &out), ECUIO_OK);
+    EXPECT_STREQ(out.version, "1.0.0");
+
+    ASSERT_NO_FATAL_FAILURE(others_write(path, {r1, r3}));
+    ASSERT_EQ(ecuio_consent_store_withdraw(s.get(), "talker", bytes_of(print3)),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(records_in(path), 1u);
+
+    /* A file that no longer reads */
+    write_text(path, "{");
+    EXPECT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print1), &out),
+              ECUIO_ERR_LOAD_FAILED);
+    const std::string words = ecuio_last_error_detail();
+    EXPECT_NE(words.find("the consent store doesn't read"), std::string::npos)
+        << words;
+    EXPECT_EQ(words.find(f.path.filename().generic_u8string()),
+              std::string::npos)
+        << words;
+    EXPECT_EQ(ecuio_consent_store_give(s.get(), v2.get(), kUtc),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), "talker", nullptr),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(count_of(s.get()), 1u) << "the getters answer from memory";
+    EXPECT_EQ(read_text(path), "{");
+
+    /* Removed: a store of none */
+    ASSERT_EQ(std::remove(path.c_str()), 0);
+    EXPECT_EQ(count_of(s.get()), 0u);
+    EXPECT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print1), &out),
+              ECUIO_ERR_CONSENT_REQUIRED);
 }
 
 TEST(ConsentStoreTest, EachFailingStepOfASaveLeavesTheStoreAsItWas)

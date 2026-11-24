@@ -239,6 +239,30 @@ bool lock_store(const std::string& path, ecuio_files::file_lock* lock,
     return got == ecuio_files::lock_got::locked;
 }
 
+/* A file's bytes, read, into *out (empty): store_load's judgment */
+store_io load_bytes(std::string bytes, store* out, std::string* why)
+{
+    std::string words;
+    if (bytes.size() > kStoreMaxBytes) {
+        words =
+            "it is longer than " + std::to_string(kStoreMaxBytes) + " bytes";
+    } else {
+        const store_io read =
+            store_read(bytes.data(), bytes.size(), &out->records, &words);
+        if (read == store_io::ok) {
+            out->base = out->records;
+            out->on_disk = std::move(bytes);
+        }
+        if (read != store_io::refused) {
+            return read;
+        }
+    }
+    *why = "the consent store doesn't read (" + words +
+           "). It keeps the plugins you consented to; removing the file "
+           "forgets them, and each asks again";
+    return store_io::refused;
+}
+
 } // namespace
 
 const record* store_find(const store& s, const uint8_t fingerprint[32])
@@ -325,28 +349,43 @@ store_io store_load(const std::string& path, store* out, std::string* why)
             *why = "the consent store " + words;
             return store_io::refused;
         }
-        if (bytes.size() > kStoreMaxBytes) {
-            words = "it is longer than " + std::to_string(kStoreMaxBytes) +
-                    " bytes";
-        } else {
-            const store_io read =
-                store_read(bytes.data(), bytes.size(), &out->records, &words);
-            if (read == store_io::ok) {
-                out->base = out->records;
-                out->on_disk = std::move(bytes);
-            }
-            if (read != store_io::refused) {
-                return read;
-            }
-        }
-        *why = "the consent store doesn't read (" + words +
-               "). It keeps the plugins you consented to; removing the file "
-               "forgets them, and each asks again";
-        return store_io::refused;
+        return load_bytes(std::move(bytes), out, why);
     } catch (const std::bad_alloc&) {
         out->records.clear();
         out->on_disk.clear();
         out->base.clear();
+        return store_io::out_of_memory;
+    }
+}
+
+store_io store_refresh(const std::string& path, store* s, std::string* why)
+{
+    try {
+        std::string bytes;
+        std::string words;
+        const file_read got =
+            read_file(path, kStoreMaxBytes, store_test_open_errno.exchange(0),
+                      &bytes, &words);
+        if (got == file_read::failed) {
+            *why = "the consent store " + words;
+            return store_io::refused;
+        }
+        const bool unchanged = got == file_read::none
+                                   ? s->on_disk.empty()
+                                   : !bytes.empty() && bytes == s->on_disk;
+        if (unchanged) {
+            return store_io::ok;
+        }
+        store fresh; /* no file: a store of none */
+        if (got == file_read::read) {
+            const store_io io = load_bytes(std::move(bytes), &fresh, why);
+            if (io != store_io::ok) {
+                return io;
+            }
+        }
+        *s = std::move(fresh);
+        return store_io::ok;
+    } catch (const std::bad_alloc&) {
         return store_io::out_of_memory;
     }
 }

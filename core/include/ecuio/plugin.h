@@ -254,6 +254,12 @@ ecuio_status_t ecuio_consent_store_open(const char* path,
                                         ecuio_consent_store_t** out);
 ecuio_status_t ecuio_consent_store_close(ecuio_consent_store_t* store);
 
+/* Each call below first reads the file again when another program has
+ * changed it since this process last read or wrote it (a file removed
+ * holds none); a file that then doesn't read is find's, give's and
+ * withdraw's ECUIO_ERR_LOAD_FAILED with words, and the other getters
+ * answer from what was read before. */
+
 /* The record of fingerprint (32 bytes): ECUIO_ERR_CONSENT_REQUIRED for
  * none. The
  * record getters take a struct_size of at least this core's
@@ -381,8 +387,9 @@ ecuio_status_t ecuio_consent_line(uint32_t set, uint32_t index,
  * ECUIO_ERR_NULL_ARGUMENT for a NULL argument; ECUIO_ERR_INVALID_ARGUMENT
  * with words after start, while a recorder is attached (its header is
  * written), for a set with no plugin part, or a fingerprint not the
- * plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin
- * that names no publisher (format 1 or 2) or no record in store. A
+ * plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin that
+ * names no publisher (format 1 or 2) or no record in store;
+ * ECUIO_ERR_LOAD_FAILED with words for a store whose file doesn't read. A
  * session that asked nothing asks from start once its module binds. */
 ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,
                                            const ecuio_consent_store_t* store,

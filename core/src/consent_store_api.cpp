@@ -5,7 +5,9 @@
 // The consent store's C calls (plugin.h): one owner for a path in the
 // process (path_registry.h), each call under its mutex. A record is made
 // from the plugin itself, never from fields the caller names, and a give
-// or a withdraw is on the disk before the call returns.
+// or a withdraw is on the disk before the call returns. Each call first
+// loads the file again when another program changed it, so a withdraw
+// there holds here.
 
 #include "ecuio/plugin.h"
 
@@ -86,6 +88,23 @@ bool sized(const ecuio_consent_record_t* out)
     return out->struct_size >= sizeof(ecuio_consent_record_t);
 }
 
+/* The owner's store as the file holds it, its mutex held: OK, or the
+ * status with words, the store as it was */
+ecuio_status_t refresh(consent_owner& o)
+{
+    std::string why;
+    const store_io io = ecuio_consent::store_refresh(o.path, &o.store, &why);
+    return io == store_io::ok ? ECUIO_OK : refused(io, why);
+}
+
+/* The getters' refresh: one that fails answers from the store held, with
+ * no words */
+void refresh_quietly(consent_owner& o)
+{
+    std::string why;
+    (void)ecuio_consent::store_refresh(o.path, &o.store, &why);
+}
+
 } // namespace
 
 struct ecuio_consent_store {
@@ -143,6 +162,7 @@ ecuio_status_t ecuio_consent_store_find(const ecuio_consent_store_t* store,
                                         const uint8_t* fingerprint,
                                         ecuio_consent_record_t* out)
 {
+    ecuio_detail_clear();
     if (store == nullptr || fingerprint == nullptr || out == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -151,6 +171,10 @@ ecuio_status_t ecuio_consent_store_find(const ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    const ecuio_status_t fresh = refresh(o);
+    if (fresh != ECUIO_OK) {
+        return fresh;
+    }
     const record* r = ecuio_consent::store_find(o.store, fingerprint);
     if (r == nullptr) {
         return ECUIO_ERR_CONSENT_REQUIRED;
@@ -171,6 +195,7 @@ ecuio_status_t ecuio_consent_store_latest(const ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    refresh_quietly(o);
     try {
         for (const record* r : newest_first(o.store)) {
             if (r->id == id) {
@@ -192,6 +217,7 @@ ecuio_status_t ecuio_consent_store_count(const ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    refresh_quietly(o);
     *out = static_cast<uint32_t>(o.store.records.size());
     return ECUIO_OK;
 }
@@ -208,6 +234,7 @@ ecuio_status_t ecuio_consent_store_get(const ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    refresh_quietly(o);
     if (index >= o.store.records.size()) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
@@ -238,6 +265,10 @@ ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    const ecuio_status_t fresh = refresh(o);
+    if (fresh != ECUIO_OK) {
+        return fresh;
+    }
     if (ecuio_consent::store_find(o.store, plugin->fingerprint) != nullptr) {
         return ECUIO_OK; /* given already: the first second stands */
     }
@@ -279,6 +310,10 @@ ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
     }
     consent_owner& o = *store->ref.get();
     const std::lock_guard<std::mutex> hold(o.mutex);
+    const ecuio_status_t fresh = refresh(o);
+    if (fresh != ECUIO_OK) {
+        return fresh;
+    }
     try {
         ecuio_consent::store next = o.store;
         const auto gone = [&](const record& r) {
