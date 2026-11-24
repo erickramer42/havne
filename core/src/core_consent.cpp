@@ -15,6 +15,17 @@
 #include "session.h"
 
 #include <cstring>
+#include <mutex>
+
+namespace {
+
+bool recording(const ecuio_session_t& s)
+{
+    const std::lock_guard<std::mutex> attach(s.record_link->m);
+    return s.record_link->active.load() != nullptr;
+}
+
+} // namespace
 
 extern "C" ecuio_status_t
 ecuio_session_apply_consent(ecuio_session_t* session,
@@ -30,6 +41,11 @@ ecuio_session_apply_consent(ecuio_session_t* session,
     }
     if (session->started) {
         ecuio_detail_set("consent is applied before the session starts");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    /* An attached recorder wrote its header without the consent line */
+    if (recording(*session)) {
+        ecuio_detail_set("consent is applied before a recorder attaches");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (session->conversation == nullptr) {

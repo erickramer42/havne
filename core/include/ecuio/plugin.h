@@ -379,8 +379,9 @@ ecuio_status_t ecuio_consent_line(uint32_t set, uint32_t index,
  * holds a record of it; it keeps the fingerprint and the record's second
  * for the session's records. It proves nothing about who gave the record.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL argument; ECUIO_ERR_INVALID_ARGUMENT
- * with words after start, for a set with no plugin part, or a fingerprint
- * not the plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin
+ * with words after start, while a recorder is attached (its header is
+ * written), for a set with no plugin part, or a fingerprint not the
+ * plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin
  * that names no publisher (format 1 or 2) or no record in store. A
  * session that asked nothing asks from start once its module binds. */
 ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,

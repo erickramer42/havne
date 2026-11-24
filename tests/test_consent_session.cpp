@@ -361,3 +361,39 @@ TEST(ConsentSessionTest, TheDoorWritesNoConsentLine)
     EXPECT_EQ(recorded_events(none, "consent_none").find("\nconsent  "),
               std::string::npos);
 }
+
+/* A recorder attached first has written its header without the consent:
+ * apply is refused while it is attached, and taken once it has closed */
+TEST(ConsentSessionTest, ApplyIsRefusedWhileARecorderIsAttached)
+{
+    Store store("consent-session-recorder.json");
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made3()));
+    ASSERT_EQ(ecuio_consent_store_give(store.store, b.plugin.get(), kUtc),
+              ECUIO_OK);
+    const std::string print = print_of(b.plugin.get());
+    const fs::path root = fs::u8path(testing::TempDir()) / "consent_first";
+    fs::remove_all(root);
+    const std::string root_text = root.u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root_text.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_record(b.session.get(), rec), ECUIO_OK);
+
+    EXPECT_EQ(ecuio_session_apply_consent(b.session.get(), store.store,
+                                          bytes_of(print)),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "consent is applied before a recorder attaches");
+    EXPECT_FALSE(b.session->consent_applied);
+
+    EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+    fs::remove_all(root);
+    ASSERT_EQ(ecuio_session_apply_consent(b.session.get(), store.store,
+                                          bytes_of(print)),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_NE(recorded_events(b, "consent_after").find("\nconsent  "),
+              std::string::npos);
+}
