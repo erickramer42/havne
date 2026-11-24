@@ -5,16 +5,24 @@
 // plugin's module binds only with a consent applied between create and
 // start, then unlocks the simulated ECU's gated level; apply's refusals;
 // the unlock's ECUIO_ERR_CONSENT_REQUIRED; a session that asked nothing
-// asks once a consent binds; the test door unchanged.
+// asks once a consent binds; the test door unchanged; the recording's
+// consent line.
 
 #include "conversation_session_support.h"
 #include "core_test_support.h"
 
+#include "../core/src/sha256.h"
+#include "ecuio/recording.h"
+
 #include <gtest/gtest.h>
 #include <ecuio/plugin.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 using conversation_session::Bench;
@@ -257,4 +265,99 @@ TEST(ConsentSessionTest, OutOfMemoryInAnApplyIsAnswered)
         ASSERT_TRUE(st == ECUIO_OK || st == ECUIO_ERR_OUT_OF_MEMORY) << n;
     }
     EXPECT_TRUE(b.session->consent_applied);
+}
+
+namespace {
+
+namespace fs = std::filesystem;
+
+/* events.log of a recording of b's session, its line ends LF, after a
+ * folder export too (copy_events) */
+std::string recorded_events(Bound& b, const char* name,
+                            std::string* copy_events = nullptr)
+{
+    const fs::path root = fs::u8path(testing::TempDir()) / name;
+    fs::remove_all(root);
+    const std::string root_text = root.u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root_text.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK);
+    char folder[1024] = {};
+    uint32_t len = 0;
+    EXPECT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(b.session.get(), rec), ECUIO_OK);
+    b.session.reset();
+    EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+    const auto events_of = [](const fs::path& f) {
+        std::ifstream in(f / "events.log", std::ios::binary);
+        std::stringstream all;
+        all << in.rdbuf();
+        std::string text = all.str();
+        text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+        return text;
+    };
+    const std::string events = events_of(fs::u8path(folder));
+    ecuio_recording_t* r = nullptr;
+    EXPECT_EQ(ecuio_recording_open(folder, nullptr, nullptr, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_close(r);
+    if (copy_events != nullptr) {
+        const std::string copy = (root / "copy").u8string();
+        ecuio_export_options_t x{};
+        x.format = ECUIO_EXPORT_FOLDER;
+        x.folder_utf8 = folder;
+        x.out_path_utf8 = copy.c_str();
+        EXPECT_EQ(ecuio_export(&x, nullptr), ECUIO_OK)
+            << ecuio_last_error_detail();
+        *copy_events = events_of(fs::u8path(copy));
+    }
+    fs::remove_all(root);
+    return events;
+}
+
+} // namespace
+
+/* A consented session's header says what was consented to and when,
+ * after the conversation line; the reader opens it and a folder export
+ * keeps it */
+TEST(ConsentSessionTest, AConsentedSessionsHeaderSaysWhatAndWhen)
+{
+    Store store("consent-session-header.json");
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made3()));
+    ASSERT_EQ(ecuio_consent_store_give(store.store, b.plugin.get(), kUtc),
+              ECUIO_OK);
+    const std::string print = print_of(b.plugin.get());
+    ASSERT_EQ(ecuio_session_apply_consent(b.session.get(), store.store,
+                                          bytes_of(print)),
+              ECUIO_OK);
+    const std::string line =
+        "consent  " +
+        ecuio_sha256::hex(reinterpret_cast<const uint8_t*>(print.data())) +
+        ",1795132800\n";
+    std::string copied;
+    const std::string events = recorded_events(b, "consent_header", &copied);
+    const size_t at = events.find("\n" + line);
+    ASSERT_NE(at, std::string::npos) << events;
+    EXPECT_LT(events.find("\nconversation  "), at);
+    EXPECT_NE(copied.find("\n" + line), std::string::npos) << copied;
+}
+
+/* Behind the door, or with no consent, no consent line */
+TEST(ConsentSessionTest, TheDoorWritesNoConsentLine)
+{
+    {
+        DoorOpen open;
+        Bound b;
+        ASSERT_NO_FATAL_FAILURE(make_session(&b, made3()));
+        const std::string events = recorded_events(b, "consent_door");
+        EXPECT_NE(events.find("\nconversation  "), std::string::npos);
+        EXPECT_EQ(events.find("\nconsent  "), std::string::npos) << events;
+    }
+    Bound none;
+    ASSERT_NO_FATAL_FAILURE(make_session(&none, made3()));
+    EXPECT_EQ(recorded_events(none, "consent_none").find("\nconsent  "),
+              std::string::npos);
 }
