@@ -1163,6 +1163,11 @@ if(TARGET havne-cli)
         add_test(NAME CliConsentTest.GiveListAndWithdrawInTheDefaultStore
             COMMAND ${Python3_EXECUTABLE} ${_cli_consent} store
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
+        add_test(NAME CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} run
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
+        set_tests_properties(CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliPluginRunTest.AFormat2ConversationPluginReadsSignalsOnly
             COMMAND ${Python3_EXECUTABLE} ${_cli_consent} no-publisher
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
@@ -1698,6 +1703,11 @@ if(TARGET havne-cli)
         "plugins|consent|--give|0000" "plugins consent takes")
     app_cli_usage_says(PluginsConsentTwoFormsIsUsage
         "plugins|consent|--list|--withdraw|talker3" "plugins consent takes")
+    app_cli_usage_says(StreamAConsentStoreWithoutAFileIsUsage
+        "stream|mock://x|--consent-store" "--consent-store takes one file")
+    app_cli_usage_says(LogTwoConsentStoresIsUsage
+        "log|mock://x|f|--consent-store|a|--consent-store|b"
+        "--consent-store takes one file")
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
     app_cli_usage_says(PluginsAnUnknownWordIsUsage "plugins|lint|x"
         "plugins takes list <pkg>")

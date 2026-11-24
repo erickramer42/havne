@@ -7,15 +7,18 @@
 // `plugins terms <pkg> [--json]` prints Havne's lines, the publisher block,
 // the terms and the full fingerprint; `plugins consent <pkg> --give <fp>`
 // prints them again, then records the consent; `plugins consent --list`
-// and `--withdraw <id> [<fp>]` read and change the store. The store is
-// --consent-store's, or the app's consent.json (settings_home.h). Public
-// headers only.
+// and `--withdraw <id> [<fp>]` read and change the store. A run (stream,
+// log) whose plugin talks to a car on ELM327 or J2534 finds its record
+// before create, refusing with words and exit 2 without one, and applies
+// it between create and start. The store is --consent-store's, or the
+// app's consent.json (settings_home.h). Public headers only.
 
 #include "consent_lines.h"
 #include "settings_home.h"
 
 #include "commands.h"
 #include "profile_source.h"
+#include "session_lines.h"
 #include "common.h"
 
 #include "ecuio/plugin.h"
@@ -292,7 +295,113 @@ bool parse_consent(int argc, char** argv, ConsentArgs* a)
     return forms == 1 && (a->give != nullptr) == (a->package != nullptr);
 }
 
+// The store a run's check found its record in, open until the apply
+ecuio_consent_store_t* g_found_store = nullptr;
+uint8_t g_found_print[32] = {};
+uint64_t g_found_utc = 0;
+
+// Whether uri names a transport a car is on: no store opens for the
+// mock, a replay or SocketCAN, where core judges the link (vcan binds)
+bool car_transport(const char* uri)
+{
+    const std::string u = uri != nullptr ? uri : "";
+    return u.rfind("elm327://", 0) == 0 || u.rfind("j2534://", 0) == 0;
+}
+
 } // namespace
+
+SessionConsent g_session_consent;
+
+int need_consent(const char* uri, const char* package, const char* named)
+{
+    cli::ConsentFacts f;
+    if (g_plugin == nullptr || !car_transport(uri)) {
+        return -1;
+    }
+    if (!cli::consent_facts(g_plugin, &f)) {
+        std::fprintf(stderr,
+                     "havne-cli: the plugin's consent facts don't "
+                     "read: %s\n",
+                     ecuio_last_error_detail());
+        return kExitConnect;
+    }
+    if (f.set == 0 || !f.has_publisher) {
+        return -1;
+    }
+    const std::string path = store_path(named);
+    if (path.empty()) {
+        return kExitUsage;
+    }
+    ecuio_consent_store_t* store = nullptr;
+    if (ecuio_consent_store_open(path.c_str(), &store) != ECUIO_OK) {
+        std::fprintf(stderr, "havne-cli: the consent store doesn't read: %s\n",
+                     ecuio_last_error_detail());
+        return kExitConnect;
+    }
+    ecuio_consent_record_t r{};
+    r.struct_size = sizeof r;
+    if (ecuio_consent_store_find(store, f.fingerprint, &r) == ECUIO_OK) {
+        g_found_store = store;
+        std::memcpy(g_found_print, f.fingerprint, sizeof g_found_print);
+        g_found_utc = r.given_utc;
+        return -1;
+    }
+    ecuio_consent_record_t before{};
+    before.struct_size = sizeof before;
+    const bool changed =
+        ecuio_consent_store_latest(store, f.info.id, &before) == ECUIO_OK;
+    ecuio_consent_store_close(store);
+    const std::string words =
+        changed ? cli::version_change_text(f, before, package, named)
+                : cli::refusal_text(f, package, named);
+    std::fwrite(words.data(), 1, words.size(), stderr);
+    return kExitUsage;
+}
+
+bool take_consent_store(int& argc, char** argv, const char** store)
+{
+    *store = nullptr;
+    for (int i = 2; i < argc;) {
+        if (std::strcmp(argv[i], kStoreOption) != 0) {
+            ++i;
+            continue;
+        }
+        if (*store != nullptr || i + 1 >= argc || argv[i + 1][0] == '\0') {
+            std::fprintf(stderr, "havne-cli: --consent-store takes one file\n");
+            return false;
+        }
+        *store = argv[i + 1];
+        for (int k = i; k + 2 < argc; ++k) {
+            argv[k] = argv[k + 2];
+        }
+        argc -= 2;
+    }
+    return true;
+}
+
+ecuio_status_t create_consented(Output& out, const char* uri,
+                                ecuio_session_t** session, std::string* detail,
+                                bool start_first)
+{
+    ecuio_status_t st = create_within(out, uri, session, detail, start_first);
+    if (st != ECUIO_OK || g_found_store == nullptr) {
+        return st;
+    }
+    st = ecuio_session_apply_consent(*session, g_found_store, g_found_print);
+    ecuio_consent_store_close(g_found_store);
+    g_found_store = nullptr;
+    if (st != ECUIO_OK) {
+        *detail = ecuio_last_error_detail();
+        ecuio_session_destroy(*session);
+        *session = nullptr;
+        return st;
+    }
+    g_session_consent.applied = true;
+    std::memcpy(g_session_consent.fingerprint, g_found_print,
+                sizeof g_found_print);
+    g_session_consent.given_utc = g_found_utc;
+    return st;
+}
 
 // plugins terms <pkg> [--json]
 int plugins_terms(int argc, char** argv)

@@ -6,13 +6,19 @@
 #                                     [--update]
 #   python tests/cli_consent.py store <havne-cli> <talker3.json>
 #   python tests/cli_consent.py no-publisher <havne-cli> <format-2 package>
+#   python tests/cli_consent.py run <havne-cli> <talker3.json>
 #
 # terms: `plugins terms`' text against its golden, byte for byte (line
 # ends aside), the package's path written as <package>. store: give, list
 # and withdraw in a scratch HAVNE_SETTINGS_DIR, whose consent.json is the
 # default store; an unreadable store is exit 3 with an error line.
 # no-publisher: a plugin with no publisher says it reads signals only, and
-# takes no consent.
+# takes no consent. run: stream on the emulator's ELM327 (sim --elm327):
+# with no record exit 2, the refusal on standard error (16 digits), nothing
+# on standard output and no connection (an unreadable store exit 3, the
+# same nothing); with one its session line carries
+# the consent; a plugin whose terms changed shows the version-change block;
+# a withdrawn record refuses again.
 
 import json
 import os
@@ -122,7 +128,108 @@ def no_publisher_case(cli, package):
     return 0
 
 
+class Sim:
+    """havne-cli sim's ELM327 on an OS-picked port, its later lines kept"""
+
+    def __init__(self, cli):
+        self.p = subprocess.Popen(
+            [cli, "sim", "mock://sim?values=canned", "--elm327", "tcp:0",
+             "--seconds", "60"],
+            stdout=subprocess.PIPE, text=True)
+        self.port = None
+        for line in self.p.stdout:
+            j = json.loads(line)
+            if j["type"] == "elm327":
+                self.port = int(j["listen"].rsplit(":", 1)[1])
+                return
+        raise SystemExit("FAIL  the emulator wrote no elm327 line")
+
+    def clients(self):
+        """Ends it; the connections it took"""
+        self.p.terminate()
+        rest, _ = self.p.communicate(timeout=60)
+        return [json.loads(line) for line in rest.splitlines()
+                if '"client"' in line and '"connected"' in line]
+
+
+def stream(cli, port, package, store, env=None):
+    uri = (f"elm327://127.0.0.1:{port}?profile=plugin.talker3.base"
+           "&identify=0&diagnose=0&probe=0")
+    return run(cli, ["stream", uri, "--plugin", package, "--consent-store",
+                     store, "--count", "1"], env)
+
+
+def changed_terms(package, folder):
+    """package with one byte of its terms changed, its version kept"""
+    with open(package, encoding="utf-8") as f:
+        text = f.read()
+    at = text.index("made up")
+    path = os.path.join(folder, "talker3-changed.json")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text[:at] + "Made up" + text[at + 7:])
+    return path
+
+
+def run_case(cli, package):
+    print_ = fingerprint_of(cli, package)
+    with tempfile.TemporaryDirectory(prefix="havne-cli-consent-run-") as d:
+        store = os.path.join(d, "consent.json")
+        bad = os.path.join(d, "bad.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("not a store")
+        sim = Sim(cli)
+        code_bad, out_bad, err_bad = stream(cli, sim.port, package, bad)
+        code, out, err = stream(cli, sim.port, package, store)
+        took = sim.clients()
+        if code_bad != 3 or out_bad or "consent store doesn't read" \
+                not in err_bad:
+            print(f"FAIL  an unreadable store: exit {code_bad} {out_bad!r} "
+                  f"{err_bad!r}")
+            return 1
+        if code != 2 or out or took \
+                or "this plugin needs your consent" not in err \
+                or f"fingerprint {print_[:16]}\n" not in err \
+                or print_ in err:
+            print(f"FAIL  refused with no record: exit {code} {out!r} "
+                  f"{err!r} {took!r}")
+            return 1
+        code, _, err = run(cli, ["plugins", "consent", package,
+                                 "--consent-store", store, "--give", print_])
+        if code != 0:
+            print(f"FAIL  --give: exit {code} {err!r}")
+            return 1
+        sim = Sim(cli)
+        try:
+            code, out, err = stream(cli, sim.port, package, store)
+        finally:
+            sim.clients()
+        session = [r for r in rows_of(out) if r.get("type") == "session"
+                   and "ecu" not in r]
+        if code != 0 or len(session) != 1 \
+                or session[0].get("consent", {}).get("fingerprint") != print_:
+            print(f"FAIL  a consented run's session line: exit {code} "
+                  f"{session!r} {err!r}")
+            return 1
+        other = changed_terms(package, d)
+        code, out, err = stream(cli, 1, other, store)
+        if code != 2 or out or "The terms have changed." not in err \
+                or "This file is not the same plugin" not in err:
+            print(f"FAIL  a changed plugin's block: exit {code} {err!r}")
+            return 1
+        code, _, err = run(cli, ["plugins", "consent", "--consent-store",
+                                 store, "--withdraw", "talker3"])
+        code2, out, err2 = stream(cli, 1, package, store)
+        if code != 0 or code2 != 2 or out \
+                or "this plugin needs your consent" not in err2:
+            print(f"FAIL  a withdrawn record: exit {code} {code2} {err2!r}")
+            return 1
+    print("ok    a run refused, consented, changed and withdrawn")
+    return 0
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "run":
+        return run_case(argv[2], argv[3])
     if len(argv) >= 5 and argv[1] == "terms":
         return terms_case(argv[2], argv[3], argv[4], "--update" in argv[5:])
     if len(argv) == 4 and argv[1] == "store":

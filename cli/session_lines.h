@@ -29,6 +29,21 @@ constexpr auto kRecordingCloseWait = std::chrono::seconds(2);
 ecuio_status_t create_within(Output& out, const char* uri,
                              ecuio_session_t** session, std::string* detail,
                              bool start_first = false);
+// create_within, then the record need_consent found applied between create
+// and start (cmd_consent.cpp; none: as create_within); a refused apply
+// destroys the session, *detail its words
+ecuio_status_t create_consented(Output& out, const char* uri,
+                                ecuio_session_t** session, std::string* detail,
+                                bool start_first = false);
+// The consent a run applied (create_consented): the session line's
+// "consent" key, absent when none was
+struct SessionConsent {
+    bool applied = false;
+    uint8_t fingerprint[32] = {};
+    uint64_t given_utc = 0;
+};
+extern SessionConsent g_session_consent;
+
 void write_session(Output& out, const ecuio_session_t* session,
                    const ecuio_session_info_t& info);
 /* The session's modules, every one: what the per-channel arrays
