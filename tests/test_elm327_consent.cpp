@@ -3,7 +3,9 @@
 // Testing: HARNESS: Elm327SessionTest (test_elm327)
 //
 // Consent on the fake ELM327 (ADR-0066 section 2.4): the wire log names
-// a consent applied, or a part withheld for want of one, at start.
+// a consent applied, or a part withheld for want of one, at start; and
+// an adapter set up to listen at attach is set up again at start once a
+// consent made the session ask.
 
 #include "test_elm327_support.h"
 
@@ -61,6 +63,14 @@ std::string log_of(const char* dir, Registered& r, bool consented)
     return logs.only_log();
 }
 
+size_t index_of(const std::vector<std::string>& v, const std::string& what,
+                size_t from = 0)
+{
+    const auto at =
+        std::find(v.begin() + static_cast<long>(from), v.end(), what);
+    return static_cast<size_t>(at - v.begin());
+}
+
 } // namespace
 
 TEST_F(Elm327SessionTest, TheWireLogNamesAConsentAppliedAtStart)
@@ -102,4 +112,32 @@ TEST_F(Elm327SessionTest, NoConsentLineForAFormat2PartOrBehindTheDoor)
     ASSERT_NE(r.plugin, nullptr);
     const std::string log = log_of("elm327-consent-door", r, false);
     EXPECT_EQ(log.find("consent "), std::string::npos) << log;
+}
+
+/* Attach set the adapter up to listen (flow control off); the consent
+ * applied after it makes the session ask, so start sets it up again
+ * before the module's first request */
+TEST_F(Elm327SessionTest, AConsentAfterAPassiveSetupSetsTheAdapterUpAgain)
+{
+    Registered r(made3(true));
+    ASSERT_NE(r.plugin, nullptr);
+    Session s;
+    ASSERT_EQ(s.create(uri(std::string("?profile=") + r.name +
+                           "&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::vector<std::string> at_attach = fake_commands();
+    ASSERT_LT(index_of(at_attach, "ATCFC0"), at_attach.size())
+        << "attach set the adapter up to listen";
+    ASSERT_NO_FATAL_FAILURE(
+        give_and_apply("elm327-consent-passive.json", r.plugin.get(), s.s));
+    s.start();
+    ASSERT_TRUE(wait_for([] { return fake_count("1003") > 0; }, 5000))
+        << "the module entered its session";
+    const std::vector<std::string> all = fake_commands();
+    const size_t again = index_of(all, "ATCFC1", at_attach.size());
+    EXPECT_LT(again, all.size()) << "the setup ran again, flow control on";
+    EXPECT_LT(again, index_of(all, "1003")) << "before the first request";
+    EXPECT_EQ(index_of(all, "ATMA"), all.size()) << "never a monitor";
+    ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
 }

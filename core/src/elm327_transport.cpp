@@ -165,6 +165,11 @@ ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
     if (ecuio_consent_log_line(session, line, sizeof line)) {
         elm327_log_write(t->log, "%s", line);
     }
+    /* A consent applied since attach made a listening setup's session ask:
+     * the worker sets the adapter up again, flow control on */
+    if (t->set_up_passive && !asks_nothing(t)) {
+        t->configured = false;
+    }
     t->stop_requested.store(false);
     try {
         t->worker = std::thread(elm327_worker, t);

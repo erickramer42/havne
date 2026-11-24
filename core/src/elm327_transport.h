@@ -112,6 +112,7 @@ struct ecuio_elm327_transport {
     /* The setup has run since the port opened and the adapter last
      * reset; the transmit ID AT SH last set. */
     bool configured = false;
+    bool set_up_passive = false; /* that setup's flow control was off */
     bool header_set = false;
     uint32_t header_tx = 0;
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
