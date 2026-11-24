@@ -63,6 +63,29 @@ QVariantMap refusal(const QString& words)
 
 namespace {
 
+// What a consent asks of a plugin: conversation (its code talks to
+// modules), publisher ("" for none) and fingerprint (64 hex digits)
+QVariantMap consentFactsOf(const ecuio_plugin_t* plugin)
+{
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    ecuio_plugin_publisher_t publisher{};
+    publisher.struct_size = sizeof publisher;
+    ecuio_plugin_fingerprint_t print{};
+    print.struct_size = sizeof print;
+    const bool talks = ecuio_plugin_info(plugin, &info) == ECUIO_OK &&
+                       (info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0;
+    const bool named = ecuio_plugin_publisher(plugin, &publisher) == ECUIO_OK;
+    const bool printed = ecuio_plugin_fingerprint(plugin, &print) == ECUIO_OK;
+    const QByteArray bytes(reinterpret_cast<const char*>(print.fingerprint),
+                           sizeof print.fingerprint);
+    return {{QStringLiteral("conversation"), talks},
+            {QStringLiteral("publisher"),
+             named ? QString::fromUtf8(publisher.name) : QString()},
+            {QStringLiteral("fingerprint"),
+             printed ? QString::fromLatin1(bytes.toHex()) : QString()}};
+}
+
 // The package read: its plugin loaded, nothing registered; nullptr with
 // *words saying why not
 ecuio_plugin_t* loadPackage(const QByteArray& bytes, QString* words)
@@ -349,7 +372,7 @@ bool PluginStore::isMine(const QString& id) const
 QVariantMap PluginStore::entryOf(const QString& sha, const Held& h) const
 {
     const QJsonObject f = facts(h.id);
-    return {{QStringLiteral("sha256"), sha},
+    QVariantMap e{{QStringLiteral("sha256"), sha},
             {QStringLiteral("ok"), true},
             {QStringLiteral("words"), QString()},
             {QStringLiteral("id"), h.id},
@@ -366,6 +389,8 @@ QVariantMap PluginStore::entryOf(const QString& sha, const Held& h) const
             {QStringLiteral("mine"), f.value(kMine).toBool()},
             {QStringLiteral("importedFor"), f.value(kImportedFor).toString()},
             {QStringLiteral("obdb"), h.obdb}};
+    e.insert(consentFactsOf(h.plugin));
+    return e;
 }
 
 bool PluginStore::take(const QString& sha, const QByteArray& bytes,
@@ -462,6 +487,19 @@ PluginStore::heldWithProfile(const QString& profile, int* variant) const
         }
     }
     return m_held.end();
+}
+
+const ecuio_plugin_t* PluginStore::pluginOfProfile(const QString& profile,
+                                                   QString* sha)
+{
+    (void)all();
+    int at = 0;
+    const auto it = heldWithProfile(profile, &at);
+    if (it == m_held.end()) {
+        return nullptr;
+    }
+    *sha = it->first;
+    return it->second.plugin;
 }
 
 QVariantList PluginStore::all()

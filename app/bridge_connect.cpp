@@ -257,15 +257,22 @@ QString SessionBridge::connectSession(const QString& typed)
         return err;
     }
     applyFrameLoggingEnv();
+    const ConsentNeed need = m_consent->needFor(uri, m_vehicleLabel);
     ecuio_session_t* session = nullptr;
     err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
+        // Nothing waits for an answer here: with no record it reads only
+        for (const QString& line : ConsentFlow::applyFound(session, need).lines) {
+            emit logMessage(line);
+        }
         err = startSession(session, uri);
     }
     if (!err.isEmpty()) {
         emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
         return err;
     }
+    // Before the apply's emits, so a handler's disconnect ends it
+    m_consent->begin(session, need);
     applyConnectedState(session, uri);
     applyAwake(session);
     return {};
@@ -301,46 +308,66 @@ void SessionBridge::connectSessionAsync(const QString& typed)
     emit connectingChanged();
     emit logMessage(QStringLiteral("Connecting: %1").arg(uri));
     applyFrameLoggingEnv();   // before the connect thread spawns any surrogate
+    const ConsentNeed need = m_consent->needFor(uri, m_vehicleLabel);
 
-    m_connectThread = std::thread([this, uri]() {
+    m_connectThread = std::thread([this, uri, need]() {
         ecuio_session_t* session = nullptr;
         const QString core_err = connectCoreOnly(uri, &session);
+        const ConsentFound found = core_err.isEmpty()
+                                       ? ConsentFlow::applyFound(session, need)
+                                       : ConsentFound{};
         // Handed over through the member, not the lambda: a completion
         // dropped with `this` would leak a lambda capture, while the
         // destructor can always find the member.
         m_pendingSession.store(session);
 
-        QMetaObject::invokeMethod(this, [this, uri, core_err]() {
-            // Join first, then clear the flag, then emit: assigning to a
-            // joinable std::thread terminates the process, and a QML
-            // handler can run synchronously inside connectingChanged.
-            // connecting clears only once the session is applied, so a
-            // handler always sees connecting or connected: a connect it
-            // starts is refused, never a second session over this one.
+        QMetaObject::invokeMethod(this, [this, uri, core_err, need, found]() {
+            // Join first: assigning to a joinable std::thread terminates
             if (m_connectThread.joinable()) {
                 m_connectThread.join();
             }
-            ecuio_session_t* session = m_pendingSession.exchange(nullptr);
-            QString err = core_err;
-            if (err.isEmpty()) {
-                err = startSession(session, uri);
+            for (const QString& line : found.lines) {
+                emit logMessage(line);
             }
-            if (err.isEmpty()) {
-                applyConnectedState(session, uri);
-                applyAwake(session);
+            if (core_err.isEmpty() && found.waits) {
+                // Unstarted until the answer, still connecting
+                m_consent->wait(m_pendingSession.load(), need, found,
+                                [this, uri, need]() {
+                                    finishConnect(uri, {}, need);
+                                });
+                return;
             }
-            m_connecting = false;
-            emit connectingChanged();
-
-            if (err.isEmpty()) {
-                emit connectResult(uri, {});
-            } else {
-                emit logMessage(QStringLiteral("Connect failed: %1 (%2)")
-                                    .arg(uri, err));
-                emit connectResult(uri, err);
-            }
+            finishConnect(uri, core_err, need);
         }, Qt::QueuedConnection);
     });
+}
+
+void SessionBridge::finishConnect(const QString& uri, QString err,
+                                  const ConsentNeed& need)
+{
+    // Clear the flag, then emit: a QML handler can run synchronously
+    // inside connectingChanged. connecting clears only once the session
+    // is applied, so a handler always sees connecting or connected: a
+    // connect it starts is refused, never a second session over this one.
+    ecuio_session_t* session = m_pendingSession.exchange(nullptr);
+    if (err.isEmpty()) {
+        err = startSession(session, uri);
+    }
+    if (err.isEmpty()) {
+        // Before the apply's emits, so a handler's disconnect ends it
+        m_consent->begin(session, need);
+        applyConnectedState(session, uri);
+        applyAwake(session);
+    }
+    m_connecting = false;
+    emit connectingChanged();
+
+    if (err.isEmpty()) {
+        emit connectResult(uri, {});
+    } else {
+        emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
+        emit connectResult(uri, err);
+    }
 }
 
 void SessionBridge::disconnectSession()
@@ -363,6 +390,7 @@ void SessionBridge::disconnectSession()
     // onFrame and handleFrameInternal drop everything, and the GUI
     // thread never touches the session again.
     ecuio_session_t* session = std::exchange(m_session, nullptr);
+    m_consent->end();
     m_accepting.store(false, std::memory_order_release);
     m_connected.store(false, std::memory_order_release);
     m_disconnecting = true;
@@ -394,12 +422,11 @@ void SessionBridge::disconnectSession()
     emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
     setLogPaused(false);
 
-    // The teardown thread is the session's one caller from here: the
-    // session API is single-caller by contract.
+    // From here the teardown thread is the session's one caller (contract)
     m_disconnectThread = std::thread([this, session, uri]() {
+        m_consent->drain(); // an unlock posted before the end uses session
         // Close joins the worker, whose last act publishes reply timing's
-        // final rows (ADR-0042); they're read here because destroy frees
-        // them
+        // final rows (ADR-0042), read here since destroy frees them
         ecuio_session_close(session);
         ecuio_session_timing_t timing{};
         std::vector<ecuio_request_timing_t> rows;
