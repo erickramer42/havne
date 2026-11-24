@@ -18,10 +18,6 @@
 
 namespace ecuio_plugin_loader {
 
-namespace {
-
-/* v's text, lo to hi bytes, plain as the header says; lines lets the
- * terms keep their line feeds and tabs */
 const std::string& plain_of(const Value& v, size_t lo, size_t hi,
                             const std::string& what, bool lines)
 {
@@ -40,8 +36,6 @@ const std::string& plain_of(const Value& v, size_t lo, size_t hi,
     }
     return text;
 }
-
-} // namespace
 
 /* "publisher": required with the conversation tier in format 3, and
  * format 3's alone */

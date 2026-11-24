@@ -169,6 +169,13 @@ placed placed_json(const std::string& prefix, const ecuio_json::Error& error);
 bool path_ok(const std::string& p);
 const std::string& path_of(const Value& v, std::string_view what);
 
+/* v's text, lo to hi bytes, with no control character (lines keeps line
+ * feeds and tabs) and none that shows as nothing or moves the text
+ * around it: a text a person reads before consenting
+ * (plugin_publisher.cpp) */
+const std::string& plain_of(const Value& v, size_t lo, size_t hi,
+                            const std::string& what, bool lines);
+
 class loader
 {
 public:

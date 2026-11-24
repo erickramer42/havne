@@ -584,6 +584,7 @@ ECUIO_ERR_CANCELED = 19
 ECUIO_ERR_IN_USE = 20
 ECUIO_ERR_STREAM_ENDED = 21
 ECUIO_ERR_TOO_SOON = 22
+ECUIO_ERR_CONSENT_REQUIRED = 23
 ECUIO_VALUE_UINT = 0
 ECUIO_VALUE_INT = 1
 ECUIO_VALUE_FLOAT = 2
@@ -648,6 +649,12 @@ class ecuio_condition_state_t(Structure):
     pass
 
 class ecuio_condition_term_t(Structure):
+    pass
+
+class ecuio_consent_record_t(Structure):
+    pass
+
+class ecuio_consent_store_t(Structure):
     pass
 
 class ecuio_csv_guess_t(Structure):
@@ -1135,6 +1142,17 @@ ecuio_condition_term_t._fields_ = [
     ('unit', (c_char * 16)),
     ('reserved', (c_uint64 * 2)),
     ('references', (ecuio_condition_reference_t * 8)),
+]
+ecuio_consent_record_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('given_utc', c_uint64),
+    ('id', (c_char * 32)),
+    ('version', (c_char * 16)),
+    ('fingerprint', (c_uint8 * 32)),
+    ('terms_sha256', (c_uint8 * 32)),
+    ('publisher', (c_char * 128)),
+    ('reserved', (c_uint32 * 8)),
 ]
 ecuio_csv_guess_t._fields_ = [
     ('flags', c_uint32),
@@ -1854,6 +1872,14 @@ FUNCTIONS = {
     'ecuio_condition_set_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_condition_set_t))]),  # conditions.h
     'ecuio_condition_set_name': (c_char_p, [POINTER(ecuio_condition_set_t)]),  # conditions.h
     'ecuio_condition_set_resolve': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_condition_binding_t)]),  # conditions.h
+    'ecuio_consent_store_close': (c_int, [POINTER(ecuio_consent_store_t)]),  # plugin.h
+    'ecuio_consent_store_count': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint32)]),  # plugin.h
+    'ecuio_consent_store_find': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint8), POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_get': (c_int, [POINTER(ecuio_consent_store_t), c_uint32, POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_give': (c_int, [POINTER(ecuio_consent_store_t), POINTER(ecuio_plugin_t), c_uint64]),  # plugin.h
+    'ecuio_consent_store_latest': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_open': (c_int, [c_char_p, POINTER(POINTER(ecuio_consent_store_t))]),  # plugin.h
+    'ecuio_consent_store_withdraw': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(c_uint8)]),  # plugin.h
     'ecuio_decode_signal': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, POINTER(c_double)]),  # signals.h
     'ecuio_decode_text': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, c_char_p, c_uint32]),  # signals.h
     'ecuio_def_applies_to_frame': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_frame_t)]),  # signals.h

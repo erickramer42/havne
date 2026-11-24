@@ -127,6 +127,16 @@ int c_abi_plugin(void)
              ecuio_plugin_terms(plugin, NULL, 0, &terms) ==
                  ECUIO_ERR_INVALID_ARGUMENT &&
              terms == 7u;
+        /* The consent store's record, and its calls' NULL refusals */
+        ok = ok && sizeof(ecuio_consent_record_t) == 288u &&
+             offsetof(ecuio_consent_record_t, given_utc) == 8u &&
+             offsetof(ecuio_consent_record_t, id) == 16u &&
+             offsetof(ecuio_consent_record_t, fingerprint) == 64u &&
+             offsetof(ecuio_consent_record_t, publisher) == 128u &&
+             offsetof(ecuio_consent_record_t, reserved) == 256u &&
+             ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_consent_store_close(NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ECUIO_ERR_CONSENT_REQUIRED == 23;
         if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {
             return 1;
         }

@@ -157,6 +157,8 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_CANCELED:                return "canceled";
         case ECUIO_ERR_IN_USE:                  return "still in use";
         case ECUIO_ERR_STREAM_ENDED:            return "the stream has ended";
+        case ECUIO_ERR_TOO_SOON:                return "not yet: ask again later";
+        case ECUIO_ERR_CONSENT_REQUIRED:        return "no consent given";
         default:                                return "unknown status";
     }
 }
