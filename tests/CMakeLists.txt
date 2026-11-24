@@ -408,7 +408,8 @@ if(TARGET havne-cli)
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
-        test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp)
+        test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp
+        test_cli_unlock.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -1168,6 +1169,18 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
         set_tests_properties(CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
             PROPERTIES TIMEOUT 120)
+        # stream --unlock on the emulator, its plugins written by a
+        # test-only program from test_core's own guest
+        add_executable(cli_unlock_fixture cli_unlock_fixture.cpp)
+        target_include_directories(cli_unlock_fixture PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/src)
+        target_link_libraries(cli_unlock_fixture PRIVATE ecuio-core GTest::gtest)
+        app_enable_warnings(cli_unlock_fixture)
+        add_test(NAME CliConsentRunTest.AnUnlockOpensTheGatedLevelOnce
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} unlock
+                    $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_unlock_fixture>)
+        set_tests_properties(CliConsentRunTest.AnUnlockOpensTheGatedLevelOnce
+            PROPERTIES TIMEOUT 180)
         add_test(NAME CliPluginRunTest.AFormat2ConversationPluginReadsSignalsOnly
             COMMAND ${Python3_EXECUTABLE} ${_cli_consent} no-publisher
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
@@ -1703,6 +1716,25 @@ if(TARGET havne-cli)
         "plugins|consent|--give|0000" "plugins consent takes")
     app_cli_usage_says(PluginsConsentTwoFormsIsUsage
         "plugins|consent|--list|--withdraw|talker3" "plugins consent takes")
+    # stream --unlock (ADR-0066 section 2.3): each bad form before a connect
+    set(_talker3_run "stream|mock://x?profile=plugin.talker3.base|--plugin|${_talker3}")
+    app_cli_usage_says(StreamUnlockWithoutAValueIsUsage
+        "${_talker3_run}|--unlock" "--unlock takes <ecu>:<level>")
+    app_cli_usage_says(StreamUnlockWithoutAColonIsUsage
+        "${_talker3_run}|--unlock|pcm01" "--unlock takes <ecu>:<level>: the plugin's")
+    app_cli_usage_says(StreamUnlockAnEcuNotThePluginsIsUsage
+        "${_talker3_run}|--unlock|bcm:01" "talks to no ECU 'bcm'")
+    app_cli_usage_says(StreamUnlockAnEvenLevelIsUsage
+        "${_talker3_run}|--unlock|pcm:02" "a security level is odd")
+    app_cli_usage_says(StreamUnlockALevelTheEcuDoesntDeclareIsUsage
+        "${_talker3_run}|--unlock|pcm:03" "declares no level 03 for 'pcm'")
+    app_cli_usage_says(StreamUnlockWithoutAPluginIsUsage
+        "stream|mock://x|--unlock|pcm:01" "give it with --plugin")
+    app_cli_usage_says(StreamUnlockADataPluginIsUsage
+        "stream|mock://x?profile=plugin.example-sim.base|--plugin|${_usage_example}|--unlock|pcm:01"
+        "reads signals only")
+    app_cli_usage_says(StreamASecurityStoreWithoutUnlockIsUsage
+        "stream|mock://x|--security-store|s.json" "go with --unlock")
     app_cli_usage_says(StreamAConsentStoreWithoutAFileIsUsage
         "stream|mock://x|--consent-store" "--consent-store takes one file")
     app_cli_usage_says(LogTwoConsentStoresIsUsage

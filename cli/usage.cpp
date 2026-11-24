@@ -10,8 +10,8 @@ namespace cmd {
 
 namespace {
 
-// stream's and log's paragraphs, after the synopsis
-void usage_stream_log(FILE* to)
+// stream's paragraph, after the synopsis
+void usage_stream(FILE* to)
 {
     std::fprintf(
         to,
@@ -53,6 +53,15 @@ void usage_stream_log(FILE* to)
         "         another than the app's), and the session line says it;\n"
         "         without one nothing is sent, and the refusal says what\n"
         "         to read and run. log takes it the same way.\n"
+        "         --unlock asks one security access level of one module the\n"
+        "         plugin's code talks to (its ECU id and the level in hex,\n"
+        "         one the plugin declares for it): once, when the code\n"
+        "         talks, never again in the run. An unlock line says how\n"
+        "         core took it, and a conversation line follows each change\n"
+        "         of a module's report (state, level, outcome, failed\n"
+        "         attempts, delay left). The attempts are counted in the\n"
+        "         app's security.json, or the --security-store named, by\n"
+        "         the module's serial, else the car's VIN, else --vehicle.\n"
         "         --pick ranked asks only the profile's ranked signals (the\n"
         "         ones a UI plots first: the app's default pick without its\n"
         "         gauges and ticks), and a focus line names them; a profile\n"
@@ -63,7 +72,14 @@ void usage_stream_log(FILE* to)
         "         An adapter or a CAN interface holds the computer from\n"
         "         sleeping on its idle timer until the end, and the session\n"
         "         line says so (awake); --allow-sleep lets it sleep. A closed\n"
-        "         lid still sleeps it. log holds it the same way.\n"
+        "         lid still sleeps it. log holds it the same way.\n");
+}
+
+// log's paragraph, after stream's
+void usage_log(FILE* to)
+{
+    std::fprintf(
+        to,
         "log      records the session <uri> names to a folder of its own in\n"
         "         <folder>, as stream --record does, asking only the signals\n"
         "         --signal names (every one with none) so each is read as\n"
@@ -86,6 +102,30 @@ void usage_stream_log(FILE* to)
         "         line as each opens (its folder) and as the log is armed\n"
         "         again; a file with no enabled condition that records is\n"
         "         refused at the start.\n");
+}
+
+// stream's and log's lines of the synopsis, its first
+void usage_stream_log_synopsis(FILE* to)
+{
+    std::fprintf(
+        to,
+        "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
+        "                         [--until-scanned] [--record <folder> "
+        "[--label <name>]]\n"
+        "                         [--signals <file> | --plugin <pkg>]\n"
+        "                         [--conditions <file>] [--pick ranked]\n"
+        "                         [--allow-sleep] [--consent-store <path>]\n"
+        "                         [--unlock <ecu>:<level> [--security-store "
+        "<path>]\n"
+        "                         [--vehicle <label>]]\n"
+        "       havne-cli log <uri> <folder> [--signal <name>]... "
+        "[--pick ranked]\n"
+        "                      [--min-sweep <ms>] [--label <name>] "
+        "[--seconds S]\n"
+        "                      [--signals <file> | --plugin <pkg>] "
+        "[--conditions <file>\n"
+        "                      [--armed]] [--allow-sleep] "
+        "[--consent-store <path>]\n");
 }
 
 // plugins' lines of the synopsis
@@ -141,22 +181,9 @@ void usage_plugins(FILE* to)
 
 void usage(FILE* to)
 {
+    usage_stream_log_synopsis(to);
     std::fprintf(
         to,
-        "usage: havne-cli stream <uri> [--values] [--count N] [--seconds S]\n"
-        "                         [--until-scanned] [--record <folder> "
-        "[--label <name>]]\n"
-        "                         [--signals <file> | --plugin <pkg>]\n"
-        "                         [--conditions <file>] [--pick ranked]\n"
-        "                         [--allow-sleep] [--consent-store <path>]\n"
-        "       havne-cli log <uri> <folder> [--signal <name>]... "
-        "[--pick ranked]\n"
-        "                      [--min-sweep <ms>] [--label <name>] "
-        "[--seconds S]\n"
-        "                      [--signals <file> | --plugin <pkg>] "
-        "[--conditions <file>\n"
-        "                      [--armed]] [--allow-sleep] "
-        "[--consent-store <path>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -216,7 +243,8 @@ void usage(FILE* to)
                      "       havne-cli dtc <code>\n"
                      "       havne-cli --version | --help\n"
                      "\n");
-    usage_stream_log(to);
+    usage_stream(to);
+    usage_log(to);
     std::fprintf(
         to,
         "play     (Linux) writes a session's frames to a virtual CAN "

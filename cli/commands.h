@@ -22,6 +22,7 @@
 #include "ecuio/obdb.h"
 #include "ecuio/recording.h"
 #include "ecuio/socketcan.h"
+#include "ecuio/signals.h"
 
 namespace cmd {
 
@@ -43,10 +44,42 @@ struct StreamArgs {
     const char* conditions = nullptr; // --conditions' file
     bool pick_ranked = false;         // --pick ranked
     bool allow_sleep = false;         // --allow-sleep
+    const char* unlock = nullptr;     // --unlock's <ecu>:<level>
+    const char* security_store = nullptr; // --security-store's file
+    const char* vehicle = nullptr;        // --vehicle's label
+    uint32_t unlock_rx = 0;               // --unlock's module, by its reply ID
+    uint8_t unlock_level = 0;             // and its level, checked
 };
 
 int run_stream(const StreamArgs& args);
 int cmd_stream(int argc, char** argv);
+
+// cmd_unlock.cpp
+// A run's one word (--unlock) and the conversation lines it has written
+struct UnlockRun {
+    bool wanted = false; // --unlock's module is the session's
+    bool asked = false;  // core took the word or refused it: never again
+    uint32_t channel = 0;
+    uint8_t level = 0;
+    bool shown[ECUIO_MAX_CHANNELS] = {};
+    uint32_t generation[ECUIO_MAX_CHANNELS] = {};
+};
+// --unlock, --security-store and --vehicle taken out of argv (argc shrinks
+// by two each): false with words on standard error for one with no value
+// or given twice
+bool take_unlock_options(int& argc, char** argv, StreamArgs* args);
+// --unlock against the run's plugin, once its profile is read: -1 to go
+// on (unlock_rx and unlock_level set), else the exit code with words on
+// standard error
+int check_unlock(StreamArgs& args);
+// Before start: the security store named and --unlock's channel found;
+// false with an error line written
+bool arm_unlock(Output& out, ecuio_session_t* session, const StreamArgs& args,
+                uint32_t channels, UnlockRun* run);
+// Each bound channel's conversation line on a change of its report, and
+// --unlock's word given once its module talks
+void poll_conversation(Output& out, ecuio_session_t* session, uint32_t channels,
+                       UnlockRun* run);
 
 // cmd_log.cpp
 int run_log(const cli::LogArgs& args);

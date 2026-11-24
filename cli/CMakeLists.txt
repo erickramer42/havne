@@ -14,6 +14,7 @@ add_executable(havne-cli
     cmd_info.cpp
     cmd_plugins.cpp
     cmd_consent.cpp
+    cmd_unlock.cpp
     cmd_signals.cpp
     cmd_check.cpp
     cmd_transfer.cpp

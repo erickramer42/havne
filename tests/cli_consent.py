@@ -7,6 +7,7 @@
 #   python tests/cli_consent.py store <havne-cli> <talker3.json>
 #   python tests/cli_consent.py no-publisher <havne-cli> <format-2 package>
 #   python tests/cli_consent.py run <havne-cli> <talker3.json>
+#   python tests/cli_consent.py unlock <havne-cli> <cli_unlock_fixture>
 #
 # terms: `plugins terms`' text against its golden, byte for byte (line
 # ends aside), the package's path written as <package>. store: give, list
@@ -18,7 +19,11 @@
 # on standard output and no connection (an unreadable store exit 3, the
 # same nothing); with one its session line carries
 # the consent; a plugin whose terms changed shows the version-change block;
-# a withdrawn record refuses again.
+# a withdrawn record refuses again. unlock: stream --unlock pcm:01 on the
+# emulator with the plugins cli_unlock_fixture writes: the right key's run
+# says asked once and reaches unlocked, its wire log one seed asked; the
+# wrong key's first run fails, and a second inside the delay says delayed
+# and asks no seed (the emulator still took its connection).
 
 import json
 import os
@@ -227,7 +232,98 @@ def run_case(cli, package):
     return 0
 
 
+def unlock_stream(cli, package, consent, security, folder):
+    """stream --unlock pcm:01 for 8 s on an emulator of its own, the
+    exchanges logged in a temporary folder of its own: (exit, rows,
+    standard error, the wire logs' text, the emulator's connections)"""
+    logs = tempfile.mkdtemp(prefix="wire-", dir=folder)
+    env = dict(os.environ, TMP=logs, TEMP=logs, TMPDIR=logs,
+               ECUIO_SUR_LOG_FRAMES="1")
+    sim = Sim(cli)
+    uri = (f"elm327://127.0.0.1:{sim.port}?profile=plugin.talker.base"
+           "&diagnose=0&probe=0")
+    try:
+        code, out, err = run(cli, ["stream", uri, "--plugin", package,
+                                   "--consent-store", consent,
+                                   "--unlock", "pcm:01",
+                                   "--security-store", security,
+                                   "--vehicle", "bench", "--seconds", "8"],
+                             env)
+    finally:
+        took = sim.clients()
+    wire = ""
+    for name in sorted(os.listdir(logs)):
+        if name.startswith("ecuio-elm327"):
+            with open(os.path.join(logs, name), encoding="utf-8",
+                      errors="replace") as f:
+                wire += f.read()
+    return code, rows_of(out), err, wire, took
+
+
+# How the ELM327 wire log shows level 01's seed request typed
+SEED_SENT = "] > 2701"
+
+
+def seeds_asked(wire):
+    """The seed requests (27 01) the wire logs show typed"""
+    return sum(1 for line in wire.splitlines() if SEED_SENT in line)
+
+
+def of_type(rows, kind):
+    return [r for r in rows if r.get("type") == kind]
+
+
+def unlock_case(cli, writer):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-unlock-") as d:
+        right = os.path.join(d, "right.json")
+        wrong = os.path.join(d, "wrong.json")
+        done = subprocess.run([writer, right, wrong], capture_output=True)
+        if done.returncode != 0:
+            print(f"FAIL  the fixture writer: {done.stderr!r}")
+            return 1
+        for package, name in ((right, "right"), (wrong, "wrong")):
+            code, _, err = run(cli, ["plugins", "consent", package,
+                                     "--consent-store",
+                                     os.path.join(d, name + "-consent.json"),
+                                     "--give", fingerprint_of(cli, package)])
+            if code != 0:
+                print(f"FAIL  --give {name}: exit {code} {err!r}")
+                return 1
+        code, rows, err, wire, _ = unlock_stream(
+            cli, right, os.path.join(d, "right-consent.json"),
+            os.path.join(d, "right-security.json"), d)
+        words = of_type(rows, "unlock")
+        talk = of_type(rows, "conversation")
+        if code != 0 or [w.get("outcome") for w in words] != ["asked"]                 or not any(t.get("unlock") == "unlocked" for t in talk)                 or seeds_asked(wire) != 1:
+            print(f"FAIL  the right key: exit {code} {words!r} {talk!r} "
+                  f"{seeds_asked(wire)} seeds {err!r}")
+            return 1
+        consent = os.path.join(d, "wrong-consent.json")
+        security = os.path.join(d, "wrong-security.json")
+        code, rows, err, wire, _ = unlock_stream(cli, wrong, consent,
+                                                 security, d)
+        words = of_type(rows, "unlock")
+        talk = of_type(rows, "conversation")
+        if code != 0 or [w.get("outcome") for w in words] != ["asked"]                 or not any(t.get("unlock") == "failed"
+                           and t.get("failed") == 1 for t in talk)                 or any(t.get("unlock") == "unlocked" for t in talk)                 or seeds_asked(wire) != 1:
+            print(f"FAIL  the wrong key: exit {code} {words!r} {talk!r} "
+                  f"{seeds_asked(wire)} seeds {err!r}")
+            return 1
+        code, rows, err, wire, took = unlock_stream(cli, wrong, consent,
+                                                    security, d)
+        words = of_type(rows, "unlock")
+        if code != 0 or len(words) != 1                 or words[0].get("outcome") != "delayed"                 or not words[0].get("wait_ms") or not took                 or seeds_asked(wire) != 0:
+            print(f"FAIL  inside the delay: exit {code} {words!r} "
+                  f"{seeds_asked(wire)} seeds {len(took)} connections "
+                  f"{err!r}")
+            return 1
+    print("ok    unlocked once; a wrong key failed, then delayed unsent")
+    return 0
+
+
 def main(argv):
+    if len(argv) == 4 and argv[1] == "unlock":
+        return unlock_case(argv[2], argv[3])
     if len(argv) == 4 and argv[1] == "run":
         return run_case(argv[2], argv[3])
     if len(argv) >= 5 and argv[1] == "terms":
