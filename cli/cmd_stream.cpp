@@ -1,7 +1,7 @@
 // File/layer: cli/cmd_stream.cpp | havne-cli, stream (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliReplayTest, CliRecordTest,
 //          CliSignalTest, CliConditionsRunTest, CliExitTest,
-//          CliUsageTest (ctest);
+//          CliUsageTest, CliConsentRunTest (ctest);
 //          CliMarkLinesTest (test_cli); BENCH
 //
 // Public headers only: what any program linking core can do.
@@ -345,6 +345,13 @@ int run_stream(const StreamArgs& args)
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_held_session(out, session, info, args.allow_sleep);
+    UnlockRun unlock;
+    if (!arm_unlock(out, session, args, module_count(info), &unlock)) {
+        out.flush();
+        ecuio_session_destroy(session);
+        ecuio_condition_set_free(conditions);
+        return ended(out, kExitConnect);
+    }
     ShownConditions shown;
     if (conditions != nullptr) {
         if (!attach_conditions(out, session, conditions, conditions_source,
@@ -476,6 +483,7 @@ int run_stream(const StreamArgs& args)
         poll_timing(out, session, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
         poll_conditions(out, session, &shown);
+        poll_conversation(out, session, channels, &unlock);
 
         poll_health(out, session, &last_error, &episodes);
         // A replay whose file changed has stopped, short of its last
@@ -530,6 +538,7 @@ int run_stream(const StreamArgs& args)
         poll_scan(out, session, channels, scan_seen, session_seen, scan_reports,
                   true);
         poll_timing(out, session, timing_snaps, timing_rows, true);
+        poll_conversation(out, session, channels, &unlock);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
             covered = args.count;
@@ -599,12 +608,21 @@ int check_stream_args(const StreamArgs& args)
     return -1;
 }
 
-// stream's arguments but --consent-store (taken out: store), its profile,
-// then run_stream
-int read_stream(int argc, char** argv, const char* store)
+// The checks that need the profile read (--unlock's, then the consent's):
+// -1 to go on, else the exit code
+int check_profile_run(StreamArgs& args)
 {
-    StreamArgs args;
-    args.consent_store = store;
+    const int unlock = check_unlock(args);
+    if (unlock >= 0) {
+        return unlock;
+    }
+    return need_consent(args.uri, args.plugin, args.consent_store);
+}
+
+// stream's arguments but those taken out already (args), its profile,
+// then run_stream
+int read_stream(int argc, char** argv, StreamArgs args)
+{
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--values") {
@@ -668,24 +686,25 @@ int read_stream(int argc, char** argv, const char* store)
     if (rc >= 0) {
         return rc;
     }
-    const int consent = need_consent(args.uri, args.plugin, args.consent_store);
-    if (consent >= 0) {
-        return consent;
+    const int checked_run = check_profile_run(args);
+    if (checked_run >= 0) {
+        return checked_run;
     }
     return run_stream(args);
 }
 
 } // namespace
 
-// stream's --consent-store taken out, then the rest read
+// stream's --consent-store and unlock options taken out, then the rest read
 int cmd_stream(int argc, char** argv)
 {
-    const char* store = nullptr;
-    if (!take_consent_store(argc, argv, &store)) {
+    StreamArgs args;
+    if (!take_consent_store(argc, argv, &args.consent_store) ||
+        !take_unlock_options(argc, argv, &args)) {
         usage(stderr);
         return kExitUsage;
     }
-    return read_stream(argc, argv, store);
+    return read_stream(argc, argv, args);
 }
 
 } // namespace cmd
