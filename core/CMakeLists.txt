@@ -87,6 +87,7 @@ add_library(ecuio-core STATIC
     src/plugin_pages.cpp
     src/plugin_wrap.cpp
     src/security_store.cpp
+    src/store_file.cpp
     src/security_store_owner.cpp
     src/conversation.cpp
     src/conversation_registry.cpp
