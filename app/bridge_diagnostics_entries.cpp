@@ -13,6 +13,60 @@
 
 using namespace bridgetext;
 
+namespace {
+
+/* A clear's outcome (ADR-0038) as QML's key, and its NRC as "7F xx yy"
+ * where one was answered */
+QString clearOutcome(const ecuio_channel_diagnostics_t& s, QString* nrc)
+{
+    QString clear;
+    switch (s.clear) {
+    case ECUIO_CLEAR_CLEARED:
+        clear = QStringLiteral("cleared");
+        break;
+    case ECUIO_CLEAR_REFUSED:
+        clear = QStringLiteral("refused");
+        *nrc = QStringLiteral("7F 04 %1").arg(hexByte(s.clear_nrc));
+        break;
+    case ECUIO_CLEAR_UNANSWERED:
+        clear = QStringLiteral("unanswered");
+        break;
+    case ECUIO_CLEAR_ENGINE_RUNNING:
+        clear = QStringLiteral("engineRunning");
+        break;
+    case ECUIO_CLEAR_NO_ENGINE_SPEED:
+        clear = QStringLiteral("noEngineSpeed");
+        if (s.clear_nrc != 0) {
+            *nrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
+        }
+        break;
+    case ECUIO_CLEAR_REPORT_CHANGED:
+        clear = QStringLiteral("reportChanged");
+        break;
+    case ECUIO_CLEAR_MOVING:
+        clear = QStringLiteral("moving");
+        break;
+    case ECUIO_CLEAR_NO_VEHICLE_SPEED:
+        clear = QStringLiteral("noVehicleSpeed");
+        if (s.clear_nrc != 0) {
+            *nrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
+        }
+        break;
+    case ECUIO_CLEAR_NOT_EMISSIONS:
+        clear = QStringLiteral("notEmissions");
+        break;
+    case ECUIO_CLEAR_NOT_OPENED:
+        clear = QStringLiteral("notOpened");
+        break;
+    default:
+        clear = QStringLiteral("none");
+        break;
+    }
+    return clear;
+}
+
+} // namespace
+
 QVariantMap SessionBridge::inspection() const
 {
     uint32_t year = 0;
@@ -247,50 +301,8 @@ BridgeFormats::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
 
     /* The last clear (ADR-0038) and whether one runs */
     m[QStringLiteral("clearing")] = (s.flags & ECUIO_DIAG_CLEARING) != 0;
-    QString clear;
     QString clearNrc;
-    switch (s.clear) {
-    case ECUIO_CLEAR_CLEARED:
-        clear = QStringLiteral("cleared");
-        break;
-    case ECUIO_CLEAR_REFUSED:
-        clear = QStringLiteral("refused");
-        clearNrc = QStringLiteral("7F 04 %1").arg(hexByte(s.clear_nrc));
-        break;
-    case ECUIO_CLEAR_UNANSWERED:
-        clear = QStringLiteral("unanswered");
-        break;
-    case ECUIO_CLEAR_ENGINE_RUNNING:
-        clear = QStringLiteral("engineRunning");
-        break;
-    case ECUIO_CLEAR_NO_ENGINE_SPEED:
-        clear = QStringLiteral("noEngineSpeed");
-        if (s.clear_nrc != 0) {
-            clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
-        }
-        break;
-    case ECUIO_CLEAR_REPORT_CHANGED:
-        clear = QStringLiteral("reportChanged");
-        break;
-    case ECUIO_CLEAR_MOVING:
-        clear = QStringLiteral("moving");
-        break;
-    case ECUIO_CLEAR_NO_VEHICLE_SPEED:
-        clear = QStringLiteral("noVehicleSpeed");
-        if (s.clear_nrc != 0) {
-            clearNrc = QStringLiteral("7F 01 %1").arg(hexByte(s.clear_nrc));
-        }
-        break;
-    case ECUIO_CLEAR_NOT_EMISSIONS:
-        clear = QStringLiteral("notEmissions");
-        break;
-    case ECUIO_CLEAR_NOT_OPENED:
-        clear = QStringLiteral("notOpened");
-        break;
-    default:
-        clear = QStringLiteral("none");
-        break;
-    }
+    const QString clear = clearOutcome(s, &clearNrc);
     m[QStringLiteral("clear")] = clear;
     m[QStringLiteral("clearNrc")] = clearNrc;
     m[QStringLiteral("clearRpm")] = static_cast<int>(s.clear_rpm);

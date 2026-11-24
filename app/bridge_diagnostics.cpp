@@ -281,15 +281,13 @@ QString SessionBridge::clearDiagnostics()
     emit logMessage(
         QStringLiteral("Diagnostics saved before the clear: %1").arg(shown));
     m_clearSavedTo = shown;
-    for (bool& waiting : m_clearWaiting) {
-        waiting = false;
-    }
+    std::fill(std::begin(m_clearWaiting), std::end(m_clearWaiting), false);
     emit clearMovingChanged();
 
     /* One request: the engine and vehicle speed judged once for every ECU */
-    std::vector<ecuio_clear_target_t> targets;
+    std::vector<ecuio_clear_target_t> targets(n);
     for (uint32_t i = 0; i < n; ++i) {
-        targets.push_back({channels[i], reports[i].generation, {0, 0}});
+        targets[i] = {channels[i], reports[i].generation, {0, 0}};
     }
     const std::vector<ecuio_status_t> rc =
         cli::ask_clears(m_session, targets, ECUIO_CLEAR_ALLOW_RUNNING);
