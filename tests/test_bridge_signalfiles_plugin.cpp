@@ -83,7 +83,7 @@ TEST(BridgeTest, PluginRefusalNamesNoPath)
     const QVariantMap r = bridge.importPlugin(
         writeScratch(from.path(), "broken.havne-plugin.json",
                      packed_plugin::example().replace("\"havne_plugin\": 1",
-                                                      "\"havne_plugin\": 3")));
+                                                      "\"havne_plugin\": 4")));
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     const QString words = r.value(QStringLiteral("words")).toString();
     EXPECT_TRUE(words.contains(QStringLiteral("line"))) << words.toStdString();
