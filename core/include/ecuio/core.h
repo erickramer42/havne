@@ -1239,7 +1239,9 @@ ecuio_status_t ecuio_session_clear_diagnostics_set(
  * set or ended as an activity line (ecuio_session_record). Returns at
  * once. The session's one caller may call it from any thread, while the
  * worker runs (the picks reach it under a lock), but not at the same
- * time as another call on the session, ecuio_session_close among them.
+ * time as another call on the session, ecuio_session_close among them,
+ * other than one this header lets any thread make (the getters,
+ * ecuio_session_security_unlock).
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
