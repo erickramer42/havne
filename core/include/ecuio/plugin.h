@@ -371,6 +371,22 @@ _Static_assert(offsetof(ecuio_consent_line_t, key) == 16,
 ecuio_status_t ecuio_consent_line(uint32_t set, uint32_t index,
                                   ecuio_consent_line_t* out);
 
+/* Applies a person's consent to the session's plugin, between create and
+ * start: a plugin's module binds at start only with one (but on a bus no
+ * car is on, SocketCAN's vcan). Core checks that the session's set
+ * carries a plugin part that asks consent, that the plugin names a
+ * publisher, that fingerprint (32 bytes) is that plugin's, and that store
+ * holds a record of it; it keeps the fingerprint and the record's second
+ * for the session's records. It proves nothing about who gave the record.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument; ECUIO_ERR_INVALID_ARGUMENT
+ * with words after start, for a set with no plugin part, or a fingerprint
+ * not the plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin
+ * that names no publisher (format 1 or 2) or no record in store. A
+ * session that asked nothing asks from start once its module binds. */
+ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,
+                                           const ecuio_consent_store_t* store,
+                                           const uint8_t* fingerprint);
+
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
  * buffer too small for the whole text and its NUL */

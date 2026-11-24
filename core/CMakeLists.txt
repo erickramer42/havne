@@ -91,6 +91,7 @@ add_library(ecuio-core STATIC
     src/consent_store.cpp
     src/consent_store_api.cpp
     src/consent_lines.cpp
+    src/core_consent.cpp
     src/security_store_owner.cpp
     src/conversation.cpp
     src/conversation_registry.cpp

@@ -79,8 +79,16 @@ struct ecuio_session {
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
-    /* The consent create found (consent_gate.h): a create-time fact */
+    /* The consent create found (consent_gate.h), or apply's; read at the
+     * bind */
     bool conversation_consent = false;
+    /* A consent applied before start (ecuio_session_apply_consent): the
+     * record's fingerprint and second, the caller's alone until start */
+    bool consent_applied = false;
+    uint8_t consent_fingerprint[32] = {};
+    uint64_t consent_given_utc = 0;
+    /* The link is one no car is on (SocketCAN's vcan), set by attach */
+    bool no_car_bus = false;
     /* started's copy for any thread: the conditions' states judge what the
      * session gets only once it runs */
     std::atomic<bool> ran{false};

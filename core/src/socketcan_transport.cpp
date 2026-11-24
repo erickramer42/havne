@@ -647,6 +647,8 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
                 r.proof.quiet_us = unproven_us;
             }
         }
+        /* The driver, not the name, says no car is on it (consent_gate.h) */
+        session->no_car_bus = link.is_vcan();
         impl->fd = open_socket(impl.get(), link.index);
         if (impl->fd < 0) {
             ecuio_detail_set("%s: %s", name, why(errno).c_str());

@@ -345,8 +345,10 @@ ecuio_status_t ecuio_session_create(
     if (status != ECUIO_OK) {
         return status;
     }
-    /* After attach, which fills the rest of the info; the worker hasn't
-     * started, so no lock */
+    /* After attach, which fills the rest of the info and may find a bus
+     * no car is on; the worker hasn't started, so no lock */
+    s->conversation_consent =
+        s->conversation != nullptr && ecuio_plugin_code_may_run(s.get());
     if (s->focus_requests || ecuio_session_may_talk(s.get())) {
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
     }

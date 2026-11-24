@@ -48,7 +48,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
     test_security_store_owner.cpp test_conversation_registry.cpp
-    test_consent_store.cpp test_consent_lines.cpp
+    test_consent_store.cpp test_consent_lines.cpp test_consent_session.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp)
 

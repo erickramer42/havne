@@ -171,6 +171,9 @@ ecuio_status_t keep_conversation(ecuio_plugin& p, const ecuio_signal_set_t* set,
             }
             part->services = c.services;
             part->levels = c.levels;
+            std::memcpy(part->fingerprint, p.fingerprint,
+                        sizeof part->fingerprint);
+            part->has_publisher = p.publisher != nullptr;
             p.conversation_part = std::move(part);
         } catch (const std::bad_alloc&) {
             return ECUIO_ERR_OUT_OF_MEMORY;

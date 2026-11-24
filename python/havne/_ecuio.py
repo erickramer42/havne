@@ -2032,6 +2032,7 @@ FUNCTIONS = {
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h
     'ecuio_scrub_frames': (c_int, [c_size_t, ecuio_scrub_frame_callback_t, c_void_p, POINTER(ecuio_signal_set_t), c_uint32, POINTER(c_uint8), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_serial_ports': (c_int, [POINTER(ecuio_serial_port_t), c_uint32, POINTER(c_uint32)]),  # serial.h
+    'ecuio_session_apply_consent': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_consent_store_t), POINTER(c_uint8)]),  # plugin.h
     'ecuio_session_clear_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_set': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_clear_target_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_with': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32, c_uint32]),  # core.h

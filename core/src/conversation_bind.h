@@ -113,6 +113,11 @@ bool ecuio_session_may_talk(const ecuio_session_t* session);
 /* Whether the part talks on module channel c alone: the channels the
  * bind makes, by the same rule */
 bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c);
+
+/* Whether channel c's module is the part's and would bind but for a
+ * consent its plugin can be given (a publisher named; consent_gate.h):
+ * the unlock's ECUIO_ERR_CONSENT_REQUIRED */
+bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c);
 /* Whether frame is a security access (access_cut.h) on the request or
  * response ID of a channel the part talks on: cut from the recording */
 bool ecuio_session_cuts_access(const ecuio_session_t* session,
