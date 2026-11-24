@@ -20,7 +20,8 @@
 //   - A save that finds the file isn't what this store last read or wrote
 //     merges by fingerprint, three ways: a record this store gave or
 //     withdrew since then is this store's; any other is the file's. So
-//     two writers' consents are both kept, and a withdraw stands.
+//     two writers' consents are both kept, and a withdraw stands. A file
+//     removed since is merged as one holding none.
 //   - One owner for a path in a process (path_registry.h).
 //   - The words name no path.
 

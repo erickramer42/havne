@@ -4,8 +4,9 @@
 // The consent store (consent_store.{h,cpp}, consent_store_api.cpp): a
 // record made from the plugin, the first second kept, a withdraw of one
 // or all, the newest of an id, the file's refusals in words that name no
-// path, two opens sharing one owner, a merge with another writer, each
-// failing step of a save, and the out-of-memory loop.
+// path, two opens sharing one owner, a merge with another writer and
+// with a removed file, each failing step of a save, and the
+// out-of-memory loop.
 
 #include "consent_store.h"
 #include "folder_files.h"
@@ -409,6 +410,40 @@ TEST(ConsentStoreTest, ASaveMergesAnotherWritersRecords)
     ASSERT_EQ(after.records.size(), 1u);
     EXPECT_EQ(after.records[0].id, "other");
     EXPECT_EQ(count_of(s.get()), 1u) << "the store holds what it wrote";
+}
+
+/* The file removed between two saves: the records it held stay removed,
+ * and only what this store gave since is written */
+TEST(ConsentStoreTest, AFileRemovedBetweenTwoSavesBringsNothingBack)
+{
+    Folder f;
+    const std::string path = path_in(f);
+    const Plugin v1 = plugin("1.0.0");
+    const Plugin v2 = plugin("1.1.0");
+    {
+        const Store s = open_store(path);
+        ASSERT_EQ(ecuio_consent_store_give(s.get(), v1.get(), kUtc), ECUIO_OK);
+    }
+    ecuio_consent::store s;
+    std::string why;
+    ASSERT_EQ(ecuio_consent::store_load(path, &s, &why),
+              ecuio_consent::store_io::ok);
+    ASSERT_EQ(s.records.size(), 1u);
+    ASSERT_EQ(std::remove(path.c_str()), 0);
+
+    ecuio_consent::record r = s.records[0];
+    std::memcpy(r.fingerprint, bytes_of(print_of(v2.get())), 32);
+    r.version = "1.1.0";
+    s.records.push_back(r);
+    ASSERT_EQ(ecuio_consent::store_save(path, &s, &why),
+              ecuio_consent::store_io::ok)
+        << why;
+    ecuio_consent::store after;
+    ASSERT_EQ(ecuio_consent::store_load(path, &after, &why),
+              ecuio_consent::store_io::ok);
+    ASSERT_EQ(after.records.size(), 1u);
+    EXPECT_EQ(after.records[0].version, "1.1.0");
+    EXPECT_EQ(s.records.size(), 1u) << "the store holds what it wrote";
 }
 
 TEST(ConsentStoreTest, EachFailingStepOfASaveLeavesTheStoreAsItWas)

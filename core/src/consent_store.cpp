@@ -193,17 +193,21 @@ store_io merged_records(const std::string& path, const store& s,
         *words = "the file there " + *words;
         return store_io::refused;
     }
-    if (got == file_read::none || (!there.empty() && there == s.on_disk)) {
+    if (!there.empty() && there == s.on_disk) {
         return store_io::ok;
     }
+    /* No file is a "theirs" of none: a removed file's records aren't s's
+     * to write again */
     std::vector<record> theirs;
-    const store_io read =
-        store_read(there.data(), there.size(), &theirs, words);
-    if (read == store_io::refused) {
-        *words = "the file there doesn't read (" + *words + ")";
-    }
-    if (read != store_io::ok) {
-        return read;
+    if (got != file_read::none) {
+        const store_io read =
+            store_read(there.data(), there.size(), &theirs, words);
+        if (read == store_io::refused) {
+            *words = "the file there doesn't read (" + *words + ")";
+        }
+        if (read != store_io::ok) {
+            return read;
+        }
     }
     merged->clear();
     for (const record& m : s.records) {
