@@ -68,6 +68,8 @@ ECUIO_CLEAR_CLEARED = 1
 ECUIO_CLEAR_ENGINE_RUNNING = 4
 ECUIO_CLEAR_MOVING = 7
 ECUIO_CLEAR_NONE = 0
+ECUIO_CLEAR_NOT_EMISSIONS = 9
+ECUIO_CLEAR_NOT_OPENED = 10
 ECUIO_CLEAR_NO_ENGINE_SPEED = 5
 ECUIO_CLEAR_NO_VEHICLE_SPEED = 8
 ECUIO_CLEAR_REFUSED = 2
@@ -185,6 +187,7 @@ ECUIO_DIAG_MAX_DTCS = 32
 ECUIO_DIAG_MAX_FREEZE = 16
 ECUIO_DIAG_MAX_MONITORS = 12
 ECUIO_DIAG_MIL_ON = 4
+ECUIO_DIAG_NOT_OPENED = 0x400
 ECUIO_DIAG_PENDING = 1
 ECUIO_DIAG_PERMANENT = 2
 ECUIO_DIAG_READINESS = 2
@@ -270,6 +273,10 @@ ECUIO_MERGE_BASE_OBD2 = 1
 ECUIO_MERGE_MAX_PARTS = 16
 ECUIO_MODULE_BASE = 1
 ECUIO_MODULE_MAX_REQUESTS = 0x400
+ECUIO_MODULE_REASON_CONVERSATION = 4
+ECUIO_MODULE_REASON_RANGE = 1
+ECUIO_MODULE_REASON_READ = 2
+ECUIO_MODULE_REASON_VISIT = 8
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
@@ -458,10 +465,12 @@ ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
 ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED = 1
+ECUIO_SUPPORT_CLOSED = 128
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_CONVERSATION = 64
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
+ECUIO_SUPPORT_NO_ROOM = 0x100
 ECUIO_SUPPORT_PACKED = 8
 ECUIO_SUPPORT_PROBED = 1
 ECUIO_SUPPORT_SCAN_COMPLETE = 4
@@ -608,6 +617,9 @@ class ecuio_check_options_t(Structure):
     pass
 
 class ecuio_check_summary_t(Structure):
+    pass
+
+class ecuio_clear_target_t(Structure):
     pass
 
 class ecuio_computed_t(Structure):
@@ -1006,7 +1018,8 @@ ecuio_channel_support_t._fields_ = [
     ('session_nrc', c_uint8),
     ('session_entries', c_uint16),
     ('session_lost', c_uint16),
-    ('reserved', (c_uint32 * 2)),
+    ('open_reasons', c_uint32),
+    ('reserved', (c_uint32 * 1)),
 ]
 ecuio_check_finding_t._fields_ = [
     ('kind', c_uint32),
@@ -1033,6 +1046,11 @@ ecuio_check_summary_t._fields_ = [
     ('counts', (c_uint64 * 8)),
     ('torn_rows', c_uint64),
     ('reserved', (c_uint64 * 4)),
+]
+ecuio_clear_target_t._fields_ = [
+    ('channel', c_uint32),
+    ('generation', c_uint32),
+    ('reserved', (c_uint32 * 2)),
 ]
 ecuio_computed_t._fields_ = [
     ('input_ids', (c_uint16 * 4)),
@@ -1568,7 +1586,8 @@ ecuio_session_info_t._fields_ = [
     ('replay_speed_milli', c_uint32),
     ('replay_rows_torn', c_uint32),
     ('module_count', c_uint32),
-    ('reserved', (c_uint32 * 11)),
+    ('module_budget', c_uint32),
+    ('reserved', (c_uint32 * 10)),
 ]
 ecuio_session_timing_t._fields_ = [
     ('snapshot_us', c_uint64),
@@ -1912,6 +1931,7 @@ FUNCTIONS = {
     'ecuio_scrub_frames': (c_int, [c_size_t, ecuio_scrub_frame_callback_t, c_void_p, POINTER(ecuio_signal_set_t), c_uint32, POINTER(c_uint8), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_serial_ports': (c_int, [POINTER(ecuio_serial_port_t), c_uint32, POINTER(c_uint32)]),  # serial.h
     'ecuio_session_clear_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32]),  # core.h
+    'ecuio_session_clear_diagnostics_set': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_clear_target_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_with': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_close': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_create': (c_int, [c_char_p, POINTER(POINTER(ecuio_session_t))]),  # core.h

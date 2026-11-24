@@ -60,6 +60,53 @@ uint32_t rotation_rows(const ecuio_session_t* session,
 } // namespace
 
 namespace {
+void store_modules(ecuio_session_t* session);
+
+/* The picks handed over, under focus_mutex, with the modules they read */
+void store_picks(ecuio_session_t* session, std::vector<uint16_t>& ids,
+                 std::vector<uint8_t>& picked, uint32_t min_sweep_ms,
+                 uint32_t flags)
+{
+    session->focus_ids.swap(ids);
+    session->focus_defs.swap(picked);
+    session->focus_min_sweep_ms = min_sweep_ms;
+    session->focus_flags = flags;
+    store_modules(session);
+}
+
+/* The conditions' signals handed over, under focus_mutex, with the
+ * modules they read; whether the map moved */
+bool store_watched(ecuio_session_t* session, std::vector<uint8_t>& watched)
+{
+    const bool moved = watched != session->condition_defs;
+    session->condition_defs.swap(watched);
+    store_modules(session);
+    return moved;
+}
+
+/* The modules the stored picks and conditions read (ADR-0065 step 5),
+ * under focus_mutex, before focus_generation moves */
+void store_modules(ecuio_session_t* session)
+{
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    const size_t defs =
+        (set != nullptr && set->defs != nullptr) ? set->count : 0;
+    const auto bytes = [defs](const std::vector<uint8_t>& v) {
+        return v.size() >= defs && defs > 0 ? v.data() : nullptr;
+    };
+    const ecuio_modules_read m = ecuio_modules_wanted(
+        set, session->module_rx.data(),
+        static_cast<uint32_t>(session->module_rx.size()),
+        session->focus_ids.data(),
+        static_cast<uint32_t>(session->focus_ids.size()),
+        bytes(session->focus_defs), bytes(session->condition_defs), defs);
+    session->focus_modules = m.mask;
+    session->focus_module_count = m.count;
+    for (uint32_t k = 0; k < m.count; ++k) {
+        session->focus_module_order[k] = m.order[k];
+    }
+}
+
 /* ecuio_session_test_after_conditions_handover's (internal.h) */
 std::atomic<void (*)(void*)> g_after_conditions_handover{nullptr};
 std::atomic<void*> g_after_conditions_handover_user{nullptr};
@@ -180,10 +227,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
                 return ECUIO_ERR_INVALID_ARGUMENT;
             }
         }
-        session->focus_ids.swap(ids);
-        session->focus_defs.swap(picked);
-        session->focus_min_sweep_ms = min_sweep_ms;
-        session->focus_flags = flags;
+        store_picks(session, ids, picked, min_sweep_ms, flags);
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);
@@ -338,9 +382,7 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
          * only a changed map moves it, under a focus or on such a session;
          * otherwise the next focus call moves it. */
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        const bool moved = watched != session->condition_defs;
-        session->condition_defs.swap(watched);
-        if (moved &&
+        if (store_watched(session, watched) &&
             (!session->focus_ids.empty() || session->focus_pick_only)) {
             session->focus_generation.fetch_add(1);
         }

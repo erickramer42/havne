@@ -426,7 +426,8 @@ ecuio_status_t ecuio_session_get_timing(
  * first ECUIO_SESSION_INFO_MAX_CHANNELS. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
  * a NULL session or out; ECUIO_ERR_INVALID_ARGUMENT for an index at or
  * past module_count, out untouched. Readable at any time and after
- * close.
+ * close. Every module the session has, open or not (ADR-0065 step 5: a
+ * module's support report says whether it is closed).
  */
 ecuio_status_t ecuio_session_get_module(
     const ecuio_session_t* session,

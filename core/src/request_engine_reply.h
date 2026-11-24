@@ -72,7 +72,8 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
  * out never answered counts one frame from then (reply_segmented), until
  * an answer, a late one too (ecuio_engine_late_frames), teaches it, or a
  * recovery or its module's waking takes it back (ran_out). Each wait
- * counts toward the channel's quiet run, a pack's rows each. */
+ * counts toward the channel's quiet run, a pack's rows each; a table
+ * row's or a pack's is a lost reply. */
 inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
@@ -88,6 +89,7 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     ch.in_step = false;
     if (!once) {
         e->answering &= ~(1u << c); /* a table's request: the ECU's silence */
+        ecuio_engine_count(ch.counts.lost);
     }
     const auto timed_out = [e](uint32_t row) {
         if (e->timing != nullptr && row < e->count &&
@@ -349,7 +351,7 @@ inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
  * a one-byte request (03, 07, 0A) has no key, so its service's reply
  * alone answers it. *out_nrc (when not NULL) gets the code of a negative
  * or pending reply. */
-inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
+inline ecuio_reply ecuio_engine_take_reply(ecuio_request_engine* e, uint32_t c,
                                            const uint8_t* data, uint16_t len,
                                            int64_t now_us, uint8_t* out_nrc)
 {
@@ -399,13 +401,59 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
     return ecuio_engine_take_negative(e, c, out, r, code, now_us);
 }
 
+/* ecuio_engine_take_reply, and the channel's counts: each pending and
+ * busy answer, and a reply completing its request past P2 */
+inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
+                                           const uint8_t* data, uint16_t len,
+                                           int64_t now_us, uint8_t* out_nrc)
+{
+    const bool out = e->chans[c].outstanding != ECUIO_ENGINE_NONE;
+    const int64_t sent_us = e->chans[c].sent_us;
+    uint8_t nrc = 0;
+    const ecuio_reply r =
+        ecuio_engine_take_reply(e, c, data, len, now_us, &nrc);
+    ecuio_engine_counts& n = e->chans[c].counts;
+    const bool done = r == ecuio_reply::positive || r == ecuio_reply::negative;
+    if (r == ecuio_reply::pending) {
+        ecuio_engine_count(n.pending);
+    } else if (r == ecuio_reply::negative &&
+               nrc == ECUIO_NRC_BUSY_REPEAT_REQUEST) {
+        ecuio_engine_count(n.busy);
+    }
+    if (out && done && now_us - sent_us > ECUIO_ENGINE_P2_US) {
+        ecuio_engine_count(n.late);
+    }
+    if (out_nrc != nullptr && (r == ecuio_reply::negative ||
+                               r == ecuio_reply::pending)) {
+        *out_nrc = nrc;
+    }
+    return r;
+}
+
+/* The transport said frames were lost before one it hands over */
+inline void ecuio_engine_overflowed(ecuio_request_engine* e)
+{
+    ecuio_engine_count(e->overflowed);
+}
+
+/* The kernel refused a write for want of buffers */
+inline void ecuio_engine_write_refused(ecuio_request_engine* e)
+{
+    ecuio_engine_count(e->writes_refused);
+}
+
 /* The driver's call for a frame received on channel c:
  * ecuio_engine_take_frame, and the channel's ECU is answering and heard,
- * whatever the frame answered, which ends a quiet state */
+ * whatever the frame answered, which ends a quiet state. A closed
+ * module's frame is no reply: the driver dispatches it, the engine
+ * takes nothing from it. */
 inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
                                          const uint8_t* data, uint16_t len,
                                          int64_t now_us, uint8_t* out_nrc)
 {
+    if (!ecuio_engine_module_hears(e->chans[c])) {
+        return ecuio_reply::none;
+    }
     e->answering |= 1u << c;
     const ecuio_reply r =
         ecuio_engine_take_frame(e, c, data, len, now_us, out_nrc);

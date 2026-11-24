@@ -168,7 +168,11 @@ TEST_F(Elm327SessionTest, TheWireLogHoldsTheSetupAndTheReadings)
               "] < STN2255 v9.9.9", "] > STVR", "] < 13.80", "] > ATPPS",
               "] the session closes", std::string("] ") + kPort + " closed"}));
     EXPECT_EQ(log.find("] > 010C"), std::string::npos) << log;
-    EXPECT_EQ(log.find("] < 7E8"), std::string::npos) << log;
+    /* the probe's reply is the setup's, written as the setup's are */
+    const size_t probe = log.find("] emissions probe: 1 functional 01 00 in ");
+    ASSERT_NE(probe, std::string::npos) << log;
+    EXPECT_NE(log.find("ms, answered by 7E8", probe), std::string::npos);
+    EXPECT_EQ(log.find("] < 7E8", probe), std::string::npos) << log;
 }
 
 /* With frame logging, as a recording sets it: every request, every line

@@ -19,8 +19,11 @@
 //     how often it was disconnected and closed by the IDs it handed
 //     out, its PassThruReadMsgs calls (counted, the first
 //     kReadDepth calls' Timeout kept), how many received messages
-//     it still held, unread, when the last filter stopped, and the
-//     replies ECUIO_FAKE_LOST_UNDER_SEGMENTS dropped.
+//     it still held, unread, when the last filter stopped, the
+//     replies ECUIO_FAKE_LOST_UNDER_SEGMENTS dropped, and the filters
+//     it holds started (now, and the most at once since the reset), the
+//     starts since the reset and the starts ECUIO_FAKE_FILTER_MAX
+//     refused.
 // Fixed-size fields and no pointers, so an x64 test process and an x86
 // child map the same bytes; the size is pinned below and the layout
 // versioned (kLayout).
@@ -42,7 +45,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 7;
+constexpr uint32_t kLayout = 9;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -105,10 +108,14 @@ struct Page {
     uint32_t unread_at_stop; /* messages queued, arrived or due, when the
                               * last filter stopped */
     volatile LONG lost_under_segments; /* replies the knob dropped */
+    volatile LONG filters_active;      /* filters started and not stopped */
+    volatile LONG filters_peak;        /* the most at once since the reset */
+    volatile LONG filters_refused; /* starts ECUIO_FAKE_FILTER_MAX refused */
+    volatile LONG filters_started; /* starts since the reset or the clear */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
                                   kWriteDepth * 76 + 12 + 48 + 4 + 4 +
-                                  kReadDepth * 4 + 4 + 4,
+                                  kReadDepth * 4 + 4 + 4 + 16,
               "the page's layout must match in x86 and x64 builds");
 
 class Guard {
@@ -280,6 +287,10 @@ inline void reset(Page* p)
     p->last_stopped = 0;
     p->unread_at_stop = 0;
     InterlockedExchange(&p->lost_under_segments, 0);
+    InterlockedExchange(&p->filters_active, 0);
+    InterlockedExchange(&p->filters_peak, 0);
+    InterlockedExchange(&p->filters_refused, 0);
+    InterlockedExchange(&p->filters_started, 0);
 }
 
 /* Queues a message for the fake's receive queue; it moves there on the
@@ -363,6 +374,7 @@ inline void record_filter(Page* p, uint32_t id, uint32_t type,
                           uint32_t len, const uint8_t* flow)
 {
     Guard g(p);
+    ++p->filters_started;
     Filter& f = p->last_filter;
     f.id = id;
     f.type = type;
@@ -381,6 +393,52 @@ inline void record_filter_stop(Page* p, uint32_t id, uint32_t unread)
     Guard g(p);
     p->last_stopped = id;
     p->unread_at_stop = unread;
+}
+
+/* Fake side: the filters it holds now, and the most at once */
+inline void record_filters_active(Page* p, uint32_t active)
+{
+    Guard g(p);
+    p->filters_active = static_cast<LONG>(active);
+    if (p->filters_peak < p->filters_active) {
+        p->filters_peak = p->filters_active;
+    }
+}
+
+/* The filters the fake holds started, and the most at once since the
+ * reset or clear_filters_peak */
+inline uint32_t filters_active(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->filters_active, 0, 0));
+}
+
+inline uint32_t filters_peak(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->filters_peak, 0, 0));
+}
+
+inline uint32_t filters_refused(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->filters_refused, 0, 0));
+}
+
+/* The filters started since the reset or clear_filters_peak */
+inline uint32_t filters_started(Page* p)
+{
+    return static_cast<uint32_t>(
+        InterlockedCompareExchange(&p->filters_started, 0, 0));
+}
+
+/* The most at once counted again from those held now, and the starts
+ * from none */
+inline void clear_filters_peak(Page* p)
+{
+    Guard g(p);
+    p->filters_peak = p->filters_active;
+    p->filters_started = 0;
 }
 
 inline uint32_t writes(Page* p)

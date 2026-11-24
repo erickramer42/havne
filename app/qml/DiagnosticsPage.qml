@@ -140,6 +140,10 @@ Page {
             return e.clearNrc !== ""
                 ? qsTr("Not sent: the ECU didn't give the vehicle speed (%1)").arg(e.clearNrc)
                 : qsTr("Not sent: the ECU didn't give the vehicle speed")
+        case "notEmissions":
+            return qsTr("Not sent: this ECU gave no emissions answer (01 00 or 03), so it isn't cleared with them")
+        case "notOpened":
+            return qsTr("Not sent: no room to open this ECU for the clear: live data holds every filter the adapter has")
         default:
             return ""
         }

@@ -47,9 +47,8 @@ struct Exchange {
  * replies to the engine that long after the write, as the VX hands a long
  * reply over whole, while its frames hold the bus at their own time; a
  * reply handed over after its wait ran out leaves the exchange
- * unanswered. The pass is the worker's, j2534_hold_pass, or (plain)
- * the pass a worker makes with no hold, written out: each channel's wait
- * ended and its due request written in turn. */
+ * unanswered. The pass is the worker's, j2534_hold_pass, held or (plain)
+ * not. */
 struct Bus {
     ecuio_request_engine e;
     j2534_hold hold;
@@ -104,25 +103,14 @@ struct Bus {
     void pass()
     {
         deliver();
-        if (plain) {
-            for (uint32_t c = 0; c < e.chan_count; ++c) {
-                if (ecuio_engine_expire(&e, c, now)) {
-                    end_open(c);
-                }
-                const int32_t r = ecuio_engine_due(&e, c, now);
-                if (r != ECUIO_ENGINE_NONE) {
-                    write(c, r, false);
-                }
-            }
-        } else {
-            bool chosen[ECUIO_MAX_CHANNELS] = {};
-            for (uint32_t c = 0; c < e.chan_count; ++c) {
-                chosen[c] = hold.chosen[c] != ECUIO_ENGINE_NONE;
-            }
-            j2534_hold_pass(
-                hold, &e, now, [&](uint32_t c) { end_open(c); },
-                [&](uint32_t c, int32_t r) { write(c, r, chosen[c]); });
+        hold.on = hold.on && !plain;
+        bool chosen[ECUIO_MAX_CHANNELS] = {};
+        for (uint32_t c = 0; c < e.chan_count; ++c) {
+            chosen[c] = hold.chosen[c] != ECUIO_ENGINE_NONE;
         }
+        j2534_hold_pass(
+            hold, &e, now, [&](uint32_t c) { end_open(c); },
+            [&](uint32_t c, int32_t r) { write(c, r, chosen[c]); });
         now += kStepUs;
     }
 

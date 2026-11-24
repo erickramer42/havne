@@ -75,6 +75,9 @@ struct Ecu {
         if (q == Bytes{0x04}) {
             return {0x44};
         }
+        if (q == Bytes{0x03}) {
+            return {0x43, 0x00}; /* no codes: an emissions module */
+        }
         if (q == kGated) {
             const uint32_t n = ecuio_sim_security_did(security, extended, out);
             return n != 0 ? Bytes(out, out + n) : Bytes{0x7F, 0x22, 0x31};

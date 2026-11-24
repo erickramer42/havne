@@ -14,9 +14,10 @@
 //          The floor and the timer's wait: J2534HealthTest.TheFloor*,
 //          .VxTheFloorsWaitReadsNothing; ?gap=: J2534QueryParamTest
 //          A talk's request whole in one write: J2534TalkTest
+//          Each module's filter (ADR-0065 step 5): J2534ModulesTest
 //
 // j2534:// attach (the URI, the channels, the requests, the DLL), start
-// and detach, and the C call. The worker is j2534_worker.cpp;
+// and detach, each module's filter, and the C call. The worker is j2534_worker.cpp;
 // j2534_transport.h is what they share.
 
 #include "ecuio/core.h"
@@ -32,6 +33,8 @@
 #include "error_detail.h"
 #include "host_clock.h"
 #include "isotp.h"
+#include "request_probe.h"
+#include "conversation_bind.h"
 #include "ecuio/profile.h"
 
 #include <atomic>
@@ -244,58 +247,36 @@ ecuio_status_t resolve_uri(const char* uri, ecuio_j2534_device_t* dev)
 
 ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
 {
-    (void)session;
     auto* t = static_cast<ecuio_j2534_transport*>(impl);
     if (t->worker.joinable()) {
         return ECUIO_OK;    /* internal.h: second start on a live
                          * transport returns ECUIO_OK */
     }
 
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        uint8_t mask[J2534_FILTER_MSG_LEN];
-        uint8_t pattern[J2534_FILTER_MSG_LEN];
-        uint8_t fc[J2534_FILTER_MSG_LEN];
-        pack_be32(mask, 0xFFFFFFFFu);   /* exact-ID match, all 4 bytes */
-        pack_be32(pattern, t->chans[i].rx_id);
-        /* A functional request's reply takes its Flow Control on the
-         * physical request ID (isotp_flow_control_id); the request itself
-         * is one frame, which J2534-1 (DEC2004) Appendix A.3 sends with no
-         * filter naming its ID */
-        pack_be32(fc,
-                  isotp_flow_control_id(t->chans[i].rx_id, t->chans[i].tx_id));
-        ecuio_status_t st = ecuio_j2534_start_msg_filter(
-            t->handle, t->channel,
-            ECUIO_PT_FLOW_CONTROL_FILTER,
-            mask, J2534_FILTER_MSG_LEN,
-            pattern, J2534_FILTER_MSG_LEN,
-            fc, J2534_FILTER_MSG_LEN,
-            t->chans[i].addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD,
-            &t->chans[i].filter_id);
-        if (st != ECUIO_OK) {
-            /* Unwind the ones already registered: no partial
-             * filter state survives a failed start. */
-            for (uint32_t j = 0; j < i; ++j) {
-                if (t->chans[j].filter_active) {
-                    (void)ecuio_j2534_stop_msg_filter(
-                        t->handle, t->channel, t->chans[j].filter_id);
-                    t->chans[j].filter_active = false;
-                }
-            }
-            return st;
+    ecuio_status_t st = ECUIO_OK;
+    if (j2534_asks(t)) {
+        ecuio_modules_seen seen; /* the picks set before start first */
+        (void)ecuio_take_modules(session, &t->engine, seen, 0);
+        st = j2534_filters_follow(t, true);
+    } else {
+        for (uint32_t c = 0; c < t->chan_count && st == ECUIO_OK; ++c) {
+            st = j2534_filter_open(t, c);
         }
-        t->chans[i].filter_active = true;
+    }
+    if (st != ECUIO_OK) {
+        /* no partial filter state survives a failed start */
+        for (uint32_t c = 0; c < t->chan_count; ++c) {
+            j2534_filter_close(t, c);
+        }
+        return st;
     }
 
     t->stop_requested.store(false);
     try {
         t->worker = std::thread(j2534_worker, t);
     } catch (...) {
-        for (uint32_t i = 0; i < t->chan_count; ++i) {
-            if (t->chans[i].filter_active) {
-                (void)ecuio_j2534_stop_msg_filter(t->handle, t->channel,
-                                                  t->chans[i].filter_id);
-                t->chans[i].filter_active = false;
-            }
+        for (uint32_t c = 0; c < t->chan_count; ++c) {
+            j2534_filter_close(t, c);
         }
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -315,12 +296,8 @@ void j2534_detach(ecuio_session_t* session, void* impl)
         t->stop_requested.store(true);
         t->worker.join();
     }
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        if (t->chans[i].filter_active) {
-            (void)ecuio_j2534_stop_msg_filter(t->handle, t->channel,
-                                              t->chans[i].filter_id);
-            t->chans[i].filter_active = false;
-        }
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        j2534_filter_close(t, c);
     }
     (void)ecuio_j2534_disconnect_channel(t->handle, t->channel);
     (void)ecuio_j2534_close(t->handle);
@@ -357,6 +334,166 @@ void describe_session(const ecuio_j2534_transport* t, unsigned long baud,
                                  info->api_version) == ECUIO_OK) {
         info->flags |= ECUIO_SESSION_INFO_VERSIONS;
     }
+}
+
+/* The requests for the channels as they stand (ecuio_build_requests),
+ * their IDs into rx_ids and tx_ids, with the adapter's bounds: ISO-TP
+ * sent whole, J2534's guaranteed filters */
+ecuio_status_t build_channels(ecuio_session_t* session,
+                              const ecuio_signal_set_t* set,
+                              const j2534_uri_params& params,
+                              ecuio_j2534_transport* t, uint32_t* rx_ids,
+                              uint32_t* tx_ids)
+{
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        rx_ids[i] = t->chans[i].rx_id;
+        tx_ids[i] = t->chans[i].tx_id;
+    }
+    const ecuio_status_t st = ecuio_build_requests(
+        session, set, params.req, rx_ids, tx_ids, t->chan_count, &t->engine,
+        &t->probe, &t->identify);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
+    t->engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* the adapter sends ISO-TP */
+    t->engine.filters_most = J2534_FILTERS_GUARANTEED;
+    t->engine.module_budget = J2534_FILTERS_GUARANTEED - 1;
+    return ECUIO_OK;
+}
+
+/* A probe group's replies, read until the one-shot's wait has passed */
+void probe_read(ecuio_j2534_handle_t* handle, unsigned long channel,
+                ecuio_probe* p)
+{
+    const auto until = std::chrono::steady_clock::now() +
+                       std::chrono::microseconds(ECUIO_ENGINE_WAIT_US);
+    for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            until - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            return;
+        }
+        ecuio_pt_rx_t rx{};
+        bool got = false;
+        if (ecuio_j2534_read_msg(handle, channel, &rx,
+                                 static_cast<uint32_t>(left.count()),
+                                 &got) != ECUIO_OK) {
+            return;
+        }
+        if (got && rx.data_size > J2534_ADDR_LEN) {
+            const uint32_t id =
+                ((uint32_t{rx.data[0]} << 24) | (uint32_t{rx.data[1]} << 16) |
+                 (uint32_t{rx.data[2]} << 8) | rx.data[3]) &
+                ECUIO_CAN_ID_MAX;
+            ecuio_probe_take(*p, id, rx.data + J2534_ADDR_LEN,
+                             rx.data_size - J2534_ADDR_LEN);
+        }
+    }
+}
+
+/* The start's emissions probe (request_probe.h) on the connected channel,
+ * a best try: for each group a flow-control filter for each reply ID, one
+ * functional 01 00, its replies read, the filters stopped. A refused
+ * vendor call ends it with what it heard; the session log has the call. */
+void run_probe(ecuio_j2534_handle_t* handle, unsigned long channel,
+               const ecuio_j2534_transport& t, unsigned long wide,
+               ecuio_probe* p)
+{
+    const auto start = std::chrono::steady_clock::now();
+    const uint32_t tx = wide != 0 ? ECUIO_PROBE_TX_29 : ECUIO_PROBE_TX_11;
+    uint32_t rx_ids[ECUIO_MAX_CHANNELS];
+    for (uint32_t i = 0; i < t.chan_count; ++i) {
+        rx_ids[i] = t.chans[i].rx_id;
+    }
+    uint32_t group[ECUIO_MAX_CHANNELS];
+    for (uint32_t g = 0;; ++g) {
+        const uint32_t n = ecuio_probe_group(rx_ids, t.chan_count, wide != 0,
+                                             t.engine.module_budget, g, group);
+        if (n == 0) {
+            break;
+        }
+        unsigned long ids[ECUIO_MAX_CHANNELS];
+        uint32_t started = 0;
+        for (; started < n; ++started) {
+            uint8_t mask[J2534_FILTER_MSG_LEN];
+            uint8_t pattern[J2534_FILTER_MSG_LEN];
+            uint8_t fc[J2534_FILTER_MSG_LEN];
+            pack_be32(mask, 0xFFFFFFFFu);
+            pack_be32(pattern, group[started]);
+            pack_be32(fc, isotp_flow_control_id(group[started], tx));
+            if (ecuio_j2534_start_msg_filter(
+                    handle, channel, ECUIO_PT_FLOW_CONTROL_FILTER, mask,
+                    J2534_FILTER_MSG_LEN, pattern, J2534_FILTER_MSG_LEN, fc,
+                    J2534_FILTER_MSG_LEN, wide | ECUIO_PT_TX_ISO15765_FRAME_PAD,
+                    &ids[started]) != ECUIO_OK) {
+                break;
+            }
+        }
+        uint8_t msg[J2534_ADDR_LEN + 2];
+        pack_be32(msg, tx);
+        msg[J2534_ADDR_LEN] = ECUIO_PROBE_REQUEST[0];
+        msg[J2534_ADDR_LEN + 1] = ECUIO_PROBE_REQUEST[1];
+        uint32_t written = 0;
+        if (started == n &&
+            ecuio_j2534_write_frame(handle, channel, msg, sizeof msg,
+                                    wide | ECUIO_PT_TX_ISO15765_FRAME_PAD, 0,
+                                    &written) == ECUIO_OK &&
+            written >= 1) {
+            ++p->requests;
+            probe_read(handle, channel, p);
+        }
+        for (uint32_t k = 0; k < started; ++k) {
+            (void)ecuio_j2534_stop_msg_filter(handle, channel, ids[k]);
+        }
+        if (started != n) {
+            break;
+        }
+    }
+    p->took_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count();
+}
+
+/* The probe on a session that asks anything: its answerers are RANGE
+ * (the session's module_range), and an undeclared 11-bit one joins the
+ * channels (never under ?filter= or ?poll=), whose requests are then
+ * built again */
+ecuio_status_t probe_modules(ecuio_session_t* session,
+                             const ecuio_signal_set_t* set,
+                             const j2534_uri_params& params,
+                             ecuio_j2534_transport* t, unsigned long wide,
+                             uint32_t* rx_ids, uint32_t* tx_ids)
+{
+    if (t->engine.count == 0 && t->engine.scan_count == 0) {
+        return ECUIO_OK;
+    }
+    ecuio_probe p;
+    if (ecuio_start_probe_on().load()) {
+        run_probe(t->handle, t->channel, *t, wide, &p);
+    }
+    const uint32_t before = t->chan_count;
+    if (params.req.rx_id == 0 && !params.req.has_poll &&
+        ecuio_probe_join(p, rx_ids, tx_ids, &t->chan_count) > 0) {
+        for (uint32_t i = before; i < t->chan_count; ++i) {
+            t->chans[i].rx_id = rx_ids[i];
+            t->chans[i].tx_id = tx_ids[i];
+            t->chans[i].addr_flags = 0;
+        }
+        const ecuio_status_t st =
+            build_channels(session, set, params, t, rx_ids, tx_ids);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+    }
+    session->module_range = ecuio_probe_range(
+        p, rx_ids, t->chan_count, ecuio_engine_rpm_module_of(&t->engine));
+    if (p.requests > 0) {
+        char line[160];
+        ecuio_probe_describe(p, line, sizeof line);
+        ecuio_j2534_log_line(t->handle, line);
+    }
+    return ECUIO_OK;
 }
 
 /* Ops table: static storage owned by this TU (internal.h contract),
@@ -412,19 +549,11 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
      * is touched. */
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        rx_ids[i] = t->chans[i].rx_id;
-        tx_ids[i] = t->chans[i].tx_id;
-    }
-    st = ecuio_build_requests(session, set, params.req, rx_ids, tx_ids,
-                              t->chan_count, &t->engine, &t->probe,
-                              &t->identify);
+    st = build_channels(session, set, params, t.get(), rx_ids, tx_ids);
     t->hold = params.hold;
     if (st != ECUIO_OK) {
         return st;
     }
-    ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
-    t->engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* the adapter sends ISO-TP */
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
      * channels use 29-bit IDs, so the channel opens at the width its
@@ -472,8 +601,13 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->session = session;
     t->handle = handle;
     t->channel = channel;
-    describe_session(t.get(), params.baud, connect_flags, &session->info);
-    st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
+    st = probe_modules(session, set, params, t.get(),
+                       wide_chans != 0 ? ECUIO_PT_CAN_29BIT_ID : 0UL, rx_ids,
+                       tx_ids);
+    if (st == ECUIO_OK) {
+        describe_session(t.get(), params.baud, connect_flags, &session->info);
+        st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
+    }
     if (st != ECUIO_OK) {
         delete wrap;
         ecuio_j2534_disconnect_channel(handle, channel);
@@ -490,6 +624,79 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
 }
 
 } // namespace
+
+bool ecuio_j2534::j2534_asks(const ecuio_j2534_transport* t)
+{
+    return t->engine.count > 0 || t->engine.scan_count > 0 ||
+           ecuio_session_may_talk(t->session);
+}
+
+ecuio_status_t ecuio_j2534::j2534_filter_open(ecuio_j2534_transport* t,
+                                              uint32_t c)
+{
+    j2534_channel& ch = t->chans[c];
+    uint8_t mask[J2534_FILTER_MSG_LEN];
+    uint8_t pattern[J2534_FILTER_MSG_LEN];
+    uint8_t fc[J2534_FILTER_MSG_LEN];
+    pack_be32(mask, 0xFFFFFFFFu); /* exact-ID match, all 4 bytes */
+    pack_be32(pattern, ch.rx_id);
+    /* A functional request's reply takes its Flow Control on the physical
+     * request ID (isotp_flow_control_id); the request itself is one frame,
+     * which J2534-1 (DEC2004) Appendix A.3 sends with no filter naming
+     * its ID */
+    pack_be32(fc, isotp_flow_control_id(ch.rx_id, ch.tx_id));
+    const ecuio_status_t st = ecuio_j2534_start_msg_filter(
+        t->handle, t->channel, ECUIO_PT_FLOW_CONTROL_FILTER, mask,
+        J2534_FILTER_MSG_LEN, pattern, J2534_FILTER_MSG_LEN, fc,
+        J2534_FILTER_MSG_LEN, ch.addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD,
+        &ch.filter_id);
+    ch.filter_active = st == ECUIO_OK;
+    return st;
+}
+
+void ecuio_j2534::j2534_filter_close(ecuio_j2534_transport* t, uint32_t c)
+{
+    j2534_channel& ch = t->chans[c];
+    if (ch.filter_active) {
+        (void)ecuio_j2534_stop_msg_filter(t->handle, t->channel, ch.filter_id);
+        ch.filter_active = false;
+    }
+}
+
+ecuio_status_t ecuio_j2534::j2534_filters_follow(ecuio_j2534_transport* t,
+                                                 bool at_start)
+{
+    ecuio_request_engine& e = t->engine;
+    uint32_t held = 0;
+    uint32_t holding = 0; /* a bit for each module holding a filter */
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        if (!ecuio_engine_module_hears(e.chans[c])) {
+            j2534_filter_close(t, c);
+        }
+        held += t->chans[c].filter_active ? 1u : 0u;
+        holding |= t->chans[c].filter_active ? 1u << c : 0u;
+    }
+    /* RANGE first: a refusal falls on a pick, never on an emissions module */
+    for (const bool range : {true, false}) {
+        for (uint32_t c = 0; c < t->chan_count; ++c) {
+            const ecuio_engine_channel& ch = e.chans[c];
+            if (t->chans[c].filter_active || !ecuio_engine_module_hears(ch) ||
+                ((ch.reasons & ECUIO_ENGINE_REASON_RANGE) != 0) != range) {
+                continue;
+            }
+            const ecuio_status_t st = j2534_filter_open(t, c);
+            if (st == ECUIO_OK) {
+                ++held;
+                holding |= 1u << c;
+            } else if (at_start && held == 0) {
+                return st;
+            } else {
+                ecuio_engine_filter_refused(&e, c, holding);
+            }
+        }
+    }
+    return ECUIO_OK;
+}
 
 extern "C" ecuio_status_t ecuio_j2534_transport_attach(
     ecuio_session_t* session, const char* uri, const ecuio_uri_query* query)

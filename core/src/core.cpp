@@ -17,6 +17,7 @@
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "request_setup.h"    /* the unpicked check's interval */
+#include "request_probe.h"    /* the start probe's switch */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "computed.h"        /* a computed pick's leaves, for a focus */
@@ -470,6 +471,11 @@ ecuio_status_t ecuio_session_receive(
 void ecuio_set_j2534_clock_lag_us(uint64_t us)
 {
     j2534_clock_lag_override_us().store(us);
+}
+
+void ecuio_set_start_probe(int on)
+{
+    ecuio_start_probe_on().store(on != 0);
 }
 
 void ecuio_set_unpicked_check_ms(uint32_t ms)

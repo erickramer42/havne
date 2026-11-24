@@ -34,24 +34,29 @@ public:
 
 } // namespace
 
-/* The setup's contract commands in order, then the readings, then the
- * requests: the obd2 profile's probe first, each Service 01 request to
- * the engine ECU with the count digit (ADR-0026 section 3) */
+/* The setup's contract commands in order, the start's emissions probe
+ * (the replies 7E8-7EF heard, one functional 01 00, the channels' filter
+ * again), then the readings, then the requests: the obd2 profile's walk
+ * first, each Service 01 request to the engine ECU with the count digit
+ * (ADR-0026 section 3) */
 TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
 {
     Session s;
     ASSERT_EQ(s.create(uri()), ECUIO_OK) << ecuio_last_error_detail();
     const std::vector<std::string> setup = {
-        "ATZ",      "ATE0",   "ATL0",  "ATS0",  "ATH1",   "ATD0",
-        "ATCAF1",   "ATCFC1", "ATSP6", "ATAT1", "ATST19", "ATSH7E0",
-        "ATCRA7E8", "ATI",    "STI",   "STVR",  "ATPPS"};
+        "ATZ",      "ATE0",    "ATL0",    "ATS0",    "ATH1",        "ATD0",
+        "ATCAF1",   "ATCFC1",  "ATSP6",   "ATAT1",   "ATST19",      "ATSH7E0",
+        "ATCRA7E8", "ATCF7E8", "ATCM7F8", "ATSH7DF", kProbeCommand, "ATCRA7E8",
+        "ATI",      "STI",     "STVR",    "ATPPS"};
     EXPECT_EQ(fake_commands(), setup);
 
     s.start();
     ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 3; }, 10000));
     const std::vector<std::string> sent = fake_commands();
     ASSERT_GT(sent.size(), setup.size());
-    EXPECT_EQ(sent[setup.size()], "01001") << "the probe's first bitmap";
+    EXPECT_EQ(sent[setup.size()], "ATSH7E0") << "the engine ECU's header";
+    ASSERT_GT(sent.size(), setup.size() + 1);
+    EXPECT_EQ(sent[setup.size() + 1], "01001") << "the walk's first bitmap";
     EXPECT_EQ(
         on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.bare_crs; }),
         0u)
@@ -411,7 +416,8 @@ TEST_F(Elm327SessionTest, AFocusAsksOnlyThePickedPids)
     const auto requests = [] {
         std::vector<std::string> out;
         for (const std::string& cmd : fake_commands()) {
-            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0) {
+            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0 &&
+                cmd != kProbeCommand) {
                 out.push_back(cmd.substr(0, 4));
             }
         }
@@ -465,12 +471,14 @@ TEST_F(Elm327SessionTest, AMinimumTimeSpacesTheFocusSweeps)
         [&] {
             return on_fake<uint32_t>([](fake_elm327::adapter& a) {
                        return a.requests;
-                   }) >= want;
+                   }) >= want + 1;
         },
         5000));
+    /* past the start's probe, the first request */
     const std::vector<int64_t> stamps =
         on_fake<std::vector<int64_t>>([](fake_elm327::adapter& a) {
-            return std::vector<int64_t>(a.request_us, a.request_us + want);
+            return std::vector<int64_t>(a.request_us + 1,
+                                        a.request_us + 1 + want);
         });
     std::vector<int64_t> sweeps;
     std::vector<int64_t> within;
@@ -649,7 +657,8 @@ TEST_F(Elm327SessionTest, AFocusOnADroppedPidAloneIsRefused)
     const auto requests = [] {
         std::vector<std::string> out;
         for (const std::string& cmd : fake_commands()) {
-            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0) {
+            if (cmd.size() >= 4 && cmd.compare(0, 2, "01") == 0 &&
+                cmd != kProbeCommand) {
                 out.push_back(cmd);
             }
         }

@@ -229,7 +229,7 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
     const auto in_range = [&o](uint64_t host_us) {
         return host_us >= o.from_us && (o.to_us == 0 || host_us <= o.to_us);
     };
-    ecuio_health_replies::builder replies(obd2);
+    ecuio_health_replies::builder replies(obd2, set);
     std::set<std::string> ident_values;
     uint64_t end_us = 0;
     const auto take = [&](uint32_t id, bool ext, const uint8_t* data, size_t n,
@@ -268,9 +268,9 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
             /* A message whole: REASSEMBLED, or in a recording older than
              * the flag any row not on the wire (the reader decodes such a
              * row whole too). builder::take lists an ECU only on a reply
-             * ID (scrub::reply_id), so another ID's frame that opens like
-             * a reply never becomes one; its identity values still go to
-             * the check. */
+             * ID (scrub::reply_id) or one the set declares, so another
+             * ID's frame that opens like a reply never becomes one; its
+             * identity values still go to the check. */
             if (!damaged && f.data_length > 0 &&
                 ((f.flags & ECUIO_FRAME_FLAG_REASSEMBLED) != 0 ||
                  !fr::reassembly::on_the_wire(f))) {

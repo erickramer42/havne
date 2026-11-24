@@ -575,18 +575,19 @@ TEST_F(SimBusTest, AnExtendedSessionScanReadsEachModuleInItsOwnSession)
 }
 
 /* Without modules=2 nothing answers on 0x7E9: the default stays the
- * engine ECU alone */
+ * engine ECU alone, whose one reply is its answer to the start's probe
+ * (it joins the table, asked nothing of its own here) */
 TEST_F(SimBusTest, TheSecondModuleIsOptIn)
 {
     Sim sim("mock://sim");
     ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
     Values values;
-    Session s("?profile=uds-generic&did=7E9:D100:u8");
+    Session s("?profile=uds-generic&did=7E9:D100:u8&identify=0&diagnose=0");
     ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
     values.listen(s.get());
     std::this_thread::sleep_for(1500ms);
     EXPECT_FALSE(values.has(ECUIO_UDS_GENERIC_SIG_ID_BASE));
-    EXPECT_EQ(sim.stats().replies, 0u);
+    EXPECT_EQ(sim.stats().replies, 1u);
 }
 
 /* pending: every third reply comes as 7F <service> 78 and then, 300 ms

@@ -189,13 +189,16 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
-    /* ecuio_session_clear_diagnostics's requests, per channel, from any
-     * thread: the generation the caller saved, then the count moved on;
-     * a worker that reads diagnostics takes each new one
-     * (ecuio_take_clear_requests) */
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_generation;
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_flags;
-    std::unique_ptr<std::atomic<uint32_t>[]> clear_requests;
+    /* ecuio_session_clear_diagnostics_set's request, from any thread,
+     * under clear_mutex: its targets and flags, the requests made, and
+     * the last one the worker has seen to its end
+     * (ecuio_take_clear_requests); a request runs while the two differ */
+    std::mutex clear_mutex;
+    ecuio_clear_target_t clear_targets[ECUIO_MAX_CHANNELS] = {};
+    uint32_t clear_count = 0;
+    uint32_t clear_flags = 0;
+    uint32_t clear_requests = 0;
+    uint32_t clear_ended = 0;
     /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
      * caller's order and one byte per def (1 picked), under the mutex;
      * focus_generation moves with each call and a requesting worker takes
@@ -229,6 +232,23 @@ struct ecuio_session {
     /* One byte per def, sized with focus_askable: 1 for a def the focus the
      * worker took leaves unasked (ecuio_focus_unasked), under the mutex */
     std::vector<uint8_t> focus_unasked;
+    /* The modules the picks and the attached conditions read (ADR-0065
+     * step 5's READ, ecuio_modules_wanted), worked out with them under
+     * the mutex before focus_generation moves: one bit per module, and
+     * those modules in the order of their first pick */
+    uint32_t focus_modules = 0;
+    uint8_t focus_module_order[ECUIO_MAX_CHANNELS] = {};
+    uint32_t focus_module_count = 0;
+    /* The modules that answered the start's emissions probe (RANGE,
+     * request_probe.h), a bit each; every module when no probe ran (the
+     * mock, ?poll=). Set by attach, read-only afterwards. */
+    uint32_t module_range = UINT32_MAX;
+    /* The modules closed and those with no room, a bit each, as the
+     * requesting worker's last take left them (ecuio_take_modules); a
+     * recording's attach reads them for its header. None for a transport
+     * that sends no request. */
+    std::atomic<uint32_t> modules_closed{0};
+    std::atomic<uint32_t> modules_no_room{0};
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

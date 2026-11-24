@@ -172,7 +172,8 @@ TEST_F(SocketCanRequestTest, ASetPastARotationIsAskedOnlyItsPicks)
 
     /* Twice the quiet run a link takes to say an ECU isn't answering */
     std::this_thread::sleep_for(2000ms);
-    EXPECT_EQ(engine.answered(), 0u) << "nothing is asked before a pick";
+    EXPECT_EQ(engine.answered(), 1u)
+        << "the start's probe alone: nothing is asked before a pick";
     EXPECT_EQ(second.answered(), 0u);
     EXPECT_EQ(state(), ECUIO_OK)
         << "a session asking nothing isn't one an ECU doesn't answer";
@@ -228,6 +229,11 @@ bool items_settled(const Session& s)
     for (uint32_t c = 0; c < 2; ++c) {
         ecuio_channel_identity_t id{};
         ecuio_channel_diagnostics_t diag{};
+        ecuio_channel_support_t sup{};
+        if (ecuio_session_get_channel_support(s.get(), c, &sup) == ECUIO_OK &&
+            (sup.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+            continue; /* no answer to the start's probe, nothing picked */
+        }
         if (ecuio_session_get_channel_identity(s.get(), c, &id) != ECUIO_OK ||
             ecuio_session_get_channel_diagnostics(s.get(), c, &diag) !=
                 ECUIO_OK ||
@@ -300,19 +306,24 @@ bool goes_quiet(Count count, int64_t quiet_ms, int64_t limit_ms)
 }
 
 /* Whether a request is 22 10 00, the car-sized set's first DID */
-bool asks_the_first_did(const Asked& a)
+bool asks_did(const Asked& a, uint8_t low)
 {
     return a.data.size() >= 4 && a.data[0] == 0x03 && a.data[1] == 0x22 &&
-           a.data[2] == 0x10 && a.data[3] == 0x00;
+           a.data[2] == 0x10 && a.data[3] == low;
+}
+
+bool asks_the_first_did(const Asked& a)
+{
+    return asks_did(a, 0x00);
 }
 
 } // namespace
 
 /* Such a session with nothing picked still asks identification and
- * diagnostics, each module's. One module of two isn't on the bus, and
- * the other answers nothing to what it doesn't serve (its refusals are
- * silence): the silence is one module's and an item's, never the
- * vehicle's. The link is OK through the unanswered items, and after a
+ * diagnostics, each module's. One module of two isn't on the bus (so the
+ * start's probe leaves it closed), and the other answers nothing to what
+ * it doesn't serve (its refusals are silence): the silence is an item's,
+ * never the vehicle's. The link is OK through the unanswered items, and after a
  * bus-off and the bus clean again, when they are all asked again with
  * no reply among them. */
 TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
@@ -347,12 +358,11 @@ TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     }
     EXPECT_GE(silent_items, 1u)
         << "the case needs an item the live ECU leaves unanswered";
-    ecuio_channel_identity_t module{};
-    ASSERT_EQ(ecuio_session_get_channel_identity(s.get(), 1, &module),
-              ECUIO_OK);
-    for (uint32_t i = 0; i < module.items; ++i) {
-        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
-    }
+    /* The module off the bus gave the start's probe no answer: closed
+     * with nothing picked, so its silence is never asked */
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 1, &module), ECUIO_OK);
+    EXPECT_NE(module.flags & ECUIO_SUPPORT_CLOSED, 0u);
     uint32_t episodes = 0;
     EXPECT_EQ(state_of(s, &episodes), ECUIO_OK);
     EXPECT_EQ(episodes, 0u);
@@ -395,12 +405,71 @@ TEST_F(SocketCanRequestTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     EXPECT_EQ(episodes, 1u) << "the bus-off, and nothing since";
 }
 
+/* ADR-0065 step 5: the kernel's filter holds the open modules' IDs
+ * alone, so a frame on a closed module's reply ID never reaches the
+ * session (the worker takes a whole message on any declared channel);
+ * once a pick opens the module, the same frame is the session's. */
+TEST_F(SocketCanRequestTest, AClosedModulesFramesAreNotDelivered)
+{
+    using car_sized::id_of;
+    using car_sized::kMost;
+    struct Module {
+        Module() { EXPECT_TRUE(fake_ecu::set_module_dids("7E8:1007=2A")); }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    const CarProfile profile("socketcan-filter-car");
+    struct Heard {
+        std::atomic<uint32_t> engine{0};
+        std::atomic<uint32_t> closed{0};
+        static void cb(const ecuio_frame_t* f, void* user)
+        {
+            auto* h = static_cast<Heard*>(user);
+            (f->arbitration_id == 0x7E9u ? h->closed : h->engine)++;
+        }
+    } heard;
+    vcan_bus::Ecu engine; /* the start's probe hears 0x7E8 alone */
+    ASSERT_TRUE(engine.ok());
+    vcan_bus::Fd bus = vcan_bus::open_raw();
+    ASSERT_TRUE(bus.ok());
+    Session s("?profile=socketcan-filter-car&identify=0&diagnose=0", Heard::cb,
+              &heard);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const uint16_t engine_pick = id_of(7);
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), &engine_pick, 1), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return heard.engine.load() >= 2; }, 5000ms));
+    /* A Single Frame shaped as module 0x7E9's answer to its first DID */
+    const std::vector<uint8_t> shaped = {0x04, 0x62, 0x10, 0x00, 0x11};
+    ASSERT_TRUE(put(bus.get(), 0x7E9, shaped));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(heard.closed.load(), 0u) << "a closed module's frame came";
+
+    /* Its pick opens it */
+    const uint16_t picks[] = {engine_pick, id_of(kMost)};
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), picks, 2), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            ecuio_channel_support_t sup{};
+            return ecuio_session_get_channel_support(s.get(), 1, &sup) ==
+                       ECUIO_OK &&
+                   (sup.flags & ECUIO_SUPPORT_CLOSED) == 0;
+        },
+        5000ms));
+    ASSERT_TRUE(wait_for(
+        [&] {
+            (void)put(bus.get(), 0x7E9, shaped);
+            return heard.closed.load() > 0;
+        },
+        2000ms))
+        << "the open module's frame never came";
+}
+
 /* On a bus with no ECU the link says not responding and keeps saying
  * so: an idle pass never turns that into OK. While it is down the
- * worker asks one request an interval (here kCheckMs), a module in
- * turn, the first a whole interval after the items settled. The first
- * answered ends the timeout, the identification is read after all, and
- * the checks end. */
+ * worker asks one request an interval (here kCheckMs) of the module
+ * standing in for the silent start's probe (the first: the car asks no
+ * PID 0C), the first a whole interval after the items settled. The
+ * first answered (a refusal is an answer) ends the timeout, the
+ * identification is read after all, and the checks end. */
 TEST_F(SocketCanRequestTest,
        AnUnpickedSessionOnASilentBusChecksItAndFindsItAwake)
 {
@@ -455,8 +524,8 @@ TEST_F(SocketCanRequestTest,
     EXPECT_EQ(state_of(s), ECUIO_ERR_VEHICLE_TIMEOUT)
         << "its silence changes nothing";
 
-    /* The ECUs on the bus: the next check, the other module's, is
-     * answered */
+    /* The ECUs on the bus: the next check, the engine ECU's next row, is
+     * answered, refused; the other module stays closed */
     vcan_bus::Ecu engine;
     vcan_bus::Ecu module(-1, vcan_bus::interface_name(), 0x7E1, 0x7E9);
     ASSERT_TRUE(engine.ok());
@@ -465,9 +534,9 @@ TEST_F(SocketCanRequestTest,
         << "no check found the vehicle awake";
     take_asked(listener.get(), asked);
     ASSERT_GT(asked.size(), settled + 1);
-    EXPECT_EQ(asked[settled + 1].id, 0x7E1u) << "the next module's";
-    EXPECT_TRUE(asks_the_first_did(asked[settled + 1]));
-    EXPECT_GE(module.answered(), 1u);
+    EXPECT_EQ(asked[settled + 1].id, 0x7E0u) << "the engine ECU's again";
+    EXPECT_TRUE(asks_did(asked[settled + 1], 0x01)) << "its next row";
+    EXPECT_EQ(module.answered(), 0u) << "the module not standing in";
     /* The recovery: what went unanswered is asked again, and the engine
      * ECU's VIN is in */
     ASSERT_TRUE(wait_for(
@@ -529,4 +598,52 @@ TEST_F(SocketCanRequestTest,
     EXPECT_EQ(episodes, 1u);
     take_asked(bus.get(), asked);
     EXPECT_EQ(asked.size(), before) << "nothing was asked to end it";
+}
+
+/* The start's probe (request_probe.h) on the bus: the engine ECU answers
+ * the functional 01 00 on a socket of the probe's own, so a set that
+ * doesn't declare it gains it as a module, open for RANGE; ?filter=
+ * joins nothing */
+TEST_F(SocketCanRequestTest, AnUndeclaredAnswererJoinsTheTable)
+{
+    vcan_bus::Ecu engine;
+    ASSERT_TRUE(engine.ok());
+    {
+        Session s("?profile=uds-generic&did=7B8:D801&identify=0&diagnose=0");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s.get(), &info), ECUIO_OK);
+        ASSERT_EQ(info.module_count, 2u);
+        ecuio_channel_decl_t m{};
+        ASSERT_EQ(ecuio_session_get_module(s.get(), 1, &m), ECUIO_OK);
+        EXPECT_EQ(m.rx_id, 0x7E8u);
+        EXPECT_EQ(m.tx_id, 0x7E0u);
+        ecuio_channel_support_t sup{};
+        ASSERT_EQ(ecuio_session_get_channel_support(s.get(), 1, &sup),
+                  ECUIO_OK);
+        EXPECT_NE(sup.open_reasons & ECUIO_MODULE_REASON_RANGE, 0u);
+    }
+    Session f("?profile=obd2&filter=0x7B8&identify=0&diagnose=0");
+    ASSERT_EQ(f.status(), ECUIO_OK) << f.detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(f.get(), &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 1u);
+}
+
+/* SocketCAN keeps no session log: the probe's time and answerers go to
+ * standard error */
+TEST_F(SocketCanRequestTest, TheProbeWritesItsLineToStandardError)
+{
+    vcan_bus::Ecu engine;
+    ASSERT_TRUE(engine.ok());
+    testing::internal::CaptureStderr();
+    {
+        Session s("?profile=obd2&identify=0&diagnose=0");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    }
+    const std::string err = testing::internal::GetCapturedStderr();
+    EXPECT_NE(err.find("socketcan: emissions probe: 1 functional 01 00 in "),
+              std::string::npos)
+        << err;
+    EXPECT_NE(err.find("answered by 7E8"), std::string::npos) << err;
 }

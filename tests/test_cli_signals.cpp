@@ -403,11 +403,12 @@ TEST(CliClearTest, TheOutcomesInWords)
     const char* const words[] = {
         "none",           "cleared",        "refused",
         "unanswered",     "engine-running", "no-engine-speed",
-        "report-changed", "moving",         "no-vehicle-speed"};
-    for (uint8_t i = 0; i < 9; ++i) {
+        "report-changed", "moving",         "no-vehicle-speed",
+        "not-emissions",  "not-opened"};
+    for (uint8_t i = 0; i < 11; ++i) {
         EXPECT_STREQ(cli::clear_outcome_word(i), words[i]) << int{i};
     }
-    EXPECT_STREQ(cli::clear_outcome_word(9), "unknown");
+    EXPECT_STREQ(cli::clear_outcome_word(11), "unknown");
     EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_CLEARED));
     EXPECT_TRUE(cli::clear_reads_again(ECUIO_CLEAR_UNANSWERED));
     EXPECT_FALSE(cli::clear_reads_again(ECUIO_CLEAR_REFUSED));

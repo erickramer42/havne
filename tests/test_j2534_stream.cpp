@@ -3,10 +3,16 @@
 //          (test_j2534_stream)
 
 #include "test_j2534_stream_support.h"
+#include "start_probe_seam.h"
 
 #ifdef _WIN32
 
 namespace {
+
+/* These cases pin the fake's first writes and filters: the start's probe
+ * is off, and on in J2534ProbeTest's own cases */
+[[maybe_unused]] ::testing::Environment* const kStartProbeOff =
+    ::testing::AddGlobalTestEnvironment(new StartProbeOff);
 
 void page_connect_params(unsigned long* baud, unsigned long* flags,
                          unsigned long* protocol)

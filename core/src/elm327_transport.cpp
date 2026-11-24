@@ -270,13 +270,12 @@ ecuio_status_t read_uri(const char* uri, const ecuio_uri_query* query,
     return ECUIO_OK;
 }
 
-/* Channels, their addressing mode, and the requests, before the port
- * opens. One mode for the session: AT SP takes one */
-ecuio_status_t plan_requests(ecuio_session_t* session,
-                             const request_params& req, transport* t)
+/* The channels' addressing mode and their requests, as the channels
+ * stand. One mode for the session: AT SP takes one */
+ecuio_status_t build_channels(ecuio_session_t* session,
+                              const request_params& req, transport* t)
 {
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-    t->chan_count = ecuio_resolve_channels(set, req, t->rx_ids, t->tx_ids);
     uint32_t wide = 0;
     for (uint32_t i = 0; i < t->chan_count; ++i) {
         if (ecuio_channel_is_29bit(t->rx_ids[i], t->tx_ids[i])) {
@@ -297,7 +296,22 @@ ecuio_status_t plan_requests(ecuio_session_t* session,
         return st;
     }
     ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_HOST);
+    /* one command out for the whole adapter: the turns pick its channel */
+    ecuio_engine_slots(&t->engine, ECUIO_ENGINE_INFLIGHT_DEFAULT, 1);
     elm327_one_frame_pids_for(set, &t->one_frame);
+    return ECUIO_OK;
+}
+
+/* Channels and their requests, before the port opens */
+ecuio_status_t plan_requests(ecuio_session_t* session,
+                             const request_params& req, transport* t)
+{
+    t->chan_count = ecuio_resolve_channels(ecuio_session_signal_set(session),
+                                           req, t->rx_ids, t->tx_ids);
+    const ecuio_status_t st = build_channels(session, req, t);
+    if (st != ECUIO_OK) {
+        return st;
+    }
     /* A session that asks nothing listens on its channels (AT MA keeps
      * the receive filter); with none, the whole bus would be raw frames
      * a serial link can't carry, a step of its own */
@@ -364,6 +378,46 @@ ecuio_status_t open_adapter(transport* t, const char* uri, char* version,
     return ECUIO_OK;
 }
 
+/* The start's emissions probe (request_probe.h) on a session that asks
+ * anything: its answerers are the channels' RANGE, and an undeclared
+ * 11-bit one joins the channels (never under ?filter= or ?poll=), whose
+ * requests are then built again; then the channels' receive filter is
+ * set again and the probe's line written. The port closed on a refusal. */
+ecuio_status_t probe_modules(ecuio_session_t* session,
+                             const request_params& req, transport* t)
+{
+    if (asks_nothing(t)) {
+        return ECUIO_OK;
+    }
+    ecuio_probe p;
+    ecuio_status_t st =
+        ecuio_start_probe_on().load() ? run_probe(t, &p) : ECUIO_OK;
+    if (st == ECUIO_OK && req.rx_id == 0 && !req.has_poll &&
+        ecuio_probe_join(p, t->rx_ids, t->tx_ids, &t->chan_count) > 0) {
+        st = build_channels(session, req, t);
+    }
+    if (st == ECUIO_OK) {
+        /* every module, so the worker's first take types it again only
+         * when some module doesn't hear */
+        t->hearing = t->chan_count >= ECUIO_MAX_CHANNELS
+                         ? UINT32_MAX
+                         : (1u << t->chan_count) - 1u;
+        st = hearing_filter(t);
+    }
+    if (st != ECUIO_OK) {
+        close_port(t);
+        return st;
+    }
+    t->range = ecuio_probe_range(p, t->rx_ids, t->chan_count,
+                                 ecuio_engine_rpm_module_of(&t->engine));
+    if (p.requests > 0) {
+        char line[160];
+        ecuio_probe_describe(p, line, sizeof line);
+        elm327_log_write(t->log, "%s", line);
+    }
+    return ECUIO_OK;
+}
+
 /* The session takes the transport: the wrapper, the info and modules,
  * the reports' seeds, the epoch; the port closed on a refusal */
 ecuio_status_t hand_over(ecuio_session_t* session,
@@ -384,6 +438,7 @@ ecuio_status_t hand_over(ecuio_session_t* session,
         close_port(t.get());
         return st;
     }
+    session->module_range = t->range;
     ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     t->epoch = host_clock::now(); /* as mock: end of attach */
     session->judges_link = true;
@@ -414,6 +469,10 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     }
     char version[ELM327_LINE_MAX + 1] = {};
     st = open_adapter(t.get(), uri, version, sizeof(version));
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    st = probe_modules(session, req, t.get());
     if (st != ECUIO_OK) {
         return st;
     }

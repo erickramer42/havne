@@ -12,6 +12,7 @@
 //          .VxTheFloorsWaitReadsNothing
 //          The hold (Known Issue #42): UNIT: J2534HoldTest; on the fake,
 //          tests/test_j2534_hold_bus.cpp (J2534HealthTest)
+//          The filters following the modules: J2534ModulesTest
 //
 // The J2534 session's worker: the read pump, a request's write, the
 // link-health feed and the close's 10 01. j2534_transport.cpp starts it
@@ -100,6 +101,7 @@ void mark_overflow(ecuio_j2534_transport* t, ecuio_frame_t* f)
     if (t->overflow_pending) {
         f->flags |= ECUIO_FRAME_FLAG_OVERFLOW;
         t->overflow_pending = false;
+        ecuio_engine_overflowed(&t->engine);
     }
 }
 
@@ -384,17 +386,16 @@ struct worker_state {
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
-    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    uint32_t clear_seen = 0;     /* ecuio_take_clear_requests' count */
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     int64_t timing_at = 0;
     /* made after attach's ecuio_engine_init: its chosen rows are this
      * table's, and it ends with the worker */
     j2534_hold hold;
 
     explicit worker_state(ecuio_j2534_transport* t)
-        : e(t->engine), requests(e.count > 0 || e.scan_count > 0 ||
-                                 ecuio_session_may_talk(t->session)),
-          precise(requests),
+        : e(t->engine), requests(j2534_asks(t)), precise(requests),
           h(t->session->last_error, t->session->error_count,
             t->session->record_link.get(), t->session, t->epoch,
             &t->clock.last_us, &t->clock.last_host_us)
@@ -422,6 +423,9 @@ void begin_worker(ecuio_j2534_transport* t, worker_state& w)
     if (requests) {
         /* A focus set before start applies from the first request */
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        (void)ecuio_take_modules(t->session, &e, w.modules_seen,
+                                 engine_now_us(t));
+        (void)j2534_filters_follow(t, false);
         ecuio_conversations_start(t->session, &e);
     }
 }
@@ -516,9 +520,12 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
     const bool requests = w.requests;
     if (requests) {
         ecuio_take_diag_request(t->session, &e, w.diag_seen);
-        ecuio_take_clear_requests(t->session, &e, w.clear_seen);
+        ecuio_take_clear_requests(t->session, &e, &w.clear_seen);
         ecuio_take_test_talk(t->session, &e, engine_now_us(t));
         ecuio_take_focus(t->session, &e, w.focus_seen);
+        (void)ecuio_take_modules(t->session, &e, w.modules_seen,
+                                 engine_now_us(t));
+        (void)j2534_filters_follow(t, false);
         ecuio_step_conversations(t->session, &e, engine_now_us(t));
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {

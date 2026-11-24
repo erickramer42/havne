@@ -207,17 +207,43 @@ inline void ecuio_engine_diag_restart(ecuio_engine_channel& ch)
     ecuio_engine_diag_list(ch);
 }
 
+/* Whether any target waits on the clear request's judgment */
+inline bool ecuio_engine_judge_waits(const ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].clear_step == ECUIO_CLEAR_STEP_WAIT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The judgment with no target left waiting asks nothing more; a request
+ * of it already out settles into nothing (ecuio_engine_judge_rpm) */
+inline void ecuio_engine_judge_drop(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count && !ecuio_engine_judge_waits(e);
+         ++c) {
+        if (!e->chans[c].clearing) {
+            e->chans[c].judge_step = ECUIO_CLEAR_STEP_NONE;
+        }
+    }
+}
+
 /* A quiet step's item on channel ch settled, the report changed or
  * not (same): a clear accepted meanwhile, nothing of it sent yet, ends
  * ECUIO_CLEAR_REPORT_CHANGED when the report changed (the user agreed to
  * the one shown); a Read again pressed meanwhile starts the read over */
-inline void ecuio_engine_diag_step_settled(ecuio_engine_channel& ch, bool same)
+inline void ecuio_engine_diag_step_settled(ecuio_request_engine* e,
+                                           ecuio_engine_channel& ch, bool same)
 {
     ch.diag_step = false;
-    if (!same && ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+    if (!same && (ch.clear_step == ECUIO_CLEAR_STEP_WAIT ||
+                  ch.clear_step == ECUIO_CLEAR_STEP_CLEAR)) {
         ch.clear_step = ECUIO_CLEAR_STEP_NONE;
         ch.diag.flags &= ~ECUIO_DIAG_CLEARING;
         ch.diag.clear = ECUIO_CLEAR_REPORT_CHANGED;
+        ecuio_engine_judge_drop(e);
     }
     if (ch.diag_again) {
         ch.diag_again = false;
@@ -265,7 +291,7 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     }
     d.generation += same ? 0u : 1u;
     if (step) {
-        ecuio_engine_diag_step_settled(ch, same);
+        ecuio_engine_diag_step_settled(e, ch, same);
     }
 }
 
@@ -294,7 +320,7 @@ inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
         if (ch.diag_count == 0 || ch.diag_pending > 0 ||
-            ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+            ecuio_engine_clear_on(ch)) {
             continue;
         }
         if (ch.diagnosing) {
@@ -305,26 +331,70 @@ inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
     }
 }
 
-/* Clears channel c's trouble codes (ADR-0038) when its report is the
- * one the caller saved: read to the end, at generation, with no clear
- * running. The clear then asks the engine speed through the one-shot,
- * and sends 04 only at 0 rpm, or under flags' ECUIO_CLEAR_ALLOW_RUNNING
- * asks the vehicle speed next (ecuio_engine_clear_settle). Any other
- * report records ECUIO_CLEAR_REPORT_CHANGED and sends nothing. False
- * then, and for a channel past the count, one that reads no
- * diagnostics, or one already clearing (which carries on). A quiet
+/* Whether module ch's report holds a positive answer to 01 00 or 03: an
+ * emissions module, which alone a clear may clear (ADR-0038) */
+inline bool ecuio_engine_diag_emissions(const ecuio_engine_channel& ch)
+{
+    for (uint32_t i = 0; i < ch.diag_count; ++i) {
+        const ecuio_diag_item& it = ch.diag_items[i];
+        const bool asked =
+            it.request[0] == 0x03 ||
+            (it.request[0] == 0x01 && it.len == 2 && it.request[1] == 0x00);
+        if (asked && it.outcome == ECUIO_DIAG_ANSWERED) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether a clear request runs: any module with a clear under way */
+inline bool ecuio_engine_clear_running(const ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (ecuio_engine_clear_on(e->chans[c])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The engine module, whose rpm a clear judges by: rpm_module when set,
+ * else the lowest channel a row of the table asks PID 0C of (a pack's
+ * too); UINT32_MAX for none */
+inline uint32_t ecuio_engine_rpm_module_of(const ecuio_request_engine* e)
+{
+    if (e->rpm_module != UINT32_MAX) {
+        return e->rpm_module;
+    }
+    uint32_t found = UINT32_MAX;
+    for (const ecuio_request& r : e->requests) {
+        for (uint8_t k = 1; r.bytes[0] == 0x01 && k < r.len; ++k) {
+            if (r.bytes[k] == 0x0C && r.channel < found) {
+                found = r.channel;
+            }
+        }
+    }
+    return found;
+}
+
+/* Target c's gate (ADR-0038): its report the one the caller saved (read
+ * to the end, at generation, nothing running), else
+ * ECUIO_CLEAR_REPORT_CHANGED; an emissions module, else
+ * ECUIO_CLEAR_NOT_EMISSIONS. Past it, the target waits on the request's
+ * judgment. False for a channel past the count, one that reads no
+ * diagnostics, one already clearing, or a gate not passed. A quiet
  * step's item out is no read, unless a Read again waits on it: the clear
  * goes once it settles, or ends REPORT_CHANGED if it changed the report
  * (ecuio_engine_diag_step_settled). */
-inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
-                               uint32_t generation, uint32_t flags = 0)
+inline bool ecuio_engine_clear_gate(ecuio_request_engine* e, uint32_t c,
+                                    uint32_t generation)
 {
     if (c >= e->chan_count) {
         return false;
     }
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_channel_diagnostics_t& d = ch.diag;
-    if (ch.diag_count == 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE) {
+    if (ch.diag_count == 0 || ecuio_engine_clear_on(ch)) {
         return false;
     }
     d.clear_nrc = 0;
@@ -338,20 +408,193 @@ inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
         d.clear = ECUIO_CLEAR_REPORT_CHANGED;
         return false;
     }
+    if (!ecuio_engine_diag_emissions(ch)) {
+        d.clear = ECUIO_CLEAR_NOT_EMISSIONS;
+        return false;
+    }
     d.clear = ECUIO_CLEAR_NONE;
     d.flags |= ECUIO_DIAG_CLEARING;
-    ch.clear_step = ECUIO_CLEAR_STEP_SPEED;
-    ch.clear_flags = flags;
+    ch.clear_step = ECUIO_CLEAR_STEP_WAIT;
     return true;
 }
 
+/* Each target waiting on the judgment takes a reading: value into
+ * clear_rpm or clear_kmh, as flag (ECUIO_DIAG_CLEAR_RPM, _KMH) says; its
+ * generation moves with the step that settles (judge_end, judge_moved) */
+inline void ecuio_engine_judge_note(ecuio_request_engine* e, uint32_t flag,
+                                    uint32_t value)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (ch.clear_step != ECUIO_CLEAR_STEP_WAIT) {
+            continue;
+        }
+        if (flag == ECUIO_DIAG_CLEAR_RPM) {
+            ch.diag.clear_rpm = value;
+        } else {
+            ch.diag.clear_kmh = value;
+        }
+        ch.diag.flags |= flag;
+    }
+}
+
+/* The judgment's step settled with more to ask: each waiting target's
+ * generation moves on, as a target's own step's did */
+inline void ecuio_engine_judge_moved(ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].clear_step == ECUIO_CLEAR_STEP_WAIT) {
+            ++e->chans[c].diag.generation;
+        }
+    }
+}
+
+/* The judgment's end: every waiting target sends its 04 next
+ * (ECUIO_CLEAR_NONE) or ends as outcome, with nrc, nothing sent */
+inline void ecuio_engine_judge_end(ecuio_request_engine* e, uint8_t outcome,
+                                   uint8_t nrc)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        ecuio_engine_channel& ch = e->chans[c];
+        if (ch.clear_step != ECUIO_CLEAR_STEP_WAIT) {
+            continue;
+        }
+        if (outcome == ECUIO_CLEAR_NONE) {
+            ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
+        } else {
+            ch.clear_step = ECUIO_CLEAR_STEP_NONE;
+            ch.diag.flags &= ~ECUIO_DIAG_CLEARING;
+            ch.diag.clear = outcome;
+            ch.diag.clear_nrc = nrc;
+        }
+        ++ch.diag.generation;
+    }
+}
+
+/* The judgment's vehicle speed from the next module not yet asked 01
+ * 0D: the engine module, then each waiting target in channel order;
+ * with none left, no speed (nrc the last refusal's); nothing once no
+ * target waits */
+inline void ecuio_engine_judge_speed(ecuio_request_engine* e, uint8_t nrc)
+{
+    if (!ecuio_engine_judge_waits(e)) {
+        return;
+    }
+    const uint32_t m = ecuio_engine_rpm_module_of(e);
+    for (uint32_t k = 0; k <= e->chan_count; ++k) {
+        const uint32_t c = k == 0 ? m : k - 1;
+        if (c >= e->chan_count || ((e->speed_asked >> c) & 1u) != 0 ||
+            !ecuio_engine_module_hears(e->chans[c]) ||
+            (k > 0 && e->chans[c].clear_step != ECUIO_CLEAR_STEP_WAIT)) {
+            continue;
+        }
+        e->speed_asked |= 1u << c;
+        e->chans[c].judge_step = ECUIO_CLEAR_STEP_VEHICLE;
+        return;
+    }
+    const bool moving_ok = (e->clear_flags & ECUIO_CLEAR_ALLOW_MOVING) != 0;
+    ecuio_engine_judge_end(
+        e, moving_ok ? ECUIO_CLEAR_NONE : ECUIO_CLEAR_NO_VEHICLE_SPEED,
+        moving_ok ? 0 : nrc);
+}
+
+/* The judgment's engine speed read (got, raw in 0.25 rpm counts) or not
+ * (nrc): 0 rpm sends every 04; under ECUIO_CLEAR_ALLOW_RUNNING it is
+ * only recorded, and the vehicle speed is judged next; nothing once no
+ * target waits */
+inline void ecuio_engine_judge_rpm(ecuio_request_engine* e, bool got,
+                                   uint32_t raw, uint8_t nrc)
+{
+    if (!ecuio_engine_judge_waits(e)) {
+        return;
+    }
+    if (got) {
+        ecuio_engine_judge_note(e, ECUIO_DIAG_CLEAR_RPM, (raw + 3) / 4);
+    }
+    if ((e->clear_flags & ECUIO_CLEAR_ALLOW_RUNNING) != 0) {
+        ecuio_engine_judge_moved(e);
+        ecuio_engine_judge_speed(e, 0);
+    } else if (got && raw == 0) {
+        ecuio_engine_judge_end(e, ECUIO_CLEAR_NONE, 0);
+    } else if (got) {
+        ecuio_engine_judge_end(e, ECUIO_CLEAR_ENGINE_RUNNING, 0);
+    } else {
+        ecuio_engine_judge_end(e, ECUIO_CLEAR_NO_ENGINE_SPEED, nrc);
+    }
+}
+
+/* A clear request (ADR-0038): each of count targets past its gate
+ * (ecuio_engine_clear_gate) waits on one judgment of the engine and
+ * vehicle speed, flags (ECUIO_CLEAR_ALLOW_*) for them all, then sends
+ * its 04. The engine module asks 01 0C; with none open there is no rpm.
+ * False when a request runs, or no target passed its gate. */
+inline bool ecuio_engine_clear_request(ecuio_request_engine* e,
+                                       const ecuio_clear_target_t* targets,
+                                       uint32_t count, uint32_t flags)
+{
+    if (ecuio_engine_clear_running(e)) {
+        return false;
+    }
+    bool any = false;
+    for (uint32_t k = 0; k < count; ++k) {
+        any = ecuio_engine_clear_gate(e, targets[k].channel,
+                                      targets[k].generation) ||
+              any;
+    }
+    if (!any) {
+        return false;
+    }
+    e->clear_flags = flags;
+    e->speed_asked = 0;
+    const uint32_t m = ecuio_engine_rpm_module_of(e);
+    if (m < e->chan_count && ecuio_engine_module_hears(e->chans[m])) {
+        e->chans[m].judge_step = ECUIO_CLEAR_STEP_SPEED;
+    } else {
+        ecuio_engine_judge_rpm(e, false, 0, 0);
+    }
+    return true;
+}
+
+/* Clears channel c's trouble codes: a clear request of one target */
+inline bool ecuio_engine_clear(ecuio_request_engine* e, uint32_t c,
+                               uint32_t generation, uint32_t flags = 0)
+{
+    const ecuio_clear_target_t target = {c, generation, {0, 0}};
+    return ecuio_engine_clear_request(e, &target, 1, flags);
+}
+
+/* Settles the judgment's request module c had out: the engine speed's
+ * answer (ecuio_engine_judge_rpm), or the vehicle speed's, whose 0 km/h
+ * (or anything, under ECUIO_CLEAR_ALLOW_MOVING) sends every 04; a
+ * vehicle speed refused or unanswered asks the next module */
+inline void ecuio_engine_judge_settle(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t outcome, uint8_t nrc,
+                                      const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    const uint8_t step = ch.judge_step;
+    ch.judge_step = ECUIO_CLEAR_STEP_NONE;
+    if (step == ECUIO_CLEAR_STEP_SPEED) {
+        const bool got = outcome == ECUIO_DIAG_ANSWERED && len >= 4;
+        const uint32_t raw = got ? (uint32_t{data[2]} << 8) | data[3] : 0;
+        ecuio_engine_judge_rpm(e, got, raw, nrc);
+        return;
+    }
+    if (outcome != ECUIO_DIAG_ANSWERED || len < 3) {
+        ecuio_engine_judge_speed(e, nrc);
+        return;
+    }
+    ecuio_engine_judge_note(e, ECUIO_DIAG_CLEAR_KMH, data[2]);
+    const bool moving_ok = (e->clear_flags & ECUIO_CLEAR_ALLOW_MOVING) != 0;
+    ecuio_engine_judge_end(
+        e, moving_ok || data[2] == 0 ? ECUIO_CLEAR_NONE : ECUIO_CLEAR_MOVING,
+        0);
+}
+
 /* Settles the request channel c's clear has out: answered with the
- * reply, refused with its code, or unanswered (ECUIO_DIAG_*). The engine
- * speed's answer sends 04 next at 0 rpm and ends the clear otherwise;
- * under ECUIO_CLEAR_ALLOW_RUNNING it is only recorded, any answer or
- * none, and the vehicle speed is asked, whose 0 km/h (or anything,
- * under ECUIO_CLEAR_ALLOW_MOVING) sends 04. 04's answer ends it, and a
- * 44 or no answer reads the report again. */
+ * reply, refused with its code, or unanswered (ECUIO_DIAG_*). The
+ * judgment's request settles the judgment; 04's answer ends the target,
+ * and a 44 or no answer reads the report again. */
 inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
                                       uint8_t outcome, uint8_t nrc,
                                       const uint8_t* data, uint16_t len)
@@ -359,45 +602,12 @@ inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_channel_diagnostics_t& d = ch.diag;
     ch.clearing = false;
-    bool done = true;
+    if (ch.judge_step != ECUIO_CLEAR_STEP_NONE) {
+        ecuio_engine_judge_settle(e, c, outcome, nrc, data, len);
+        return;
+    }
     bool read = false;
-    const bool running_ok = (ch.clear_flags & ECUIO_CLEAR_ALLOW_RUNNING) != 0;
-    const bool moving_ok = (ch.clear_flags & ECUIO_CLEAR_ALLOW_MOVING) != 0;
-    if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
-        const bool got = outcome == ECUIO_DIAG_ANSWERED && len >= 4;
-        const uint32_t raw = got ? (uint32_t{data[2]} << 8) | data[3] : 0;
-        if (got) {
-            d.clear_rpm = (raw + 3) / 4; /* 0.25 rpm a count */
-            d.flags |= ECUIO_DIAG_CLEAR_RPM;
-        }
-        if (running_ok) {
-            ch.clear_step = ECUIO_CLEAR_STEP_VEHICLE;
-            done = false;
-        } else if (got && raw == 0) {
-            ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
-            done = false;
-        } else if (got) {
-            d.clear = ECUIO_CLEAR_ENGINE_RUNNING;
-        } else {
-            d.clear = ECUIO_CLEAR_NO_ENGINE_SPEED;
-            d.clear_nrc = nrc;
-        }
-    } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
-        const bool got = outcome == ECUIO_DIAG_ANSWERED && len >= 3;
-        if (got) {
-            d.clear_kmh = data[2]; /* 1 km/h a count */
-            d.flags |= ECUIO_DIAG_CLEAR_KMH;
-        }
-        if (moving_ok || (got && data[2] == 0)) {
-            ch.clear_step = ECUIO_CLEAR_STEP_CLEAR;
-            done = false;
-        } else if (got) {
-            d.clear = ECUIO_CLEAR_MOVING;
-        } else {
-            d.clear = ECUIO_CLEAR_NO_VEHICLE_SPEED;
-            d.clear_nrc = nrc;
-        }
-    } else if (outcome == ECUIO_DIAG_ANSWERED) {
+    if (outcome == ECUIO_DIAG_ANSWERED) {
         d.clear = ECUIO_CLEAR_CLEARED;
         read = true;
     } else if (outcome == ECUIO_DIAG_REFUSED) {
@@ -407,10 +617,8 @@ inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
         d.clear = ECUIO_CLEAR_UNANSWERED;
         read = true;
     }
-    if (done) {
-        ch.clear_step = ECUIO_CLEAR_STEP_NONE;
-        d.flags &= ~ECUIO_DIAG_CLEARING;
-    }
+    ch.clear_step = ECUIO_CLEAR_STEP_NONE;
+    d.flags &= ~ECUIO_DIAG_CLEARING;
     ++d.generation;
     if (read) {
         ecuio_engine_diag_restart(ch);

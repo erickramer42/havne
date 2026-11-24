@@ -66,6 +66,9 @@ Count run(const Shape& s, int64_t until_us = 3000 * kMs)
     Count out;
     Bus b;
     EXPECT_TRUE(ecuio_engine_init(&b.e, s.present + s.absent));
+    /* the hold's own judgment: at the cap of 4, the absent modules' waits
+     * hold slots the present ones would take */
+    ecuio_engine_slots(&b.e, ECUIO_MAX_CHANNELS, ECUIO_MAX_CHANNELS);
     b.e.gap_us = 5 * kMs;
     add_rows(b, s);
     ecuio_engine_identify(&b.e);

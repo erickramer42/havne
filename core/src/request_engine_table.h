@@ -140,10 +140,11 @@ inline int32_t ecuio_engine_check_row(const ecuio_request_engine* e, uint32_t c)
  * timed only at a row a focus once kept: the check takes no pool row, so
  * its turn around the table spends none on rows nobody picked. A pick or
  * the link's recovery before it goes out withdraws it. False, nothing
- * changed, for a channel with no such request. */
+ * changed, for a channel with no such request or not open. */
 inline bool ecuio_engine_ask_check(ecuio_request_engine* e, uint32_t c)
 {
-    if (c >= e->chan_count || ecuio_engine_check_row(e, c) < 0) {
+    if (c >= e->chan_count || !ecuio_engine_module_open(e->chans[c]) ||
+        ecuio_engine_check_row(e, c) < 0) {
         return false;
     }
     e->chans[c].check_due = true;

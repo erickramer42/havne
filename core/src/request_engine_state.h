@@ -40,11 +40,23 @@ constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
 constexpr int64_t ECUIO_ENGINE_PROBE_BUDGET_US = 1000000;
 
+/* The requests in flight at once, session-wide (ADR-0065 section 11): a
+ * transport's attach sets its ceiling through ecuio_engine_slots; step 8
+ * sets the cap */
+constexpr uint32_t ECUIO_ENGINE_INFLIGHT_DEFAULT = 4;
+
+/* A reply taken later than P2 after its request is late (ADR-0065
+ * section 11's counters) */
+constexpr int64_t ECUIO_ENGINE_P2_US = 50000;
+static_assert(ECUIO_ENGINE_P2_US < ECUIO_ENGINE_WAIT_US,
+              "a reply inside the wait can be late");
+
 /* Negative responses: 7F <service> <code> (ISO 14229-1). */
 constexpr uint8_t ECUIO_NEGATIVE_RESPONSE = 0x7F;
 constexpr uint8_t ECUIO_NRC_SERVICE_NOT_SUPPORTED = 0x11;
 constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_SUPPORTED = 0x12;
 constexpr uint8_t ECUIO_NRC_REQUEST_OUT_OF_RANGE = 0x31;
+constexpr uint8_t ECUIO_NRC_BUSY_REPEAT_REQUEST = 0x21;
 constexpr uint8_t ECUIO_NRC_SECURITY_ACCESS_DENIED = 0x33;
 constexpr uint8_t ECUIO_NRC_RESPONSE_PENDING = 0x78;
 constexpr uint8_t ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION = 0x7E;
@@ -146,11 +158,13 @@ constexpr uint32_t ECUIO_DIAG_FIRST_COUNT =
 constexpr uint32_t ECUIO_DIAG_MAX_ITEMS =
     ECUIO_DIAG_FIRST_COUNT + 1 + ECUIO_DIAG_MAX_FREEZE;
 
-/* A channel's clear: what its one-shot asks next */
+/* A clear's steps: a target's (WAIT, then CLEAR) and the judgment's
+ * request on the module asking it (SPEED, VEHICLE) */
 constexpr uint8_t ECUIO_CLEAR_STEP_NONE = 0;
 constexpr uint8_t ECUIO_CLEAR_STEP_SPEED = 1;   /* 01 0C */
-constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the gate */
+constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the judgment */
 constexpr uint8_t ECUIO_CLEAR_STEP_VEHICLE = 3; /* 01 0D, under ALLOW_RUNNING */
+constexpr uint8_t ECUIO_CLEAR_STEP_WAIT = 4;    /* a target: the judgment */
 
 struct ecuio_diag_item {
     uint8_t request[3];
@@ -196,6 +210,48 @@ struct ecuio_scan_entry {
     uint8_t retried;    /* 1 once asked again after its channel's round;
                            a recovery's rescan clears it */
 };
+
+/* Why a module is open (ADR-0065 step 5): any reason holds it. RANGE: it
+ * answered the start's emissions probe; READ: a signal on it is read;
+ * CONVERSATION: a conversation is bound to it; VISIT: a read or clear of
+ * its codes runs on it (request_engine_modules.h) */
+constexpr uint8_t ECUIO_ENGINE_REASON_RANGE = 0x1;
+constexpr uint8_t ECUIO_ENGINE_REASON_READ = 0x2;
+constexpr uint8_t ECUIO_ENGINE_REASON_CONVERSATION = 0x4;
+constexpr uint8_t ECUIO_ENGINE_REASON_VISIT = 0x8;
+static_assert(ECUIO_ENGINE_REASON_RANGE == ECUIO_MODULE_REASON_RANGE &&
+                  ECUIO_ENGINE_REASON_READ == ECUIO_MODULE_REASON_READ &&
+                  ECUIO_ENGINE_REASON_CONVERSATION ==
+                      ECUIO_MODULE_REASON_CONVERSATION &&
+                  ECUIO_ENGINE_REASON_VISIT == ECUIO_MODULE_REASON_VISIT,
+              "the support report's open_reasons are the engine's");
+
+/* A module's state: open; closing, finishing what it began; closed; or
+ * wanted with no filter free for it */
+constexpr uint8_t ECUIO_MODULE_STATE_OPEN = 0;
+constexpr uint8_t ECUIO_MODULE_STATE_CLOSING = 1;
+constexpr uint8_t ECUIO_MODULE_STATE_CLOSED = 2;
+constexpr uint8_t ECUIO_MODULE_STATE_NO_ROOM = 3;
+
+/* What a module's replies did (ADR-0065 section 11), each saturating:
+ * a table row's or a pack's wait run out with nothing (lost), each
+ * 7F xx 21 (busy), each 7F xx 78 (pending), and a reply that completed
+ * its request later than ECUIO_ENGINE_P2_US after it went out (late).
+ * Internal: step 8's in-flight policy reads them. */
+struct ecuio_engine_counts {
+    uint32_t lost = 0;
+    uint32_t busy = 0;
+    uint32_t pending = 0;
+    uint32_t late = 0;
+};
+
+/* Adds one to a count, which stops at its most */
+inline void ecuio_engine_count(uint32_t& n)
+{
+    if (n != UINT32_MAX) {
+        ++n;
+    }
+}
 
 struct ecuio_engine_channel {
     int64_t deadline_us = 0;    /* when the outstanding request's wait ends */
@@ -275,9 +331,10 @@ struct ecuio_engine_channel {
     uint8_t freeze_bits[4] = {}; /* 02 00 00's answer: PIDs 01 to 20 */
     ecuio_channel_diagnostics_t diag = {}; /* the report, but rx_id */
     /* Clearing (ADR-0038): the one-shot carries the clear's request
-     * while clearing; clear_step is what it asks next. */
+     * while clearing; clear_step is the target's, judge_step the
+     * judgment's request this module asks for the clear request. */
     uint8_t clear_step = ECUIO_CLEAR_STEP_NONE;
-    uint32_t clear_flags = 0; /* the call's ECUIO_CLEAR_ALLOW_* */
+    uint8_t judge_step = ECUIO_CLEAR_STEP_NONE;
     bool clearing = false; /* the one-shot is the clear's request */
     /* Packing (ADR-0039 Appendix A): each PID's data length as its own
      * reply showed it (0 not yet, ECUIO_ENGINE_PID_LONG longer than
@@ -322,7 +379,31 @@ struct ecuio_engine_channel {
      * sends only a key */
     ecuio_key_window key;
     ecuio_request session_refused = {};
+    ecuio_engine_counts counts;
+    /* The reasons that want the module (ECUIO_ENGINE_REASON_*), and its
+     * state (ECUIO_MODULE_STATE_*): only an open module asks anything new */
+    uint8_t reasons = ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ;
+    uint8_t module_state = ECUIO_MODULE_STATE_OPEN;
+    /* With no room: its place among the modules waiting for a filter, 0
+     * otherwise (ecuio_engine_modules_fill opens the lowest first) */
+    uint32_t waiting = 0;
+    /* A visit holds the module open for its codes (request_diag_visit.h),
+     * through its close; it was waiting for a filter before (else closed) */
+    bool visiting = false;
+    bool visit_from_no_room = false;
 };
+
+/* Whether module ch asks anything new: open */
+inline bool ecuio_engine_module_open(const ecuio_engine_channel& ch)
+{
+    return ch.module_state == ECUIO_MODULE_STATE_OPEN;
+}
+
+/* Whether module ch is open or closing: a frame from it is still its own */
+inline bool ecuio_engine_module_hears(const ecuio_engine_channel& ch)
+{
+    return ch.module_state <= ECUIO_MODULE_STATE_CLOSING;
+}
 
 /* Sets channel ch's session step. A key's window lasts only while the
  * session is entered: every other step ends it (request_talk.h). */
@@ -425,7 +506,55 @@ struct ecuio_request_engine {
     /* The longest request the transport sends, a talk's bound: attach
      * sets ECUIO_ENGINE_PDU_MAX where a request goes out as ISO-TP */
     uint32_t pdu_max = ECUIO_ENGINE_PDU_SINGLE;
+    /* Frames the transport said were lost before one it handed over
+     * (ecuio_engine_overflowed), and writes the kernel refused for want
+     * of buffers (SocketCAN's ENOBUFS); saturating, internal */
+    uint32_t overflowed = 0;
+    uint32_t writes_refused = 0;
+    /* The requests out at once: the least of cap and ceiling (the
+     * transport's), and the channel after the last one given a free slot,
+     * where ties start (ecuio_engine_next_slot) */
+    uint32_t cap = ECUIO_ENGINE_INFLIGHT_DEFAULT;
+    uint32_t ceiling = ECUIO_MAX_CHANNELS;
+    uint32_t slot_from = 0;
+    /* The modules live data may hold open at once (the transport's
+     * filters less one kept back for a visit), 0 for no bound; whether
+     * the worker has set the reasons yet (ecuio_engine_modules_apply);
+     * the last place given to a module waiting for a filter */
+    uint32_t module_budget = 0;
+    bool modules_taken = false;
+    uint32_t waiting_last = 0;
+    /* The filters the transport may hold, live data's and a visit's, 0 for
+     * no bound; the visits wanted (a bit each) in the order asked, and the
+     * module visiting (UINT32_MAX: none) */
+    uint32_t filters_most = 0;
+    uint32_t visit_want = 0;
+    uint8_t visit_order[ECUIO_MAX_CHANNELS] = {};
+    uint32_t visit_count = 0;
+    uint32_t visit_now = UINT32_MAX;
+    /* The clear request's judgment (ADR-0038): its flags and the modules
+     * asked 01 0D so far, a bit each. rpm_module names the engine module
+     * outright (the mock's one ECU), else UINT32_MAX: the table's. */
+    uint32_t clear_flags = 0;
+    uint32_t speed_asked = 0;
+    uint32_t rpm_module = UINT32_MAX;
 };
+
+/* Whether module ch has a clear under way: a target's step, or the
+ * judgment's request on it */
+inline bool ecuio_engine_clear_on(const ecuio_engine_channel& ch)
+{
+    return ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.judge_step != ECUIO_CLEAR_STEP_NONE;
+}
+
+/* Whether module ch has a clear's request to send: the judgment's, or
+ * its own 04 (a target waiting on the judgment sends nothing) */
+inline bool ecuio_engine_clear_asks(const ecuio_engine_channel& ch)
+{
+    return ch.judge_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.clear_step == ECUIO_CLEAR_STEP_CLEAR;
+}
 
 /* Whether request r is asked in the rotation: not dropped by the probe
  * and not parked by a focus (ADR-0056 section 2) */

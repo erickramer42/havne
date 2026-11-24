@@ -116,15 +116,16 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
     return false;
 }
 
-/* A clear's next request into channel c's one-shot */
+/* A clear's next request into channel c's one-shot: the judgment's
+ * first, else the target's 04 */
 inline void ecuio_engine_take_clear(ecuio_engine_channel& ch, uint32_t c)
 {
     ch.once = ecuio_request{};
-    if (ch.clear_step == ECUIO_CLEAR_STEP_SPEED) {
+    if (ch.judge_step == ECUIO_CLEAR_STEP_SPEED) {
         ch.once.bytes[0] = ECUIO_CLEAR_SPEED_REQUEST[0];
         ch.once.bytes[1] = ECUIO_CLEAR_SPEED_REQUEST[1];
         ch.once.len = 2;
-    } else if (ch.clear_step == ECUIO_CLEAR_STEP_VEHICLE) {
+    } else if (ch.judge_step == ECUIO_CLEAR_STEP_VEHICLE) {
         ch.once.bytes[0] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[0];
         ch.once.bytes[1] = ECUIO_CLEAR_VEHICLE_SPEED_REQUEST[1];
         ch.once.len = 2;
@@ -263,7 +264,7 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
     ecuio_engine_channel& ch = e->chans[c];
     const bool once_turn = ch.requests == 0 || ch.scan_turn ||
                            (e->scan_first && ch.scan_pending > 0);
-    if (ch.clear_step != ECUIO_CLEAR_STEP_NONE && once_turn) {
+    if (ecuio_engine_clear_asks(ch) && once_turn) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
     }
@@ -281,6 +282,128 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
         return ecuio_engine_talk_slot(ch, c);
     }
     if (ch.scan_pending > 0 && once_turn && ecuio_engine_take_scan(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
+/* Whether closing module ch, in its session, still owes its 10 01 */
+inline bool ecuio_engine_closing_leaves(const ecuio_request_engine* e,
+                                        const ecuio_engine_channel& ch)
+{
+    return e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+}
+
+/* Whether closing module ch has what it began still to send: a clear's
+ * steps, a diagnostics read (the read after a clear's 44 too), its 10 01 */
+inline bool ecuio_engine_closing_owes(const ecuio_request_engine* e,
+                                      const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_clear_on(ch) || ch.diag_pending > 0 || ch.diagnosing ||
+           ch.clearing || ch.sessioning || ecuio_engine_closing_leaves(e, ch);
+}
+
+/* When closing module ch next sends: its floor while it owes something
+ * and has nothing out, else INT64_MAX (a closed module never sends) */
+inline int64_t ecuio_engine_closing_next_us(const ecuio_request_engine* e,
+                                            const ecuio_engine_channel& ch)
+{
+    return ch.module_state == ECUIO_MODULE_STATE_CLOSING &&
+                   ch.outstanding == ECUIO_ENGINE_NONE &&
+                   ecuio_engine_closing_owes(e, ch)
+               ? ch.next_send_us
+               : INT64_MAX;
+}
+
+/* Whether visiting module ch still sends something of its pass: a clear's
+ * request, identification items unsettled, a diagnostics read (a target
+ * waiting on the judgment sends nothing) */
+inline bool ecuio_engine_visit_sends(const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_clear_asks(ch) || ch.clearing || ch.ident_pending > 0 ||
+           ch.identifying || ch.diag_pending > 0 || ch.diagnosing;
+}
+
+/* Whether visiting module ch still owes its pass: what it sends, and a
+ * clear under way to its end */
+inline bool ecuio_engine_visit_owes(const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_clear_on(ch) || ecuio_engine_visit_sends(ch);
+}
+
+/* When a module that isn't open, or is visiting, next sends: a closing
+ * one's floor while it owes something, a visiting one's while its pass
+ * sends something; INT64_MAX otherwise */
+inline int64_t ecuio_engine_limited_next_us(const ecuio_request_engine* e,
+                                            const ecuio_engine_channel& ch)
+{
+    if (ch.module_state == ECUIO_MODULE_STATE_OPEN && ch.visiting) {
+        return ch.outstanding == ECUIO_ENGINE_NONE &&
+                       ecuio_engine_visit_sends(ch)
+                   ? ch.next_send_us
+                   : INT64_MAX;
+    }
+    return ecuio_engine_closing_next_us(e, ch);
+}
+
+/* due for a visiting module (request_diag_visit.h): its pass alone, a
+ * clear's requests first (the judgment's, the 04; the read after is the
+ * diagnostics read), the identification items unsettled, then the
+ * diagnostics read; no walk, row, scan or session */
+inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
+                                      int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.identifying || ch.diagnosing || ch.clearing) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_clear_asks(ch)) {
+        ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.ident_pending > 0 && ecuio_engine_take_ident(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
+/* due for a module that isn't open: a closing one finishes what it began
+ * (a one-shot already in, a clear's next step, the diagnostics read's
+ * next item), then leaves its session (10 01); nothing else, and nothing
+ * at all once closed */
+inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
+                                        int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.module_state != ECUIO_MODULE_STATE_CLOSING ||
+        ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+        return ECUIO_ENGINE_NONE;
+    }
+    if (ch.diagnosing || ch.clearing || ch.sessioning) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_clear_asks(ch)) {
+        ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_closing_leaves(e, ch) &&
+        ecuio_engine_session_leave(e, c, &ch.once)) {
+        ch.sessioning = true;
         return ECUIO_ENGINE_ONCE;
     }
     return ECUIO_ENGINE_NONE;
@@ -349,10 +472,18 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
  * walk out of budget ends here. A quiet channel held back
  * (request_engine_quiet.h) settles its lists unasked and asks a row at
  * each step, with no rows an item. Moves the rotation past the request
- * it returns; ecuio_engine_sent records what became of it. */
+ * it returns; ecuio_engine_sent records what became of it. A module that
+ * isn't open asks only what ecuio_engine_due_closing gives, a visiting
+ * one what ecuio_engine_due_visit gives. */
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
+    if (!ecuio_engine_module_open(e->chans[c])) {
+        return ecuio_engine_due_closing(e, c, now_us);
+    }
+    if (e->chans[c].visiting) {
+        return ecuio_engine_due_visit(e, c, now_us);
+    }
     int32_t r = ECUIO_ENGINE_NONE;
     if (ecuio_engine_due_lead(e, c, now_us, &r)) {
         return r;
@@ -390,12 +521,13 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
 /* Channel c's session request alone (the J2534 hold's gate, where a row
  * in its place would pass the hold): a one-shot already in, else the
  * entry, else the keep-alive; ECUIO_ENGINE_NONE while one is outstanding,
- * before the floor or with neither due */
+ * before the floor, on a module not open or with neither due */
 inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
                                         int64_t now_us)
 {
     const ecuio_engine_channel& ch = e->chans[c];
-    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
+    if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us ||
+        !ecuio_engine_module_open(ch) || ch.visiting) {
         return ECUIO_ENGINE_NONE;
     }
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
@@ -412,10 +544,33 @@ inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
 inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 {
     return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
-           ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
+           ch.diag_pending > 0 || ecuio_engine_clear_asks(ch) ||
            ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
            ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
            ch.talk.offered || ch.talk.out;
+}
+
+/* The channels with a request out (a pending wait's too): the slots taken */
+inline uint32_t ecuio_engine_out_count(const ecuio_request_engine* e)
+{
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        n += e->chans[c].outstanding != ECUIO_ENGINE_NONE ? 1u : 0u;
+    }
+    return n;
+}
+
+/* The most requests out at once: the least of the cap and the
+ * transport's ceiling */
+inline uint32_t ecuio_engine_slots_most(const ecuio_request_engine* e)
+{
+    return e->cap < e->ceiling ? e->cap : e->ceiling;
+}
+
+/* Whether every slot is taken */
+inline bool ecuio_engine_slots_full(const ecuio_request_engine* e)
+{
+    return ecuio_engine_out_count(e) >= ecuio_engine_slots_most(e);
 }
 
 /* Microseconds until the engine next has something to do: a wait
@@ -425,56 +580,90 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
  * window's end); 0 when something is due now, INT64_MAX when nothing
  * is. A channel whose window is open with nothing to send after it
  * reports the window's end too: a driver counts quiet reads only at
- * INT64_MAX, and a link judged silent would end the window. The
- * channels with a bit in skip are left out. */
+ * INT64_MAX, and a link judged silent would end the window. With every
+ * slot taken only the waits count; a module not open counts only its
+ * wait and what it owes as it closes. The channels with a bit in skip
+ * are left out. */
+/* next_event_us's wait for module ch while it isn't open or is visiting:
+ * its reply's deadline, else its own floor, from now (INT64_MAX: never) */
+inline int64_t ecuio_engine_limited_in_us(const ecuio_request_engine* e,
+                                          const ecuio_engine_channel& ch,
+                                          int64_t now_us)
+{
+    const int64_t at = ch.outstanding != ECUIO_ENGINE_NONE
+                           ? ch.deadline_us
+                           : ecuio_engine_limited_next_us(e, ch);
+    return at == INT64_MAX ? INT64_MAX : at > now_us ? at - now_us : 0;
+}
+
+/* Whether open module ch asks anything besides the session's keepalive
+ * (items: its quiet items are due) */
+inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
+{
+    return ch.requests > 0 || items || ch.scan_pending > 0 ||
+           ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
+           ch.talk.offered || ecuio_engine_clear_asks(ch);
+}
+
+/* next_event_us's moment for open module ch: its reply's deadline, else
+ * its next send behind the sweep floor, the quiet pace, the session's
+ * keepalive and the key's hold (window: its key's window is open) */
+inline int64_t ecuio_engine_open_at_us(const ecuio_request_engine* e,
+                                       const ecuio_engine_channel& ch,
+                                       bool asks_more, bool window)
+{
+    if (ch.outstanding != ECUIO_ENGINE_NONE) {
+        return window && ch.deadline_us == INT64_MAX ? ch.key.until_us
+                                                     : ch.deadline_us;
+    }
+    int64_t at = ch.next_send_us;
+    if (e->min_sweep_us > 0 && !ecuio_engine_once_waiting(ch) &&
+        ch.next_sweep_us > at) {
+        at = ch.next_sweep_us;
+    }
+    if (!ch.check_due && !ecuio_engine_once_waiting(ch) &&
+        ecuio_engine_quiet_held(e, ch)) {
+        const int64_t q = ecuio_engine_quiet_due_us(e, ch);
+        at = q > at ? q : at;
+    }
+    if (!asks_more) {
+        at = INT64_MAX; /* only the session's keepalive is left */
+    }
+    const int64_t s = ecuio_engine_session_next_us(e, ch);
+    at = s < at ? s : at;
+    if (at != INT64_MAX && !ecuio_talk_key_waits(ch.talk)) {
+        const int64_t held = ecuio_engine_key_held_until(e, ch);
+        at = held > at ? held : at;
+    } else if (window && at == INT64_MAX) {
+        at = ch.key.until_us;
+    }
+    return at;
+}
+
 inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
                                           int64_t now_us, uint32_t skip = 0)
 {
     int64_t next = INT64_MAX;
+    const bool full = ecuio_engine_slots_full(e);
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
-        if (((skip >> c) & 1u) != 0) {
+        if (((skip >> c) & 1u) != 0 ||
+            (full && ch.outstanding == ECUIO_ENGINE_NONE)) {
+            continue;
+        }
+        if (!ecuio_engine_module_open(ch) || ch.visiting) {
+            const int64_t in = ecuio_engine_limited_in_us(e, ch, now_us);
+            next = in < next ? in : next;
             continue;
         }
         const bool window = ecuio_key_window_open(ch.key, now_us);
         const bool items = ch.quiet && ecuio_engine_quiet_asks_items(e, ch);
-        if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 && !items &&
-            !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
-            ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
-            !ch.talk.offered && !ecuio_engine_session_live(e, ch) && !window) {
+        const bool asks_more = ecuio_engine_asks_more(ch, items);
+        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more &&
+            !ecuio_engine_session_live(e, ch) && !window) {
             continue;
         }
-        int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
-                                                           : ch.next_send_us;
-        const bool asks_more =
-            ch.requests > 0 || items || ch.scan_pending > 0 ||
-            ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
-            ch.talk.offered || ch.clear_step != ECUIO_CLEAR_STEP_NONE;
-        if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
-            !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {
-            at = ch.next_sweep_us;
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && !ch.check_due &&
-            !ecuio_engine_once_waiting(ch) && ecuio_engine_quiet_held(e, ch)) {
-            const int64_t q = ecuio_engine_quiet_due_us(e, ch);
-            at = q > at ? q : at;
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more) {
-            at = INT64_MAX; /* only the session's keepalive is left */
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE) {
-            const int64_t s = ecuio_engine_session_next_us(e, ch);
-            if (s < at) {
-                at = s;
-            }
-        }
-        if (ch.outstanding == ECUIO_ENGINE_NONE && at != INT64_MAX &&
-            !ecuio_talk_key_waits(ch.talk)) {
-            const int64_t held = ecuio_engine_key_held_until(e, ch);
-            at = held > at ? held : at;
-        } else if (window && at == INT64_MAX) {
-            at = ch.key.until_us;
-        }
+        const int64_t at = ecuio_engine_open_at_us(e, ch, asks_more, window);
         const int64_t in = (at > now_us) ? at - now_us : 0;
         if (in < next) {
             next = in;

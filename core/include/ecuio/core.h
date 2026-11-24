@@ -420,7 +420,12 @@ typedef struct ecuio_session_info {
                                  session, 1 for mock (its simulated engine
                                  ECU). The reports below are read by an
                                  index under it */
-    uint32_t reserved[11];    /* zero; ABI growth space */
+    uint32_t module_budget;   /* the modules live data may hold open at
+                                 once, one filter kept back for a read of
+                                 a closed module's codes (ADR-0065 step
+                                 5); 0 when not limited (a session that
+                                 sends no request) */
+    uint32_t reserved[10];    /* zero; ABI growth space */
 } ecuio_session_info_t;
 
 #if defined(__cplusplus)
@@ -428,13 +433,15 @@ static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is
 static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
 static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
-static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, module_budget) == 388, "session info module_budget offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 392, "session info reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
-_Static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, module_budget) == 388, "session info module_budget offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 392, "session info reserved offset is ABI");
 #endif
 
 /* Copies what the session runs on into *out_info. Filled once, while
@@ -513,6 +520,33 @@ ecuio_status_t ecuio_session_get_replay_faults(
                                                           its report
                                                           ecuio_session_get_
                                                           channel_conversation's */
+#define ECUIO_SUPPORT_CLOSED             0x00000080u   /* no reason reaches
+                                                          the module
+                                                          (open_reasons 0):
+                                                          nothing sent since,
+                                                          the report what it
+                                                          last read (ADR-0065
+                                                          step 5) */
+#define ECUIO_SUPPORT_NO_ROOM            0x00000100u   /* a reason wants the
+                                                          module, but no
+                                                          filter is free
+                                                          (module_budget):
+                                                          nothing sent until
+                                                          one frees. Never
+                                                          with CLOSED */
+
+/* open_reasons: why a module is open, or wanted (ADR-0065 step 5) */
+#define ECUIO_MODULE_REASON_RANGE        0x1u   /* it answered the start's
+                                                   emissions request: always
+                                                   open */
+#define ECUIO_MODULE_REASON_READ         0x2u   /* a signal on it is read:
+                                                   a pick, a gauge, an alert,
+                                                   a condition, or a session
+                                                   asking its table whole */
+#define ECUIO_MODULE_REASON_CONVERSATION 0x4u   /* a conversation is bound
+                                                   to it (ADR-0066) */
+#define ECUIO_MODULE_REASON_VISIT        0x8u   /* a read or a clear of its
+                                                   codes runs on it */
 
 /* session_state: a channel's session (ADR-0060), with ?session=03 */
 #define ECUIO_SESSION_STATE_NOT_ASKED    0u   /* no session asked: default */
@@ -602,7 +636,12 @@ typedef struct ecuio_channel_support {
     uint16_t session_lost;    /* each time the session was entered again
                                  (a 7E or 7F, a timeout, S3, a link
                                  recovery), saturating at 65535 */
-    uint32_t reserved[2];     /* zero; ABI growth space */
+    uint32_t open_reasons;    /* ECUIO_MODULE_REASON_*: what wants the
+                                 module, whether it holds a filter or not;
+                                 0 with ECUIO_SUPPORT_CLOSED, and on a
+                                 session that sends no request (every
+                                 module open) */
+    uint32_t reserved[1];     /* zero; ABI growth space */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
@@ -613,7 +652,8 @@ static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support sca
 static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 148, "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
@@ -622,14 +662,17 @@ _Static_assert(offsetof(ecuio_channel_support_t, scan_total) == 120, "support sc
 _Static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support pids offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 148, "support reserved offset is ABI");
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
  * into the session's modules, below the info's module_count, so a
  * passive session has none (ECUIO_ERR_INVALID_ARGUMENT); the mock's one
  * channel learns nothing. Callable from any thread until destroy; after
- * close it keeps the last update. */
+ * close it keeps the last update. A requesting session opens a module
+ * only while a reason wants it (ADR-0065 step 5): its flags say when it
+ * is closed or has no room, open_reasons what wants it. */
 ecuio_status_t ecuio_session_get_channel_support(
     const ecuio_session_t* session,
     uint32_t channel,
@@ -784,6 +827,13 @@ ecuio_status_t ecuio_identity_vin(
                                                           monitors' CYCLE flags
                                                           hold this drive
                                                           cycle */
+#define ECUIO_DIAG_NOT_OPENED            0x00000400u   /* the last read found
+                                                          its closed module
+                                                          could not be opened
+                                                          (no filter free):
+                                                          COMPLETE with every
+                                                          item unasked
+                                                          (ADR-0065 step 5) */
 
 /* lists[]: one per service */
 #define ECUIO_DIAG_STORED                0u   /* Service 03: confirmed */
@@ -824,6 +874,15 @@ ecuio_status_t ecuio_identity_vin(
                                                  or unanswered and the call
                                                  didn't allow a moving
                                                  vehicle: 04 not sent */
+#define ECUIO_CLEAR_NOT_EMISSIONS        9u   /* the report holds no
+                                                 positive answer to 01 00
+                                                 or 03: no emissions
+                                                 module, 04 not sent */
+#define ECUIO_CLEAR_NOT_OPENED                                                 \
+    10u /* the module wasn't open
+                                                 and no filter was free to
+                                                 visit it for the clear:
+                                                 04 not sent */
 
 /* ecuio_session_clear_diagnostics_with's flags */
 #define ECUIO_CLEAR_ALLOW_RUNNING        0x00000001u   /* send 04 at any engine
@@ -1074,10 +1133,11 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
  * first (ecuio_session_get_channel_diagnostics): it must be read to the
  * end, with no clear running, and still be the channel's, or the call
  * is ECUIO_ERR_REPORT_CHANGED and nothing is sent. On its next pass the
- * worker checks the generation again and asks the ECU's engine speed
+ * worker checks the generation again and asks the engine module's speed
  * (01 0C); 04 goes out only at 0 rpm. The report's clear field says
  * what became of it (ECUIO_CLEAR_*), and after a clear the report is
- * read again. Returns at once, from any thread.
+ * read again. Returns at once, from any thread. A clear request of one
+ * target (ecuio_session_clear_diagnostics_set's rules).
  * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past the session info's
  * module_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
  * ecuio_session_clear_diagnostics_with and flags 0. */
@@ -1100,6 +1160,43 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
     ecuio_session_t* session,
     uint32_t channel,
     uint32_t generation,
+    uint32_t flags
+);
+
+/* One target of a clear request: the channel, and the generation of its
+ * report the caller saved */
+typedef struct ecuio_clear_target {
+    uint32_t channel;
+    uint32_t generation;
+    uint32_t reserved[2]; /* zero */
+} ecuio_clear_target_t;
+
+/* One clear request over count targets (ADR-0038): the engine and the
+ * vehicle speed are judged once for them all, then each target's 04
+ * goes out. The rpm is the engine module's (the channel the session's
+ * signals read PID 0C from), target or not; none open reads as no rpm.
+ * The vehicle speed is the first answer to 01 0D, asked of the engine
+ * module, then of the targets in channel order. flags are
+ * ecuio_session_clear_diagnostics_with's, for the whole request, and
+ * every target ends as one judgment says. A target whose report holds
+ * no positive answer to 01 00 or 03 ends ECUIO_CLEAR_NOT_EMISSIONS; one
+ * whose report moved before the worker took the request ends
+ * ECUIO_CLEAR_REPORT_CHANGED; nothing is sent for either, and the other
+ * targets go on. A target that isn't open is visited for its 04 and the
+ * read after it, one at a time, in the filter kept back from live data;
+ * with none free it ends ECUIO_CLEAR_NOT_OPENED, nothing sent. Returns at
+ * once, from any thread.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL targets; ECUIO_ERR_INVALID_ARGUMENT
+ * for count 0 or past ECUIO_MAX_CHANNELS, a channel at or past the
+ * session info's module_count or named twice, nonzero reserved, or any
+ * other flag; ECUIO_ERR_REPORT_CHANGED when a target's report isn't read
+ * to the end, is clearing or has another generation, nothing requested;
+ * ECUIO_ERR_IN_USE while the session's last request still runs;
+ * ECUIO_ERR_SESSION_CLOSED after close. */
+ecuio_status_t ecuio_session_clear_diagnostics_set(
+    ecuio_session_t* session,
+    const ecuio_clear_target_t* targets,
+    uint32_t count,
     uint32_t flags
 );
 

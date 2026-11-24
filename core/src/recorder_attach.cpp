@@ -66,6 +66,8 @@ struct attach_build {
     size_t conditions_at = 0;
     int32_t link_state = ECUIO_OK;
     uint32_t link_episodes = 0;
+    uint32_t modules_closed = 0; /* the modules' states the header names */
+    uint32_t modules_no_room = 0;
     /* An armed recorder's: a window's header lines from core to frame
      * flags (the conditions line's place in them) and the signal lines,
      * and room for a state per condition */
@@ -206,6 +208,19 @@ void header_focus_link(ecuio_session_t* session,
     if (session->started) {
         ecuio_session_get_error_state(session, &b.link_state, &b.link_episodes);
         b.header += header_link(b.link_state, b.link_episodes);
+    }
+    /* A line for each module not open now; the timed lines say each
+     * change after it */
+    b.modules_closed = session->modules_closed.load();
+    b.modules_no_room = session->modules_no_room.load();
+    for (uint32_t c = 0; c < b.rx_ids.size() && c < ECUIO_MAX_CHANNELS; ++c) {
+        const uint32_t bit = 1u << c;
+        if (((b.modules_closed | b.modules_no_room) & bit) != 0) {
+            b.header += std::string(ecuio_recording_rows::kModuleKey) +
+                        module_text(b.rx_ids[c], (b.modules_closed & bit) != 0,
+                                    (b.modules_no_room & bit) != 0, 0) +
+                        "\n";
+        }
     }
 }
 
@@ -365,6 +380,8 @@ void attach_commit(ecuio_recorder_t* recorder, attach_build& b,
     recorder->defs = std::move(b.defs);
     recorder->rx_ids.swap(b.rx_ids);
     recorder->channels = static_cast<uint32_t>(recorder->rx_ids.size());
+    recorder->written_closed = b.modules_closed;
+    recorder->written_no_room = b.modules_no_room;
     recorder->link = link;
     recorder->zero_us = b.zero_us;
     recorder->slept_at_attach = b.slept_at_attach;

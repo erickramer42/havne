@@ -67,6 +67,23 @@ def expect_run(run, lines, outcome, exit_code, rpm, kmh, reply=None):
     return 1 if why else 0
 
 
+def two_ecus(cli, dll, knobs):
+    """Two ECUs, one request: 7E9 (the fake's module table, answering no
+    OBD service, so no emissions module) and the engine ECU 7E8, which
+    the start's probe joins; one clear request takes both, 7E8 clears
+    and 7E9 ends not-emissions (a per-ECU loop of calls finds the first
+    request running and asks no second)"""
+    uri = "j2534://%s?profile=uds-generic&identify=0&did=7E9:1000" % dll
+    run, lines = clear(cli, uri, ["--engine-running"],
+                       env=dict(knobs, ECUIO_FAKE_ENGINE_OFF="1",
+                                ECUIO_FAKE_MODULE_DIDS="7E9:1000=11"))
+    got = {l["rx"]: l["outcome"] for l in lines if l["type"] == "clear"}
+    if got != {"0x7E8": "cleared", "0x7E9": "not-emissions"}:
+        print("clear lines %r: %s" % (got, run.stderr.strip()))
+        return 1
+    return 0
+
+
 def fake_case(case, cli, dll):
     uri = "j2534://%s?identify=0" % dll
     knobs = {k: v for k, v in os.environ.items() if not k.startswith("ECUIO_FAKE_")}
@@ -88,6 +105,8 @@ def fake_case(case, cli, dll):
         run, lines = clear(cli, uri, ["--engine-running", "--moving"],
                            env=dict(knobs, ECUIO_FAKE_SPEED_KMH="30"))
         return expect_run(run, lines, "cleared", 0, 2000, 30)
+    if case == "TwoEcusAreOneRequest":
+        return two_ecus(cli, dll, knobs)
     raise SystemExit("no case %s" % case)
 
 

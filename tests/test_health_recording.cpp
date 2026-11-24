@@ -80,6 +80,57 @@ TEST(HealthTest, ARecordingsRepliesRebuildTheEcusReports)
     EXPECT_EQ(json.r.flags, ECUIO_HEALTH_VIN_DECODED);
 }
 
+/* A uds-generic recording whose set declares a module at 0x7B8: its
+ * stored codes, and the same reply from 0x7B9, which nothing declares */
+void module_recording(const Folder& f)
+{
+    f.write("rec/events.log",
+            "ecuio session recording, format 2 (ADR-0049)\n"
+            "started  2026-11-06 14:00:00.000 (UTC)\n"
+            "utc  2026-11-06T05:30:00.000Z\n"
+            "core  0.5.1\n"
+            "uri  elm327://COM3?profile=uds-generic&did=1E1C,7B8:D801\n"
+            "profile  uds-generic\n"
+            "frame flags  complete\n"
+            "\n");
+    f.write("rec/frames.csv",
+            "host_us,timestamp_us,id,flags,data\n" +
+                row(1000, 0x7B8, kWhole, {0x43, 0x01, 0x01, 0x23}) +
+                row(1100, 0x7B9, kWhole, {0x43, 0x01, 0x01, 0x23}) +
+                row(2000000, 0x7E8, kWhole, {0x62, 0x1E, 0x1C, 0x12}));
+}
+
+/* ADR-0065 section 6: a module on a reply ID the set declares is listed,
+ * though the ID is outside the diagnostic range */
+TEST(HealthTest, ARecordingListsAModuleOnEveryReplyIdItsSetDeclares)
+{
+    Folder f;
+    module_recording(f);
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    std::vector<std::string> ecus;
+    for (const ecuio_json::Value& e : v.find("ecus")->items) {
+        ecus.push_back(e.find("ecu")->text);
+    }
+    EXPECT_NE(std::find(ecus.begin(), ecus.end(), "0x7B8"), ecus.end())
+        << json.bytes;
+    EXPECT_EQ(json.r.codes, 1u) << "0x7B8's code, once";
+}
+
+/* A reply ID neither diagnostic nor declared is still no module */
+TEST(HealthTest, AnIdTheSetDoesntDeclareIsStillNoModule)
+{
+    Folder f;
+    module_recording(f);
+    const Reported json(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(json.status, ECUIO_OK) << json.detail;
+    const ecuio_json::Value v = parsed(json.bytes);
+    for (const ecuio_json::Value& e : v.find("ecus")->items) {
+        EXPECT_NE(e.find("ecu")->text, "0x7B9") << json.bytes;
+    }
+}
+
 /* The range: up to 5 s the first readiness reply (the MIL on); from 8.5 s
  * only the later one, every other kind not recorded, and no value in
  * force from the range's start */

@@ -385,9 +385,10 @@ TEST_F(Elm327SessionTest, RawWithPollAsksTheEngineEcu)
     const std::vector<uint32_t> counts =
         on_fake<std::vector<uint32_t>>([](fake_elm327::adapter& a) {
             return std::vector<uint32_t>{a.count("010C"), a.requests,
-                                         a.count("010C1")};
+                                         a.count("010C1"), a.count("0100")};
         });
-    EXPECT_EQ(counts[0], counts[1]) << "only ?poll='s request";
+    EXPECT_EQ(counts[3], 1u) << "the start's probe";
+    EXPECT_EQ(counts[0] + counts[3], counts[1]) << "only ?poll='s request";
     EXPECT_EQ(counts[2], 0u);
 }
 

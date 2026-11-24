@@ -25,6 +25,7 @@ Bytes stopped_engine(const Bytes& req)
 ecuio_channel_diagnostics_t read_report(ecuio_request_engine* e, int64_t* now)
 {
     ecuio_engine_init(e, 1);
+    e->rpm_module = 0; /* the one ECU is the engine module */
     ecuio_engine_diagnose(e, ecuio_obd2_signal_set());
     drive(e, now, fake_reply);
     ecuio_channel_diagnostics_t d;
@@ -331,6 +332,7 @@ TEST_F(ClearTest, OnlyTheReportTheCallerSawIsCleared)
     static ecuio_request_engine e;
     int64_t now = 0;
     ecuio_engine_init(&e, 1);
+    e.rpm_module = 0; /* the engine module */
     EXPECT_FALSE(ecuio_engine_clear(&e, 0, 0)) << "no diagnostics read";
     ecuio_channel_diagnostics_t d;
     ecuio_engine_diagnostics(&e, 0, &d);
@@ -403,6 +405,7 @@ TEST_F(ClearTest, ARescanWaitsForTheClear)
     static ecuio_request_engine e;
     int64_t now = 0;
     ecuio_engine_init(&e, 1);
+    e.rpm_module = 0; /* the engine module */
     ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
     const Responder no_pending = [](const Bytes& req) {
         return req == Bytes{0x07} ? Bytes{} : fake_reply(req);

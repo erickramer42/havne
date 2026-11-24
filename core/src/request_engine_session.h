@@ -227,13 +227,19 @@ inline bool ecuio_engine_keepalive_due(ecuio_request_engine* e, uint32_t c,
  * the session; a refusal of it reads on in default with its code; one
  * unanswered reads on in default until ecuio_engine_rescan; tester
  * present unanswered means the session may be gone, so it's entered
- * again, and refused leaves it standing (the other requests keep it). */
+ * again, and refused leaves it standing (the other requests keep it). A
+ * closing module's 10 01 (ecuio_engine_due_closing) changes nothing: it
+ * reads in default after, whatever came. */
 inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
                                         uint8_t outcome, uint8_t nrc,
                                         int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
     ch.sessioning = false;
+    if (ch.once.bytes[0] == ECUIO_SESSION_CONTROL &&
+        ch.once.bytes[1] == ECUIO_SESSION_DEFAULT) {
+        return; /* a closing module's leave: it reads in default after */
+    }
     if (ch.once.bytes[0] == ECUIO_TESTER_PRESENT) {
         if (outcome == ECUIO_DIAG_UNANSWERED) {
             ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
@@ -353,12 +359,14 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
 }
 
 /* At a close: the request that returns channel c to the default session
- * (10 01), when it entered one, into *out. False when it never did. */
+ * (10 01), when it entered one, into *out. False when it never did, or
+ * its module closed (it left then). */
 inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
                                        ecuio_request* out)
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (e->session == 0 || ch.session_entries == 0 ||
+        !ecuio_engine_module_hears(ch) ||
         !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL,
                                               ECUIO_SESSION_DEFAULT)) {
         return false;

@@ -332,6 +332,10 @@ inline uint32_t fake_count(const char* prefix)
         [&](fake_elm327::adapter& a) { return a.count(prefix); });
 }
 
+/* The start's emissions probe's request (request_probe.h): 01 00 with no
+ * count digit, typed once at attach under the functional header */
+constexpr char kProbeCommand[] = "0100";
+
 inline std::vector<std::string> fake_commands()
 {
     return on_fake<std::vector<std::string>>([](fake_elm327::adapter& a) {

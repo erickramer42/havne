@@ -123,7 +123,8 @@ void recording_export::head_line(const std::string& line)
         }
     }
     if (rows::starts_with(p, n, rows::kPluginKey) ||
-        rows::starts_with(p, n, rows::kConversationKey)) {
+        rows::starts_with(p, n, rows::kConversationKey) ||
+        rows::starts_with(p, n, rows::kModuleKey)) {
         events_head_.push_back(line);
         return;
     }
@@ -185,7 +186,8 @@ void recording_export::activity_line(const std::string& line)
     if (!in_range(e.ms * 1000)) {
         return;
     }
-    if (raw_ || kind == "link" || kind == "drop" || kind == "asleep") {
+    if (raw_ || kind == "link" || kind == "drop" || kind == "asleep" ||
+        kind == "module") {
         range_starts();
         events_body_.push_back(line);
         return;

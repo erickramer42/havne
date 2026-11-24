@@ -55,7 +55,12 @@ int c_abi_core(void)
         ecuio_session_security_unlock(NULL, 0, 0x01, 0, &wait_ms) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         wait_ms != 0 || ECUIO_ERR_TOO_SOON != 22 ||
-        ECUIO_SUPPORT_CONVERSATION != 0x40u) {
+        ECUIO_SUPPORT_CONVERSATION != 0x40u ||
+        ECUIO_SUPPORT_CLOSED != 0x80u || ECUIO_SUPPORT_NO_ROOM != 0x100u ||
+        ECUIO_MODULE_REASON_RANGE != 0x1u || ECUIO_MODULE_REASON_READ != 0x2u ||
+        ECUIO_MODULE_REASON_CONVERSATION != 0x4u ||
+        ECUIO_MODULE_REASON_VISIT != 0x8u ||
+        ECUIO_DIAG_NOT_OPENED != 0x400u) {
         return 1;
     }
     printf("detail '%s'\n", ecuio_last_error_detail());

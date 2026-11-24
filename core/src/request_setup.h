@@ -25,6 +25,7 @@
 #include "obd2_rates.h"
 #include "pid_support.h"
 #include "request_engine.h"
+#include "request_modules.h"
 #include "request_params.h"
 #include "session.h"
 #include "talk_seam.h"
@@ -239,6 +240,19 @@ inline bool ecuio_pack_frames_fit(const request_params& params)
  * hardware is touched. ?session=03 (ADR-0060) belongs to uds-generic too,
  * and ?keepalive_ms= to it. tx_ids marks each channel whose requests go
  * to a functional address (ecuio_engine_channel::functional). */
+/* The channels' addressing (functional by tx_ids) and the transport's
+ * filters: a filter for each module up to the cap, one kept back for a
+ * visit (J2534's attach lowers both) */
+inline void ecuio_setup_channels(ecuio_request_engine* e,
+                                 const uint32_t* tx_ids, uint32_t chan_count)
+{
+    e->filters_most = ECUIO_MAX_CHANNELS;
+    e->module_budget = ECUIO_MAX_CHANNELS - 1;
+    for (uint32_t c = 0; c < chan_count; ++c) {
+        e->chans[c].functional = isotp_functional_id(tx_ids[c]);
+    }
+}
+
 inline ecuio_status_t
 ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      const request_params& params, const uint32_t* rx_ids,
@@ -290,9 +304,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     if (!ecuio_engine_init(e, chan_count, static_cast<uint32_t>(room))) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    for (uint32_t c = 0; c < chan_count; ++c) {
-        e->chans[c].functional = isotp_functional_id(tx_ids[c]);
-    }
+    ecuio_setup_channels(e, tx_ids, chan_count);
     /* More than a session asks: nothing until a focus picks (section 2) */
     const bool pick_only =
         session->uds == nullptr && derived.total > ECUIO_PROFILE_MAX_REQUESTS;
@@ -544,7 +556,8 @@ inline void ecuio_publish_diagnostics(ecuio_session_t* session,
 
 /* Starts the diagnostics over (ecuio_engine_diagnose_again) when
  * ecuio_session_read_diagnostics has been called since the worker last
- * looked; seen is the worker's count. */
+ * looked, the closed modules' read through a visit each
+ * (ecuio_engine_visit_closed); seen is the worker's count. */
 inline void ecuio_take_diag_request(ecuio_session_t* session,
                                     ecuio_request_engine* e, uint32_t& seen)
 {
@@ -552,25 +565,34 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
     if (asked != seen) {
         seen = asked;
         ecuio_engine_diagnose_again(e);
+        ecuio_engine_visit_closed(e);
     }
 }
 
-/* Starts a clear (ecuio_engine_clear, ADR-0038) on each channel whose
- * ecuio_session_clear_diagnostics request the worker hasn't taken, at
- * the generation the caller saved and with its flags; seen holds the
- * worker's count per channel. The engine checks the generation again, so a read that
- * settled since makes it ECUIO_CLEAR_REPORT_CHANGED, sending nothing. */
+/* Starts the clear request (ecuio_engine_clear_request, ADR-0038) the
+ * worker hasn't taken, at the generations the caller saved and with its
+ * flags; *seen is the worker's count. The engine checks each generation
+ * again, so a read that settled since makes that target
+ * ECUIO_CLEAR_REPORT_CHANGED. Once the engine has no clear running the
+ * session hears the request ended, and takes the next. */
 inline void ecuio_take_clear_requests(ecuio_session_t* session,
                                       ecuio_request_engine* e, uint32_t* seen)
 {
-    for (uint32_t c = 0; c < e->chan_count && c < session->info.module_count;
-         ++c) {
-        const uint32_t asked = session->clear_requests[c].load();
-        if (asked != seen[c]) {
-            seen[c] = asked;
-            (void)ecuio_engine_clear(e, c, session->clear_generation[c].load(),
-                                     session->clear_flags[c].load());
+    ecuio_clear_target_t targets[ECUIO_MAX_CHANNELS];
+    std::lock_guard<std::mutex> lock(session->clear_mutex);
+    if (session->clear_requests != *seen) {
+        *seen = session->clear_requests;
+        uint32_t count = 0;
+        for (uint32_t k = 0; k < session->clear_count; ++k) {
+            if (session->clear_targets[k].channel < e->chan_count) {
+                targets[count++] = session->clear_targets[k];
+            }
         }
+        (void)ecuio_engine_clear_request(e, targets, count,
+                                         session->clear_flags);
+    }
+    if (!ecuio_engine_clear_running(e)) {
+        session->clear_ended = *seen;
     }
 }
 
@@ -673,87 +695,6 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
     if (e->focused || was_focused) {
         std::lock_guard<std::mutex> lock(session->focus_mutex);
         unasked();
-    }
-}
-
-/* The session's modules as attach resolved them: every one's IDs, the
- * info's count and its first ECUIO_SESSION_INFO_MAX_CHANNELS, and room
- * for each one's reports and clear requests, each report naming its
- * ECU. Before create returns; nothing sizes them afterwards. Out of
- * memory is ECUIO_ERR_OUT_OF_MEMORY, the session unchanged. */
-inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
-                                                const uint32_t* rx_ids,
-                                                const uint32_t* tx_ids,
-                                                uint32_t count)
-{
-    /* Made whole first, then handed over: a table that doesn't
-     * allocate leaves the session as it was */
-    std::vector<uint32_t> rx;
-    std::vector<uint32_t> tx;
-    std::vector<ecuio_channel_support_t> support;
-    std::vector<ecuio_channel_identity_t> identity;
-    std::vector<ecuio_channel_diagnostics_t> diagnostics;
-    std::unique_ptr<std::atomic<uint32_t>[]> generation;
-    std::unique_ptr<std::atomic<uint32_t>[]> flags;
-    std::unique_ptr<std::atomic<uint32_t>[]> requests;
-    try {
-        rx.assign(rx_ids, rx_ids + count);
-        tx.assign(tx_ids, tx_ids + count);
-        support.assign(count, ecuio_channel_support_t{});
-        identity.assign(count, ecuio_channel_identity_t{});
-        diagnostics.assign(count, ecuio_channel_diagnostics_t{});
-        generation.reset(new std::atomic<uint32_t>[count]());
-        flags.reset(new std::atomic<uint32_t>[count]());
-        requests.reset(new std::atomic<uint32_t>[count]());
-    } catch (...) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
-    std::lock_guard<std::mutex> lock(session->support_mutex);
-    session->module_rx.swap(rx);
-    session->module_tx.swap(tx);
-    session->support.swap(support);
-    session->identity.swap(identity);
-    session->diagnostics.swap(diagnostics);
-    session->clear_generation = std::move(generation);
-    session->clear_flags = std::move(flags);
-    session->clear_requests = std::move(requests);
-    session->support_count = count;
-    session->info.module_count = count;
-    session->info.channel_count =
-        count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? count
-            : uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS};
-    for (uint32_t c = 0; c < count; ++c) {
-        if (c < ECUIO_SESSION_INFO_MAX_CHANNELS) {
-            session->info.rx_ids[c] = rx_ids[c];
-            session->info.tx_ids[c] = tx_ids[c];
-        }
-        session->support[c].rx_id = rx_ids[c];
-        session->identity[c].rx_id = rx_ids[c];
-        session->diagnostics[c].rx_id = rx_ids[c];
-    }
-    return ECUIO_OK;
-}
-
-/* Each channel's ECU, its requests, its identification and diagnostics
- * items, nothing learned yet: what attach hands the session before the
- * worker runs, after ecuio_session_set_modules, whose modules are the
- * only ones seeded. */
-inline void ecuio_seed_reports(ecuio_session_t* session,
-                               const ecuio_request_engine& e,
-                               const uint32_t* rx_ids, uint32_t chan_count)
-{
-    std::lock_guard<std::mutex> lock(session->support_mutex);
-    const uint32_t modules = static_cast<uint32_t>(session->support.size());
-    const uint32_t count = chan_count < modules ? chan_count : modules;
-    session->support_count = count;
-    for (uint32_t c = 0; c < count; ++c) {
-        ecuio_engine_support(&e, c, &session->support[c]);
-        session->support[c].rx_id = rx_ids[c];
-        ecuio_engine_identity(&e, c, &session->identity[c]);
-        session->identity[c].rx_id = rx_ids[c];
-        ecuio_engine_diagnostics(&e, c, &session->diagnostics[c]);
-        session->diagnostics[c].rx_id = rx_ids[c];
     }
 }
 

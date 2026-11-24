@@ -18,6 +18,7 @@
 #include "link_health.h"
 #include "request_setup.h"
 #include "request_conversation.h"
+#include "request_turns.h"
 #include "socketcan_send.h"
 
 #include <errno.h>
@@ -182,6 +183,9 @@ bool send_frame(ecuio_socketcan_transport* t, sent_request& pending, uint32_t c,
                 int32_t r, const isotp_can& f, int64_t now)
 {
     if (!write_frame(t->fd, f, t->ext29[c])) {
+        if (errno == ENOBUFS) {
+            ecuio_engine_write_refused(&t->engine);
+        }
         return false;
     }
     ecuio_engine_sent(&t->engine, c, r, true, now);
@@ -202,23 +206,17 @@ void send_failed(ecuio_socketcan_transport* t, link_health& h,
     socketcan_send_failed(send, *t->sender, &t->engine, c, r, why, h, now);
 }
 
-/* The next request due on any channel, from next_chan on: its one frame,
- * or the First Frame of one longer than a frame (socketcan_send.h) */
+/* A free slot's request (ecuio_engine_next_slot): its one frame, or the
+ * First Frame of one longer than a frame (socketcan_send.h) */
 void send_due(ecuio_socketcan_transport* t, link_health& h,
-              sent_request& pending, socketcan_send& send, uint32_t& next_chan,
-              int64_t now)
+              sent_request& pending, socketcan_send& send, int64_t now)
 {
     ecuio_request_engine& e = t->engine;
     uint32_t c = 0;
-    int32_t r = ECUIO_ENGINE_NONE;
-    for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE; ++k) {
-        c = (next_chan + k) % e.chan_count;
-        r = ecuio_engine_due(&e, c, now);
-    }
+    const int32_t r = ecuio_engine_next_slot(&e, now, 0, &c);
     if (r == ECUIO_ENGINE_NONE) {
         return;
     }
-    next_chan = (c + 1) % e.chan_count;
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
     uint32_t len = 0;
     const uint8_t* pdu = ecuio_engine_pdu_of(
@@ -287,7 +285,6 @@ struct request_sends {
     ecuio_socketcan_transport* t;
     ecuio_request_engine& e;
     link_health& h;
-    uint32_t next_chan = 0;
     sent_request pending;
     socketcan_send send; /* a request longer than a frame, under way */
 
@@ -352,7 +349,7 @@ struct request_sends {
     {
         if (!t->proof.halted && !t->proof.confirming) {
             if (!pending.active && !send.active) {
-                send_due(t, h, pending, send, next_chan, now);
+                send_due(t, h, pending, send, now);
             }
             send_on(t, h, pending, send, now);
         }
@@ -407,8 +404,9 @@ struct worker_state {
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
-    uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
+    uint32_t clear_seen = 0;     /* ecuio_take_clear_requests' count */
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
+    ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     int64_t timing_at = 0;
     request_sends sends;
 
@@ -433,6 +431,29 @@ struct frame_in {
     int64_t now;
 };
 
+/* The kernel's filter set again when the hearing modules (open or
+ * closing) change, so a closed module's frames never reach the session;
+ * a refusal is a hard failure, and the reopen sets the list as it
+ * stands */
+void follow_modules(ecuio_socketcan_transport* t, worker_state& w)
+{
+    uint32_t hearing = 0;
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        if (ecuio_engine_module_hears(w.e.chans[c])) {
+            hearing |= 1u << c;
+        }
+    }
+    if (hearing == t->hearing) {
+        return;
+    }
+    t->hearing = hearing;
+    if (t->fd >= 0 && !set_channel_filters(t, t->fd, hearing)) {
+        link_on_read(w.h, true, false, false);
+        close(t->fd);
+        t->fd = -1;
+    }
+}
+
 void begin_worker(ecuio_socketcan_transport* t, worker_state& w)
 {
     ecuio_session_t* s = w.s;
@@ -443,6 +464,8 @@ void begin_worker(ecuio_socketcan_transport* t, worker_state& w)
     /* A focus set before start applies from the first request, and the
      * seam's talk handed over before start is that request */
     ecuio_take_focus(s, &e, w.focus_seen);
+    (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_take_test_talk(s, &e, now_us(t));
     ecuio_conversations_start(s, &e);
 }
@@ -583,6 +606,7 @@ void deliver_reply(ecuio_socketcan_transport* t, worker_state& w, uint32_t c,
     if (overflow_pending) {
         reply.flags |= ECUIO_FRAME_FLAG_OVERFLOW;
         overflow_pending = false;
+        ecuio_engine_overflowed(&e);
     }
     reply.reserved = 0;
     std::memcpy(reply.data, m.data, m.len);
@@ -727,9 +751,11 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
         ecuio_engine_rescan(&e);
     }
     ecuio_take_diag_request(s, &e, w.diag_seen);
-    ecuio_take_clear_requests(s, &e, w.clear_seen);
+    ecuio_take_clear_requests(s, &e, &w.clear_seen);
     ecuio_take_test_talk(s, &e, now_us(t));
     ecuio_take_focus(s, &e, w.focus_seen);
+    (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
+    follow_modules(t, w);
     ecuio_step_conversations(s, &e, now_us(t));
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(s, e, c, t->rx_ids[c], w.published[c]);

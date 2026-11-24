@@ -121,6 +121,32 @@ inline uint8_t ecuio_engine_session_asked(const ecuio_request_engine* e,
     return asked ? e->session : uint8_t{0};
 }
 
+/* Channel c's scanned DIDs in its support report: the total, those
+ * settled, found and refused, the found ones' polls, and SCAN_COMPLETE */
+inline void ecuio_engine_support_scan(const ecuio_request_engine* e, uint32_t c,
+                                      ecuio_channel_support_t* out)
+{
+    for (uint32_t i = 0; i < e->scan_count; ++i) {
+        const ecuio_scan_entry& s = e->scan[i];
+        if (s.channel != c) {
+            continue;
+        }
+        ++out->scan_total;
+        if (s.outcome == ECUIO_SCAN_FOUND) {
+            ++out->scan_done;
+            ++out->scan_found;
+            out->scan_polled =
+                static_cast<uint16_t>(out->scan_polled + s.polled);
+        } else if (s.outcome == ECUIO_SCAN_REFUSED) {
+            ++out->scan_done;
+            ++out->scan_refused;
+        }
+    }
+    if (out->scan_total > 0 && out->scan_done == out->scan_total) {
+        out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
+    }
+}
+
 /* What channel c has learned, for ecuio_session_get_channel_support;
  * the driver adds the channel's rx_id. */
 inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
@@ -135,7 +161,14 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     out->flags = ((ch.probed && ended) ? ECUIO_SUPPORT_PROBED : 0u) |
                  (ch.walked ? ECUIO_SUPPORT_COMPLETE : 0u) |
                  (ch.packed ? ECUIO_SUPPORT_PACKED : 0u) |
-                 (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u);
+                 (ch.unpacked ? ECUIO_SUPPORT_UNPACKED : 0u) |
+                 (ch.module_state == ECUIO_MODULE_STATE_CLOSED
+                      ? ECUIO_SUPPORT_CLOSED
+                      : 0u) |
+                 (ch.module_state == ECUIO_MODULE_STATE_NO_ROOM
+                      ? ECUIO_SUPPORT_NO_ROOM
+                      : 0u);
+    out->open_reasons = ch.reasons;
     out->generation = ch.generation;
     out->ranges = ch.ranges;
     for (uint32_t b = 0; b < sizeof(out->pid_bitmap); ++b) {
@@ -172,24 +205,7 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
             d.nrc = r.nrc;
         }
     }
-    for (uint32_t i = 0; i < e->scan_count; ++i) {
-        const ecuio_scan_entry& s = e->scan[i];
-        if (s.channel != c) {
-            continue;
-        }
-        ++out->scan_total;
-        if (s.outcome == ECUIO_SCAN_FOUND) {
-            ++out->scan_done;
-            ++out->scan_found;
-            out->scan_polled = static_cast<uint16_t>(out->scan_polled + s.polled);
-        } else if (s.outcome == ECUIO_SCAN_REFUSED) {
-            ++out->scan_done;
-            ++out->scan_refused;
-        }
-    }
-    if (out->scan_total > 0 && out->scan_done == out->scan_total) {
-        out->flags |= ECUIO_SUPPORT_SCAN_COMPLETE;
-    }
+    ecuio_engine_support_scan(e, c, out);
     const bool extended =
         e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
     out->session_asked = ecuio_engine_session_asked(e, ch);

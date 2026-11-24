@@ -129,16 +129,17 @@ inline uint8_t ecuio_mock_ecu_reply(ecuio_mock_ecu* ecu, const ecuio_request& q,
 
 /* Runs channel 0's diagnostics list, and a clear it has started, to
  * their end against the ECU, on the engine's own clock (*now_us, which
- * only moves forward), with nothing else asked. No sleep: the engine's
- * gaps and waits pass on the clock alone. */
+ * only moves forward), with nothing else asked; channel 0, the one ECU,
+ * is the engine module a clear judges by. No sleep: the engine's gaps
+ * and waits pass on the clock alone. */
 inline void ecuio_mock_ecu_read(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
                                 int64_t* now_us)
 {
+    e->rpm_module = 0;
     const ecuio_engine_channel& ch = e->chans[0];
     for (int step = 0; step < 256; ++step) {
         if (ch.diag_pending == 0 && !ch.diagnosing &&
-            ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
-            ch.outstanding == ECUIO_ENGINE_NONE) {
+            !ecuio_engine_clear_on(ch) && ch.outstanding == ECUIO_ENGINE_NONE) {
             return;
         }
         const int32_t r = ecuio_engine_due(e, 0, *now_us);

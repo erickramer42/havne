@@ -3,6 +3,7 @@
 
 #include "sessionbridge.h"
 #include "bridgetext.h"
+#include "clear_request.h"    /* cli/: one clear request over the ECUs */
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 
 #include <QByteArray>
@@ -17,8 +18,21 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 
 using namespace bridgetext;
+
+namespace {
+
+/* A clear core took none of, for the Log */
+QString clearNotSent(ecuio_status_t rc)
+{
+    return rc == ECUIO_ERR_REPORT_CHANGED
+               ? QStringLiteral("the report changed")
+               : QString::fromUtf8(ecuio_status_string(rc));
+}
+
+} // namespace
 
 /* What each channel's ECU said it is (ADR-0021), in the activity log
  * once the whole list has an outcome, and again when a recovery re-asks
@@ -267,24 +281,23 @@ QString SessionBridge::clearDiagnostics()
     emit logMessage(
         QStringLiteral("Diagnostics saved before the clear: %1").arg(shown));
     m_clearSavedTo = shown;
-    for (bool& waiting : m_clearWaiting) {
-        waiting = false;
-    }
+    std::fill(std::begin(m_clearWaiting), std::end(m_clearWaiting), false);
     emit clearMovingChanged();
 
+    /* One request: the engine and vehicle speed judged once for every ECU */
+    std::vector<ecuio_clear_target_t> targets(n);
     for (uint32_t i = 0; i < n; ++i) {
-        const ecuio_status_t rc = ecuio_session_clear_diagnostics_with(
-            m_session, channels[i], reports[i].generation,
-            ECUIO_CLEAR_ALLOW_RUNNING);
-        if (rc == ECUIO_OK) {
+        targets[i] = {channels[i], reports[i].generation, {0, 0}};
+    }
+    const std::vector<ecuio_status_t> rc =
+        cli::ask_clears(m_session, targets, ECUIO_CLEAR_ALLOW_RUNNING);
+    for (uint32_t i = 0; i < n; ++i) {
+        if (rc[i] == ECUIO_OK) {
             m_clearAsked[channels[i]] = true;
         } else {
             emit logMessage(
                 QStringLiteral("ECU %1 clear: not sent: %2")
-                    .arg(hexId(reports[i].rx_id),
-                         rc == ECUIO_ERR_REPORT_CHANGED
-                             ? QStringLiteral("the report changed")
-                             : QString::fromUtf8(ecuio_status_string(rc))));
+                    .arg(hexId(reports[i].rx_id), clearNotSent(rc[i])));
         }
     }
     return shown;
@@ -332,23 +345,24 @@ void SessionBridge::clearDiagnosticsMoving()
     emit logMessage(QStringLiteral("Clearing while moving; the report was "
                                    "saved before the clear: %1")
                         .arg(m_clearSavedTo));
+    std::vector<ecuio_clear_target_t> targets;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
-        if (!m_clearWaiting[c]) {
-            continue;
+        if (m_clearWaiting[c]) {
+            m_clearWaiting[c] = false;
+            targets.push_back({c, m_clearWaitGeneration[c], {0, 0}});
         }
-        m_clearWaiting[c] = false;
-        const ecuio_status_t rc = ecuio_session_clear_diagnostics_with(
-            m_session, c, m_clearWaitGeneration[c],
-            ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING);
-        if (rc == ECUIO_OK) {
+    }
+    const std::vector<ecuio_status_t> rc =
+        cli::ask_clears(m_session, targets,
+                        ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING);
+    for (size_t k = 0; k < targets.size(); ++k) {
+        const uint32_t c = targets[k].channel;
+        if (rc[k] == ECUIO_OK) {
             m_clearAsked[c] = true;
         } else {
-            emit logMessage(
-                QStringLiteral("ECU %1 clear: not sent: %2")
-                    .arg(hexId(m_diagnosticsShown[c].rx_id),
-                         rc == ECUIO_ERR_REPORT_CHANGED
-                             ? QStringLiteral("the report changed")
-                             : QString::fromUtf8(ecuio_status_string(rc))));
+            emit logMessage(QStringLiteral("ECU %1 clear: not sent: %2")
+                                .arg(hexId(m_diagnosticsShown[c].rx_id),
+                                     clearNotSent(rc[k])));
         }
     }
     emit clearMovingChanged();

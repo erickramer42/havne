@@ -43,6 +43,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_csv_guess_call.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_session_link.cpp
     test_condition_recording.cpp test_condition_recording_events.cpp
+    test_recorder_modules.cpp
     test_armed_recorder.cpp test_pick_only.cpp test_query_keys.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
@@ -178,7 +179,9 @@ add_executable(test_obd2 test_obd2.cpp
     test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
     test_request_turns_key.cpp test_request_turns_session.cpp
     test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
-    test_request_quiet_reports.cpp
+    test_request_quiet_reports.cpp test_request_counts.cpp
+    test_request_slots.cpp test_request_modules.cpp test_pick_modules.cpp
+    test_diag_visit.cpp test_probe_range.cpp test_clear_request.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
@@ -227,7 +230,8 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
-    test_elm327_conversation.cpp test_elm327_awake.cpp)
+    test_elm327_conversation.cpp test_elm327_modules.cpp
+    test_elm327_awake.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -691,7 +695,8 @@ if(TARGET havne-cli)
         # ECUIO_VCAN_REQUIRED, and serial: it answers 0x7E0 for the bus)
         if(WIN32)
             foreach(_case EngineRunningIsNotCleared EngineOffIsCleared
-                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears)
+                    ARefusalIsNamed MovingIsNotCleared TheWordOnMovingClears
+                    TwoEcusAreOneRequest)
                 add_test(NAME CliClearRunTest.${_case}
                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_clear.py
                             ${_case} $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
@@ -2685,6 +2690,7 @@ if(WIN32)
         ../tests/test_j2534_stream_requests.cpp
         ../tests/test_j2534_stream_rotation.cpp
         ../tests/test_j2534_stream_probe.cpp
+        ../tests/test_j2534_start_probe.cpp
         ../tests/test_j2534_stream_session.cpp
         ../tests/test_j2534_stream_clear.cpp
         ../tests/test_j2534_stream_stamps.cpp
@@ -2764,6 +2770,7 @@ if(WIN32)
         test_j2534_talk.cpp
         test_j2534_car.cpp
         test_j2534_conversation.cpp
+        test_j2534_modules.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core

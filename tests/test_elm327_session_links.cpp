@@ -360,13 +360,18 @@ struct ModuleDids {
     ModuleDids& operator=(const ModuleDids&) = delete;
 };
 
-/* Whether both modules' identification and diagnostics have an outcome
- * for every item */
+/* Whether each open module's identification and diagnostics have an
+ * outcome for every item */
 bool items_settled(ecuio_session_t* s)
 {
     for (uint32_t c = 0; c < 2; ++c) {
         ecuio_channel_identity_t id{};
         ecuio_channel_diagnostics_t diag{};
+        ecuio_channel_support_t sup{};
+        if (ecuio_session_get_channel_support(s, c, &sup) == ECUIO_OK &&
+            (sup.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+            continue; /* no answer to the start's probe, nothing picked */
+        }
         if (ecuio_session_get_channel_identity(s, c, &id) != ECUIO_OK ||
             ecuio_session_get_channel_diagnostics(s, c, &diag) != ECUIO_OK ||
             (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
@@ -419,22 +424,23 @@ uint32_t adapter_commands()
 } // namespace
 
 /* Such a session with nothing picked still asks identification and
- * diagnostics. An ECU that answers none of it isn't responding, and the
- * link says so for as long as nothing answers: an idle pass never turns
- * that into OK. While it is down the worker asks one request an
- * interval (here kCheckMs), a module in turn, the first a whole interval
- * after the items settled; the first answered ends the timeout, the
- * identification is read after all, and the checks end. A check's
- * request and its reply are in the wire log and the recording as any
- * other's. */
+ * diagnostics of the module standing in for a silent start's probe (the
+ * first: the car asks no PID 0C). An ECU that answers none of it isn't
+ * responding, and the link says so for as long as nothing answers: an
+ * idle pass never turns that into OK. While it is down the worker asks
+ * one request an interval (here kCheckMs), the first a whole interval
+ * after the items settled; the first answered (a refusal is an answer)
+ * ends the timeout, the identification is read after all, and the checks
+ * end. A check's request and its reply are in the wire log and the
+ * recording as any other's. */
 TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuChecksItAndFindsItAwake)
 {
     const CheckEvery checks(kCheckMs);
     const EnvSet frame_logging("ECUIO_SUR_LOG_FRAMES", "1");
     const LogDir logs("unpicked-check");
     const CarProfile profile("elm327-quiet-car");
-    /* 0x7E9 is a module that answers the car's first DID; 0x7E8 the
-     * engine ECU, which has the VIN */
+    /* 0x7E8, the engine ECU, has the VIN and refuses the car's DIDs;
+     * 0x7E9 answers the first but stays closed with nothing picked */
     const ModuleDids modules("7E9:1000=11");
     const fs::path root =
         fs::temp_directory_path() / temp_name("ecuio-elm327-unpicked");
@@ -497,16 +503,16 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuChecksItAndFindsItAwake)
     EXPECT_EQ(s.state(), ECUIO_ERR_VEHICLE_TIMEOUT) << "its silence changes "
                                                        "nothing";
 
-    /* The ignition on: the next check, the other module's, is answered */
+    /* The ignition on: the next check is answered, refused */
     set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
     ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 8000))
         << "no check found the ECU awake";
-    const std::vector<uint8_t> answer = {0x62, 0x10, 0x00, 0x11};
+    const std::vector<uint8_t> answer = {0x7F, 0x22, 0x31};
     ASSERT_TRUE(wait_for(
         [&] {
             std::lock_guard<std::mutex> g(s.cap.m);
             for (const Capture::Frame& f : s.cap.frames) {
-                if (f.id == 0x7E9u && f.data == answer) {
+                if (f.id == 0x7E8u && f.data == answer) {
                     return true;
                 }
             }
@@ -540,24 +546,27 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuChecksItAndFindsItAwake)
         return ss.str();
     };
     const std::string frames = read(folder / "frames.csv");
-    EXPECT_NE(frames.find(",0x7E9,"), std::string::npos) << frames;
-    EXPECT_NE(frames.find(",62 10 00 11"), std::string::npos)
+    EXPECT_NE(frames.find(",0x7E8,"), std::string::npos) << frames;
+    EXPECT_NE(frames.find(",7F 22 31"), std::string::npos)
         << "the check's reply is recorded";
+    EXPECT_EQ(frames.find(",0x7E9,"), std::string::npos)
+        << "the module not standing in was asked";
     const std::string events = read(folder / "events.log");
     EXPECT_NE(events.find("  link  vehicle not responding (state 8, "),
               std::string::npos)
         << events;
     EXPECT_NE(events.find("  link  recovered (state 0, "), std::string::npos)
         << events;
-    EXPECT_TRUE(
-        in_order(logs.only_log(), {"] > 221000", "] > 221000", "] < 7E9"}))
+    EXPECT_TRUE(in_order(logs.only_log(),
+                         {"] > 221000", "] > 221001", "] < 7E8037F2231"}))
         << "each check's request and the reply are in the wire log";
     fs::remove_all(root, ec);
 }
 
-/* One module of two answers nothing at all, and the other nothing to
- * what it doesn't serve (the fake's refusals as silence): the silence
- * is one module's and an item's, never the vehicle's. The link is OK
+/* One module of two answers nothing at all (so the start's probe leaves
+ * it closed), and the other nothing to what it doesn't serve (the fake's
+ * refusals as silence): the silence is an item's, never the vehicle's.
+ * The link is OK
  * through the unanswered items, and after the adapter dropped and came
  * back, when they are all asked again with no reply among them. */
 TEST_F(Elm327SessionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
@@ -593,11 +602,11 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
     }
     EXPECT_GE(silent_items, 1u)
         << "the case needs an item the live ECU leaves unanswered";
-    ecuio_channel_identity_t module{};
-    ASSERT_EQ(ecuio_session_get_channel_identity(s.s, 1, &module), ECUIO_OK);
-    for (uint32_t i = 0; i < module.items; ++i) {
-        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
-    }
+    /* The silent module gave the start's probe no answer: closed with
+     * nothing picked, so its silence is never asked */
+    ecuio_channel_support_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_support(s.s, 1, &module), ECUIO_OK);
+    EXPECT_NE(module.flags & ECUIO_SUPPORT_CLOSED, 0u);
 
     /* The adapter drops and is back: the recovery asks every unanswered
      * item again, the live ECU's too, and none is answered */

@@ -194,16 +194,93 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
     if (!header.ok) {
         return refuse(t, header_cmd, header, "OK");
     }
+    const ecuio_status_t st = hearing_filter(t);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    t->configured = true;
+    return ECUIO_OK;
+}
+
+/* The adapter's receive filter for these reply IDs (AT CRA for one, AT
+ * CF and AT CM for several); a refusal as the setup's */
+ecuio_status_t receive_filter(transport* t, const uint32_t* rx_ids,
+                              uint32_t count)
+{
     char filter[2][24];
-    const size_t n = elm327_format_receive_filter(t->rx_ids, t->chan_count,
-                                                  t->ext29, filter);
+    const size_t n =
+        elm327_format_receive_filter(rx_ids, count, t->ext29, filter);
     for (size_t i = 0; i < n; ++i) {
         const setup_answer a = contract(t, filter[i]);
         if (!a.ok) {
             return refuse(t, filter[i], a, "OK");
         }
     }
-    t->configured = true;
+    return ECUIO_OK;
+}
+
+/* The receive filter for the hearing modules' reply IDs (t->hearing);
+ * nothing typed while none hears */
+ecuio_status_t hearing_filter(transport* t)
+{
+    uint32_t ids[ECUIO_MAX_CHANNELS];
+    uint32_t n = 0;
+    for (uint32_t c = 0; c < t->chan_count && c < ECUIO_MAX_CHANNELS; ++c) {
+        if (((t->hearing >> c) & 1u) != 0) {
+            ids[n++] = t->rx_ids[c];
+        }
+    }
+    return receive_filter(t, ids, n);
+}
+
+/* The start's emissions probe (request_probe.h): for each group, its
+ * receive filter, the functional header and one 01 00, every line to the
+ * prompt taken (the adapter waits its AT ST after the last reply). The
+ * caller puts the channels' filter back; a refused command refuses the
+ * connect, as the setup's do. */
+ecuio_status_t run_probe(transport* t, ecuio_probe* p)
+{
+    const auto start = std::chrono::steady_clock::now();
+    const uint32_t tx = t->ext29 ? ECUIO_PROBE_TX_29 : ECUIO_PROBE_TX_11;
+    uint32_t group[ECUIO_MAX_CHANNELS];
+    for (uint32_t g = 0;; ++g) {
+        const uint32_t n = ecuio_probe_group(t->rx_ids, t->chan_count, t->ext29,
+                                             t->engine.module_budget, g, group);
+        if (n == 0) {
+            break;
+        }
+        ecuio_status_t st = receive_filter(t, group, n);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+        char header_cmd[ELM327_CMD_MAX] = {};
+        const setup_answer h = set_header(t, tx, header_cmd);
+        if (!h.ok) {
+            return refuse(t, header_cmd, h, "OK");
+        }
+        char cmd[ELM327_CMD_MAX];
+        (void)elm327_format_request(ECUIO_PROBE_REQUEST, 2, 0, cmd, sizeof cmd);
+        ++p->requests;
+        const elm327_io io =
+            command(t, cmd, false, [&](const elm327_reader& r) {
+                elm327_can_line f;
+                if (elm327_classify(r, t->ext29, &f) != elm327_line::frame) {
+                    return;
+                }
+                isotp_message m;
+                if (isotp_take(t->isotp, f, 0, &m) == isotp_result::complete) {
+                    ecuio_probe_take(*p, m.id, m.data, m.len);
+                }
+            });
+        if (io == elm327_io::failed) {
+            setup_answer a;
+            a.io = io;
+            return refuse(t, cmd, a, "a reply");
+        }
+    }
+    p->took_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - start)
+                     .count();
     return ECUIO_OK;
 }
 

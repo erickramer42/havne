@@ -194,7 +194,51 @@ uint64_t host_us_now(const ecuio_record_link& link)
     return now > zero ? now - zero : 0;
 }
 
+/* The worker's: carried module states into the ring after a carried link
+ * transition; false while they still don't fit */
+bool put_pending_modules(ecuio_recorder_t* r)
+{
+    if (!r->modules_pending) {
+        return true;
+    }
+    const uint64_t size = sizeof(record_head) + sizeof(modules_body);
+    if (!ring_has_room(r, size)) {
+        return false;
+    }
+    const uint64_t h = r->head.load(std::memory_order_relaxed);
+    const record_head rh{static_cast<uint32_t>(size), kRecordModules, 0};
+    r->copy_in(h, &rh, sizeof rh);
+    r->copy_in(h + sizeof rh, &r->pending_modules, sizeof r->pending_modules);
+    r->head.store(h + size, std::memory_order_release);
+    r->modules_pending = false;
+    r->put_host_us = (std::max)(r->put_host_us, r->pending_modules.host_us);
+    return true;
+}
+
 } // namespace
+
+void ecuio_record_modules(ecuio_record_link* link, uint32_t closed,
+                          uint32_t no_room, const uint8_t* reasons,
+                          uint32_t count)
+{
+    if (link == nullptr) {
+        return;
+    }
+    ecuio_recorder_t* r = ecuio_record_pin(*link);
+    if (r == nullptr) {
+        return;
+    }
+    /* States still carried give way to these: the latest are a reader's */
+    modules_body& mb = r->pending_modules;
+    mb = modules_body{host_us_now(*link), closed, no_room, {}};
+    std::memcpy(mb.reasons, reasons,
+                (std::min)(count, uint32_t{ECUIO_MAX_CHANNELS}));
+    r->modules_pending = true;
+    if (put_pending_conditions(r) && put_pending_link(r)) {
+        put_pending_modules(r);
+    }
+    ecuio_record_unpin(*link);
+}
 
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
                              uint32_t episodes, uint64_t t_us)
@@ -246,7 +290,7 @@ void ecuio_record_timing(ecuio_record_link* link,
             stamped = true;
         }
         if (put_pending_conditions(r) && put_pending_link(r) &&
-            ring_has_room(r, size)) {
+            put_pending_modules(r) && ring_has_room(r, size)) {
             const uint64_t h = r->head.load(std::memory_order_relaxed);
             const record_head rh{static_cast<uint32_t>(size), kRecordTiming,
                                  r->pending_dropped};
@@ -368,7 +412,7 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     /* What was carried goes first, or the frame waits behind it, dropped;
      * its events are carried, never dropped with it */
     if (!put_pending_conditions(r) || !put_pending_link(r) ||
-        !ring_has_room(r, size)) {
+        !put_pending_modules(r) || !ring_has_room(r, size)) {
         ++r->pending_dropped;
         r->records_dropped.fetch_add(1, std::memory_order_relaxed);
         for (uint32_t k = 0; k < nevents; ++k) {
@@ -438,7 +482,8 @@ void ecuio_recorder_put_events(ecuio_recorder_t* r, uint64_t host_us,
      * time_us, never before the record put before it */
     const uint64_t floor_us = (std::min)(r->put_host_us, host_us);
     /* What was carried, and the link line before these, go in first */
-    const bool behind = !put_pending_conditions(r) || !put_pending_link(r);
+    const bool behind = !put_pending_conditions(r) || !put_pending_link(r) ||
+                        !put_pending_modules(r);
     for (uint32_t k = 0; k < held + settled; ++k) {
         event_body e{};
         if (k < held) {

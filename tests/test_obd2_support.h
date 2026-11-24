@@ -314,7 +314,7 @@ inline std::vector<SentRequest> drive(ecuio_request_engine* e, int64_t* now,
     const ecuio_engine_channel& ch = e->chans[0];
     for (int step = 0; step < 1000; ++step) {
         if (!ch.walking && ch.ident_pending == 0 && ch.diag_pending == 0 &&
-            ch.scan_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
+            ch.scan_pending == 0 && !ecuio_engine_clear_on(ch) &&
             ch.outstanding == ECUIO_ENGINE_NONE) {
             return sent;
         }
