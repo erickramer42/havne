@@ -107,14 +107,14 @@ std::string one_file(const std::string& ecu_list, const std::string& data_file,
                   "\"a.json\": " + data_file, "1.0.0", more);
 }
 
-/* package as format 2 of the manifest, nothing else changed */
-std::string format2(std::string package)
+/* package as manifest format n, nothing else changed */
+std::string of_format(std::string package, char n)
 {
     const std::string one = "\"havne_plugin\": 1";
     const size_t at = package.find(one);
     EXPECT_NE(at, std::string::npos);
     if (at != std::string::npos) {
-        package[at + one.size() - 1] = '2';
+        package[at + one.size() - 1] = n;
     }
     return package;
 }
@@ -300,7 +300,8 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
         {"4 ECUs and the base's",
          one_file(kFourPastTheBase, data(sig("oil", "F40D", "e1"), extends)),
          "0.9.0"},
-        {"plugin format 2", format2(one_file(kPcm, data(oil))), "0.9.0"},
+        {"plugin format 2", of_format(one_file(kPcm, data(oil)), '2'), "0.9.0"},
+        {"plugin format 3", of_format(one_file(kPcm, data(oil)), '3'), "0.9.1"},
         {"signal-file format 3",
          one_file(kPcm, "{\"havne_signals\": 3, \"signals\": [" + oil + "]}"),
          "0.9.1"},

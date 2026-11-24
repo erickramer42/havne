@@ -8,7 +8,9 @@
 // the manifest's keys and the package's files, plugin_conversation.cpp
 // the conversation tier's keys and its module, plugin_pages.cpp the
 // Dashboard pages and their getters, plugin_merge.cpp merges a variant's
-// files into its set, and plugin.cpp holds the C API.
+// files into its set, plugin_publisher.cpp the publisher block (format
+// 3), plugin_fingerprint.cpp the plugin's fingerprint,
+// and plugin.cpp holds the C API.
 
 #ifndef ECUIO_PLUGIN_LOADER_H
 #define ECUIO_PLUGIN_LOADER_H
@@ -99,6 +101,15 @@ struct conversation_ecu {
     uint32_t tx = 0;
 };
 
+/* A manifest's "publisher" (format 3) */
+struct publisher {
+    std::string name;
+    std::string contact;
+    std::string license;
+    std::string terms;
+    uint8_t terms_sha256[32] = {};
+};
+
 /* The conversation tier's part of a plugin (ADR-0066), as its manifest
  * declares it and its module's bytes, checked */
 struct conversation {
@@ -132,6 +143,10 @@ struct ecuio_plugin {
     std::vector<ecuio_plugin_loader::variant> variants;
     std::vector<std::string> fixtures;
     std::vector<ecuio_plugin_loader::page> pages;
+    /* NULL for a plugin that names none (plugin_publisher.cpp) */
+    std::unique_ptr<ecuio_plugin_loader::publisher> publisher;
+    /* What a consent names (plugin_fingerprint.cpp) */
+    uint8_t fingerprint[32] = {};
 };
 
 namespace ecuio_plugin_loader {
@@ -153,6 +168,13 @@ placed placed_json(const std::string& prefix, const ecuio_json::Error& error);
  * as text_of's). */
 bool path_ok(const std::string& p);
 const std::string& path_of(const Value& v, std::string_view what);
+
+/* v's text, lo to hi bytes, with no control character (lines keeps line
+ * feeds and tabs) and none that shows as nothing or moves the text
+ * around it: a text a person reads before consenting
+ * (plugin_publisher.cpp) */
+const std::string& plain_of(const Value& v, size_t lo, size_t hi,
+                            const std::string& what, bool lines);
 
 class loader
 {
@@ -179,6 +201,7 @@ private:
     static void read_requires(const Value& root, ecuio_plugin& p);
     static void read_origin(const Value& root, ecuio_plugin& p);
     void read_tiers(const Value& root, ecuio_plugin& p);
+    static void read_publisher(const Value& root, ecuio_plugin& p);
     void read_match(const Value& root, ecuio_plugin& p);
     void read_fixtures(const Value& root, ecuio_plugin& p);
     void read_files(const Value& root, const ecuio_plugin& p);
@@ -192,6 +215,7 @@ private:
                      conversation& c);
     void folder_code(const Value& file, const std::string& path,
                      conversation& c);
+    void read_fingerprint(const Value& root, ecuio_plugin& p) const;
     std::vector<std::vector<const data_file*>> read_variants(const Value& root,
                                                              ecuio_plugin& p);
     const data_file* file_at(const Value& at, const std::string& path);

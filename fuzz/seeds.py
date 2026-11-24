@@ -34,6 +34,9 @@
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
+# fuzz_consent_store's are stores with no record, one, two of one id,
+# a record at each bound, a fingerprint twice, and as many of the longest
+# record as one holds and one more.
 # fuzz_signal_merge's are signal files in the order to merge them, the
 # example plugins' variants written as one file each (variant_file()).
 # fuzz_sur_reply's are scripts of requests and the replies the surrogate
@@ -700,6 +703,25 @@ def main(argv):
     }.items():
         store = {"havne_security_store": 1, "entries": entries}
         write(out, "fuzz_security_store", name + ".json",
+              json.dumps(store, indent=2).encode())
+    # The consent store (consent_store.h)
+    record = {"id": "talker", "version": "1.0.0", "fingerprint": "a" * 64,
+              "terms": "b" * 64, "publisher": "Made-up Tools",
+              "given_utc": 1795132800}
+    widest = {"id": "t" * 31, "version": "65535.65535.65", "fingerprint": "f" * 64,
+              "terms": "e" * 64, "publisher": '"' * 127, "given_utc": 253402300799}
+    longest = [dict(widest, fingerprint="%064x" % k) for k in range(257)]
+    for name, records in {
+        "empty": [],
+        "one": [record],
+        "versions": [record, dict(record, version="1.1.0", fingerprint="c" * 64)],
+        "widest": [widest],
+        "twice": [record, record],
+        "full": longest[:256],
+        "past_full": longest,
+    }.items():
+        store = {"havne_consent_store": 1, "entries": records}
+        write(out, "fuzz_consent_store", name + ".json",
               json.dumps(store, indent=2).encode())
     for name, data in sur_seeds().items():
         write(out, "fuzz_sur_reply", name, data)

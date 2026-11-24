@@ -68,6 +68,11 @@ constexpr const char* kPluginKey = "plugin  ";
  * session's modules, its module's hash, and the response IDs of the
  * channels it was bound to, in channel order */
 constexpr const char* kConversationKey = "conversation  ";
+/* "consent  <fingerprint>,<UTC second>" after it (ADR-0066's appendix of
+ * 2026-11-23): the plugin's fingerprint, 64 hex digits, and the second
+ * its consent was given; only for a part that talks with a consent
+ * applied, never behind the test door or on a bus no car is on */
+constexpr const char* kConsentKey = "consent  ";
 /* "module  <rx>,<state>" (ADR-0065 step 5): a module not open when the
  * recording began, closed or no-room; the timed `module` lines say each
  * change after it */

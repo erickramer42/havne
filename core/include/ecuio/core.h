@@ -179,6 +179,10 @@ typedef enum {
                                          given), or its identity is still
                                          being read (no time given): ask
                                          again later (ADR-0066) */
+    ECUIO_ERR_CONSENT_REQUIRED = 23,  /* no consent: the consent store
+                                         holds none for the plugin, or the
+                                         plugin names no publisher to
+                                         consent to (plugin.h, ADR-0066) */
 
     /* Append-only rule: new codes go HERE, never renumber */
 } ecuio_status_t;

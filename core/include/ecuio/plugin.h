@@ -36,7 +36,7 @@ extern "C" {
  */
 
 #define ECUIO_PLUGIN_FORMAT            1 /* "havne_plugin" a wrap writes */
-#define ECUIO_PLUGIN_FORMAT_MAX        2 /* the newest read; 1 is too */
+#define ECUIO_PLUGIN_FORMAT_MAX        3 /* the newest read; 1 and 2 too */
 #define ECUIO_PLUGIN_TIER_DATA    0x1u      /* signal files only */
 #define ECUIO_PLUGIN_TIER_CONVERSATION 0x2u /* a module that asks (below) */
 #define ECUIO_PLUGIN_MANIFEST_MAX 1048576u  /* a folder's manifest.json */
@@ -117,6 +117,283 @@ ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
  * its NUL. */
 ecuio_status_t ecuio_plugin_lineage(const ecuio_plugin_t* plugin, char* lineage,
                                     size_t cap);
+
+/*
+ * A plugin's fingerprint (ADR-0066's appendix of 2026-11-23): the SHA-256
+ * that names its contents, and what a consent names. A folder and its
+ * packed file have one fingerprint: it is the SHA-256 of the line
+ * "havne-plugin-fingerprint 1", the manifest without "files" and
+ * "fixtures" as core writes JSON, then for each file (each data file a
+ * variant reads, each page, the conversation's module) in byte order of
+ * its path: the path, a line feed and the SHA-256 of its bytes, a JSON
+ * file's as core writes it. Whitespace inside a JSON file changes nothing;
+ * every value and every module byte does. Every loaded plugin has one.
+ */
+typedef struct ecuio_plugin_fingerprint {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* zero */
+    uint8_t fingerprint[32];
+    uint32_t reserved[8]; /* zero; ABI growth space */
+} ecuio_plugin_fingerprint_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_fingerprint_t) == 72,
+              "ecuio_plugin_fingerprint_t size is ABI");
+static_assert(offsetof(ecuio_plugin_fingerprint_t, fingerprint) == 8,
+              "plugin fingerprint offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_fingerprint_t) == 72,
+               "ecuio_plugin_fingerprint_t size is ABI");
+#endif
+
+/* ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct,
+ * nothing written; this core's struct_size is written back */
+ecuio_status_t ecuio_plugin_fingerprint(const ecuio_plugin_t* plugin,
+                                        ecuio_plugin_fingerprint_t* out);
+
+/*
+ * The publisher (format 3, ADR-0066's appendix of 2026-11-23): who stands
+ * behind a plugin, how to reach them, the license and the terms a person
+ * reads before consenting. Required with the conversation tier in format
+ * 3; a format 1 or 2 plugin names none. Each text is UTF-8 with no
+ * control character (the terms keep line feeds and tabs) and no
+ * character that shows as nothing or moves the text around it.
+ */
+#define ECUIO_PLUGIN_PUBLISHER_NAME_MAX    127u /* bytes */
+#define ECUIO_PLUGIN_PUBLISHER_CONTACT_MAX 255u
+#define ECUIO_PLUGIN_PUBLISHER_LICENSE_MAX 63u
+#define ECUIO_PLUGIN_TERMS_MAX             65536u
+
+typedef struct ecuio_plugin_publisher {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t terms_len;   /* bytes, 1 to ECUIO_PLUGIN_TERMS_MAX */
+    char name[128];
+    char contact[256];
+    char license[64];
+    uint8_t terms_sha256[32]; /* what a consent record keeps */
+    uint32_t flags;           /* zero */
+    uint32_t reserved[7];     /* zero; ABI growth space */
+} ecuio_plugin_publisher_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_publisher_t) == 520,
+              "ecuio_plugin_publisher_t size is ABI");
+static_assert(offsetof(ecuio_plugin_publisher_t, terms_sha256) == 456,
+              "plugin publisher terms_sha256 offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_publisher_t) == 520,
+               "ecuio_plugin_publisher_t size is ABI");
+#endif
+
+/* ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, nothing written, for a struct_size smaller
+ * than the struct or a plugin that names no publisher */
+ecuio_status_t ecuio_plugin_publisher(const ecuio_plugin_t* plugin,
+                                      ecuio_plugin_publisher_t* out);
+
+/* The terms whole into buf with a NUL after them, *length their length
+ * without it. buf NULL with cap 0 asks the length; a cap short of the
+ * length and its NUL is ECUIO_ERR_INVALID_ARGUMENT with *length set and
+ * nothing written: the terms are never cut. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL plugin or length, or a NULL buf with a cap;
+ * ECUIO_ERR_INVALID_ARGUMENT, *length untouched, for a plugin that names
+ * no publisher. */
+ecuio_status_t ecuio_plugin_terms(const ecuio_plugin_t* plugin, char* buf,
+                                  size_t cap, size_t* length);
+
+/*
+ * The consent store (ADR-0066's appendix of 2026-11-23): a file the host
+ * names that keeps one record for each plugin fingerprint a person
+ * consented to. A record is made from the plugin itself at give, never
+ * from fields a caller names; it says what was consented to and when,
+ * and proves nothing about who: anyone who can call give can make one.
+ * Every run only reads the store; a give or a withdraw is on the disk
+ * before it returns, written as the security store is (a file beside it,
+ * flushed, then put over it, under <store>.lock), and merged with what
+ * another program wrote meanwhile. A file that isn't there is an empty
+ * store; one that doesn't read is refused, never taken as empty. Words
+ * name no path. One open store per path in a process: a second open of
+ * the path shares it. Any thread; each call holds the store's lock.
+ */
+typedef struct ecuio_consent_store ecuio_consent_store_t; /* opaque */
+
+typedef struct ecuio_consent_record {
+    uint32_t struct_size;     /* the caller's sizeof, at least this one's */
+    uint32_t flags;           /* zero */
+    uint64_t given_utc;       /* the second consent was given */
+    char id[32];              /* the plugin's id */
+    char version[16];         /* its X.Y.Z */
+    uint8_t fingerprint[32];  /* ecuio_plugin_fingerprint's */
+    uint8_t terms_sha256[32]; /* the terms consented to */
+    char publisher[128];      /* the publisher's name */
+    uint32_t reserved[8];     /* zero; ABI growth space */
+} ecuio_consent_record_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_consent_record_t) == 288,
+              "ecuio_consent_record_t size is ABI");
+static_assert(offsetof(ecuio_consent_record_t, given_utc) == 8,
+              "consent record given_utc offset is ABI");
+static_assert(offsetof(ecuio_consent_record_t, fingerprint) == 64,
+              "consent record fingerprint offset is ABI");
+static_assert(offsetof(ecuio_consent_record_t, publisher) == 128,
+              "consent record publisher offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_consent_record_t) == 288,
+               "ecuio_consent_record_t size is ABI");
+_Static_assert(offsetof(ecuio_consent_record_t, publisher) == 128,
+               "consent record publisher offset is ABI");
+#endif
+
+/* The store at path (UTF-8), read here. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL path or out; ECUIO_ERR_LOAD_FAILED, with words, for a file that
+ * can't be read or doesn't read as a store; ECUIO_ERR_OUT_OF_MEMORY.
+ * *out is NULL on any failure. */
+ecuio_status_t ecuio_consent_store_open(const char* path,
+                                        ecuio_consent_store_t** out);
+ecuio_status_t ecuio_consent_store_close(ecuio_consent_store_t* store);
+
+/* Each call below first reads the file again when another program has
+ * changed it since this process last read or wrote it (a file removed
+ * holds none); a file that then doesn't read is find's, give's and
+ * withdraw's ECUIO_ERR_LOAD_FAILED with words, and the other getters
+ * answer from what was read before. */
+
+/* The record of fingerprint (32 bytes): ECUIO_ERR_CONSENT_REQUIRED for
+ * none. The
+ * record getters take a struct_size of at least this core's
+ * (ECUIO_ERR_INVALID_ARGUMENT otherwise, out untouched) and write this
+ * core's back. */
+ecuio_status_t ecuio_consent_store_find(const ecuio_consent_store_t* store,
+                                        const uint8_t* fingerprint,
+                                        ecuio_consent_record_t* out);
+/* The newest record of the plugin id (a version change's screen reads
+ * it): ECUIO_ERR_CONSENT_REQUIRED for none */
+ecuio_status_t ecuio_consent_store_latest(const ecuio_consent_store_t* store,
+                                          const char* id,
+                                          ecuio_consent_record_t* out);
+/* The records, newest first: a getter by index */
+ecuio_status_t ecuio_consent_store_count(const ecuio_consent_store_t* store,
+                                         uint32_t* out);
+ecuio_status_t ecuio_consent_store_get(const ecuio_consent_store_t* store,
+                                       uint32_t index,
+                                       ecuio_consent_record_t* out);
+
+/* The person's consent to plugin at the second utc, saved before it
+ * returns. A fingerprint given already is ECUIO_OK with its first second
+ * kept. ECUIO_ERR_INVALID_ARGUMENT with words: the plugin names no
+ * publisher, utc outside 1970 to 9999, or the store is full;
+ * ECUIO_ERR_LOAD_FAILED with words: the save was refused, nothing given
+ * (but when the new file stood and only the folder's flush failed). */
+ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
+                                        const ecuio_plugin_t* plugin,
+                                        uint64_t utc);
+/* Withdraws the consent to fingerprint, or with fingerprint NULL every
+ * consent to the plugin id, saved before it returns.
+ * ECUIO_ERR_INVALID_ARGUMENT for none held; ECUIO_ERR_LOAD_FAILED as
+ * give's. */
+ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
+                                            const char* id,
+                                            const uint8_t* fingerprint);
+
+/*
+ * The lines a consent shows, in core so every front end shows the same
+ * words (ADR-0066's appendix of 2026-11-23): Havne's own lines, the same
+ * for every plugin, then the lines of the classes the plugin's code falls
+ * in, then the front end's publisher block and terms. A set names the
+ * classes: a plugin with the conversation tier is
+ * ECUIO_CONSENT_SET_CONVERSATION; one with a read-class operation (a
+ * dump) adds ECUIO_CONSENT_SET_READ. The write class's lines are not in
+ * this core: a set naming it is refused. The text is plain ASCII; line
+ * HAVNE_1 holds "{name}" and "{version}" once each, which a front end
+ * fills with the plugin's. The ids are append-only; an id may name a line
+ * no set shows yet.
+ */
+#define ECUIO_CONSENT_TEXT_VERSION              1u
+#define ECUIO_CONSENT_SET_CONVERSATION          0x1u
+#define ECUIO_CONSENT_SET_READ                  0x2u
+#define ECUIO_CONSENT_SET_WRITE                 0x4u
+#define ECUIO_CONSENT_LINE_ACTION               0x1u /* shown in full at
+                                                        each write too */
+#define ECUIO_CONSENT_LINE_HAVNE_1              1u
+#define ECUIO_CONSENT_LINE_HAVNE_2              2u
+#define ECUIO_CONSENT_LINE_HAVNE_3              3u
+#define ECUIO_CONSENT_LINE_HAVNE_4              4u
+#define ECUIO_CONSENT_LINE_HAVNE_5              5u
+#define ECUIO_CONSENT_LINE_WRITE_ON_ASK         6u
+#define ECUIO_CONSENT_LINE_NOT_A_CONFIRMATION   7u
+#define ECUIO_CONSENT_LINE_EMISSIONS            8u
+#define ECUIO_CONSENT_LINE_EMISSIONS_READ       9u
+#define ECUIO_CONSENT_LINE_MONITORS             10u
+#define ECUIO_CONSENT_LINE_STABILITY            11u
+#define ECUIO_CONSENT_LINE_RESTRAINTS           12u
+#define ECUIO_CONSENT_LINE_BRICKED              13u
+#define ECUIO_CONSENT_LINE_NO_UNDO              14u
+#define ECUIO_CONSENT_LINE_POWER                15u
+#define ECUIO_CONSENT_LINE_POWER_READ           16u
+#define ECUIO_CONSENT_LINE_WARRANTY             17u
+#define ECUIO_CONSENT_LINE_WARRANTY_READ        18u
+#define ECUIO_CONSENT_LINE_ENGINE_STATE         19u
+#define ECUIO_CONSENT_LINE_LOCKOUT              20u
+#define ECUIO_CONSENT_LINE_RESTORE_LIMITS       21u
+#define ECUIO_CONSENT_LINE_COPY_DATA            22u
+#define ECUIO_CONSENT_LINE_COPYRIGHT            23u
+#define ECUIO_CONSENT_LINE_ROAD_USE             24u
+#define ECUIO_CONSENT_LINE_DRY_RUN_LIMITS       25u
+#define ECUIO_CONSENT_LINE_OWN_RISK             26u
+#define ECUIO_CONSENT_LINE_LOCKOUT_COUNT        27u
+#define ECUIO_CONSENT_LINE_RECOVERY             28u
+
+/* The one public struct holding pointers: each is to static text in core
+ * (never freed, never sent over the surrogate's pipe), so its size
+ * follows the pointer width; test_c_abi checks it for each width. */
+typedef struct ecuio_consent_line {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t id;          /* ECUIO_CONSENT_LINE_* */
+    uint32_t flags;       /* ECUIO_CONSENT_LINE_ACTION */
+    uint32_t reserved0;   /* zero */
+    const char* key;      /* "lockout": the line's name in records */
+    const char* text;
+    const char* heading;  /* its one-line heading, "" for none */
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_consent_line_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_consent_line_t, id) == 4,
+              "consent line id offset is ABI");
+static_assert(offsetof(ecuio_consent_line_t, key) == 16,
+              "consent line key offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_consent_line_t, key) == 16,
+               "consent line key offset is ABI");
+#endif
+
+/* The index-th line a consent shows for set, in order. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL out; ECUIO_ERR_INVALID_ARGUMENT,
+ * out untouched, past the last line, for a set of no class or one naming
+ * a class this core has no lines for, or a struct_size smaller than the
+ * struct. Any thread. */
+ecuio_status_t ecuio_consent_line(uint32_t set, uint32_t index,
+                                  ecuio_consent_line_t* out);
+
+/* Applies a person's consent to the session's plugin, between create and
+ * start: a plugin's module binds at start only with one (but on a bus no
+ * car is on, SocketCAN's vcan). Core checks that the session's set
+ * carries a plugin part that asks consent, that the plugin names a
+ * publisher, that fingerprint (32 bytes) is that plugin's, and that store
+ * holds a record of it; it keeps the fingerprint and the record's second
+ * for the session's records. It proves nothing about who gave the record.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument; ECUIO_ERR_INVALID_ARGUMENT
+ * with words after start, while a recorder is attached (its header is
+ * written), for a set with no plugin part, or a fingerprint not the
+ * plugin's; ECUIO_ERR_CONSENT_REQUIRED with words for a plugin that
+ * names no publisher (format 1 or 2) or no record in store;
+ * ECUIO_ERR_LOAD_FAILED with words for a store whose file doesn't read. A
+ * session that asked nothing asks from start once its module binds. */
+ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,
+                                           const ecuio_consent_store_t* store,
+                                           const uint8_t* fingerprint);
 
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a

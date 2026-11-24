@@ -81,10 +81,17 @@ add_library(ecuio-core STATIC
     src/plugin.cpp
     src/plugin_manifest.cpp
     src/plugin_conversation.cpp
+    src/plugin_fingerprint.cpp
+    src/plugin_publisher.cpp
     src/plugin_merge.cpp
     src/plugin_pages.cpp
     src/plugin_wrap.cpp
     src/security_store.cpp
+    src/store_file.cpp
+    src/consent_store.cpp
+    src/consent_store_api.cpp
+    src/consent_lines.cpp
+    src/core_consent.cpp
     src/security_store_owner.cpp
     src/conversation.cpp
     src/conversation_registry.cpp

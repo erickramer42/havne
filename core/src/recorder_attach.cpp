@@ -148,6 +148,18 @@ std::string conversation_line(const ecuio_session_t* s)
     return line + "\n";
 }
 
+/* The consent line, or "" where the part talks with no consent applied
+ * or doesn't talk */
+std::string consent_line(const ecuio_session_t* s)
+{
+    if (!s->consent_applied || !ecuio_session_may_talk(s)) {
+        return {};
+    }
+    return std::string(ecuio_recording_rows::kConsentKey) +
+           ecuio_sha256::hex(s->consent_fingerprint) + "," +
+           std::to_string(s->consent_given_utc) + "\n";
+}
+
 /* The header's lines from the start to frame flags, and an armed
  * recorder's copy of those from core on */
 void header_top(const ecuio_session_t* session,
@@ -166,6 +178,7 @@ void header_top(const ecuio_session_t* session,
     }
     header += recorder->signals_plugin;
     header += conversation_line(session);
+    header += consent_line(session);
     /* The conditions line goes here once the set is read under the
      * locks, into room kept now */
     b.conditions_at = header.size();

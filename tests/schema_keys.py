@@ -24,7 +24,8 @@ import sys
 LOADERS = ("core/src/signal_file.cpp", "core/src/signal_file_parts.cpp",
            "core/src/signal_file_source.cpp", "core/src/signal_file_merged.cpp",
            "core/src/plugin_manifest.cpp",
-           "core/src/plugin_conversation.cpp", "core/src/plugin.cpp",
+           "core/src/plugin_conversation.cpp", "core/src/plugin_publisher.cpp",
+           "core/src/plugin.cpp",
            "core/src/condition_file.cpp")
 # Where only_keys itself is defined
 RULES = "core/src/signal_file_rules.cpp"
@@ -62,6 +63,7 @@ CALLS = {
     ("plugin_conversation.cpp", '"a security level"', 1):
         ("plugin-manifest", "/$defs/securityLevel"),
     ("plugin_conversation.cpp", '"a binary file"', 1): ("plugin-manifest", "/$defs/binaryFile"),
+    ("plugin_publisher.cpp", '"\\"publisher\\""', 1): ("plugin-manifest", "/$defs/publisher"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),

@@ -48,6 +48,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_key_window_setup.cpp test_security_store.cpp
     test_security_store_file.cpp test_security_store_lock.cpp
     test_security_store_owner.cpp test_conversation_registry.cpp
+    test_consent_store.cpp test_consent_lines.cpp test_consent_session.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp)
 
@@ -132,6 +133,7 @@ add_executable(test_signals test_signals.cpp test_signals_text.cpp test_signal_t
     test_plugin_car.cpp test_plugin_wrap.cpp test_plugin_put.cpp
     test_plugin_least_core.cpp test_plugin_conversation.cpp test_plugin_pages.cpp
     test_plugin_conversation_rules.cpp test_plugin_conversation_gate.cpp test_base64.cpp
+    test_plugin_fingerprint.cpp test_plugin_publisher.cpp
     test_condition_file.cpp test_condition_file_resolve.cpp
     test_condition_eval.cpp)
 

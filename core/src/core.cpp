@@ -157,6 +157,8 @@ const char* ecuio_status_string(ecuio_status_t status)
         case ECUIO_ERR_CANCELED:                return "canceled";
         case ECUIO_ERR_IN_USE:                  return "still in use";
         case ECUIO_ERR_STREAM_ENDED:            return "the stream has ended";
+        case ECUIO_ERR_TOO_SOON:                return "not yet: ask again later";
+        case ECUIO_ERR_CONSENT_REQUIRED:        return "no consent given";
         default:                                return "unknown status";
     }
 }
@@ -343,8 +345,10 @@ ecuio_status_t ecuio_session_create(
     if (status != ECUIO_OK) {
         return status;
     }
-    /* After attach, which fills the rest of the info; the worker hasn't
-     * started, so no lock */
+    /* After attach, which fills the rest of the info and may find a bus
+     * no car is on; the worker hasn't started, so no lock */
+    s->conversation_consent =
+        s->conversation != nullptr && ecuio_plugin_code_may_run(s.get());
     if (s->focus_requests || ecuio_session_may_talk(s.get())) {
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
     }

@@ -167,7 +167,7 @@ TEST(PluginTest, EveryManifestRefusalSaysWhy)
     const std::string v1 = R"([{"id": "base", "files": ["a.json"]}])";
     const std::vector<Case> cases = {
         {"{\"id\": \"p\"}", "starts with \"havne_plugin\""},
-        {"{\"havne_plugin\": 3}", "format 3, and this Havne reads formats"},
+        {"{\"havne_plugin\": 4}", "format 4, and this Havne reads formats"},
         {packed(kHead + ", \"tint\": 1", kData),
          "unknown key 'tint' in the manifest"},
         {packed(R"("name": "P")", kData), "needs an \"id\""},

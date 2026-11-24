@@ -10,4 +10,5 @@
 # For example:
 # ECUIO_PROFILE_MAX_REQUESTS  vX.Y.0 raises the cap (CHANGELOG.md)
 ECUIO_SIGNAL_FILE_FORMAT  v0.9.1 is format 3: a file's needs and a merged set's parts (ADR-0065, CHANGELOG.md)
+ECUIO_PLUGIN_FORMAT_MAX  v0.9.1 is format 3: a plugin's publisher block (ADR-0066, CHANGELOG.md)
 ECUIO_EXPORT_LEFT_OUT_COUNT  v0.9.1 is 6: ECUIO_EXPORT_LEFT_OUT_VIN_MASKED counts the VIN-shaped tokens an export masks (ADR-0054, CHANGELOG.md)

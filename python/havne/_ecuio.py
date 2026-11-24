@@ -139,6 +139,39 @@ ECUIO_CONDITION_WHY_NO_CHECK = 7
 ECUIO_CONDITION_WHY_NO_LINK = 6
 ECUIO_CONDITION_WHY_NO_SIGNAL = 2
 ECUIO_CONDITION_WHY_UNIT = 3
+ECUIO_CONSENT_LINE_ACTION = 1
+ECUIO_CONSENT_LINE_BRICKED = 13
+ECUIO_CONSENT_LINE_COPYRIGHT = 23
+ECUIO_CONSENT_LINE_COPY_DATA = 22
+ECUIO_CONSENT_LINE_DRY_RUN_LIMITS = 25
+ECUIO_CONSENT_LINE_EMISSIONS = 8
+ECUIO_CONSENT_LINE_EMISSIONS_READ = 9
+ECUIO_CONSENT_LINE_ENGINE_STATE = 19
+ECUIO_CONSENT_LINE_HAVNE_1 = 1
+ECUIO_CONSENT_LINE_HAVNE_2 = 2
+ECUIO_CONSENT_LINE_HAVNE_3 = 3
+ECUIO_CONSENT_LINE_HAVNE_4 = 4
+ECUIO_CONSENT_LINE_HAVNE_5 = 5
+ECUIO_CONSENT_LINE_LOCKOUT = 20
+ECUIO_CONSENT_LINE_LOCKOUT_COUNT = 27
+ECUIO_CONSENT_LINE_MONITORS = 10
+ECUIO_CONSENT_LINE_NOT_A_CONFIRMATION = 7
+ECUIO_CONSENT_LINE_NO_UNDO = 14
+ECUIO_CONSENT_LINE_OWN_RISK = 26
+ECUIO_CONSENT_LINE_POWER = 15
+ECUIO_CONSENT_LINE_POWER_READ = 16
+ECUIO_CONSENT_LINE_RECOVERY = 28
+ECUIO_CONSENT_LINE_RESTORE_LIMITS = 21
+ECUIO_CONSENT_LINE_RESTRAINTS = 12
+ECUIO_CONSENT_LINE_ROAD_USE = 24
+ECUIO_CONSENT_LINE_STABILITY = 11
+ECUIO_CONSENT_LINE_WARRANTY = 17
+ECUIO_CONSENT_LINE_WARRANTY_READ = 18
+ECUIO_CONSENT_LINE_WRITE_ON_ASK = 6
+ECUIO_CONSENT_SET_CONVERSATION = 1
+ECUIO_CONSENT_SET_READ = 2
+ECUIO_CONSENT_SET_WRITE = 4
+ECUIO_CONSENT_TEXT_VERSION = 1
 ECUIO_CONVERSATION_DECLINED = 3
 ECUIO_CONVERSATION_ENDED = 5
 ECUIO_CONVERSATION_FAULTED = 4
@@ -299,7 +332,7 @@ ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
 ECUIO_PLUGIN_FORMAT = 1
-ECUIO_PLUGIN_FORMAT_MAX = 2
+ECUIO_PLUGIN_FORMAT_MAX = 3
 ECUIO_PLUGIN_ID_MAX = 31
 ECUIO_PLUGIN_KEY_MAX = 58
 ECUIO_PLUGIN_LINEAGE_LEN = 32
@@ -317,6 +350,10 @@ ECUIO_PLUGIN_PAGE_DESKTOP = 2
 ECUIO_PLUGIN_PAGE_MAX_BYTES = 0x141e0
 ECUIO_PLUGIN_PAGE_PHONE = 1
 ECUIO_PLUGIN_PATH_MAX = 127
+ECUIO_PLUGIN_PUBLISHER_CONTACT_MAX = 255
+ECUIO_PLUGIN_PUBLISHER_LICENSE_MAX = 63
+ECUIO_PLUGIN_PUBLISHER_NAME_MAX = 127
+ECUIO_PLUGIN_TERMS_MAX = 0x10000
 ECUIO_PLUGIN_TIER_CONVERSATION = 2
 ECUIO_PLUGIN_TIER_DATA = 1
 ECUIO_PLUGIN_VARIANT_ID_MAX = 24
@@ -580,6 +617,7 @@ ECUIO_ERR_CANCELED = 19
 ECUIO_ERR_IN_USE = 20
 ECUIO_ERR_STREAM_ENDED = 21
 ECUIO_ERR_TOO_SOON = 22
+ECUIO_ERR_CONSENT_REQUIRED = 23
 ECUIO_VALUE_UINT = 0
 ECUIO_VALUE_INT = 1
 ECUIO_VALUE_FLOAT = 2
@@ -644,6 +682,15 @@ class ecuio_condition_state_t(Structure):
     pass
 
 class ecuio_condition_term_t(Structure):
+    pass
+
+class ecuio_consent_line_t(Structure):
+    pass
+
+class ecuio_consent_record_t(Structure):
+    pass
+
+class ecuio_consent_store_t(Structure):
     pass
 
 class ecuio_csv_guess_t(Structure):
@@ -733,10 +780,16 @@ class ecuio_plugin_conversation_ecu_t(Structure):
 class ecuio_plugin_conversation_t(Structure):
     pass
 
+class ecuio_plugin_fingerprint_t(Structure):
+    pass
+
 class ecuio_plugin_info_t(Structure):
     pass
 
 class ecuio_plugin_page_t(Structure):
+    pass
+
+class ecuio_plugin_publisher_t(Structure):
     pass
 
 class ecuio_plugin_security_level_t(Structure):
@@ -1126,6 +1179,27 @@ ecuio_condition_term_t._fields_ = [
     ('reserved', (c_uint64 * 2)),
     ('references', (ecuio_condition_reference_t * 8)),
 ]
+ecuio_consent_line_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('id', c_uint32),
+    ('flags', c_uint32),
+    ('reserved0', c_uint32),
+    ('key', c_char_p),
+    ('text', c_char_p),
+    ('heading', c_char_p),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_consent_record_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('given_utc', c_uint64),
+    ('id', (c_char * 32)),
+    ('version', (c_char * 16)),
+    ('fingerprint', (c_uint8 * 32)),
+    ('terms_sha256', (c_uint8 * 32)),
+    ('publisher', (c_char * 128)),
+    ('reserved', (c_uint32 * 8)),
+]
 ecuio_csv_guess_t._fields_ = [
     ('flags', c_uint32),
     ('columns', c_uint32),
@@ -1338,6 +1412,12 @@ ecuio_plugin_conversation_t._fields_ = [
     ('level_count', c_uint32),
     ('reserved', (c_uint32 * 2)),
 ]
+ecuio_plugin_fingerprint_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('fingerprint', (c_uint8 * 32)),
+    ('reserved', (c_uint32 * 8)),
+]
 ecuio_plugin_info_t._fields_ = [
     ('struct_size', c_uint32),
     ('tiers', c_uint32),
@@ -1355,6 +1435,16 @@ ecuio_plugin_page_t._fields_ = [
     ('text_bytes', c_uint32),
     ('reserved', (c_uint32 * 3)),
     ('path', (c_char * 128)),
+]
+ecuio_plugin_publisher_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('terms_len', c_uint32),
+    ('name', (c_char * 128)),
+    ('contact', (c_char * 256)),
+    ('license', (c_char * 64)),
+    ('terms_sha256', (c_uint8 * 32)),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 7)),
 ]
 ecuio_plugin_security_level_t._fields_ = [
     ('struct_size', c_uint32),
@@ -1828,6 +1918,15 @@ FUNCTIONS = {
     'ecuio_condition_set_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_condition_set_t))]),  # conditions.h
     'ecuio_condition_set_name': (c_char_p, [POINTER(ecuio_condition_set_t)]),  # conditions.h
     'ecuio_condition_set_resolve': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_condition_binding_t)]),  # conditions.h
+    'ecuio_consent_line': (c_int, [c_uint32, c_uint32, POINTER(ecuio_consent_line_t)]),  # plugin.h
+    'ecuio_consent_store_close': (c_int, [POINTER(ecuio_consent_store_t)]),  # plugin.h
+    'ecuio_consent_store_count': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint32)]),  # plugin.h
+    'ecuio_consent_store_find': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint8), POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_get': (c_int, [POINTER(ecuio_consent_store_t), c_uint32, POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_give': (c_int, [POINTER(ecuio_consent_store_t), POINTER(ecuio_plugin_t), c_uint64]),  # plugin.h
+    'ecuio_consent_store_latest': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(ecuio_consent_record_t)]),  # plugin.h
+    'ecuio_consent_store_open': (c_int, [c_char_p, POINTER(POINTER(ecuio_consent_store_t))]),  # plugin.h
+    'ecuio_consent_store_withdraw': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(c_uint8)]),  # plugin.h
     'ecuio_decode_signal': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, POINTER(c_double)]),  # signals.h
     'ecuio_decode_text': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, c_char_p, c_uint32]),  # signals.h
     'ecuio_def_applies_to_frame': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_frame_t)]),  # signals.h
@@ -1866,6 +1965,7 @@ FUNCTIONS = {
     'ecuio_plugin_conversation': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_conversation_t)]),  # plugin.h
     'ecuio_plugin_conversation_ecu': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_conversation_ecu_t)]),  # plugin.h
     'ecuio_plugin_drop_variant': (c_int, [c_char_p, c_size_t, c_char_p, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
+    'ecuio_plugin_fingerprint': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_fingerprint_t)]),  # plugin.h
     'ecuio_plugin_fixture': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_free': (c_int, [POINTER(ecuio_plugin_t)]),  # plugin.h
     'ecuio_plugin_info': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_info_t)]),  # plugin.h
@@ -1874,11 +1974,13 @@ FUNCTIONS = {
     'ecuio_plugin_match': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_vin_info_t), POINTER(c_uint32), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
     'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
+    'ecuio_plugin_publisher': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_publisher_t)]),  # plugin.h
     'ecuio_plugin_put_variant': (c_int, [c_char_p, c_size_t, c_char_p, c_char_p, c_size_t, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_register': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_requires_core': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint16), POINTER(c_uint16), POINTER(c_uint16)]),  # plugin.h
     'ecuio_plugin_security_level': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_security_level_t)]),  # plugin.h
     'ecuio_plugin_service': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_service_t)]),  # plugin.h
+    'ecuio_plugin_terms': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t, POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_text_free': (None, [POINTER(c_char)]),  # plugin.h
     'ecuio_plugin_values': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t, POINTER(ecuio_plugin_value_t), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_variant': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
@@ -1930,6 +2032,7 @@ FUNCTIONS = {
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h
     'ecuio_scrub_frames': (c_int, [c_size_t, ecuio_scrub_frame_callback_t, c_void_p, POINTER(ecuio_signal_set_t), c_uint32, POINTER(c_uint8), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_serial_ports': (c_int, [POINTER(ecuio_serial_port_t), c_uint32, POINTER(c_uint32)]),  # serial.h
+    'ecuio_session_apply_consent': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_consent_store_t), POINTER(c_uint8)]),  # plugin.h
     'ecuio_session_clear_diagnostics': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_set': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_clear_target_t), c_uint32, c_uint32]),  # core.h
     'ecuio_session_clear_diagnostics_with': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32, c_uint32]),  # core.h

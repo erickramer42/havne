@@ -231,7 +231,8 @@ CASES = [
     ("a binary file in format 1", PACKED, ["files", "guest.wasm"],
      {"kind": "wasm", "base64": ""}, False),
     ("format 2 with the data tier alone", PACKED, ["havne_plugin"], 2, True),
-    ("format 3 of a plugin", PACKED, ["havne_plugin"], 3, False),
+    ("format 3 of a plugin", PACKED, ["havne_plugin"], 3, True),
+    ("format 4 of a plugin", PACKED, ["havne_plugin"], 4, False),
     ("a manufacturer code with an I", PACKED, ["match", 0, "wmi"], ["ZZI"], False),
     ("a manufacturer code of 6", PACKED, ["match", 0, "wmi"], ["ZZ9ABC"], True),
     ("a manufacturer code of 4", PACKED, ["match", 0, "wmi"], ["ZZZZ"], False),
@@ -639,6 +640,35 @@ PAGES = [
     ("17 pages", SEVENTEEN, [], None, False),
 ]
 
+# Format 3's publisher (ADR-0066's appendix of 2026-11-23): required with
+# the conversation tier, format 3's alone, each text at its bound. The
+# loader's plain-text rule (no control or invisible character) is its own.
+PUB = {"name": "Made-up Tools", "contact": "https://example.com/help",
+       "license": "MIT", "terms": "Use at your own risk.\nNo warranty."}
+PACKED3 = changed(PACKED2, ["havne_plugin"], 3)
+PACKED3["publisher"] = PUB
+DATA3 = changed(PACKED, ["havne_plugin"], 3)
+PB = ["publisher"]
+PUBLISHER = [
+    ("a format 3 conversation plugin", PACKED3, [], None, True),
+    ("format 3's conversation tier with no publisher", PACKED3, PB, DELETE, False),
+    ("a publisher in format 2", PACKED2, PB, PUB, False),
+    ("a publisher in format 1", PACKED, PB, PUB, False),
+    ("a format 3 data plugin with no publisher", DATA3, [], None, True),
+    ("a format 3 data plugin with a publisher", DATA3, PB, PUB, True),
+    ("format 4", PACKED3, ["havne_plugin"], 4, False),
+    ("a signature", PACKED3, ["signature"], {"alg": "ed25519"}, False),
+    ("a publisher key it doesn't take", PACKED3, PB + ["url"], "u", False),
+    ("a publisher that isn't an object", PACKED3, PB, "Made-up Tools", False),
+] + [
+    (f"no publisher {key}", PACKED3, PB + [key], DELETE, False)
+    for key in ("name", "contact", "license", "terms")
+] + [
+    (f"a publisher {key} of {n} bytes", PACKED3, PB + [key], "x" * n, 0 < n <= most)
+    for key, most in (("name", 127), ("contact", 255), ("license", 63), ("terms", 65536))
+    for n in (0, 1, most, most + 1)
+]
+
 class Cli:
     def __init__(self, exe, scratch):
         self.exe = exe
@@ -770,7 +800,7 @@ def main():
 
         # Edge cases: one verdict from both
         cases = (list(CASES) + FORMAT2 + FORMAT3 + MERGED_SET + CONDITION_CASES +
-                 CONVERSATION + PAGES)
+                 CONVERSATION + PAGES + PUBLISHER)
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

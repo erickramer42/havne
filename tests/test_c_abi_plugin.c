@@ -61,7 +61,17 @@ int c_abi_plugin(void)
         ecuio_plugin_service_t service;
         ecuio_plugin_security_level_t level;
         ecuio_plugin_conversation_ecu_t ecu;
+        ecuio_plugin_fingerprint_t print;
+        ecuio_plugin_publisher_t publisher;
+        ecuio_consent_line_t line;
+        size_t terms = 7u;
         int ok = 0;
+        memset(&line, 0, sizeof line);
+        line.struct_size = (uint32_t)sizeof line;
+        memset(&publisher, 0, sizeof publisher);
+        publisher.struct_size = sizeof publisher;
+        memset(&print, 0, sizeof print);
+        print.struct_size = sizeof print - 1u;
         memset(&ecu, 0, sizeof ecu);
         ecu.struct_size = sizeof ecu;
         memset(&about, 0, sizeof about);
@@ -101,6 +111,45 @@ int c_abi_plugin(void)
              level.key_window_ms == 500u &&
              ecuio_plugin_security_level(plugin, 1, &level) ==
                  ECUIO_ERR_INVALID_ARGUMENT;
+        /* The fingerprint: a short struct refused, then the whole one */
+        ok = ok && sizeof(ecuio_plugin_fingerprint_t) == 72u &&
+             offsetof(ecuio_plugin_fingerprint_t, fingerprint) == 8u &&
+             ecuio_plugin_fingerprint(plugin, &print) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             print.struct_size == sizeof print - 1u;
+        print.struct_size = sizeof print;
+        ok = ok && ecuio_plugin_fingerprint(plugin, &print) == ECUIO_OK &&
+             print.struct_size == sizeof print && print.flags == 0u &&
+             (print.fingerprint[0] | print.fingerprint[31]) != 0;
+        /* A format 2 plugin names no publisher */
+        ok = ok && sizeof(ecuio_plugin_publisher_t) == 520u &&
+             offsetof(ecuio_plugin_publisher_t, terms_sha256) == 456u &&
+             offsetof(ecuio_plugin_publisher_t, flags) == 488u &&
+             ecuio_plugin_publisher(plugin, &publisher) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             ecuio_plugin_terms(plugin, NULL, 0, &terms) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             terms == 7u;
+        /* The consent store's record, and its calls' NULL refusals */
+        ok = ok && sizeof(ecuio_consent_record_t) == 288u &&
+             offsetof(ecuio_consent_record_t, given_utc) == 8u &&
+             offsetof(ecuio_consent_record_t, id) == 16u &&
+             offsetof(ecuio_consent_record_t, fingerprint) == 64u &&
+             offsetof(ecuio_consent_record_t, publisher) == 128u &&
+             offsetof(ecuio_consent_record_t, reserved) == 256u &&
+             ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_consent_store_close(NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ECUIO_ERR_CONSENT_REQUIRED == 23;
+        /* A consent line: static text, its size by the pointer width */
+        ok = ok &&
+             sizeof(ecuio_consent_line_t) == 32u + 3u * sizeof(const char*) &&
+             offsetof(ecuio_consent_line_t, key) == 16u &&
+             offsetof(ecuio_consent_line_t, reserved) ==
+                 16u + 3u * sizeof(const char*) &&
+             ecuio_consent_line(ECUIO_CONSENT_SET_CONVERSATION, 0, &line) ==
+                 ECUIO_OK &&
+             line.id == ECUIO_CONSENT_LINE_HAVNE_1 &&
+             strcmp(line.key, "asks") == 0 && line.heading[0] == 0;
         if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {
             return 1;
         }

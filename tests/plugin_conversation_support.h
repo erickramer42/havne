@@ -132,6 +132,7 @@ struct Made {
     bool has_binary = true;  /* a packed package's "files" has guest.wasm */
     std::string files_extra; /* more of "files", each after a comma */
     std::string variant_files = R"(["a.json"])"; /* the one variant's files */
+    std::string publisher; /* the manifest's "publisher", when not empty */
 
     std::string conversation() const
     {
@@ -151,7 +152,8 @@ struct Made {
             R"(, "id": "talker", "name": "Talker", "version": "1.2.0", )"
             R"("requires": {"core": "0.1.0"}, "source": {"name": "t"}, )"
             R"("tiers": )" +
-            tiers + ", \"ecus\": " + ecus +
+            tiers + (publisher.empty() ? "" : ", \"publisher\": " + publisher) +
+            ", \"ecus\": " + ecus +
             R"(, "variants": [{"id": "base", "files": )" + variant_files + "}]";
         if (packed) {
             out += std::string(", \"files\": {\"a.json\": ") + kData;

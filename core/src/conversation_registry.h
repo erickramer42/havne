@@ -41,6 +41,8 @@ struct ecuio_conversation_part {
     std::vector<ecuio_conversation_part_ecu> ecus;
     std::vector<ecuio_plugin_service_t> services;
     std::vector<ecuio_plugin_security_level_t> levels;
+    uint8_t fingerprint[32] = {}; /* its plugin's (ecuio_plugin_fingerprint) */
+    bool has_publisher = false;   /* format 3: a consent can name it */
 };
 
 using ecuio_conversation_part_ref =

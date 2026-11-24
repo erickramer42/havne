@@ -124,6 +124,7 @@ void recording_export::head_line(const std::string& line)
     }
     if (rows::starts_with(p, n, rows::kPluginKey) ||
         rows::starts_with(p, n, rows::kConversationKey) ||
+        rows::starts_with(p, n, rows::kConsentKey) ||
         rows::starts_with(p, n, rows::kModuleKey)) {
         events_head_.push_back(line);
         return;

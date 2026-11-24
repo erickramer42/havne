@@ -128,7 +128,9 @@ const char* not_in_use(const ecuio_session_t* s)
         return "the simulated source asks nothing";
     }
     if (!s->conversation_consent) {
-        return "not enabled";
+        /* A part with no publisher can't be consented to (format 2) */
+        return s->conversation->has_publisher ? "no consent given"
+                                              : "not enabled";
     }
     return nullptr;
 }
@@ -263,6 +265,17 @@ bool ecuio_session_may_talk(const ecuio_session_t* session)
     return ecuio_session_may_talk(
         session, session->module_rx.data(), session->module_tx.data(),
         static_cast<uint32_t>(session->module_rx.size()));
+}
+
+bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c)
+{
+    return session->conversation != nullptr &&
+           session->conversation->has_publisher &&
+           !session->conversation_consent && c < session->module_rx.size() &&
+           !starts_with(session->uri, "mock://") &&
+           !starts_with(session->uri, "replay://") &&
+           ecu_on(*session->conversation, session->module_rx[c],
+                  session->module_tx[c]) != nullptr;
 }
 
 bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)
