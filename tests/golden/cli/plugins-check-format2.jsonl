@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"fixtures": 0, "id": "format2", "name": "Format 2 on an older core", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.format2.base"}], "version": "1.0.0"}
+{"fingerprint": "86d76762980504430b3c8347061354572cbb785773e48a3863a789fee0b7e485", "fixtures": 0, "id": "format2", "name": "Format 2 on an older core", "package": 0, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.format2.base"}], "version": "1.0.0"}
 {"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "base", "license": "MIT", "profile": "plugin.format2.base", "share_alike": false, "signals": 3, "type": "variant"}
 {"bits": 8, "byte": 0, "decimals": 0, "group": "Other", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
 {"decimals": 0, "expr": "if(oil > 110, 1, 0)", "group": "Other", "id": 30001, "inputs": [{"id": 30000, "max_age_us": 3000000}], "kind": "computed", "name": "Running Hot", "rank": 0, "type": "signal_def", "unit": ""}

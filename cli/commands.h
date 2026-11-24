@@ -139,6 +139,10 @@ bool parse_plugin_make(const std::string& word, int first, int argc,
                        char** argv, PluginMakeArgs* args, std::string* why);
 int cmd_plugins(int argc, char** argv);
 
+// cmd_consent.cpp
+int plugins_terms(int argc, char** argv);
+int plugins_consent(int argc, char** argv);
+
 // cmd_signals.cpp
 int run_signals_check(const char* path);
 

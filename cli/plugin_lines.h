@@ -14,6 +14,7 @@
 #ifndef HAVNE_CLI_PLUGIN_LINES_H
 #define HAVNE_CLI_PLUGIN_LINES_H
 
+#include "consent_lines.h"
 #include "jsonl.h"
 #include "key_field.h"
 #include "signal_file_lines.h"
@@ -61,7 +62,8 @@ inline uint32_t own_signals(const ecuio_signal_file_t* file,
 // {"type":"plugin", package (its place among the command's packages),
 // id, version, name, tiers (["data"], and "conversation" after it for a
 // plugin with a module), variants [{id, profile}], fixtures (a folder's
-// fixture files)}
+// fixture files), fingerprint (64 hex digits), publisher ({name, contact,
+// license}, or null for none)}
 inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
                         const ecuio_plugin_info_t& info)
 {
@@ -102,8 +104,33 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.ch(']');
     l.key("fixtures");
     l.u64(info.fixture_count);
+    l.key("fingerprint");
+    ecuio_plugin_fingerprint_t print{};
+    print.struct_size = sizeof print;
+    if (ecuio_plugin_fingerprint(p, &print) == ECUIO_OK) {
+        const std::string hex = hex_text(print.fingerprint, 32);
+        l.string(hex.data(), hex.size());
+    } else {
+        l.raw("null");
+    }
+    l.key("publisher");
+    ecuio_plugin_publisher_t publisher{};
+    publisher.struct_size = sizeof publisher;
+    if (ecuio_plugin_publisher(p, &publisher) == ECUIO_OK) {
+        publisher_value(l, publisher);
+    } else {
+        l.raw("null");
+    }
     l.ch('}');
 }
+
+// Room in a plugin line for the fingerprint and the publisher's three
+// fields, six bytes for each byte at most
+constexpr size_t kPluginLinePublisherBytes =
+    (ECUIO_PLUGIN_PUBLISHER_NAME_MAX + ECUIO_PLUGIN_PUBLISHER_CONTACT_MAX +
+     ECUIO_PLUGIN_PUBLISHER_LICENSE_MAX) *
+        6 +
+    256;
 
 // Room for a conversation line at every bound of plugin.h's
 constexpr size_t kConversationLineBytes = 16384;

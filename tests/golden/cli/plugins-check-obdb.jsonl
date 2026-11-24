@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"fixtures": 0, "id": "example-car", "name": "Example car", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "my2019", "profile": "plugin.example-car.my2019"}], "version": "1.0.0"}
+{"fingerprint": "e0ff617e634c356eebfc6a5227e0dc840e59145319847cc7f3426e0a47ccc0cb", "fixtures": 0, "id": "example-car", "name": "Example car", "package": 0, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "my2019", "profile": "plugin.example-car.my2019"}], "version": "1.0.0"}
 {"base": 131, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}, {"rx": "0x7E9", "tx": "0x7E1"}], "id": "my2019", "license": "CC-BY-SA-4.0", "profile": "plugin.example-car.my2019", "share_alike": true, "signals": 7, "type": "variant"}
 {"license": "CC-BY-SA-4.0", "type": "share_alike", "variant": "my2019", "words": "variant 'my2019' holds data under CC-BY-SA-4.0, a share-alike license: whoever passes the plugin on keeps that license and the variant's source with it"}
 {"bits": 8, "byte": 0, "decimals": 0, "group": "Vehicle", "id": 30000, "kind": "number", "name": "Road speed", "offset": 0, "order": "be", "rank": 0, "read": {"number": "0D", "service": "01"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "km/h"}

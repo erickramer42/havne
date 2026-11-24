@@ -426,11 +426,17 @@ TEST(CliPluginTest, ThePluginAndMatchLinesNameTheProfiles)
     char buf[2048];
     cli::Line l(buf, sizeof buf);
     cli::plugin_line(l, 2, pk.p, pk.info());
+    ecuio_plugin_fingerprint_t print{};
+    print.struct_size = sizeof print;
+    ASSERT_EQ(ecuio_plugin_fingerprint(pk.p, &print), ECUIO_OK);
     EXPECT_EQ(text_of(l),
               "{\"type\":\"plugin\",\"package\":2,\"id\":\"p\",\"version\":"
               "\"1.2.3\",\"name\":\"P\",\"tiers\":[\"data\"],\"variants\":["
               "{\"id\":\"base\",\"profile\":\"plugin.p.base\"},{\"id\":"
-              "\"late\",\"profile\":\"plugin.p.late\"}],\"fixtures\":0}\n");
+              "\"late\",\"profile\":\"plugin.p.late\"}],\"fixtures\":0,"
+              "\"fingerprint\":\"" +
+                  cli::hex_text(print.fingerprint, 32) +
+                  "\",\"publisher\":null}\n");
 
     ecuio_vin_info_t vin{};
     std::strcpy(vin.wmi, "ZZZ");

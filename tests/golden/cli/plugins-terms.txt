@@ -1,0 +1,20 @@
+A plugin that asks, with its publisher 1.0.0 asks to send requests to your car's modules, beyond the reads Havne makes on its own.
+Havne checks each request against the services the plugin declares and against its own limits.
+Some requests can lock a module for a while or for good if they go wrong. Havne can't tell whether this plugin's content is correct.
+The publisher below, not the Havne project, answers for what this plugin contains and what it causes to be sent.
+Allowing is for this version only. If the plugin changes in any way, Havne asks again.
+Consent lets this plugin bind to a session and run its operations. It is not a confirmation of any write: each write asks again.
+A diagnostic session, and above all the programming session, can stop the module's normal work: an engine or transmission module may stop controlling the vehicle until the session ends or the vehicle is reset. Do this only with the vehicle parked, and never while it is moving.
+The unlock sends a key a plugin computed. A wrong key counts toward a lockout, and some modules lock for a long time, or for good, after a few wrong keys. Havne never retries an unlock by itself.
+
+Publisher  Made-up Tools
+Contact    https://example.com/help
+License    MIT
+Plugin     talker3 1.0.0
+Terms
+These terms are made up for Havne's tests.
+The plugin reads and asks one module; use it at your own risk.
+No warranty of any kind.
+
+Fingerprint: db4d12bbe83a964b459ad80c43f8f190c586ed452b55c004028a49c6ef97b1f5
+To allow this version: havne-cli plugins consent <package> --give <fingerprint>

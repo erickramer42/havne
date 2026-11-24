@@ -55,7 +55,7 @@ int run_plugins_list(const std::vector<const char*>& paths)
         ecuio_plugin_t* p = nullptr;
         const ecuio_status_t st = load_package(paths[i], &p, &why);
         const auto index = static_cast<uint32_t>(i);
-        BigLine b(4096 + why.size() * 6);
+        BigLine b(4096 + cli::kPluginLinePublisherBytes + why.size() * 6);
         if (st != ECUIO_OK) {
             refused = true;
             cli::refused_line(b.line, "refused", nullptr, index, st,
@@ -111,7 +111,7 @@ int run_plugins_match(const char* path, const char* typed)
     uint32_t count = 0;
     ecuio_plugin_match(p, &decoded, indices, ECUIO_PLUGIN_MAX_VARIANTS, &count);
     {
-        BigLine b(4096);
+        BigLine b(4096 + cli::kPluginLinePublisherBytes);
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
@@ -532,7 +532,7 @@ int run_plugins_check(const char* path, const char* on)
     }
     const ecuio_plugin_info_t info = plugin_info(p);
     {
-        BigLine b(4096);
+        BigLine b(4096 + cli::kPluginLinePublisherBytes);
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
@@ -603,7 +603,7 @@ void write_made_lines(Output& out, const MadeText& m, cli::Written action,
     }
     const ecuio_plugin_info_t info = plugin_info(p);
     {
-        BigLine b(4096);
+        BigLine b(4096 + cli::kPluginLinePublisherBytes);
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
@@ -858,6 +858,12 @@ int cmd_plugins(int argc, char** argv)
     if (word == "check" && package && (argc == 4 || argc == 6)) {
         return plugins_check(argc, argv);
     }
+    if (word == "terms" && package) {
+        return plugins_terms(argc, argv);
+    }
+    if (word == "consent") {
+        return plugins_consent(argc, argv);
+    }
     if (word == "match" && package && argc == 6 &&
         std::string(argv[4]) == "--vin") {
         return run_plugins_match(argv[3], argv[5]);
@@ -871,8 +877,9 @@ int cmd_plugins(int argc, char** argv)
     std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check <pkg> "
                          "[--on <vcan>], match <pkg> --vin <VIN>, wrap "
                          "<signal-file> --out <pkg>, put <pkg> <signal-file> "
-                         "--out <pkg>, or drop <pkg> --variant <id> --out "
-                         "<pkg>\n");
+                         "--out <pkg>, drop <pkg> --variant <id> --out <pkg>, "
+                         "terms <pkg>, or consent <pkg> --give "
+                         "<fingerprint>\n");
     usage(stderr);
     return kExitUsage;
 }
