@@ -277,6 +277,50 @@ ecuio_status_t ecuio_plugin_fingerprint(const ecuio_plugin_t* plugin,
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_plugin_publisher(const ecuio_plugin_t* plugin,
+                                      ecuio_plugin_publisher_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out->struct_size < sizeof(ecuio_plugin_publisher_t) ||
+        plugin->publisher == nullptr) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const ecuio_plugin_loader::publisher& pub = *plugin->publisher;
+    ecuio_plugin_publisher_t f{};
+    f.struct_size = sizeof f;
+    f.terms_len = static_cast<uint32_t>(pub.terms.size());
+    copy_field(f.name, sizeof f.name, pub.name);
+    copy_field(f.contact, sizeof f.contact, pub.contact);
+    copy_field(f.license, sizeof f.license, pub.license);
+    std::memcpy(f.terms_sha256, pub.terms_sha256, sizeof f.terms_sha256);
+    *out = f;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_terms(const ecuio_plugin_t* plugin, char* buf,
+                                  size_t cap, size_t* length)
+{
+    if (plugin == nullptr || length == nullptr || (buf == nullptr && cap > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (plugin->publisher == nullptr) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const std::string& terms = plugin->publisher->terms;
+    *length = terms.size();
+    if (buf == nullptr) {
+        return ECUIO_OK;
+    }
+    if (cap <= terms.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    std::memcpy(buf, terms.data(), terms.size());
+    buf[terms.size()] = '\0';
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_plugin_variant(const ecuio_plugin_t* plugin,
                                     uint32_t index, char* id, size_t cap)
 {

@@ -119,12 +119,15 @@ def guest_seeds():
 
 def conversation_seeds():
     """fuzz_plugin_manifest's seeds for a format 2 plugin with the
-    conversation tier, by name"""
+    conversation tier, and a format 3 one with its publisher, by name"""
     data = {"havne_signals": 1, "signals": [
         {"key": "oil_temp", "name": "Oil Temp", "ecu": "pcm",
          "read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}}]}
 
-    def plugin(module, packed, sha=None, level="01"):
+    publisher = {"name": "Made-up Tools", "contact": "https://example.com/help",
+                 "license": "MIT", "terms": "Use at your own risk.\nNo warranty."}
+
+    def plugin(module, packed, sha=None, level="01", format=2, publisher=None):
         doc = {"havne_plugin": 2, "id": "talker", "name": "Talker", "version": "1.0.0",
                "requires": {"core": "0.1.0"}, "source": {"name": "Havne's fuzz seeds"},
                "tiers": ["data", "conversation"],
@@ -143,6 +146,9 @@ def conversation_seeds():
             "security": [{"ecu": "pcm", "level": level, "seed_bytes": 4, "key_bytes": 4},
                          {"ecu": "tcm", "level": "03", "seed_bytes": 16, "key_bytes": 16,
                           "delay_ms": 30000, "key_window_ms": 250}]}
+        doc["havne_plugin"] = format
+        if publisher is not None:
+            doc["publisher"] = publisher
         return json.dumps(doc, indent=1).encode()
 
     module = guest_module()
@@ -156,6 +162,10 @@ def conversation_seeds():
         "packed_conversation_other_hash": b"\x00" + plugin(module, True, sha="0" * 64),
         "packed_conversation_imports": b"\x00" + plugin(importing, True),
         "packed_conversation_undeclared_level": b"\x00" + plugin(module, True, level="05"),
+        "packed_conversation3": b"\x00" + plugin(module, True, format=3, publisher=publisher),
+        "folder_conversation3": b"\x01" + plugin(plain, False, format=3, publisher=publisher) +
+                                SEP + json.dumps(data).encode() + SEP + plain,
+        "packed_conversation3_no_publisher": b"\x00" + plugin(module, True, format=3),
     }
 
 

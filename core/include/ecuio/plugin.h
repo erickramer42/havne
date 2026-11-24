@@ -36,7 +36,7 @@ extern "C" {
  */
 
 #define ECUIO_PLUGIN_FORMAT            1 /* "havne_plugin" a wrap writes */
-#define ECUIO_PLUGIN_FORMAT_MAX        2 /* the newest read; 1 is too */
+#define ECUIO_PLUGIN_FORMAT_MAX        3 /* the newest read; 1 and 2 too */
 #define ECUIO_PLUGIN_TIER_DATA    0x1u      /* signal files only */
 #define ECUIO_PLUGIN_TIER_CONVERSATION 0x2u /* a module that asks (below) */
 #define ECUIO_PLUGIN_MANIFEST_MAX 1048576u  /* a folder's manifest.json */
@@ -151,6 +151,56 @@ _Static_assert(sizeof(ecuio_plugin_fingerprint_t) == 72,
  * nothing written; this core's struct_size is written back */
 ecuio_status_t ecuio_plugin_fingerprint(const ecuio_plugin_t* plugin,
                                         ecuio_plugin_fingerprint_t* out);
+
+/*
+ * The publisher (format 3, ADR-0066's appendix of 2026-11-23): who stands
+ * behind a plugin, how to reach them, the license and the terms a person
+ * reads before consenting. Required with the conversation tier in format
+ * 3; a format 1 or 2 plugin names none. Each text is UTF-8 with no
+ * control character (the terms keep line feeds and tabs) and no
+ * character that shows as nothing or moves the text around it.
+ */
+#define ECUIO_PLUGIN_PUBLISHER_NAME_MAX    127u /* bytes */
+#define ECUIO_PLUGIN_PUBLISHER_CONTACT_MAX 255u
+#define ECUIO_PLUGIN_PUBLISHER_LICENSE_MAX 63u
+#define ECUIO_PLUGIN_TERMS_MAX             65536u
+
+typedef struct ecuio_plugin_publisher {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t terms_len;   /* bytes, 1 to ECUIO_PLUGIN_TERMS_MAX */
+    char name[128];
+    char contact[256];
+    char license[64];
+    uint8_t terms_sha256[32]; /* what a consent record keeps */
+    uint32_t flags;           /* zero */
+    uint32_t reserved[7];     /* zero; ABI growth space */
+} ecuio_plugin_publisher_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_publisher_t) == 520,
+              "ecuio_plugin_publisher_t size is ABI");
+static_assert(offsetof(ecuio_plugin_publisher_t, terms_sha256) == 456,
+              "plugin publisher terms_sha256 offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_publisher_t) == 520,
+               "ecuio_plugin_publisher_t size is ABI");
+#endif
+
+/* ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT, nothing written, for a struct_size smaller
+ * than the struct or a plugin that names no publisher */
+ecuio_status_t ecuio_plugin_publisher(const ecuio_plugin_t* plugin,
+                                      ecuio_plugin_publisher_t* out);
+
+/* The terms whole into buf with a NUL after them, *length their length
+ * without it. buf NULL with cap 0 asks the length; a cap short of the
+ * length and its NUL is ECUIO_ERR_INVALID_ARGUMENT with *length set and
+ * nothing written: the terms are never cut. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL plugin or length, or a NULL buf with a cap;
+ * ECUIO_ERR_INVALID_ARGUMENT, *length untouched, for a plugin that names
+ * no publisher. */
+ecuio_status_t ecuio_plugin_terms(const ecuio_plugin_t* plugin, char* buf,
+                                  size_t cap, size_t* length);
 
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a

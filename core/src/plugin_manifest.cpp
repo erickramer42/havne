@@ -171,6 +171,7 @@ void loader::read_manifest(ecuio_plugin& p)
     read_requires(root, p);
     read_origin(root, p);
     read_tiers(root, p);
+    read_publisher(root, p);
     read_match(root, p);
     read_fixtures(root, p);
     read_files(root, p);
@@ -218,14 +219,19 @@ void loader::read_format(const Value& root, ecuio_plugin& p)
         refuse(format, "\"havne_plugin\" is format " +
                            (format.integer ? std::to_string(format.whole)
                                            : std::string("?")) +
-                           ", and this Havne reads formats 1 and 2");
+                           ", and this Havne reads formats 1 to 3");
     }
     p.format = static_cast<uint32_t>(format.whole);
     ecuio_least::raise(p.least, ecuio_least::kPluginFormatSince[p.format]);
+    if (const Value* signature = root.find("signature")) {
+        refuse(*signature, "Havne doesn't check signatures: check the "
+                           "publisher's signature yourself, then remove the "
+                           "key");
+    }
     only_keys(root,
               {"havne_plugin", "id", "name", "version", "requires", "lineage",
                "source", "tiers", "match", "ecus", "variants", "fixtures",
-               "files", "conversation", "pages"},
+               "files", "conversation", "pages", "publisher"},
               "the manifest");
 }
 

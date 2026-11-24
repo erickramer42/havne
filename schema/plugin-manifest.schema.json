@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
   "title": "Havne plugin manifest",
-  "description": "A Havne plugin's manifest (formats 1 and 2, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
+  "description": "A Havne plugin's manifest (formats 1 to 3, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. Format 3 adds the publisher, which a plugin with the conversation tier names. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp, core/src/plugin_publisher.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; the publisher's texts with no control character (the terms keep line feeds and tabs) and no character that shows as nothing or moves the text around it; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
   "type": "object",
   "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
   "properties": {
     "havne_plugin": {
       "title": "Format",
-      "description": "The manifest format's version, and the manifest's first key. This Havne reads formats 1 and 2; the conversation tier and a binary file are format 2's, and a plugin of format 2 names a core that reads it (0.9.0 or later) in requires.core.",
-      "enum": [1, 2]
+      "description": "The manifest format's version, and the manifest's first key. This Havne reads formats 1 to 3; the conversation tier and a binary file are format 2's, the publisher format 3's, and a plugin names a core that reads its format in requires.core (format 2: 0.9.0 or later; format 3: 0.9.1 or later).",
+      "enum": [1, 2, 3]
     },
     "id": {
       "title": "Plugin id",
@@ -109,6 +109,7 @@
       "items": { "$ref": "#/$defs/path" }
     },
     "conversation": { "$ref": "#/$defs/conversation" },
+    "publisher": { "$ref": "#/$defs/publisher" },
     "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
   },
   "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
@@ -119,16 +120,32 @@
   },
   "allOf": [
     {
-      "$comment": "The conversation tier and \"conversation\" come together, in format 2",
+      "$comment": "The conversation tier and \"conversation\" come together, in format 2 or 3",
       "if": {
         "properties": { "tiers": { "contains": { "const": "conversation" } } },
         "required": ["tiers"]
       },
       "then": {
-        "properties": { "havne_plugin": { "const": 2 } },
+        "properties": { "havne_plugin": { "enum": [2, 3] } },
         "required": ["conversation"]
       },
       "else": { "not": { "required": ["conversation"] } }
+    },
+    {
+      "$comment": "The publisher is format 3's, and format 3 names it with the conversation tier",
+      "if": { "properties": { "havne_plugin": { "const": 3 } } },
+      "then": {
+        "if": {
+          "properties": { "tiers": { "contains": { "const": "conversation" } } },
+          "required": ["tiers"]
+        },
+        "then": { "required": ["publisher"] }
+      },
+      "else": { "not": { "required": ["publisher"] } }
+    },
+    {
+      "$comment": "Havne checks no signature: a publisher signs beside the plugin, and its user checks the signature with their own tool",
+      "not": { "required": ["signature"] }
     },
     {
       "$comment": "A binary file is format 2's",
@@ -285,6 +302,21 @@
         "files": { "type": "array", "maxItems": 0 },
         "pages": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "type": "object" } }
       }
+    },
+    "publisher": {
+      "title": "Publisher",
+      "description": "Format 3: who stands behind the plugin and on what terms, which a person reads before consenting to a plugin that talks to a module. Each text is UTF-8, its length in bytes.",
+      "type": "object",
+      "required": ["name", "contact", "license", "terms"],
+      "properties": {
+        "name": { "title": "Name", "description": "The publisher's name, 1 to 127 bytes.", "type": "string", "minLength": 1, "maxLength": 127 },
+        "contact": { "title": "Contact", "description": "How to reach the publisher (a web page or an address), 1 to 255 bytes.", "type": "string", "minLength": 1, "maxLength": 255 },
+        "license": { "title": "License", "description": "The plugin's license, 1 to 63 bytes, an SPDX identifier where there is one.", "type": "string", "minLength": 1, "maxLength": 63 },
+        "terms": { "title": "Terms", "description": "The terms a person reads whole before consenting, 1 byte to 64 KiB; line feeds and tabs are kept.", "type": "string", "minLength": 1, "maxLength": 65536 },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
     },
     "binaryFile": {
       "title": "Binary file",

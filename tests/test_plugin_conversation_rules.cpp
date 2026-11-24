@@ -29,8 +29,8 @@ TEST(PluginConversationTest, TheTiersAndTheGroupsRulesRefuseInTheirWords)
 {
     expect_refused({
         /* the format, the tier and the key */
-        {"format 3", [](Made& m) { m.format = "3"; },
-         "\"havne_plugin\" is format 3, and this Havne reads formats 1 and 2"},
+        {"format 4", [](Made& m) { m.format = "4"; },
+         "\"havne_plugin\" is format 4, and this Havne reads formats 1 to 3"},
         {"the tier in format 1", [](Made& m) { m.format = "1"; },
          "tier \"conversation\" is format 2's: its manifest starts with "
          "\"havne_plugin\": 2"},
