@@ -63,8 +63,11 @@ int c_abi_plugin(void)
         ecuio_plugin_conversation_ecu_t ecu;
         ecuio_plugin_fingerprint_t print;
         ecuio_plugin_publisher_t publisher;
+        ecuio_consent_line_t line;
         size_t terms = 7u;
         int ok = 0;
+        memset(&line, 0, sizeof line);
+        line.struct_size = (uint32_t)sizeof line;
         memset(&publisher, 0, sizeof publisher);
         publisher.struct_size = sizeof publisher;
         memset(&print, 0, sizeof print);
@@ -137,6 +140,16 @@ int c_abi_plugin(void)
              ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_consent_store_close(NULL) == ECUIO_ERR_NULL_ARGUMENT &&
              ECUIO_ERR_CONSENT_REQUIRED == 23;
+        /* A consent line: static text, its size by the pointer width */
+        ok = ok &&
+             sizeof(ecuio_consent_line_t) == 32u + 3u * sizeof(const char*) &&
+             offsetof(ecuio_consent_line_t, key) == 16u &&
+             offsetof(ecuio_consent_line_t, reserved) ==
+                 16u + 3u * sizeof(const char*) &&
+             ecuio_consent_line(ECUIO_CONSENT_SET_CONVERSATION, 0, &line) ==
+                 ECUIO_OK &&
+             line.id == ECUIO_CONSENT_LINE_HAVNE_1 &&
+             strcmp(line.key, "asks") == 0 && line.heading[0] == 0;
         if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {
             return 1;
         }

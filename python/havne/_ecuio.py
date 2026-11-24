@@ -139,6 +139,39 @@ ECUIO_CONDITION_WHY_NO_CHECK = 7
 ECUIO_CONDITION_WHY_NO_LINK = 6
 ECUIO_CONDITION_WHY_NO_SIGNAL = 2
 ECUIO_CONDITION_WHY_UNIT = 3
+ECUIO_CONSENT_LINE_ACTION = 1
+ECUIO_CONSENT_LINE_BRICKED = 13
+ECUIO_CONSENT_LINE_COPYRIGHT = 23
+ECUIO_CONSENT_LINE_COPY_DATA = 22
+ECUIO_CONSENT_LINE_DRY_RUN_LIMITS = 25
+ECUIO_CONSENT_LINE_EMISSIONS = 8
+ECUIO_CONSENT_LINE_EMISSIONS_READ = 9
+ECUIO_CONSENT_LINE_ENGINE_STATE = 19
+ECUIO_CONSENT_LINE_HAVNE_1 = 1
+ECUIO_CONSENT_LINE_HAVNE_2 = 2
+ECUIO_CONSENT_LINE_HAVNE_3 = 3
+ECUIO_CONSENT_LINE_HAVNE_4 = 4
+ECUIO_CONSENT_LINE_HAVNE_5 = 5
+ECUIO_CONSENT_LINE_LOCKOUT = 20
+ECUIO_CONSENT_LINE_LOCKOUT_COUNT = 27
+ECUIO_CONSENT_LINE_MONITORS = 10
+ECUIO_CONSENT_LINE_NOT_A_CONFIRMATION = 7
+ECUIO_CONSENT_LINE_NO_UNDO = 14
+ECUIO_CONSENT_LINE_OWN_RISK = 26
+ECUIO_CONSENT_LINE_POWER = 15
+ECUIO_CONSENT_LINE_POWER_READ = 16
+ECUIO_CONSENT_LINE_RECOVERY = 28
+ECUIO_CONSENT_LINE_RESTORE_LIMITS = 21
+ECUIO_CONSENT_LINE_RESTRAINTS = 12
+ECUIO_CONSENT_LINE_ROAD_USE = 24
+ECUIO_CONSENT_LINE_STABILITY = 11
+ECUIO_CONSENT_LINE_WARRANTY = 17
+ECUIO_CONSENT_LINE_WARRANTY_READ = 18
+ECUIO_CONSENT_LINE_WRITE_ON_ASK = 6
+ECUIO_CONSENT_SET_CONVERSATION = 1
+ECUIO_CONSENT_SET_READ = 2
+ECUIO_CONSENT_SET_WRITE = 4
+ECUIO_CONSENT_TEXT_VERSION = 1
 ECUIO_CONVERSATION_DECLINED = 3
 ECUIO_CONVERSATION_ENDED = 5
 ECUIO_CONVERSATION_FAULTED = 4
@@ -651,6 +684,9 @@ class ecuio_condition_state_t(Structure):
 class ecuio_condition_term_t(Structure):
     pass
 
+class ecuio_consent_line_t(Structure):
+    pass
+
 class ecuio_consent_record_t(Structure):
     pass
 
@@ -1142,6 +1178,16 @@ ecuio_condition_term_t._fields_ = [
     ('unit', (c_char * 16)),
     ('reserved', (c_uint64 * 2)),
     ('references', (ecuio_condition_reference_t * 8)),
+]
+ecuio_consent_line_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('id', c_uint32),
+    ('flags', c_uint32),
+    ('reserved0', c_uint32),
+    ('key', c_char_p),
+    ('text', c_char_p),
+    ('heading', c_char_p),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_consent_record_t._fields_ = [
     ('struct_size', c_uint32),
@@ -1872,6 +1918,7 @@ FUNCTIONS = {
     'ecuio_condition_set_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_condition_set_t))]),  # conditions.h
     'ecuio_condition_set_name': (c_char_p, [POINTER(ecuio_condition_set_t)]),  # conditions.h
     'ecuio_condition_set_resolve': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_condition_binding_t)]),  # conditions.h
+    'ecuio_consent_line': (c_int, [c_uint32, c_uint32, POINTER(ecuio_consent_line_t)]),  # plugin.h
     'ecuio_consent_store_close': (c_int, [POINTER(ecuio_consent_store_t)]),  # plugin.h
     'ecuio_consent_store_count': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint32)]),  # plugin.h
     'ecuio_consent_store_find': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint8), POINTER(ecuio_consent_record_t)]),  # plugin.h

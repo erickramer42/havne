@@ -291,6 +291,86 @@ ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
                                             const char* id,
                                             const uint8_t* fingerprint);
 
+/*
+ * The lines a consent shows, in core so every front end shows the same
+ * words (ADR-0066's appendix of 2026-11-23): Havne's own lines, the same
+ * for every plugin, then the lines of the classes the plugin's code falls
+ * in, then the front end's publisher block and terms. A set names the
+ * classes: a plugin with the conversation tier is
+ * ECUIO_CONSENT_SET_CONVERSATION; one with a read-class operation (a
+ * dump) adds ECUIO_CONSENT_SET_READ. The write class's lines are not in
+ * this core: a set naming it is refused. The text is plain ASCII; line
+ * HAVNE_1 holds "{name}" and "{version}" once each, which a front end
+ * fills with the plugin's. The ids are append-only; an id may name a line
+ * no set shows yet.
+ */
+#define ECUIO_CONSENT_TEXT_VERSION              1u
+#define ECUIO_CONSENT_SET_CONVERSATION          0x1u
+#define ECUIO_CONSENT_SET_READ                  0x2u
+#define ECUIO_CONSENT_SET_WRITE                 0x4u
+#define ECUIO_CONSENT_LINE_ACTION               0x1u /* shown in full at
+                                                        each write too */
+#define ECUIO_CONSENT_LINE_HAVNE_1              1u
+#define ECUIO_CONSENT_LINE_HAVNE_2              2u
+#define ECUIO_CONSENT_LINE_HAVNE_3              3u
+#define ECUIO_CONSENT_LINE_HAVNE_4              4u
+#define ECUIO_CONSENT_LINE_HAVNE_5              5u
+#define ECUIO_CONSENT_LINE_WRITE_ON_ASK         6u
+#define ECUIO_CONSENT_LINE_NOT_A_CONFIRMATION   7u
+#define ECUIO_CONSENT_LINE_EMISSIONS            8u
+#define ECUIO_CONSENT_LINE_EMISSIONS_READ       9u
+#define ECUIO_CONSENT_LINE_MONITORS             10u
+#define ECUIO_CONSENT_LINE_STABILITY            11u
+#define ECUIO_CONSENT_LINE_RESTRAINTS           12u
+#define ECUIO_CONSENT_LINE_BRICKED              13u
+#define ECUIO_CONSENT_LINE_NO_UNDO              14u
+#define ECUIO_CONSENT_LINE_POWER                15u
+#define ECUIO_CONSENT_LINE_POWER_READ           16u
+#define ECUIO_CONSENT_LINE_WARRANTY             17u
+#define ECUIO_CONSENT_LINE_WARRANTY_READ        18u
+#define ECUIO_CONSENT_LINE_ENGINE_STATE         19u
+#define ECUIO_CONSENT_LINE_LOCKOUT              20u
+#define ECUIO_CONSENT_LINE_RESTORE_LIMITS       21u
+#define ECUIO_CONSENT_LINE_COPY_DATA            22u
+#define ECUIO_CONSENT_LINE_COPYRIGHT            23u
+#define ECUIO_CONSENT_LINE_ROAD_USE             24u
+#define ECUIO_CONSENT_LINE_DRY_RUN_LIMITS       25u
+#define ECUIO_CONSENT_LINE_OWN_RISK             26u
+#define ECUIO_CONSENT_LINE_LOCKOUT_COUNT        27u
+#define ECUIO_CONSENT_LINE_RECOVERY             28u
+
+/* The one public struct holding pointers: each is to static text in core
+ * (never freed, never sent over the surrogate's pipe), so its size
+ * follows the pointer width; test_c_abi checks it for each width. */
+typedef struct ecuio_consent_line {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t id;          /* ECUIO_CONSENT_LINE_* */
+    uint32_t flags;       /* ECUIO_CONSENT_LINE_ACTION */
+    uint32_t reserved0;   /* zero */
+    const char* key;      /* "lockout": the line's name in records */
+    const char* text;
+    const char* heading;  /* its one-line heading, "" for none */
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_consent_line_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_consent_line_t, id) == 4,
+              "consent line id offset is ABI");
+static_assert(offsetof(ecuio_consent_line_t, key) == 16,
+              "consent line key offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_consent_line_t, key) == 16,
+               "consent line key offset is ABI");
+#endif
+
+/* The index-th line a consent shows for set, in order. ECUIO_OK;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL out; ECUIO_ERR_INVALID_ARGUMENT,
+ * out untouched, past the last line, for a set of no class or one naming
+ * a class this core has no lines for, or a struct_size smaller than the
+ * struct. Any thread. */
+ecuio_status_t ecuio_consent_line(uint32_t set, uint32_t index,
+                                  ecuio_consent_line_t* out);
+
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
  * buffer too small for the whole text and its NUL */
