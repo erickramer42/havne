@@ -171,7 +171,8 @@ ecuio_status_t run_setup(transport* t, char* version, size_t version_cap)
      * monitor prints a First Frame and none of its Consecutive Frames
      * (docs/bench-sessions/2026-11-04-two-ecu-car.md,
      * docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md) */
-    const char* const cfc = asks_nothing(t) ? "ATCFC0\r" : "ATCFC1\r";
+    t->set_up_passive = asks_nothing(t);
+    const char* const cfc = t->set_up_passive ? "ATCFC0\r" : "ATCFC1\r";
     const char* const steps[] = {
         "ATE0\r", /* no echo, no linefeeds, no spaces: fewer bytes */
         "ATL0\r",   "ATS0\r",

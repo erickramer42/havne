@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"fixtures": 0, "id": "pages", "name": "A Dashboard page for each form", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.pages.base"}, {"id": "turbo", "profile": "plugin.pages.turbo"}], "version": "1.0.0"}
+{"fingerprint": "a1f52730702a0955c3c9cbf1b25a94c373667cd4f2e43cb4e0ab3980b6ad88bf", "fixtures": 0, "id": "pages", "name": "A Dashboard page for each form", "package": 0, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.pages.base"}, {"id": "turbo", "profile": "plugin.pages.turbo"}], "version": "1.0.0"}
 {"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "base", "license": "MIT", "profile": "plugin.pages.base", "share_alike": false, "signals": 1, "type": "variant"}
 {"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
 {"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "turbo", "license": "MIT", "profile": "plugin.pages.turbo", "share_alike": false, "signals": 2, "type": "variant"}

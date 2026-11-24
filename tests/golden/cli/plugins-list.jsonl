@@ -1,4 +1,4 @@
 {"schema": 1, "type": "start"}
-{"fixtures": 1, "id": "example-sim", "name": "Example: the simulated car", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.example-sim.base"}, {"id": "my2019", "profile": "plugin.example-sim.my2019"}], "version": "1.0.0"}
-{"fixtures": 0, "id": "packed", "name": "A packed plugin, which carries no fixtures", "package": 1, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.packed.base"}], "version": "1.0.0"}
+{"fingerprint": "ea7ac290ececdd41d3cb38b2047279a73dbe48c9932cca4f41b284f54bf03fd0", "fixtures": 1, "id": "example-sim", "name": "Example: the simulated car", "package": 0, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.example-sim.base"}, {"id": "my2019", "profile": "plugin.example-sim.my2019"}], "version": "1.0.0"}
+{"fingerprint": "8cb07c18cac771bc8f332ae0daa228fd41bdb1c3cd3971968f5611dbc46c595e", "fixtures": 0, "id": "packed", "name": "A packed plugin, which carries no fixtures", "package": 1, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.packed.base"}], "version": "1.0.0"}
 {"code": 7, "detail": "the plugin can't be read: there's no such file", "message": "couldn't open what was named", "package": 2, "type": "refused"}

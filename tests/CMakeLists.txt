@@ -233,7 +233,7 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
     test_elm327_conversation.cpp test_elm327_modules.cpp
-    test_elm327_awake.cpp)
+    test_elm327_awake.cpp test_elm327_consent.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -1149,6 +1149,28 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
         set_tests_properties(CliPluginConversationTest.AFolderReadsAsItsPackedForm
             PROPERTIES TIMEOUT 120)
+        # What a consent shows and the store's words (ADR-0066's appendix
+        # of 2026-11-23): the terms as one line and as text, give, list
+        # and withdraw in the default store, a plugin with no publisher
+        app_cli_golden(PluginsTermsSaysWhatAConsentAllows plugins-terms.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins terms
+               ${_cli_plugins}/talker3.json --json)
+        set(_cli_consent ${CMAKE_CURRENT_SOURCE_DIR}/cli_consent.py)
+        add_test(NAME CliConsentTest.TheTermsTextIsItsGolden
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} terms
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json
+                    ${_cli_golden}/plugins-terms.txt)
+        add_test(NAME CliConsentTest.GiveListAndWithdrawInTheDefaultStore
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} store
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
+        add_test(NAME CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} run
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
+        set_tests_properties(CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
+            PROPERTIES TIMEOUT 120)
+        add_test(NAME CliPluginRunTest.AFormat2ConversationPluginReadsSignalsOnly
+            COMMAND ${Python3_EXECUTABLE} ${_cli_consent} no-publisher
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
         app_cli_golden(PluginsCheckNamesARefusedFixtureFile
             plugins-check-bad-fixture.jsonl --exit 1
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)
@@ -1661,6 +1683,31 @@ if(TARGET havne-cli)
         "unexpected '--wmi'")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+    # plugins terms and consent (ADR-0066's appendix of 2026-11-23)
+    set(_talker3 ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins/talker3.json)
+    app_cli_usage(PluginsTermsAnOptionIsUsage "plugins|terms|${_talker3}|--fast")
+    app_cli_usage_says(PluginsConsentGiveWithoutAValueIsUsage
+        "plugins|consent|${_talker3}|--give" "plugins consent takes")
+    app_cli_usage_says(PluginsConsentAShortFingerprintIsUsage
+        "plugins|consent|${_talker3}|--give|db4d12bb"
+        "--give takes the 64-digit fingerprint")
+    app_cli_usage_says(PluginsConsentAFingerprintNotHexIsUsage
+        "plugins|consent|${_talker3}|--give|zz4d12bbe83a964b459ad80c43f8f190c586ed452b55c004028a49c6ef97b1f5"
+        "--give takes the 64-digit fingerprint")
+    app_cli_usage_says(PluginsConsentAnotherPluginsFingerprintIsUsage
+        "plugins|consent|${_talker3}|--give|0000000000000000000000000000000000000000000000000000000000000000"
+        "--give does not match this plugin (its fingerprint begins")
+    app_cli_usage_says(PluginsConsentWithdrawWithoutAnIdIsUsage
+        "plugins|consent|--withdraw" "plugins consent takes")
+    app_cli_usage_says(PluginsConsentGiveWithoutAPackageIsUsage
+        "plugins|consent|--give|0000" "plugins consent takes")
+    app_cli_usage_says(PluginsConsentTwoFormsIsUsage
+        "plugins|consent|--list|--withdraw|talker3" "plugins consent takes")
+    app_cli_usage_says(StreamAConsentStoreWithoutAFileIsUsage
+        "stream|mock://x|--consent-store" "--consent-store takes one file")
+    app_cli_usage_says(LogTwoConsentStoresIsUsage
+        "log|mock://x|f|--consent-store|a|--consent-store|b"
+        "--consent-store takes one file")
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
     app_cli_usage_says(PluginsAnUnknownWordIsUsage "plugins|lint|x"
         "plugins takes list <pkg>")

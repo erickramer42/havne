@@ -17,9 +17,11 @@
 #include "../core/src/request_conversation.h"
 
 #include <ecuio/internal.h>
+#include <ecuio/plugin.h>
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <memory>
 #include <string>
 
@@ -282,6 +284,67 @@ struct Bench {
         return k;
     }
 };
+
+/* made() in format 3, naming its publisher; passive: its variant's one
+ * signal waits on a need nothing meets, so a session over it asks nothing */
+inline conversation_test::Made made3(bool passive = false)
+{
+    conversation_test::Made m = made();
+    m.format = "3";
+    m.publisher = R"({"name": "Made-up Tools", "contact": "c", )"
+                  R"("license": "MIT", "terms": "Use at your own risk."})";
+    if (passive) {
+        m.data = R"({"havne_signals": 3, "needs": ["x"], "signals": )"
+                 R"([{"key": "c", "name": "C", "kind": "computed", )"
+                 R"("expr": "x"}]})";
+    }
+    return m;
+}
+
+/* p's fingerprint, its 32 bytes */
+inline std::string print_of(const ecuio_plugin_t* p)
+{
+    ecuio_plugin_fingerprint_t f{};
+    f.struct_size = sizeof f;
+    EXPECT_EQ(ecuio_plugin_fingerprint(p, &f), ECUIO_OK);
+    return std::string(reinterpret_cast<const char*>(f.fingerprint), 32);
+}
+
+/* p's record given in a store of the case's own (file in the test
+ * folder, gone after) and applied to session s */
+inline void give_and_apply(const char* file, const ecuio_plugin_t* p,
+                           ecuio_session_t* s)
+{
+    const std::string path = testing::TempDir() + file;
+    std::remove(path.c_str());
+    ecuio_consent_store_t* store = nullptr;
+    ASSERT_EQ(ecuio_consent_store_open(path.c_str(), &store), ECUIO_OK);
+    EXPECT_EQ(ecuio_consent_store_give(store, p, 1795132800), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string print = print_of(p);
+    EXPECT_EQ(ecuio_session_apply_consent(
+                  s, store, reinterpret_cast<const uint8_t*>(print.data())),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_consent_store_close(store);
+    std::remove(path.c_str());
+    std::remove((path + ".lock").c_str());
+}
+
+/* The first 16 hex digits of p's fingerprint, as a refusal and the
+ * session logs show it */
+inline std::string print_prefix_of(const ecuio_plugin_t* p)
+{
+    static const char digits[] = "0123456789abcdef";
+    const std::string print = print_of(p);
+    std::string out;
+    for (size_t i = 0; i < 8; ++i) {
+        const auto b = static_cast<uint8_t>(print[i]);
+        out += digits[b >> 4];
+        out += digits[b & 0xF];
+    }
+    return out;
+}
 
 } // namespace conversation_session
 

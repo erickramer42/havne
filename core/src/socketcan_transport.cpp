@@ -74,6 +74,8 @@ static_assert(SOCKETCAN_PROOF_QUIET_US == ECUIO_ISOTP_N_AS_US,
 
 /* ecuio_socketcan_set_vcan_unproven's quiet time; 0: vcan starts proven */
 std::atomic<int64_t> g_vcan_unproven_us{0};
+/* ecuio_socketcan_test_vcan_as_can's: vcan judged a car's link at attach */
+std::atomic<bool> g_vcan_as_can{false};
 
 /* The OS's words for an errno; may throw bad_alloc */
 std::string why(int err)
@@ -648,7 +650,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             }
         }
         /* The driver, not the name, says no car is on it (consent_gate.h) */
-        session->no_car_bus = link.is_vcan();
+        session->no_car_bus = link.is_vcan() && !g_vcan_as_can.load();
         impl->fd = open_socket(impl.get(), link.index);
         if (impl->fd < 0) {
             ecuio_detail_set("%s: %s", name, why(errno).c_str());
@@ -685,6 +687,11 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
 extern "C" void ecuio_socketcan_set_vcan_unproven(int64_t quiet_us)
 {
     g_vcan_unproven_us.store(quiet_us > 0 ? quiet_us : 0);
+}
+
+extern "C" void ecuio_socketcan_test_vcan_as_can(int on)
+{
+    g_vcan_as_can.store(on != 0);
 }
 
 #endif /* ECUIO_HAVE_SOCKETCAN */

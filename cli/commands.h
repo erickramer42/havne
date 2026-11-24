@@ -39,6 +39,7 @@ struct StreamArgs {
     const char* label = nullptr;
     const char* signals = nullptr; // --signals' file
     const char* plugin = nullptr;  // --plugin's package
+    const char* consent_store = nullptr; // --consent-store's file
     const char* conditions = nullptr; // --conditions' file
     bool pick_ranked = false;         // --pick ranked
     bool allow_sleep = false;         // --allow-sleep
@@ -138,6 +139,18 @@ int run_plugins_drop(const PluginMakeArgs& args);
 bool parse_plugin_make(const std::string& word, int first, int argc,
                        char** argv, PluginMakeArgs* args, std::string* why);
 int cmd_plugins(int argc, char** argv);
+
+// cmd_consent.cpp
+int plugins_terms(int argc, char** argv);
+int plugins_consent(int argc, char** argv);
+// The consent a run's plugin needs, before create (stream, log): -1 to go
+// on (a record found, or none needed), else the exit code, the refusal's
+// words on standard error and nothing on standard output
+int need_consent(const char* uri, const char* package, const char* store_named);
+// --consent-store <path> taken out of argv (argc shrinks by two): *store its
+// path, NULL for none; false with words on standard error for one with no
+// path or given twice
+bool take_consent_store(int& argc, char** argv, const char** store);
 
 // cmd_signals.cpp
 int run_signals_check(const char* path);

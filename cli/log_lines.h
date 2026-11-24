@@ -44,6 +44,8 @@ struct LogArgs {
     uint64_t seconds = 0;           /* --seconds; 0 until Ctrl+C */
     const char* signals = nullptr;  /* --signals' file */
     const char* plugin = nullptr;   /* --plugin's package */
+    const char* consent_store = nullptr; /* --consent-store's, taken out of
+                                            argv before the parse */
     std::vector<const char*> names; /* --signal, in order */
     uint32_t min_sweep_ms = 0;      /* --min-sweep; 0 none */
     const char* conditions = nullptr; /* --conditions' file */

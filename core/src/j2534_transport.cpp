@@ -270,6 +270,10 @@ ecuio_status_t j2534_start(ecuio_session_t* session, void* impl)
         }
         return st;
     }
+    char line[ECUIO_CONSENT_LOG_LINE_MAX];
+    if (ecuio_consent_log_line(session, line, sizeof line)) {
+        ecuio_j2534_log_line(t->handle, line);
+    }
 
     t->stop_requested.store(false);
     try {

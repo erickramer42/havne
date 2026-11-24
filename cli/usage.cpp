@@ -47,7 +47,12 @@ void usage_stream_log(FILE* to)
         "         recording).\n"
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
-        "         profile= names the one to read.\n"
+        "         profile= names the one to read. A plugin that talks to\n"
+        "         a car (elm327://, j2534://) runs only with your consent\n"
+        "         in the store (plugins consent; --consent-store names\n"
+        "         another than the app's), and the session line says it;\n"
+        "         without one nothing is sent, and the refusal says what\n"
+        "         to read and run. log takes it the same way.\n"
         "         --pick ranked asks only the profile's ranked signals (the\n"
         "         ones a UI plots first: the app's default pick without its\n"
         "         gauges and ticks), and a focus line names them; a profile\n"
@@ -83,6 +88,55 @@ void usage_stream_log(FILE* to)
         "         refused at the start.\n");
 }
 
+// plugins' lines of the synopsis
+void usage_plugins_synopsis(FILE* to)
+{
+    std::fprintf(
+        to,
+        "       havne-cli plugins list <pkg>...\n"
+        "       havne-cli plugins check <pkg> [--on <vcan>]\n"
+        "       havne-cli plugins match <pkg> --vin <VIN>\n"
+        "       havne-cli plugins wrap <signal-file> --out <pkg> [--id <id>]\n"
+        "                      [--variant <id>]\n"
+        "       havne-cli plugins put <pkg> <signal-file> [--variant <id>]\n"
+        "                      --out <pkg>\n"
+        "       havne-cli plugins drop <pkg> --variant <id> --out <pkg>\n"
+        "       havne-cli plugins terms <pkg> [--json]\n"
+        "       havne-cli plugins consent <pkg> --give <fingerprint>\n"
+        "                      [--consent-store <path>]\n"
+        "       havne-cli plugins consent --list [--consent-store <path>]\n"
+        "       havne-cli plugins consent --withdraw <id> [<fingerprint>]\n"
+        "                      [--consent-store <path>]\n");
+}
+
+// plugins' help
+void usage_plugins(FILE* to)
+{
+    std::fprintf(
+        to,
+        "plugins  list says what each package holds, or why it's refused.\n"
+        "         check reads one as a session would, then its value\n"
+        "         fixtures: with --on (Linux), each answered by the\n"
+        "         simulated ECU on that interface and decoded back.\n"
+        "         match lists the variants a VIN's manufacturer code and\n"
+        "         model year fall in: the choice stays yours. check also\n"
+        "         names each variant's license, and says when it's\n"
+        "         share-alike. wrap makes a signal file a plugin of one\n"
+        "         variant; put adds a signal file as a variant, or puts it\n"
+        "         in the place of the one of that id; drop takes a variant\n"
+        "         out. Each writes a new packed plugin to --out and raises\n"
+        "         its version; havne-cli keeps no store of plugins.\n"
+        "         terms prints what a plugin that talks to a car asks you\n"
+        "         to allow: Havne's lines, the publisher, the terms and the\n"
+        "         plugin's full fingerprint. consent --give records that\n"
+        "         you allow this version (the fingerprint terms printed),\n"
+        "         after printing the terms again; --list and --withdraw\n"
+        "         read and change the record. The store is the app's\n"
+        "         consent.json unless --consent-store names one. Havne\n"
+        "         checks no signature: check a publisher's with your own\n"
+        "         tool before you allow it.\n");
+}
+
 } // namespace
 
 void usage(FILE* to)
@@ -94,14 +148,15 @@ void usage(FILE* to)
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
         "                         [--conditions <file>] [--pick ranked]\n"
-        "                         [--allow-sleep]\n"
+        "                         [--allow-sleep] [--consent-store <path>]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
         "[--pick ranked]\n"
         "                      [--min-sweep <ms>] [--label <name>] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>] "
         "[--conditions <file>\n"
-        "                      [--armed]] [--allow-sleep]\n"
+        "                      [--armed]] [--allow-sleep] "
+        "[--consent-store <path>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -154,20 +209,13 @@ void usage(FILE* to)
         "                      [--value <name>=<n>[@<age s>]]...]\n"
         "       havne-cli conditions check <file> [--signals <file> |\n"
         "                      --profile <name> | --plugin <pkg> "
-        "[--variant <id>]]\n"
-        "       havne-cli plugins list <pkg>...\n"
-        "       havne-cli plugins check <pkg> [--on <vcan>]\n"
-        "       havne-cli plugins match <pkg> --vin <VIN>\n"
-        "       havne-cli plugins wrap <signal-file> --out <pkg> [--id <id>]\n"
-        "                      [--variant <id>]\n"
-        "       havne-cli plugins put <pkg> <signal-file> [--variant <id>]\n"
-        "                      --out <pkg>\n"
-        "       havne-cli plugins drop <pkg> --variant <id> --out <pkg>\n"
-        "       havne-cli devices\n"
-        "       havne-cli vin <VIN>\n"
-        "       havne-cli dtc <code>\n"
-        "       havne-cli --version | --help\n"
-        "\n");
+        "[--variant <id>]]\n");
+    usage_plugins_synopsis(to);
+    std::fprintf(to, "       havne-cli devices\n"
+                     "       havne-cli vin <VIN>\n"
+                     "       havne-cli dtc <code>\n"
+                     "       havne-cli --version | --help\n"
+                     "\n");
     usage_stream_log(to);
     std::fprintf(
         to,
@@ -328,19 +376,10 @@ void usage(FILE* to)
         "         signal each term reads in that signal file's, profile's\n"
         "         or plugin variant's set (--variant names one of\n"
         "         several), and which conditions can't be judged there and\n"
-        "         why.\n"
-        "plugins  list says what each package holds, or why it's refused.\n"
-        "         check reads one as a session would, then its value\n"
-        "         fixtures: with --on (Linux), each answered by the\n"
-        "         simulated ECU on that interface and decoded back.\n"
-        "         match lists the variants a VIN's manufacturer code and\n"
-        "         model year fall in: the choice stays yours. check also\n"
-        "         names each variant's license, and says when it's\n"
-        "         share-alike. wrap makes a signal file a plugin of one\n"
-        "         variant; put adds a signal file as a variant, or puts it\n"
-        "         in the place of the one of that id; drop takes a variant\n"
-        "         out. Each writes a new packed plugin to --out and raises\n"
-        "         its version; havne-cli keeps no store of plugins.\n"
+        "         why.\n");
+    usage_plugins(to);
+    std::fprintf(
+        to,
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"

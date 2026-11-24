@@ -221,8 +221,8 @@ int log_connect(Output& out, const cli::LogArgs& args, LogRun& r)
         }
     }
     std::string detail;
-    ecuio_status_t st =
-        create_within(out, args.uri, &session, &detail, /*start_first=*/true);
+    ecuio_status_t st = create_consented(out, args.uri, &session, &detail,
+                                         /*start_first=*/true);
     if (st != ECUIO_OK) {
         ecuio_condition_set_free(conditions);
         write_start(out);
@@ -600,6 +600,10 @@ int cmd_log(int argc, char** argv)
 {
     cli::LogArgs la;
     std::string why;
+    if (!take_consent_store(argc, argv, &la.consent_store)) {
+        usage(stderr);
+        return kExitUsage;
+    }
     if (!cli::parse_log(argc, argv, la, &why)) {
         std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
         usage(stderr);
@@ -609,6 +613,10 @@ int cmd_log(int argc, char** argv)
     const int rc = take_profile_source(la.signals, la.plugin, &la.uri, &opened);
     if (rc >= 0) {
         return rc;
+    }
+    const int consent = need_consent(la.uri, la.plugin, la.consent_store);
+    if (consent >= 0) {
+        return consent;
     }
     return run_log(la);
 }

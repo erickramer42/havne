@@ -296,7 +296,7 @@ int run_stream(const StreamArgs& args)
     const bool judging = conditions != nullptr;
     ecuio_session_t* session = nullptr;
     std::string detail;
-    ecuio_status_t st = create_within(out, args.uri, &session, &detail);
+    ecuio_status_t st = create_consented(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
         ecuio_condition_set_free(conditions);
@@ -594,12 +594,12 @@ int check_stream_args(const StreamArgs& args)
     return -1;
 }
 
-} // namespace
-
-// stream's arguments and its profile, then run_stream
-int cmd_stream(int argc, char** argv)
+// stream's arguments but --consent-store (taken out: store), its profile,
+// then run_stream
+int read_stream(int argc, char** argv, const char* store)
 {
     StreamArgs args;
+    args.consent_store = store;
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--values") {
@@ -663,7 +663,24 @@ int cmd_stream(int argc, char** argv)
     if (rc >= 0) {
         return rc;
     }
+    const int consent = need_consent(args.uri, args.plugin, args.consent_store);
+    if (consent >= 0) {
+        return consent;
+    }
     return run_stream(args);
+}
+
+} // namespace
+
+// stream's --consent-store taken out, then the rest read
+int cmd_stream(int argc, char** argv)
+{
+    const char* store = nullptr;
+    if (!take_consent_store(argc, argv, &store)) {
+        usage(stderr);
+        return kExitUsage;
+    }
+    return read_stream(argc, argv, store);
 }
 
 } // namespace cmd

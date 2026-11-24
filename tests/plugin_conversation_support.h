@@ -133,6 +133,7 @@ struct Made {
     std::string files_extra; /* more of "files", each after a comma */
     std::string variant_files = R"(["a.json"])"; /* the one variant's files */
     std::string publisher; /* the manifest's "publisher", when not empty */
+    std::string data = kData; /* a.json, the variant's file */
 
     std::string conversation() const
     {
@@ -156,7 +157,7 @@ struct Made {
             ", \"ecus\": " + ecus +
             R"(, "variants": [{"id": "base", "files": )" + variant_files + "}]";
         if (packed) {
-            out += std::string(", \"files\": {\"a.json\": ") + kData;
+            out += ", \"files\": {\"a.json\": " + data;
             if (has_binary) {
                 out += ", \"guest.wasm\": " +
                        (binary.empty() ? R"({"kind": "wasm", "base64": ")" +
@@ -221,7 +222,7 @@ inline Folder folder_of(const Made& m)
 {
     Folder f;
     f.files["manifest.json"] = m.json(false);
-    f.files["a.json"] = kData;
+    f.files["a.json"] = m.data;
     f.files["guest.wasm"] = std::string(m.module.begin(), m.module.end());
     return f;
 }

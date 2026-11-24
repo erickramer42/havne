@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"fixtures": 0, "id": "pages-bad", "name": "Pages plugins check fails", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.pages-bad.base"}], "version": "1.0.0"}
+{"fingerprint": "76b26dbaebb2711f43f36dd94822904ce2870ceb13a1b19c7789d7671bd2bedd", "fixtures": 0, "id": "pages-bad", "name": "Pages plugins check fails", "package": 0, "publisher": null, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.pages-bad.base"}], "version": "1.0.0"}
 {"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "id": "base", "license": "MIT", "profile": "plugin.pages-bad.base", "share_alike": false, "signals": 1, "type": "variant"}
 {"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30000, "kind": "number", "name": "Oil Temp", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
 {"id": 30000, "key": "7E8:62F40D:3.0:8", "kind": "number", "name": "Oil Temp", "type": "no_gauge", "variant": "base", "words": "no gauge block: the Dashboard guesses this signal's range from its unit, so set min and max in the signal file"}

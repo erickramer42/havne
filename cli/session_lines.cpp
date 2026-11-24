@@ -7,6 +7,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "condition_lines.h"
+#include "consent_lines.h"
 #include "diagnostics_line.h"
 #include "timing_line.h"
 #include "view_lines.h"
@@ -228,6 +229,11 @@ void write_session(Output& out, const ecuio_session_t* session,
     }
     flag_keys(l, info);
     awake_key(l, session, info);
+    if (g_session_consent.applied) {
+        l.key("consent");
+        cli::session_consent(l, g_session_consent.fingerprint,
+                             g_session_consent.given_utc);
+    }
     if (info.backend == ECUIO_BACKEND_REPLAY) {
         l.key("replay");
         l.ch('{');

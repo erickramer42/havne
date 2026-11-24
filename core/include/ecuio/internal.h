@@ -266,6 +266,11 @@ void ecuio_test_conversation_binding(int on);
  * rate, so the proof is otherwise reached only through a controller. */
 void ecuio_socketcan_set_vcan_unproven(int64_t quiet_us);
 
+/* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): sessions created after
+ * this call judge a vcan link as a car's for the consent gate
+ * (consent_gate.h), as a can link is; 0 restores vcan's "no car". */
+void ecuio_socketcan_test_vcan_as_can(int on);
+
 /* TEST-ONLY: the directory (UTF-8) the wire logs of ELM327 sessions
  * created after this call go to; NULL restores the temporary directory.
  * The session tests keep their logs, and their pruning, out of the

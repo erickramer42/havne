@@ -230,7 +230,9 @@ TEST(ConversationSessionTest, TheMarkGoesBeforeTheSeedAndTheWriterSettles)
     EXPECT_EQ(bench.heard(kSeed01), 1u);
     bool settled = false;
     for (int i = 0; i < 200 && !settled; ++i) {
-        settled = text_of(file.path) != marked_text;
+        /* "" is an open that failed during the writer's replace (Windows) */
+        const std::string now = text_of(file.path);
+        settled = !now.empty() && now != marked_text;
         if (!settled) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
