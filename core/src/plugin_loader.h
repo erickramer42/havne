@@ -8,7 +8,8 @@
 // the manifest's keys and the package's files, plugin_conversation.cpp
 // the conversation tier's keys and its module, plugin_pages.cpp the
 // Dashboard pages and their getters, plugin_merge.cpp merges a variant's
-// files into its set, and plugin.cpp holds the C API.
+// files into its set, plugin_fingerprint.cpp the plugin's fingerprint,
+// and plugin.cpp holds the C API.
 
 #ifndef ECUIO_PLUGIN_LOADER_H
 #define ECUIO_PLUGIN_LOADER_H
@@ -132,6 +133,8 @@ struct ecuio_plugin {
     std::vector<ecuio_plugin_loader::variant> variants;
     std::vector<std::string> fixtures;
     std::vector<ecuio_plugin_loader::page> pages;
+    /* What a consent names (plugin_fingerprint.cpp) */
+    uint8_t fingerprint[32] = {};
 };
 
 namespace ecuio_plugin_loader {
@@ -192,6 +195,7 @@ private:
                      conversation& c);
     void folder_code(const Value& file, const std::string& path,
                      conversation& c);
+    void read_fingerprint(const Value& root, ecuio_plugin& p) const;
     std::vector<std::vector<const data_file*>> read_variants(const Value& root,
                                                              ecuio_plugin& p);
     const data_file* file_at(const Value& at, const std::string& path);

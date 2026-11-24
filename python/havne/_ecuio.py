@@ -733,6 +733,9 @@ class ecuio_plugin_conversation_ecu_t(Structure):
 class ecuio_plugin_conversation_t(Structure):
     pass
 
+class ecuio_plugin_fingerprint_t(Structure):
+    pass
+
 class ecuio_plugin_info_t(Structure):
     pass
 
@@ -1338,6 +1341,12 @@ ecuio_plugin_conversation_t._fields_ = [
     ('level_count', c_uint32),
     ('reserved', (c_uint32 * 2)),
 ]
+ecuio_plugin_fingerprint_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('fingerprint', (c_uint8 * 32)),
+    ('reserved', (c_uint32 * 8)),
+]
 ecuio_plugin_info_t._fields_ = [
     ('struct_size', c_uint32),
     ('tiers', c_uint32),
@@ -1866,6 +1875,7 @@ FUNCTIONS = {
     'ecuio_plugin_conversation': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_conversation_t)]),  # plugin.h
     'ecuio_plugin_conversation_ecu': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_conversation_ecu_t)]),  # plugin.h
     'ecuio_plugin_drop_variant': (c_int, [c_char_p, c_size_t, c_char_p, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
+    'ecuio_plugin_fingerprint': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_fingerprint_t)]),  # plugin.h
     'ecuio_plugin_fixture': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_free': (c_int, [POINTER(ecuio_plugin_t)]),  # plugin.h
     'ecuio_plugin_info': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_info_t)]),  # plugin.h

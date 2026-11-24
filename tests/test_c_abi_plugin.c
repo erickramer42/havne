@@ -61,7 +61,10 @@ int c_abi_plugin(void)
         ecuio_plugin_service_t service;
         ecuio_plugin_security_level_t level;
         ecuio_plugin_conversation_ecu_t ecu;
+        ecuio_plugin_fingerprint_t print;
         int ok = 0;
+        memset(&print, 0, sizeof print);
+        print.struct_size = sizeof print - 1u;
         memset(&ecu, 0, sizeof ecu);
         ecu.struct_size = sizeof ecu;
         memset(&about, 0, sizeof about);
@@ -101,6 +104,16 @@ int c_abi_plugin(void)
              level.key_window_ms == 500u &&
              ecuio_plugin_security_level(plugin, 1, &level) ==
                  ECUIO_ERR_INVALID_ARGUMENT;
+        /* The fingerprint: a short struct refused, then the whole one */
+        ok = ok && sizeof(ecuio_plugin_fingerprint_t) == 72u &&
+             offsetof(ecuio_plugin_fingerprint_t, fingerprint) == 8u &&
+             ecuio_plugin_fingerprint(plugin, &print) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             print.struct_size == sizeof print - 1u;
+        print.struct_size = sizeof print;
+        ok = ok && ecuio_plugin_fingerprint(plugin, &print) == ECUIO_OK &&
+             print.struct_size == sizeof print && print.flags == 0u &&
+             (print.fingerprint[0] | print.fingerprint[31]) != 0;
         if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {
             return 1;
         }

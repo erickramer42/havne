@@ -201,6 +201,7 @@ void loader::read_manifest(ecuio_plugin& p)
     }
     /* After the variants: the manifest's "ecus" are judged by then */
     read_conversation(root, p);
+    read_fingerprint(root, p);
 }
 
 /* "havne_plugin", first, and the keys a manifest may hold */

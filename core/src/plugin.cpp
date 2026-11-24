@@ -261,6 +261,22 @@ ecuio_status_t ecuio_plugin_lineage(const ecuio_plugin_t* plugin, char* lineage,
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_plugin_fingerprint(const ecuio_plugin_t* plugin,
+                                        ecuio_plugin_fingerprint_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out->struct_size < sizeof(ecuio_plugin_fingerprint_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    ecuio_plugin_fingerprint_t f{};
+    f.struct_size = sizeof f;
+    std::memcpy(f.fingerprint, plugin->fingerprint, sizeof f.fingerprint);
+    *out = f;
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_plugin_variant(const ecuio_plugin_t* plugin,
                                     uint32_t index, char* id, size_t cap)
 {

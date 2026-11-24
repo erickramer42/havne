@@ -118,6 +118,40 @@ ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
 ecuio_status_t ecuio_plugin_lineage(const ecuio_plugin_t* plugin, char* lineage,
                                     size_t cap);
 
+/*
+ * A plugin's fingerprint (ADR-0066's appendix of 2026-11-23): the SHA-256
+ * that names its contents, and what a consent names. A folder and its
+ * packed file have one fingerprint: it is the SHA-256 of the line
+ * "havne-plugin-fingerprint 1", the manifest without "files" and
+ * "fixtures" as core writes JSON, then for each file (each data file a
+ * variant reads, each page, the conversation's module) in byte order of
+ * its path: the path, a line feed and the SHA-256 of its bytes, a JSON
+ * file's as core writes it. Whitespace inside a JSON file changes nothing;
+ * every value and every module byte does. Every loaded plugin has one.
+ */
+typedef struct ecuio_plugin_fingerprint {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* zero */
+    uint8_t fingerprint[32];
+    uint32_t reserved[8]; /* zero; ABI growth space */
+} ecuio_plugin_fingerprint_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_fingerprint_t) == 72,
+              "ecuio_plugin_fingerprint_t size is ABI");
+static_assert(offsetof(ecuio_plugin_fingerprint_t, fingerprint) == 8,
+              "plugin fingerprint offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_fingerprint_t) == 72,
+               "ecuio_plugin_fingerprint_t size is ABI");
+#endif
+
+/* ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct,
+ * nothing written; this core's struct_size is written back */
+ecuio_status_t ecuio_plugin_fingerprint(const ecuio_plugin_t* plugin,
+                                        ecuio_plugin_fingerprint_t* out);
+
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
  * buffer too small for the whole text and its NUL */

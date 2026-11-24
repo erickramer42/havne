@@ -81,6 +81,7 @@ add_library(ecuio-core STATIC
     src/plugin.cpp
     src/plugin_manifest.cpp
     src/plugin_conversation.cpp
+    src/plugin_fingerprint.cpp
     src/plugin_merge.cpp
     src/plugin_pages.cpp
     src/plugin_wrap.cpp
