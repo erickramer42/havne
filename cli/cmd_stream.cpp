@@ -258,6 +258,41 @@ void write_faults(cli::Line& l, const ecuio_session_t* session)
     l.ch('}');
 }
 
+// --pick ranked before a recording attaches, so its header names the
+// pick; as in the app, a refused pick leaves the whole set asked
+void pick_for_stream(Output& out, ecuio_session_t* session, bool ranked)
+{
+    if (ranked) {
+        const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+        const bool pick_only = session_pick_only(session);
+        const std::vector<uint16_t> ids = cli::default_pick(set, {}, pick_only);
+        if (!session_asks(session)) {
+            std::fprintf(stderr, "havne-cli: the session asks no signal: "
+                                 "--pick ranked picks none\n");
+        } else if (ids.empty()) {
+            std::fprintf(stderr,
+                         pick_only ? "havne-cli: the profile ranks no signal "
+                                     "and is asked only what is picked: "
+                                     "--pick ranked asks none\n"
+                                   : "havne-cli: the profile ranks no signal: "
+                                     "--pick ranked asks every one\n");
+        } else if (ecuio_session_set_focus_with(
+                       session, ids.data(), static_cast<uint32_t>(ids.size()),
+                       0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
+            std::fprintf(stderr, "havne-cli: asking %s signal: %s\n",
+                         pick_only ? "no" : "every", ecuio_last_error_detail());
+        } else {
+            BigLine b(cli::focus_line_bytes(ids.size()));
+            cli::focus_line(b.line, set, ids, 0, true, session_signal_file());
+            write_line(out, b.line);
+        }
+    } else if (session_pick_only(session)) {
+        std::fprintf(stderr, "havne-cli: the profile is asked only what is "
+                             "picked: nothing is asked (--pick ranked, or log "
+                             "--signal)\n");
+    }
+}
+
 } // namespace
 
 int run_stream(const StreamArgs& args)
@@ -324,37 +359,7 @@ int run_stream(const StreamArgs& args)
         ecuio_register_conditions_callback(session, on_conditions,
                                            stream.get());
     }
-    // --pick ranked before a recording attaches, so its header names the
-    // pick; as in the app, a refused pick leaves the whole set asked
-    if (args.pick_ranked) {
-        const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-        const bool pick_only = session_pick_only(session);
-        const std::vector<uint16_t> ids = cli::default_pick(set, {}, pick_only);
-        if (!session_asks(session)) {
-            std::fprintf(stderr, "havne-cli: the session asks no signal: "
-                                 "--pick ranked picks none\n");
-        } else if (ids.empty()) {
-            std::fprintf(stderr,
-                         pick_only ? "havne-cli: the profile ranks no signal "
-                                     "and is asked only what is picked: "
-                                     "--pick ranked asks none\n"
-                                   : "havne-cli: the profile ranks no signal: "
-                                     "--pick ranked asks every one\n");
-        } else if (ecuio_session_set_focus_with(
-                       session, ids.data(), static_cast<uint32_t>(ids.size()),
-                       0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
-            std::fprintf(stderr, "havne-cli: asking %s signal: %s\n",
-                         pick_only ? "no" : "every", ecuio_last_error_detail());
-        } else {
-            BigLine b(cli::focus_line_bytes(ids.size()));
-            cli::focus_line(b.line, set, ids, 0, true, session_signal_file());
-            write_line(out, b.line);
-        }
-    } else if (session_pick_only(session)) {
-        std::fprintf(stderr, "havne-cli: the profile is asked only what is "
-                             "picked: nothing is asked (--pick ranked, or log "
-                             "--signal)\n");
-    }
+    pick_for_stream(out, session, args.pick_ranked);
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
     if (args.record != nullptr &&
