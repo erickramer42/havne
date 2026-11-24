@@ -20,6 +20,7 @@
 #include "alerttone.h"
 #include "conditionmodel.h"
 #include "conditionstore.h"
+#include "consentflow.h"
 #include "framelistmodel.h"
 #include "hostclock.h"
 #include "signallistmodel.h"
@@ -206,6 +207,8 @@ class SessionBridge : public QObject, public BridgeFormats, public BridgeSeams
     // (ConditionStore) or, on a replay, the recording's own copy, one row
     // per condition, judged while a session runs
     Q_PROPERTY(ConditionModel* conditionModel READ conditionModel CONSTANT)
+    // A plugin's consent and its unlocks (ADR-0066, consentflow.h)
+    Q_PROPERTY(ConsentFlow* consent READ consent CONSTANT)
     // Why a saved edit isn't judged yet ("applies when this recording
     // ends"), "" when the set judged is the one saved
     Q_PROPERTY(QString conditionsPending READ conditionsPending NOTIFY
@@ -499,6 +502,7 @@ public:
                                       uint32_t count);
 
     ConditionModel* conditionModel() const { return m_conditionModel; }
+    ConsentFlow* consent() const { return m_consent; }
     QString conditionsPending() const { return m_conditionsPending; }
     QString conditionsProblem() const { return m_conditionsProblem; }
     bool conditionsFromRecording() const { return m_conditionsFromRecording; }
@@ -926,6 +930,9 @@ private:
     // and saying so when it holds no signal values (never its path)
     void logReplayMadeUnder(const QString& uri);
     QString startSession(ecuio_session_t* session, const QString& uri);
+    // The async connect's end on the GUI thread: the pending session
+    // started and applied (err "" so far), connecting cleared, the result
+    void finishConnect(const QString& uri, QString err, const ConsentNeed& need);
     void applyConnectedState(ecuio_session_t* session, const QString& uri);
     void pollLinkHealth();
     // What each channel's ECU said it supports, logged once per update

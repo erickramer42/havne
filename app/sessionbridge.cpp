@@ -65,6 +65,8 @@ SessionBridge::SessionBridge(QObject* parent)
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
     m_pluginStore.setLog(
         [this](const QString& line) { emit logMessage(line); });
+    m_consent = new ConsentFlow(&m_pluginStore, this);
+    m_consent->setLog([this](const QString& line) { emit logMessage(line); });
     m_conditionModel = new ConditionModel(this);
     loadSavedConditions();
 
@@ -77,6 +79,7 @@ SessionBridge::SessionBridge(QObject* parent)
         pollUnaskedSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
+        m_consent->poll(m_channelCount);
         pollSleep();
         // Fires even when nothing arrived this window: dimming exists for
         // rows that stopped updating. 100 ms is well inside the 3 s dim
@@ -148,6 +151,8 @@ SessionBridge::~SessionBridge()
     if (m_disconnectThread.joinable()) {
         m_disconnectThread.join();
     }
+    // A give or an unlock under way uses the session the lines below free
+    m_consent->join();
     // A connect whose queued completion never ran (it was dropped with
     // `this`) left its session pending. It was never started, so no
     // worker is calling onFrame; destroy it like any other.

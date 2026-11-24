@@ -22,6 +22,7 @@
 #include "alerttone.h"
 #include "conditionmodel.h"
 #include "conditionstore.h"
+#include "consentflow.h"
 #include "hostclock.h"
 #include "latencystats.h"
 #include "pluginstore.h"
@@ -166,6 +167,7 @@ struct BridgeState
     };
     ConditionStore m_conditionStore;
     ConditionModel* m_conditionModel = nullptr;
+    ConsentFlow* m_consent = nullptr; // ADR-0066: consent and the unlock
     int m_failAttaches = 0; // failConditionsAttachesForTesting
     std::function<void()> m_duringFailedAttach;
     uint32_t m_conditionsGeneration =

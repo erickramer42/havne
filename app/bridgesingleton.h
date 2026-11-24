@@ -143,6 +143,14 @@ struct ConditionModelForeign
     QML_ANONYMOUS
 };
 
+// Bridge.consent: a plugin's consent and its unlocks (ADR-0066)
+struct ConsentFlowForeign
+{
+    Q_GADGET
+    QML_FOREIGN(ConsentFlow)
+    QML_ANONYMOUS
+};
+
 struct LiveSignalModelForeign
 {
     Q_GADGET

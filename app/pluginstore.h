@@ -51,6 +51,8 @@ public:
     // <HAVNE_SETTINGS_DIR>/plugins when the variable is set (the tests),
     // else <AppDataLocation>/plugins
     static QString root();
+    // A kept copy's file, by its SHA-256
+    static QString pathOf(const QString& sha);
 
     PluginStore() = default;
     ~PluginStore();
@@ -72,9 +74,13 @@ public:
     // ("obd2" or ""), its set's signals, the signals it adds to the base's
     // and the names of the base's it replaces (variantshape.h; a replaced
     // name is in neither the count's base part nor owns). obdb: the plugin is a
-    // converted OBDb set. A copy that no longer loads is { sha256, ok
-    // false, words }
+    // converted OBDb set. conversation, publisher and fingerprint are what
+    // a consent asks of it (ADR-0066). A copy that no longer loads is
+    // { sha256, ok false, words }
     QVariantList all();
+    // The loaded plugin a profile (plugin.<id>.<variant>) is a variant of,
+    // and its copy's SHA-256 into *sha; nullptr for none
+    const ecuio_plugin_t* pluginOfProfile(const QString& profile, QString* sha);
 
     // A package's bytes into the store: the entry above, plus kept (a
     // copy of these bytes was there), replaced (the version it took the
@@ -270,7 +276,6 @@ private:
     };
     using HeldMap = std::map<QString, Held>;
 
-    static QString pathOf(const QString& sha);
     static QString indexPath();
     QVariantMap entryOf(const QString& sha, const Held& h) const;
     // The plugin's pages, in the manifest's order: { index, form, path }
