@@ -74,6 +74,10 @@ struct ecuio_session {
     /* The store's fallback name for the car (ecuio_session_security_store),
      * used when the module gives no serial and the car no VIN */
     std::string security_label;
+    /* A consent applied before start (ecuio_session_apply_consent): the
+     * record's fingerprint and second, the caller's alone until start */
+    uint8_t consent_fingerprint[32] = {};
+    uint64_t consent_given_utc = 0;
     std::atomic<bool> closed{false};
     /* The worker was started: a start after it is the transport's no-op,
      * and the session_start probe marks the first only (ADR-0034 section 4).
@@ -82,11 +86,7 @@ struct ecuio_session {
     /* The consent create found (consent_gate.h), or apply's; read at the
      * bind */
     bool conversation_consent = false;
-    /* A consent applied before start (ecuio_session_apply_consent): the
-     * record's fingerprint and second, the caller's alone until start */
-    bool consent_applied = false;
-    uint8_t consent_fingerprint[32] = {};
-    uint64_t consent_given_utc = 0;
+    bool consent_applied = false; /* the fingerprint and second above hold */
     /* The link is one no car is on (SocketCAN's vcan), set by attach */
     bool no_car_bus = false;
     /* started's copy for any thread: the conditions' states judge what the

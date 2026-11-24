@@ -66,6 +66,7 @@ void loader::read_fingerprint(const Value& root, ecuio_plugin& p) const
     }
 
     std::vector<entry> entries;
+    entries.reserve(files_.size() + p.pages.size() + 1);
     for (const data_file& f : files_) {
         entries.push_back(entry_of(f.path, ecuio_json::write(*f.root)));
     }

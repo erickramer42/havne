@@ -40,11 +40,7 @@ ecuio_files::path_registry<consent_owner>& owners()
     return registry;
 }
 
-void copy_text(char* dst, size_t cap, const std::string& s)
-{
-    std::memset(dst, 0, cap);
-    std::memcpy(dst, s.data(), std::min(s.size(), cap - 1));
-}
+using ecuio_sf::copy_text;
 
 void fill(const record& r, ecuio_consent_record_t* out)
 {
@@ -73,6 +69,7 @@ ecuio_status_t refused(store_io io, const std::string& why)
 std::vector<const record*> newest_first(const ecuio_consent::store& s)
 {
     std::vector<const record*> list;
+    list.reserve(s.records.size());
     for (const record& r : s.records) {
         list.push_back(&r);
     }
