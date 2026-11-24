@@ -254,6 +254,8 @@ Pane {
     // Back from Connection while Other address... sent the user here: the
     // page that sent them, as Android's Back goes
     signal leaveRequested()
+    // A plugin row's Review...: Main shows the plugin's consent screen
+    signal reviewRequested(string sha)
     // The newest session event, the Log row's summary: the Log's first line
     // until one comes. The display's inset lines are about the screen, not
     // the session, so they don't take it

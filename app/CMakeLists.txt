@@ -205,6 +205,13 @@ qt_add_qml_module(app_ui
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
         qml/SettingsSignals.qml
+        qml/SettingsConsents.qml
+        qml/ConsentBody.qml
+        qml/ConsentButtons.qml
+        qml/ConsentChanged.qml
+        qml/ConsentDialog.qml
+        qml/ConsentPage.qml
+        qml/UnlockDialog.qml
         qml/SettingsAlerts.qml
         qml/SettingsAlertEditor.qml
         qml/AlertSignalPicker.qml

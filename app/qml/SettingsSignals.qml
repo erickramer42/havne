@@ -703,6 +703,10 @@ ColumnLayout {
         }
     }
 
+    SettingsConsents {
+        host: root.host
+    }
+
     DocumentOpenDialog {
         id: importDialog
         objectName: "signalImportDialog"

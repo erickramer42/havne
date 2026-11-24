@@ -73,6 +73,95 @@ Page {
         }
     }
 
+    // The modules a plugin talks to (ADR-0066): the bridge's entries copied
+    // once into plain JS, which each card reads (a test sets its own list)
+    property var conversations: JSON.parse(JSON.stringify(Bridge.consent.conversations))
+    // The unlock's question open on this channel (-1 for none), its word
+    // sent and not yet answered, and what each channel's last answer said
+    property int unlocking: -1
+    property bool unlockAsking: false
+    property string unlockNote: ""
+    property var unlockWords: ({})
+    property real nowMs: Theme.now().getTime()
+    readonly property var unlockEntry: conversations.find(c => c.channel === unlocking) ?? null
+    function conversationOf(e) {
+        const rx = parseInt(e.ecu, 16)
+        return conversations.find(c => c.rx === rx) ?? null
+    }
+    // The question's Unlock... shows for a module the plugin talks to that
+    // isn't unlocked and has no unlock under way
+    function canUnlock(c) {
+        return c !== null && c.state === "talking" && (c.levels ?? []).length > 0
+               && ["none", "failed", "delayed", "busy", "refused"].indexOf(c.unlock) >= 0
+    }
+    function delayLeftS(c) {
+        return Math.max(0, Math.ceil((c.delayEndsMs - nowMs) / 1000))
+    }
+    // The row's words on its unlock, "" while there is nothing to say
+    function unlockText(c) {
+        if (c === null)
+            return ""
+        const nrc = "0x" + c.nrc.toString(16).toUpperCase().padStart(2, "0")
+        switch (c.unlock) {
+        case "waiting":
+        case "seed":
+        case "key":
+            return qsTr("Unlocking...")
+        case "unlocked":
+        case "alreadyUnlocked":
+            return qsTr("Unlocked, level 0x%1").arg(c.level.toString(16).toUpperCase().padStart(2, "0"))
+        case "failed":
+            return delayLeftS(c) > 0
+                   ? qsTr("The unlock failed (module code %1). Try again in %2 s").arg(nrc).arg(delayLeftS(c))
+                   : qsTr("The unlock failed (module code %1)").arg(nrc)
+        case "delayed":
+            return qsTr("The module asks for a wait: %1 s").arg(delayLeftS(c))
+        }
+        return unlockWords[String(c.channel)] ?? ""
+    }
+    function unlockOpen(c) {
+        unlocking = c.channel
+        unlockNote = ""
+        unlockAsking = false
+        flick.contentY = 0
+    }
+    function unlockClose() {
+        unlocking = -1
+        unlockAsking = false
+    }
+    // The user's word: the bridge refuses at once or asks core, and the
+    // answer comes by unlockAnswered
+    function unlockSend(level) {
+        const r = Bridge.consent.unlock(unlocking, level)
+        unlockNote = r.ok ? "" : r.words
+        unlockAsking = r.ok
+    }
+    // The question closes when its module stops talking or the session ends
+    readonly property bool unlockShown: unlocking >= 0 && unlockEntry !== null && unlockEntry.state === "talking"
+    // A handler runs before the bindings on its property: it reads the new list itself
+    onConversationsChanged: {
+        const e = conversations.find(c => c.channel === unlocking)
+        if (unlocking >= 0 && (e === undefined || e.state !== "talking"))
+            unlockClose()
+    }
+    Connections {
+        target: Bridge.consent
+        function onUnlockAnswered(channel, ok, words) {
+            const kept = Object.assign({}, root.unlockWords)
+            kept[String(channel)] = words
+            root.unlockWords = kept
+            if (channel === root.unlocking)
+                root.unlockClose()
+        }
+    }
+    // A running delay counts down on the rows that show it
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.conversations.some(c => c.delayEndsMs > root.nowMs)
+        onTriggered: root.nowMs = Theme.now().getTime()
+    }
+
     function clearCodes() {
         confirming = false
         savedTo = Bridge.clearDiagnostics()
@@ -506,6 +595,20 @@ Page {
                     }
                 }
 
+                // The unlock's question, in place and scrolling with the
+                // cards: core's words in full, then the word itself
+                UnlockDialog {
+                    objectName: "unlockDialog"
+                    visible: root.unlockShown
+                    Layout.fillWidth: true
+                    conversation: root.unlockEntry ?? ({})
+                    lines: visible ? Bridge.consent.unlockLines() : []
+                    asking: root.unlockAsking
+                    note: root.unlockNote
+                    onUnlockChosen: level => root.unlockSend(level)
+                    onCancelChosen: root.unlockClose()
+                }
+
                 // The car's readiness by the federal inspection rule
                 // (ADR-0045), every ECU judged together, once read
                 Rectangle {
@@ -597,6 +700,8 @@ Page {
         id: card
         required property var modelData
         readonly property var ecu: modelData
+        // The module's conversation, null where no plugin talks to it
+        readonly property var conversation: root.conversationOf(modelData)
 
         objectName: "ecu_" + ecu.ecu
         Layout.fillWidth: true
@@ -628,6 +733,28 @@ Page {
                     text: root.ecuState(card.ecu)
                     color: Theme.textDim
                 }
+                // A plugin that talks to this module: the question's way in
+                ThemedButton {
+                    objectName: "unlockOpen"
+                    visible: root.canUnlock(card.conversation) && root.unlocking !== card.conversation.channel
+                    enabled: root.unlocking < 0
+                    flat: true
+                    compact: true
+                    Layout.minimumWidth: Theme.touchTarget
+                    text: qsTr("Unlock…")
+                    Accessible.name: qsTr("Unlock ECU %1").arg(card.ecu.ecu)
+                    onClicked: root.unlockOpen(card.conversation)
+                }
+            }
+            // What the plugin's unlock of this module did, and why not
+            Label {
+                textFormat: Text.PlainText
+                objectName: "unlockState"
+                visible: text !== ""
+                text: root.unlockText(card.conversation)
+                color: card.conversation !== null && card.conversation.unlock === "unlocked" ? Theme.success : Theme.warning
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
             }
 
             // The last clear's outcome, above the read that followed it

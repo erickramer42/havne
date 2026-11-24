@@ -156,9 +156,51 @@ ApplicationWindow {
         if (to >= 0)
             gotoPage(to)
     }
+    // The consent screen (ADR-0066): a connect waiting for the user's word,
+    // else a plugin Settings' Review... asked for. The bridge's map is copied
+    // once into plain JS, so the screen's bindings don't read it again
+    property var reviewScreen: ({})
+    property string reviewSha: ""
+    readonly property var consentScreen: Bridge.consent.waiting
+        ? JSON.parse(JSON.stringify(Bridge.consent.ask)) : reviewScreen
+    readonly property bool consentOpen: consentScreen.id !== undefined
+    function reviewConsent(sha) {
+        const screen = Bridge.consent.screenFor(sha)
+        if (screen.id === undefined)
+            return
+        reviewSha = sha
+        reviewScreen = JSON.parse(JSON.stringify(screen))
+    }
+    // Allow or Decline (also Back and Escape). A review's Decline only
+    // closes it; a connect's gives the bridge the answer
+    function consentAnswer(allow) {
+        if (Bridge.consent.waiting) {
+            Bridge.consent.answer(allow)
+            return
+        }
+        if (allow)
+            Bridge.consent.give(reviewSha)
+        reviewScreen = ({})
+        reviewSha = ""
+    }
+    // A connect that asks takes the screen from a review
+    Connections {
+        target: Bridge.consent
+        function onAskChanged() {
+            if (Bridge.consent.waiting) {
+                root.reviewScreen = ({})
+                root.reviewSha = ""
+            }
+        }
+    }
+
     // Android's Back: true when it did something here. False leaves it to the
     // system, which goes to the launcher and keeps the session
     function goBack() {
+        if (consentOpen) {
+            consentAnswer(false)
+            return true
+        }
         if (currentPage === dashboardPage)
             return dashboardView.drivePart.goBack()
         if (currentPage === settingsPage) {
@@ -416,6 +458,8 @@ ApplicationWindow {
         ColumnLayout {
             anchors.fill: parent
             spacing: 0
+            // The consent screen holds the focus and the presses
+            enabled: !root.consentOpen
 
             // The bar's place in the column: the drive view gives it to the
             // page and never shows the bar (its controls rise from the
@@ -587,6 +631,7 @@ ApplicationWindow {
                         objectName: "settingsPage"
                         onLogRequested: root.openLog()
                         onLeaveRequested: root.leaveSettings()
+                        onReviewRequested: sha => root.reviewConsent(sha)
                     }
                 }
             }
@@ -606,6 +651,28 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: zoomRoot.insetBottom
             }
+        }
+
+        // A card over a wide window, a page over a phone's
+        ConsentDialog {
+            objectName: "consentDialog"
+            anchors.fill: parent
+            z: 20
+            shown: root.consentOpen && !root.isCompact
+            screen: root.consentScreen
+            onAllowed: root.consentAnswer(true)
+            onDeclined: root.consentAnswer(false)
+        }
+        ConsentPage {
+            objectName: "consentPageView"
+            anchors.fill: parent
+            anchors.topMargin: zoomRoot.insetTop
+            anchors.bottomMargin: zoomRoot.insetBottom
+            z: 20
+            shown: root.consentOpen && root.isCompact
+            screen: root.consentScreen
+            onAllowed: root.consentAnswer(true)
+            onDeclined: root.consentAnswer(false)
         }
     }
 
