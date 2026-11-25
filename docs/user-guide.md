@@ -401,6 +401,16 @@ To see a computed signal move without a car, save it and connect `mock://demo`: 
 
 **Look up a VIN** on the Vehicle page decodes a VIN's model year and make on the device, and marks the variants that VIN matches; the VIN isn't saved.
 
+### A plugin that talks to a module: consent and unlock
+
+Most plugins only give signals names and scales. A plugin that carries code to talk to one of the car's modules (it can ask for a security-access seed and answer with a key) names its publisher, and Havne asks your consent before that code runs.
+
+- **The question.** On a connect over `elm327://` or `j2534://` with such a plugin picked, a screen shows Havne's own lines, then the publisher's name, contact, license and terms whole, and the first 16 digits of the plugin's fingerprint (**Show full fingerprint** shows all 64). **Allow** records your consent to this version of the plugin; **Decline** (or Escape on a wide window, the page's back arrow on a narrow one, or 120 seconds with no answer) goes on reading the plugin's signals and sends nothing else. A declined plugin isn't asked again until the next run of Havne. Neither button is the primary one.
+- **One consent for each version.** Any change to the plugin, even in a byte of its terms, asks again, and shows what changed since the version you allowed. The record holds the plugin's id and version, its fingerprint, the publisher's name and the date; nothing of the car.
+- **Withdraw it** in Settings, Signals, under Plugins: each plugin shows "Allowed for <version>" or "Not allowed. Reads signals only.", with **Review...** to read and answer the question there, and each record has **Withdraw**. From a terminal: `havne-cli plugins terms <package>` prints the terms and the fingerprint, `havne-cli plugins consent <package> --give <fingerprint>` gives, `--list` and `--withdraw <id>` do the rest. A run of `havne-cli stream` or `log` with such a plugin and no consent stops with the words and sends nothing; no option on a run gives consent for you. The app and `havne-cli` share one consent file.
+- **Unlock a module.** Diagnostics shows **Unlock...** on the card of a module the plugin talks to, while it is talking. The dialog repeats the engine and lockout warnings, asks which level when the module has more than one, and **Unlock this module** is your word for one attempt. Havne asks the seed, the plugin's code works out the key and Havne sends it once; a wrong key counts against the module's own limit, and its delay is kept across runs in the security file. From a terminal, `havne-cli stream --unlock <ecu>:<level>` does the same, once (`--security-store` and `--vehicle` are optional). In Python, `Session.unlock` is the same word.
+- **Signatures.** Havne doesn't check a plugin's signature. A publisher who signs gives you a signature to check with a tool of your own before you allow the plugin.
+
 ## The Activity page, Settings and developer mode
 
 **Activity** has the activity log and, in its **Frames** view, the raw
