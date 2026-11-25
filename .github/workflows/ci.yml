@@ -559,7 +559,7 @@ jobs:
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
   win-build:
-    name: win-build (${{ matrix.shard }}/2)
+    name: win-build (${{ matrix.shard }}/4)
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: windows-latest
@@ -571,13 +571,13 @@ jobs:
       actions: write
     env:
       CTEST_PARALLEL_LEVEL: '8'
-    # Two runners, each with its own build, run alternate halves of ctest
-    # (-I k,,2: every case once across the two); the first alone saves the
-    # caches and runs the load test
+    # Four runners, each with its own build, run every fourth case of ctest
+    # (-I k,,4: every case once across the four); the first alone saves the
+    # caches. The load test runs in win-load
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -811,18 +811,176 @@ jobs:
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I "${{ matrix.shard }},,2"
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I "${{ matrix.shard }},,4"
       - name: Save the tests' cost data
         if: success() || failure()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: build/Testing/Temporary/CTestCostData.txt
           key: ctest-cost-win-${{ matrix.shard }}-${{ github.run_id }}
+
+  # The load test (bench_bridge --load) in a runner of its own, beside
+  # win-build's shards: it builds only bench_bridge, with the same Qt, the
+  # same Ninja tree settings and the same compiler cache tiers, so its
+  # objects hit the cache win-build saves. It saves neither the Qt kit nor
+  # the compiler cache, and needs no pytest: it runs no ctest case.
+  win-load:
+    name: win-load
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    # actions: read lists and downloads dev's seed artifact
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The kit from the Actions cache, so Qt's mirrors are out of the
+      # path. One copy, saved by win-build on main's pushes only; every
+      # other ref reads the default branch's. The key names everything that
+      # decides the install's bytes.
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}\Qt
+          key: qt-windows-6.12.0-win64_msvc2022_64-aqt-076e1659
+
+      # aqtinstall from a pinned master commit: Qt 6.11 split the Windows
+      # x64 repository per toolchain, and the fix (aqtinstall #1000) isn't
+      # in a PyPI release yet (3.3.0 is the newest). Move back to PyPI
+      # once 3.4.0 ships, and change the cache key with it; Dependabot
+      # doesn't track a git pin.
+      - name: Install aqtinstall (pinned master commit)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: python -m pip install "aqtinstall @ git+https://github.com/miurahr/aqtinstall@076e1659807d0b362a3ed684d54c2e9c775eb9c7"
+
+      # --external 7z extracts with the runner's 7-Zip instead of py7zr,
+      # which fails sporadically on Windows with Bad7zFile. aqtinstall
+      # verifies each archive's SHA-256 before extracting, so that error
+      # is py7zr's, on good bytes. install-qt-action avoids it by pinning
+      # py7zr 1.1.0, but aqtinstall master requires 1.1.3 or later.
+      - name: Install Qt 6.12.0
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: |
+          # aqtinstall #1002: --external 7z extracts archives in parallel
+          # and 7-Zip's directory creation races on first extract.
+          # Pre-create the install root to close the window.
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          New-Item -ItemType Directory -Force -Path $prefix | Out-Null
+
+          python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
+
+      - name: Point the build at Qt
+        run: |
+          $prefix = "${env:GITHUB_WORKSPACE}\Qt\6.12.0\msvc2022_64"
+          if (-not (Test-Path "$prefix\bin\qmake.exe")) { Write-Error "no Qt at $prefix"; exit 1 }
+          "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # sccache as win-build installs it, restoring the same entry or seed;
+      # this job never saves the cache (win-build's first shard does)
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\sccache.zip"
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-pc-windows-msvc.zip -O $zip --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Error 'could not download sccache'; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($sha -ne '28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1') {
+            Write-Error "unexpected SHA-256 $sha"; exit 1
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\sccache-bin"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\sccache-bin" -Recurse -Filter sccache.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # The ref name with every character outside letters and digits as
+          # _, so no slug is the prefix of another (no key holds a hyphen
+          # inside it)
+          "SCCACHE_REF=$($env:GITHUB_REF_NAME -replace '[^A-Za-z0-9]', '_')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore the compiler cache
+        id: ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-build-3-${{ env.SCCACHE_REF }}-${{ github.run_id }}
+          restore-keys: sccache-win-build-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (the newest of dev's runs that uploaded one, or seed_run's). An
+      # artifact is trusted only from a ci.yml run of this repository, on
+      # dev, unless seed_run names it (only a writer can dispatch). A seed
+      # that can't be had leaves the build cold. The tier used goes to the
+      # run's summary beside sccache's statistics.
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          $tier = 'none (cold build)'
+          if ($env:OWN_KEY) {
+            $tier = "own branch ($env:OWN_KEY)"
+          } else {
+            try {
+              $repo = $env:GITHUB_REPOSITORY
+              $pinned = $env:SEED_RUN -match '^\d+$'
+              if ($pinned) {
+                $ids = @($env:SEED_RUN)
+              } else {
+                $list = gh api "repos/$repo/actions/artifacts?name=sccache-win-seed&per_page=30" | ConvertFrom-Json
+                $ids = @($list.artifacts | Where-Object {
+                    -not $_.expired -and $_.workflow_run.head_branch -eq 'dev' -and "$($_.workflow_run.head_repository_id)" -eq $env:REPO_ID
+                  } | Sort-Object created_at -Descending | ForEach-Object { $_.workflow_run.id })
+              }
+              foreach ($id in @($ids | Select-Object -First 5)) {
+                $r = gh api "repos/$repo/actions/runs/$id" | ConvertFrom-Json
+                if ($r.path -ne '.github/workflows/ci.yml' -or $r.head_repository.full_name -ne $repo -or (-not $pinned -and $r.head_branch -ne 'dev')) {
+                  Write-Host "skipping run ${id}: not a ci.yml run of $repo on dev"
+                  continue
+                }
+                gh run download $id -R $repo -n sccache-win-seed -D $env:SCCACHE_DIR
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $env:SCCACHE_DIR)) {
+                  $n = (Get-ChildItem $env:SCCACHE_DIR -Recurse -File | Measure-Object).Count
+                  if ($n -gt 0) { $tier = "dev seed (run $id, $n files)"; break }
+                }
+                Remove-Item $env:SCCACHE_DIR -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            } catch {
+              Write-Host "seed download failed: $_"
+              Remove-Item $env:SCCACHE_DIR -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Write-Host "compiler cache tier: $tier"
+          "SCCACHE_TIER=$tier" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          exit 0
+
+      - name: Build the load test
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -property installationPath `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHAVNE_EMBEDDED_DEBUG_INFO=ON `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_PREFIX_PATH="$env:QT_PREFIX"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --target bench_bridge
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "Compiler cache tier: $env:SCCACHE_TIER" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
       # The replay fixture through the bridge (tests/bench_bridge.cpp): its
       # table goes to the run's summary, and the step fails only on a
       # broken invariant or a bound far below the dev machine's figures
       - name: Load test
-        if: matrix.shard == 1
         shell: bash
         run: build/tests/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -991,7 +1149,7 @@ jobs:
           New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
       # The coverage tree is a Ninja tree under sccache (the Visual Studio
-      # generator ignores a launcher; win-build (2/2) keeps that one built),
+      # generator ignores a launcher; build-vs keeps that one built),
       # so it runs from a Developer shell. The objects are /Od and /Z7, a key
       # of their own; the gtest runner saves them on dev and main.
       - name: Install sccache
