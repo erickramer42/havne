@@ -69,6 +69,11 @@ public:
     uint32_t packs = 0;    /* Service 01 requests of two or more PIDs */
     uint32_t resets = 0;   /* AT Z */
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
+    /* Past kRecordDepth too: commands starting 04, those exactly 04 (no
+     * count digit), and the 010C-prefixed ones before the first 04 */
+    uint32_t service04 = 0;
+    uint32_t exact04 = 0;
+    uint32_t speed_before_04 = 0;
     uint32_t stops = 0;    /* bytes that stopped a monitor */
     uint8_t last_stop = 0; /* the last of them */
     uint32_t interrupts = 0; /* replies a byte stopped (input_stops) */
@@ -86,6 +91,7 @@ public:
         head_ = tail_ = 0;
         in_len_ = 0;
         commands = requests = packs = resets = bare_crs = stops = 0;
+        service04 = exact04 = speed_before_04 = 0;
         last_stop = 0;
         interrupts = 0;
         monitor_us = stop_us = first_stop_us = monitor_after_stop_us = 0;
@@ -425,6 +431,12 @@ private:
 
     void record(const char* cmd)
     {
+        if (strncmp(cmd, "04", 2) == 0) {
+            ++service04;
+            exact04 += cmd[2] == '\0' ? 1 : 0;
+        } else if (service04 == 0 && strncmp(cmd, "010C", 4) == 0) {
+            ++speed_before_04;
+        }
         if (commands < kRecordDepth) {
             /* Cut to the slot: a longer command is kept by its start */
             char* out = recorded[commands];

@@ -131,21 +131,29 @@ TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
             EXPECT_EQ(d.clear, ECUIO_CLEAR_CLEARED);
             EXPECT_EQ(d.lists[ECUIO_DIAG_STORED].held, 0u);
             EXPECT_EQ(d.lists[ECUIO_DIAG_PERMANENT].held, 1u);
-            EXPECT_EQ(fake_count("04"), 1u);
-            const std::vector<std::string> sent = fake_commands();
-            const auto clear = std::find(sent.begin(), sent.end(), "04");
-            ASSERT_NE(clear, sent.end()) << "04 alone, no count digit";
+            /* The fake's record keeps only the first commands, so a slow
+             * run's 04 can fall past it: these counters don't */
+            EXPECT_EQ(on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                          return a.service04;
+                      }),
+                      1u);
+            EXPECT_EQ(on_fake<uint32_t>(
+                          [](fake_elm327::adapter& a) { return a.exact04; }),
+                      1u)
+                << "04 alone, no count digit";
             /* The speed went before it; the clear's 01 0C carries the count
              * digit as the rotation's does, so the engine's own tests pin
              * which one it was (ClearTest) */
-            EXPECT_NE(std::find_if(sent.begin(), clear,
-                                   [](const std::string& c) {
-                                       return c.rfind("010C", 0) == 0;
-                                   }),
-                      clear);
+            EXPECT_GT(on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                          return a.speed_before_04;
+                      }),
+                      0u);
         } else {
             EXPECT_EQ(d.clear, ECUIO_CLEAR_ENGINE_RUNNING);
-            EXPECT_EQ(fake_count("04"), 0u);
+            EXPECT_EQ(on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                          return a.service04;
+                      }),
+                      0u);
             fake_diagnostics::expect_report(d);
         }
     }
