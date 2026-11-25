@@ -215,7 +215,7 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   only through tier 2's ceiling (`tier2_ceiling.h`) and the engine's
   talk door (`request_talk.h`). A security-access attempts' store
   (`security_store.h`) keeps the failed attempts and their delay across
-  a restart. No module binds in v0.9.0: such a plugin is data only.
+  a restart. A module binds only behind the consent gate (`consent_gate.h`): a consent a person gave to the plugin's fingerprint and a front end applied, a `vcan` link or the test door; otherwise such a plugin is data only.
 - **Enumerations and computed signals:** an enum def is a raw number
   with a label from the set's table (`ecuio_enum_label`); a computed
   def reads no frame and runs a bounded program over up to four other

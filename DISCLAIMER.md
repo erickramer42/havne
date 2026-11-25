@@ -90,11 +90,11 @@ to a module, declares a session or writes names its publisher, a
 contact, its license and its own terms, and Havne shows them word for
 word before you consent to that version of the plugin, and again with
 each write's warnings. Consent covers one version: a plugin that changes
-in any way, or is signed by a different key, asks again. Only you give
-consent, in the app's dialog or with `havne-cli plugins consent`; no
-option on a run does it for you. A plugin may be signed by its
-publisher; Havne shows the signature as where the plugin came from, and
-a signature is not a sign that a plugin is safe or correct. Havne's own
+in any way asks again. Only you give consent, in the app's dialog,
+with `havne-cli plugins consent` or with Python's `ConsentStore.give`; no option on a run does it for you.
+Havne doesn't check a plugin's signature: a publisher may sign, and you
+check it with your own tool before you consent; a signature is not a
+sign that a plugin is safe or correct. Havne's own
 warnings and the terms in [Warranty and liability](#warranty-and-liability)
 apply whatever a plugin's terms say. Havne is provided as is: you decide
 whether to use a plugin and to write, and you are responsible for the

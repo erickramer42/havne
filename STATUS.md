@@ -205,9 +205,9 @@ The conversation tier is v0.9.1's; v0.9.0 ships what is built.
 - **Held over from v0.9.0:** `?session=03` over many modules, where keep-alives crowd out data; an export's vPIC make list, which lacks most non-US makers, so a refusal fails the whole export; keeping the machine awake while a desktop session runs ([ADR-0033](docs/adr/0033-session-time-counts-sleep.md)'s appendix first); under the J2534 hold, a module that answers some rows and never others, whose unanswered rows each still hold a chosen segmented request for 100 ms (the quiet-module rule leaves it unquiet, rightly: its good rows keep their pace); and two small ones on a quiet module, about one wait in a 5 s step: Read again skips it while its diagnostics item is in flight, and a clear asked then is refused as changed.
 - **Planned:**
   - the whole car's read: a vehicle's plugins merged into one set, modules opened by what is picked, the bridge and the store for it, a faster default, sessions a plugin declares, and the simulated car's last step;
-  - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, no module bound before the consent gate; the gate, the store showing the tier, the app's unlock dialog and Python's `unlock()`;
+  - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, behind the consent gate (built: the fingerprint, the publisher block, the consent store, `havne-cli plugins consent` and `stream --unlock`, the app's consent screen and unlock dialog, Python's `ConsentStore` and `unlock()`);
   - the safety gates, then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
-- **The release gate:** the consent gate is in; until then a conversation-tier plugin is data only, pinned by a test.
+- **The release gate:** the consent gate is in: a conversation-tier plugin is data only until a person has consented to its version, pinned by tests. The running app's consent-then-unlock flow over a plugin that unlocks has not been looked at.
 
 ### The iPhone and Mac downloads
 

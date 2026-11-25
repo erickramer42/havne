@@ -822,3 +822,21 @@ number (`havne_plugin`) stays as it is:
 - **A recording of a merged set** writes section 4's `plugin` line once
   for each part that is a plugin's variant, in merge order, and none for
   a file read alone.
+
+## Note: format 3's publisher block and the fingerprint (2026-11-24)
+
+[ADR-0066](0066-conversation-tier-and-write-gates.md)'s appendix "the
+consent gate as built" adds the following to section 2:
+
+- **`publisher`** (format 3): an object with `name`, `contact`, `license`
+  and `terms`, required with the conversation tier, refused in formats 1
+  and 2, optional with the data tier. It sits among the manifest's keys
+  as any other, and a packed file carries it as it is.
+- **`signature` is refused.** Havne checks no signature (ADR-0066's
+  appendix of 2026-11-24 says why); the manifest's own bytes are what a
+  fingerprint covers, and a publisher's signature is the user's to check.
+- **A plugin has a fingerprint**, the SHA-256 that names its contents: the
+  manifest without `files` and `fixtures`, then each file's path and
+  SHA-256 in byte order of the path. A folder and its packed file agree, and
+  a consent names it, so any changed byte is a plugin to consent to again,
+  whatever its `version` says.

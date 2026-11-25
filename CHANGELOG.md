@@ -13,6 +13,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- **Plugins that talk to a car's modules ask your consent first,** once for each version. The app shows the publisher, the license and the terms before it connects, and `havne-cli plugins terms` and `plugins consent` do the same from a terminal; consent is withdrawn in Settings, Signals or with `plugins consent --withdraw`. A plugin that changes in any way asks again. Without consent a plugin only gives its signals. Havne doesn't check a plugin's signature: a publisher who signs gives you one to check with your own tool.
+- **Plugin manifest format 3** names the plugin's publisher: a name, a contact, a license and the terms the person reads before consenting. A format 2 plugin with a conversation tier still loads and reads as data.
+- **Unlock a module:** `havne-cli stream --unlock <ecu>:<level>` (optionally with `--security-store` and `--vehicle`) unlocks a module a consented plugin talks to, once, counting attempts in the security store; the app's Diagnostics has **Unlock...** on the module's card, and Python has `Session.unlock`. `stream` writes `conversation` and `unlock` lines.
+- **C API:** `ecuio_plugin_fingerprint`, `ecuio_plugin_publisher` and `ecuio_plugin_terms`; the consent store (`ecuio_consent_store_open`, `_find`, `_latest`, `_count`, `_get`, `_give`, `_withdraw`, `_close`); `ecuio_consent_line`; `ecuio_session_apply_consent`; the error code `ECUIO_ERR_CONSENT_REQUIRED`; `ECUIO_PLUGIN_FORMAT_MAX` is 3.
+- **Python:** `ConsentStore`, `consent_lines`, `consent_path`, `Plugin.fingerprint`, `.publisher`, `.terms` and `.conversation_ecus()`, and a session's `security_store`, `apply_consent`, `conversation` and `unlock` (`TooSoon` for an unlock refused for time).
 - **An unsigned iPhone app joins each release:** `havne-X.Y.Z-ios-arm64-unsigned.ipa`, installed by sideloading it with your own Apple ID ([docs/ios.md](docs/ios.md)). It has launched on one iPhone and nothing past the launch has been tried, so reports are welcome.
 - **A macOS app for Apple silicon joins each release:** `havne-X.Y.Z-macos-arm64.zip`. It isn't notarized, so macOS blocks the first open; Privacy & Security's **Open Anyway** opens it once ([docs/macos.md](docs/macos.md)). Intel Macs are not supported. No person has run it on a Mac yet, so reports are welcome.
 

@@ -8,7 +8,8 @@
   below), with no module bound. The rest is v0.9.1's (the note of
   2026-11-19 under Notes); nothing past step 1 is built.
   The appendix of 2026-11-23 settles the public build, consent and a
-  plugin's publisher.
+  plugin's publisher; the appendix of 2026-11-24 records the consent
+  gate as built, and no signature is read.
 - **Date:** 2026-11-16.
 - **Builds on:** [ADR-0001](0001-qt-free-core-c-abi.md) (the Qt-free
   core, the C ABI as the boundary);
@@ -2151,3 +2152,116 @@ section 2.4 drops a signature altogether, read this appendix.
    the simulated ECU, and its plan declares the simulated ECU's made-up
    identifiers as a precondition, so on a real module it stops at core's
    identification read before its first write.
+
+### Appendix: the consent gate as built (2026-11-24)
+
+The appendix of 2026-11-23 says what consent is. This one records what
+core, `havne-cli`, the app and Python do, and amends that appendix in one
+place: **no signature is read** (item 4 of it, and the key in item 3's
+fingerprint, are not built).
+
+- **No signature, for want of a dependency worth its protection.** Checking
+  an Ed25519 signature needs a library in core, and the sandbox, the
+  ceilings and the gates (section 2.4) are the protection whether a plugin
+  is signed or not. A manifest with a `signature` key is refused in words:
+  "Havne doesn't check signatures: check the publisher's signature
+  yourself, then remove the key". A publisher who signs publishes a
+  detached signature over the package file or its fingerprint with a tool
+  of their own, and the user checks it before consenting. `plugins check`
+  and `plugins terms` print the whole fingerprint for it. A consent record
+  holds no key, and the version-change screen has no key line.
+- **The fingerprint's form.** `SHA-256("havne-plugin-fingerprint 1\n"` then
+  the manifest without its `files` and `fixtures` keys, as core writes it
+  back, then each file in byte order of its path: the path, a line feed and
+  the SHA-256 of its bytes). `fixtures` is left out beside `files` because
+  a packed file can't carry it, so a folder and its packed file have one
+  fingerprint. White space inside a JSON file doesn't change it; every
+  value and every byte of a module does. `ecuio_plugin_fingerprint` gives
+  it, 32 bytes.
+- **The publisher block** (manifest format 3, `ECUIO_PLUGIN_FORMAT_MAX` 3):
+  required with the conversation tier, refused in formats 1 and 2, optional
+  on a format 3 data plugin. A name is 1 to 127 bytes, a contact 1 to 255,
+  a license 1 to 63 and the terms 1 byte to 64 KiB, UTF-8 with no control
+  character (the terms keep line feeds and tabs) and no character that
+  shows as nothing or moves the text around it. `ecuio_plugin_publisher`
+  gives the three short texts and the terms' SHA-256; `ecuio_plugin_terms`
+  gives the terms whole or not at all, never cut. A format 2 plugin with the
+  tier still loads and reads as data; it names no publisher, so no consent
+  can be given to it and its module binds only behind the test door.
+- **The store** (`ecuio_consent_store_*`, in `plugin.h` beside the plugin
+  calls it takes): a JSON file the host names, written as the security
+  store is (a file beside it, flushed, then put over it, under a lock, one
+  owner for a path in a process). One record per fingerprint: the plugin's
+  id and version, the fingerprint, the terms' SHA-256, the publisher's name
+  and the UTC second, up to 256 records and 192 KiB. `give` makes the record
+  from the plugin and keeps the first second of a fingerprint given twice;
+  a file another program changed is read again before each call and merged
+  at a save. Only "no such file" is an empty store: a file that doesn't read
+  is `ECUIO_ERR_LOAD_FAILED` in words that name no path. `latest` gives the
+  newest record of a plugin id, for a version change's screen.
+- **The call.** `ecuio_session_apply_consent(session, store, fingerprint)`,
+  between create and start: core checks the fingerprint is the session's
+  plugin's and that the store holds its record, keeps the fingerprint and
+  the record's second, and sets the session's requests flag where the part
+  would talk. It refuses a plugin with no publisher (`ECUIO_ERR_CONSENT_REQUIRED`,
+  new, 23), another plugin's fingerprint, a started session and a recorder
+  attached. It proves nothing about who gave the record: `give` is public.
+  A consent lives in the session and never outlives it in core; the store
+  is the front ends' memory.
+- **What binds, and where.** A module binds when a consent is applied, on a
+  SocketCAN link whose driver is `vcan`, or behind the test door. `mock://`
+  and `replay://` bind no module. ELM327 over TCP to `havne-cli sim` and the
+  fake J2534 driver need a record, as an adapter does. The unlock on a
+  channel that would talk with no consent answers `ECUIO_ERR_CONSENT_REQUIRED`
+  in words; on a format 2 part it keeps its refusal. An ELM327 session whose
+  setup was passive sets the adapter up again at start when the consent
+  made it ask.
+- **The lines.** One table in core, `ecuio_consent_line(set, index, &line)`,
+  by class: the conversation set (Havne's five lines, "not a confirmation",
+  engine state, lockout) and the read set, which holds the conversation set's
+  and adds emissions, warranty, copying data and copyright. The write
+  class is refused until the write path adds its lines. A line holds
+  pointers to static text, the one public struct whose size follows the
+  pointer width.
+- **What a record leaves behind.** A recording's header carries one line,
+  `consent  <64 hex>,<UTC second>`, after the `conversation` line, only
+  with a consent applied and a part that talks. The ELM327 wire log and the
+  J2534 session log say `consent applied  <id> <version>  <16 hex>` at
+  start, or `consent withheld  <id> <version>` where a part did not bind for
+  want of one.
+- **`havne-cli`.** `plugins terms` prints the whole fingerprint and the
+  terms; `plugins consent` gives (`--give <fingerprint>`, after the terms),
+  lists and withdraws, in `--consent-store` (default the app's `consent.json`,
+  `HAVNE_SETTINGS_DIR` first). `stream` and `log` only read the store: with
+  no record the run refuses in words on standard error (the first 16 digits
+  of the fingerprint), exit 2, nothing on standard output and no connection;
+  a store that doesn't read is exit 3. The store is asked for `elm327://` and
+  `j2534://` only: no public call tells vcan from a car's CAN link before
+  create, so a SocketCAN session opens none and core judges the link at
+  attach. `stream --unlock <ecu>:<level>` (optionally with `--security-store` and
+  `--vehicle`) gives the word once, when the module's conversation is
+  talking, and never again; the `conversation` and `unlock` lines say how
+  core took it.
+- **The app.** `ConsentFlow` (`Bridge.consent`) asks between connect and
+  start, on `elm327://` and `j2534://`: a card on a wide window, a page on a
+  narrow one (a phone's), both showing core's lines, the publisher block, the
+  terms in a plain focusable area and the first 16 digits of the fingerprint
+  (all 64 on request). Neither button is the primary one. Decline, Escape or
+  the page's back arrow, or 120 s of no answer
+  starts the session as data only and is remembered for the run; Allow gives
+  from the store's copy on the worker thread and applies. Settings'
+  Signals page lists each plugin's state and the records, with Withdraw. The
+  Diagnostics page's Unlock... gives the word the row's report showed.
+- **Python.** `ConsentStore`, `consent_lines`, `Plugin.fingerprint`,
+  `.publisher` and `.terms`, and a session's `security_store`,
+  `apply_consent`, `conversation` and `unlock`. `give` takes the terms the
+  person was shown and refuses any other text, so a script gives consent as
+  a named act. An unlock refused for time is `TooSoon`, with the wait.
+
+- **The ABI.**
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | `ecuio_plugin_fingerprint`, `ecuio_plugin_publisher`, `ecuio_plugin_terms`, the consent store's calls, `ecuio_consent_line`, `ecuio_session_apply_consent` and their structs | Additive | New names only; each struct takes the caller's `struct_size` and keeps `reserved` room; `ecuio_consent_line_t` holds pointers to static text |
+  | `ECUIO_ERR_CONSENT_REQUIRED` (23) | Additive | Appended to the status codes |
+  | `ECUIO_PLUGIN_FORMAT_MAX` 2 to 3 | Constant change | The newest manifest format this core reads; one line in `abi/api_changes.txt` |
