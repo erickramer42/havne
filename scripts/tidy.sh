@@ -29,8 +29,9 @@
 #
 # With --qt, the tree is the whole project against that Qt kit (for
 # example C:/Qt/6.12.0/msvc2022_64), so app/ is checked too, and the
-# script generates the app's moc output (the *_autogen targets) before
-# clang-tidy reads the sources; nothing else is built. The app's
+# script generates the app's moc output (the *_autogen targets, configured
+# not to wait for what their targets link) before clang-tidy reads the
+# sources; nothing else is built. The app's
 # Android-only sources (btstream.cpp, androidsession.cpp) aren't in a
 # desktop tree's database, so they aren't checked.
 #
@@ -109,15 +110,21 @@ fi
 if [ -n "$QT_KIT" ] && [ ! -f "$DB" ]; then
     echo "...   configuring $TREE (Ninja, Qt at $QT_KIT, a compile database)" >&2
     cmake -B "$TREE" -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-        -DCMAKE_PREFIX_PATH="$QT_KIT" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null || {
+        -DCMAKE_PREFIX_PATH="$QT_KIT" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DCMAKE_AUTOGEN_ORIGIN_DEPENDS=OFF > /dev/null || {
         echo "configuring $TREE failed: see the top of $0" >&2; exit 2; }
+elif [ -n "$QT_KIT" ] && ! grep -q '^CMAKE_AUTOGEN_ORIGIN_DEPENDS:[A-Z]*=OFF$' "$TREE/CMakeCache.txt"; then
+    cmake "$TREE" -DCMAKE_AUTOGEN_ORIGIN_DEPENDS=OFF > /dev/null || {
+        echo "reconfiguring $TREE failed" >&2; exit 2; }
 elif [ ! -f "$DB" ]; then
     echo "...   configuring $TREE (Ninja, core only, a compile database)" >&2
     cmake -B "$TREE" -G Ninja -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON > /dev/null || {
         echo "configuring $TREE failed: see the top of $0" >&2; exit 2; }
 fi
-# The app's sources include their moc output, which only a build writes
+# The app's sources include their moc output, which only a build writes.
+# CMAKE_AUTOGEN_ORIGIN_DEPENDS=OFF: else each *_autogen target first builds
+# what its target links (core, the CLI: hundreds of objects, unneeded by moc).
 if [ -n "$QT_KIT" ]; then
     autogen=$(ninja -C "$TREE" -t targets all | grep -oE '^[A-Za-z0-9_]+_autogen:' |
         tr -d ':' | sort -u)
