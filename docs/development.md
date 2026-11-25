@@ -664,6 +664,15 @@ with `--qt`, the tree is the whole project against that kit, and the
 script generates only the app's moc output before clang-tidy reads it.
 The app's Android-only sources aren't in a desktop tree, so they aren't
 checked.
+
+A file's clean result is cached in `Testing/tidy-cache/`
+(`scripts/tidy_cache.py`; `HAVNE_TIDY_CACHE` names another folder, `off`
+runs every file), so a second run checks only what changed. The key is the
+file preprocessed by its own compile command, the bytes of every file that
+read, the command, clang-tidy's version and the `.clang-tidy` files: a
+header's change reruns each file that includes it, and a file with a
+warning always runs again. An entry unused for 14 days is deleted.
+
 Another clang-tidy version finds other things, so the script refuses one
 that isn't the pin (an LLVM on PATH, say) unless `CLANG_TIDY_ANY=1`, for
 trying a new pin; `$CLANG_TIDY` names another binary. A warning that is wrong at one line
