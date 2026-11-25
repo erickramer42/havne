@@ -25,6 +25,8 @@ on:
   # seed_upload=true makes a run on any ref upload win-build's compiler
   # cache as the seed that dev's runs upload by default; seed_run=<run id>
   # pins the run whose seed a cold win-build restores (docs/ci.md).
+  # coverage=true and vs_build=true add win-coverage and build-vs to a
+  # lane branch's run, which skips both otherwise.
   workflow_dispatch:
     inputs:
       macos_repeat:
@@ -50,6 +52,12 @@ on:
       coverage:
         description: >-
           Also run win-coverage on a branch other than dev or main (a lane
+          branch's run skips it otherwise)
+        type: boolean
+        default: false
+      vs_build:
+        description: >-
+          Also run build-vs on a branch other than dev or main (a lane
           branch's run skips it otherwise)
         type: boolean
         default: false
@@ -1055,9 +1063,11 @@ jobs:
   # generator, the multi-config layout and /Zi in CI: core, the shared
   # library, the surrogate and the app, in a runner of its own so win-build's
   # shards don't wait on it. It restores Qt as win-build does and never saves.
+  # main's pushes, the PR to main and dev's runs; a lane branch's run only
+  # when asked (-f vs_build=true): its uncached build is CI's longest job
   build-vs:
     needs: scope
-    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || inputs.vs_build) }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
