@@ -85,51 +85,51 @@ template pins them) and linuxdeploy's pinned files (keyed on
 `make-appimage.sh`). The compiler caches (sccache in `win-build`,
 `win-coverage`, `macos-build`, `linux-build`, `core-and-tests`,
 `core-sanitizers` and `fuzz`; the Windows jobs and `linux-build` build with
-Ninja for it) save the same way, except the last three:
+Ninja for it) work differently:
 
 - **Each job's first shard** (`win-coverage`'s gtest leg) saves its
   cache right after the build, before the tests, under the run's own
-  key (`sccache-<job>-2-<run id>`; `win-build`'s is
-  `sccache-win-build-3-<ref slug>-<run id>`), on every ref, when the
-  build compiled 20 or more objects: a warm rerun adds no entry.
-- **A run restores the newest entry it may read:** its branch's own,
-  else `main`'s, since GitHub lets a branch read only its own caches and
-  the default branch's. A lane branch's first run therefore compiles
-  against `main`'s last entry, and its reruns and later commits against
-  its own. `win-build` is the exception, below.
-- **`win-build`'s three tiers.** `main`'s entry is as old as the last
-  release, and dev gets no run of its own that a lane branch could read,
-  so a lane's first run restoring `main`'s compiled most of the tree
-  again (about a quarter of its compiles hit). `win-build` therefore
-  restores only its own branch's newest entry (the key's slug is the
-  ref name with every character outside letters and digits as `_`, so
-  `main`'s entries never match another branch's prefix). With none, each
-  shard downloads dev's newest seed: the `sccache-win-seed` artifact a
-  run on `dev` uploads after its first shard's build (stored without
-  compression, kept 5 days, uploaded only when the build compiled 20 or
-  more objects), unpacked into `SCCACHE_DIR`. With no seed either it
-  builds cold. The step "Seed the compiler cache" prints the tier used
-  (own branch, dev seed, none) and the build step writes it to the run's
-  summary above sccache's statistics. The seed is trusted only from a
-  `ci.yml` run of this repository on `dev`; the dispatch input `seed_run`
-  (a run id) pins another run's, which only someone who can dispatch can
-  set, and `seed_upload=true` makes a run on any ref upload a seed. The
-  job's token has `actions: read` for the download and `actions: write`
-  for the next point.
-- **One entry for each branch:** after its save, the first shard deletes
-  the same ref's older `sccache-win-build-` entries (`gh cache list
-  --ref`, then `gh cache delete`), never another ref's, so the branch
-  holds one entry of about the cache's cap and the shared 10 GB is not
-  filled by reruns. A failed delete does not fail the run.
+  key, when the build compiled 20 or more objects: a warm rerun adds no
+  entry. `win-coverage` keys it `sccache-win-coverage-2-<run id>` and
+  restores the newest it may read (its branch's own, else `main`'s); it
+  runs on `main` and `dev`, and on a lane branch only on request.
+- **A lane branch can't read dev's caches:** GitHub lets a branch read
+  only its own and the default branch's, and `main`'s entries are as old
+  as the last release, so a lane's first run restoring them compiled most
+  of the tree again (about a quarter of its compiles hit on Windows).
+  Every other job therefore restores only its own branch's newest entry
+  (the key's slug is the ref name with every character outside letters
+  and digits as `_`, so no slug is the prefix of another, and `main`'s
+  entries never match another branch's prefix).
+- **The seed:** with no entry of its branch's, each shard downloads dev's
+  newest seed, the job's `sccache-<job>-seed` artifact (`win-build`'s is
+  `sccache-win-seed`, which `win-load` reads too), unpacked into
+  `SCCACHE_DIR`. A run on `dev` uploads it after the first shard's build
+  when that build compiled 20 or more objects (stored without
+  compression, kept 5 days); `seed_upload=true` uploads it from a run on
+  any ref, whatever the build compiled, so a dispatch on `dev` with it
+  makes every seed after a merge that changed only the workflow. With no
+  seed either the job builds cold. The step "Seed the compiler cache"
+  prints the tier used (own branch, a run's seed, none) and the build
+  step writes it to the run's summary above sccache's statistics. A seed
+  is trusted only from a `ci.yml` run of this repository on `dev`; the
+  dispatch input `seed_run` (a run id) pins another run's, which only
+  someone who can dispatch can set. `scripts/ci_sccache.sh` does this for
+  the Linux and macOS jobs, a PowerShell step for `win-build` and
+  `win-load`. The jobs' tokens have `actions: read` for the download.
+- **`win-build`, `macos-build` and `linux-build`** key their entries
+  `sccache-<job>-3-<ref slug>-<run id>` and save on every ref. After its
+  save the first shard deletes the same ref's older entries of its job
+  (`gh cache list --ref`, then `gh cache delete`; `actions: write`), never
+  another ref's, so the branch holds one entry of about the cache's cap
+  and the shared 10 GB is not filled by reruns. A failed delete does not
+  fail the run.
 - **`core-and-tests`, `core-sanitizers` and `fuzz`** key their entries
-  `sccache-<job>-3-<ref slug>-<ISO week>-<run id>` (the slug is the ref
-  name with every character outside letters and digits as `_`, so no slug
-  is the prefix of another). `main` and `dev` save on every run that
-  compiled 20 or more objects. A lane branch saves only when its restore
-  found no entry under its own slug (the restored key tells its own from
-  `main`'s), so its second run builds warm and its later runs add nothing
-  to the shared 10 GB. A pull request only restores. A run restores its
-  own newest entry, else `main`'s of this week, else `main`'s newest.
+  `sccache-<job>-3-<ref slug>-<ISO week>-<run id>`. `main` and `dev` save
+  on every run that compiled 20 or more objects. A lane branch saves only
+  when its restore found no entry of its own, so its second run builds
+  warm and its later runs add nothing to the shared 10 GB. A pull request restores or seeds
+  and never saves.
 - **Each cache is capped** at 500 MB (1 GB for `win-build`: a warm hit
   rate of about 93% needs 700-900 MB of objects).
 - **Why:** an entry for each job and week, frozen once saved and read
