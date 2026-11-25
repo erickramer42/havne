@@ -27,6 +27,7 @@ from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8, with_profile
+from ._conversation import _Talk
 from .conditions import _WHYS, ConditionEvent, ConditionState
 from .errors import Error
 from .export import _whole, checked
@@ -310,7 +311,7 @@ class Recorder:
             return self._closed_state
 
 
-class Session:
+class Session(_Talk):
     """A session on uri (core.h): mock://, replay://, elm327://,
     socketcan:// (Linux), j2534:// (Windows). signals: a SignalFile whose
     profile decodes it; plugin and variant: a Plugin's variant to decode

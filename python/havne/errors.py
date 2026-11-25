@@ -4,7 +4,8 @@
 # What the package raises: core's refusals as Error, carrying the status's
 # number, its name (ECUIO_ERR_BAD_URI is "BAD_URI") and core's detail text,
 # a failed scrub check as CheckFailed (an Error naming the class), a
-# refused expression as ExprRefused (an Error with its place), and the two
+# refused expression as ExprRefused (an Error with its place), an unlock
+# refused for time as TooSoon (an Error with the wait), and the two
 # ways the library itself can fail to load.
 
 from . import _ecuio
@@ -56,6 +57,16 @@ class ExprRefused(Error):
     def __init__(self, status, words, detail="", call="", at=0):
         super().__init__(status, words, detail, call)
         self.at = at
+
+
+class TooSoon(Error):
+    """An unlock refused for time, nothing sent: wait_ms is what is left of the
+    level's delay, or 0 where the module's identity is still being read (ask
+    again shortly)."""
+
+    def __init__(self, status, words, detail="", call="", wait_ms=0):
+        super().__init__(status, words, detail, call)
+        self.wait_ms = wait_ms
 
 
 class LibraryNotFound(ImportError):
