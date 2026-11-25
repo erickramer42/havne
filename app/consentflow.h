@@ -183,6 +183,7 @@ private:
     // The started session's
     ecuio_session_t* m_session = nullptr;
     QVariantList m_ecus;
+    bool m_vehicleNamed = false; // the security store's label was given
     uint32_t m_generations[ECUIO_MAX_CHANNELS] = {};
     bool m_asking[ECUIO_MAX_CHANNELS] = {};
     QVariantList m_conversations;

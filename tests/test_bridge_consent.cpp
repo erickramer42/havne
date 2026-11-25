@@ -348,4 +348,30 @@ TEST(BridgeTest, AnUnlockIsAskedOnceOffTheGuiThread)
     EXPECT_TRUE(disconnectAndWait(bridge));
 }
 
+// No VIN read and no vehicle named: core's refusal is put in the app's
+// words (the picked vehicle, Settings), not the CLI's "label"
+TEST(BridgeTest, AnUnlockWithNoVehicleNamedSaysHowToNameOne)
+{
+    ConsentCase k;
+    SessionBridge bridge;
+    ASSERT_TRUE(k.setUp(bridge));
+    bridge.connectSessionAsync(k.uri());
+    ASSERT_TRUE(waitsForConsent(bridge));
+    bridge.consent()->answer(true);
+    ASSERT_TRUE(connects(bridge));
+    ASSERT_TRUE(talks(bridge, 10000));
+    QString words;
+    bool answered = false;
+    QObject::connect(bridge.consent(), &ConsentFlow::unlockAnswered,
+                     [&](int, bool, const QString& w) {
+                         words = w;
+                         answered = true;
+                     });
+    EXPECT_TRUE(bridge.consent()->unlock(0, 1).value(QStringLiteral("ok")).toBool());
+    ASSERT_TRUE(spinUntil([&]() { return answered; }, 5000, 10));
+    EXPECT_TRUE(words.contains(QLatin1String("Settings, Vehicle"))) << words.toStdString();
+    EXPECT_FALSE(words.contains(QLatin1String("no label was given")));
+    EXPECT_TRUE(disconnectAndWait(bridge));
+}
+
 #endif // _WIN32

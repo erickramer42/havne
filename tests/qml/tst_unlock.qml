@@ -65,7 +65,7 @@ TestCase {
 
     function test_theQuestionShowsCoresTwoLinesInFull() {
         const d = dialog(entry({}))
-        compare(find(d, "unlockTitle").text, "Unlock ECU ecm?")
+        compare(find(d, "unlockTitle").text, "Unlock ECU 0x7E8 (ecm)?")
         // Each line's text is the second child of its column
         compare(find(d, "unlockLine_engine-state").children[1].text,
                 "Keep the engine off and the ignition on.")

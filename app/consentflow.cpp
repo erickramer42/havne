@@ -570,6 +570,7 @@ void ConsentFlow::begin(ecuio_session_t* session, const ConsentNeed& need)
 {
     m_session = session;
     m_ecus = need.talks ? need.ecus : QVariantList{};
+    m_vehicleNamed = !need.label.isEmpty();
     for (uint32_t c = 0; c < ECUIO_MAX_CHANNELS; ++c) {
         m_generations[c] = 0;
         m_asking[c] = false;
@@ -659,7 +660,8 @@ QVariantList ConsentFlow::unlockLines() const
 namespace {
 
 // What the user is told of an unlock core took or refused
-QString unlockWords(ecuio_status_t rc, uint32_t waitMs, const QString& why)
+QString unlockWords(ecuio_status_t rc, uint32_t waitMs, const QString& why,
+                    bool vehicleNamed)
 {
     switch (rc) {
     case ECUIO_OK:
@@ -674,6 +676,16 @@ QString unlockWords(ecuio_status_t rc, uint32_t waitMs, const QString& why)
     case ECUIO_ERR_REPORT_CHANGED:
         return QStringLiteral("Unlock not asked: the module's state changed. "
                               "Look, then try again");
+    case ECUIO_ERR_INVALID_ARGUMENT:
+        // Core's refusal for a module with no identity speaks the CLI's
+        // vocabulary (a label); the app's label is the picked vehicle's
+        if (!vehicleNamed && why.contains(QLatin1String("no label was given"))) {
+            return QStringLiteral(
+                "Unlock refused: nothing names this car. Pick or add the "
+                "vehicle in Settings, Vehicle, or let identification read "
+                "its VIN, then connect again");
+        }
+        [[fallthrough]];
     default:
         return QStringLiteral("Unlock refused: %1").arg(why);
     }
@@ -704,13 +716,14 @@ QVariantMap ConsentFlow::unlock(int channel, int level)
     ecuio_session_t* session = m_session;
     // The report the row showed: core refuses the word if it moved since
     const uint32_t generation = m_generations[channel];
-    post([this, session, channel, level, generation]() {
+    const bool named = m_vehicleNamed;
+    post([this, session, channel, level, generation, named]() {
         m_unlockThread.store(QThread::currentThreadId());
         uint32_t waitMs = 0;
         const ecuio_status_t rc = ecuio_session_security_unlock(
             session, static_cast<uint32_t>(channel),
             static_cast<uint8_t>(level), generation, &waitMs);
-        const QString words = unlockWords(rc, waitMs, detail());
+        const QString words = unlockWords(rc, waitMs, detail(), named);
         QMetaObject::invokeMethod(
             this,
             [this, rc, channel, level, words]() {

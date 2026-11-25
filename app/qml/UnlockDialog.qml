@@ -55,7 +55,9 @@ Rectangle {
             objectName: "unlockTitle"
             Layout.fillWidth: true
             wrapMode: Text.Wrap
-            text: qsTr("Unlock ECU %1?").arg(root.conversation.ecu ?? "")
+            text: root.conversation.rx !== undefined
+                  ? qsTr("Unlock ECU %1 (%2)?").arg(root.hex(root.conversation.rx)).arg(root.conversation.ecu ?? "")
+                  : qsTr("Unlock ECU %1?").arg(root.conversation.ecu ?? "")
             font.weight: Font.DemiBold
             color: Theme.text
         }
