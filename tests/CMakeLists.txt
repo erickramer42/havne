@@ -2174,6 +2174,9 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         if(TARGET havne-cli)   # test_read_pids' ELM327 emulator
             list(APPEND _app_env "HAVNE_CLI=$<TARGET_FILE:havne-cli>")
         endif()
+        if(TARGET cli_unlock_fixture)   # test_consent's unlock plugins
+            list(APPEND _app_env "HAVNE_UNLOCK_FIXTURE=$<TARGET_FILE:cli_unlock_fixture>")
+        endif()
         set_tests_properties(PythonTest.${_app_name} PROPERTIES
             ENVIRONMENT "${_app_env}" SKIP_RETURN_CODE 77 TIMEOUT 180 LABELS "python")
         # The cases that need vcan0 take its lock and the "vcan" label, which

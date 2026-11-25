@@ -50,6 +50,9 @@ which of the file's ECUs took another id, in core's words ("" when none
 did)"""
 
 
+Publisher = collections.namedtuple("Publisher", "name contact license terms_sha256")
+Publisher.__doc__ = """Who stands behind a plugin (format 3): the name, how to reach them,
+the license, and the terms' SHA-256 as 64 hex digits"""
 ExprCheck = collections.namedtuple("ExprCheck", "format depth inputs leaves")
 ExprCheck.__doc__ = """What check_expr found of an expression that compiles:
 format the oldest "havne_signals" whose loader takes it, depth its chain's
@@ -416,6 +419,54 @@ class Plugin:
             check(lib.ecuio_plugin_variant(self._handle, i, buf, len(buf)),
                   "ecuio_plugin_variant")
             self.variants.append(text(buf.raw))
+
+    @property
+    def fingerprint(self):
+        """The SHA-256 of the plugin's contents as 64 lower-case hex digits: what a
+        consent names. A folder and its packed file have one."""
+        out = e.ecuio_plugin_fingerprint_t()
+        out.struct_size = ctypes.sizeof(out)
+        check(lib.ecuio_plugin_fingerprint(self._handle, ctypes.byref(out)),
+              "ecuio_plugin_fingerprint")
+        return bytes(out.fingerprint).hex()
+
+    @property
+    def publisher(self):
+        """The Publisher block of a format 3 plugin, None for one that names none"""
+        out = e.ecuio_plugin_publisher_t()
+        out.struct_size = ctypes.sizeof(out)
+        if lib.ecuio_plugin_publisher(self._handle, ctypes.byref(out)) != e.ECUIO_OK:
+            return None
+        return Publisher(text(out.name), text(out.contact), text(out.license),
+                         bytes(out.terms_sha256).hex())
+
+    @property
+    def terms(self):
+        """The terms a person reads before consenting, whole; None for a plugin
+        that names no publisher"""
+        n = ctypes.c_size_t()
+        if lib.ecuio_plugin_terms(self._handle, None, 0, ctypes.byref(n)) != e.ECUIO_OK:
+            return None
+        buf = ctypes.create_string_buffer(n.value + 1)
+        check(lib.ecuio_plugin_terms(self._handle, buf, len(buf), ctypes.byref(n)),
+              "ecuio_plugin_terms")
+        return buf.raw[:n.value].decode("utf-8", "replace")
+
+    def conversation_ecus(self):
+        """The ECUs a conversation plugin's code talks to, {id: reply CAN ID};
+        empty for a plugin whose code talks to none"""
+        c = e.ecuio_plugin_conversation_t()
+        c.struct_size = ctypes.sizeof(c)
+        if lib.ecuio_plugin_conversation(self._handle, ctypes.byref(c)) != e.ECUIO_OK:
+            return {}
+        out = {}
+        for i in range(c.ecu_count):
+            ecu = e.ecuio_plugin_conversation_ecu_t()
+            ecu.struct_size = ctypes.sizeof(ecu)
+            check(lib.ecuio_plugin_conversation_ecu(self._handle, i, ctypes.byref(ecu)),
+                  "ecuio_plugin_conversation_ecu")
+            out[text(ecu.id)] = ecu.rx_id
+        return out
 
     def pages(self):
         """The Dashboard pages the plugin carries, in the manifest's order:
