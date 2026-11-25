@@ -277,10 +277,18 @@ jobs:
   # a session a test forgets to destroy fails here. The J2534 suites are
   # Windows-only, so this covers core, signals, obd2 and the C ABI check.
   core-sanitizers:
+    name: core-sanitizers (${{ matrix.shard }}/2)
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Two runners, each with its own build, run every second case of ctest
+    # (-I k,,2); the first alone saves the compiler cache and runs the
+    # SocketCAN case as root
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -333,7 +341,7 @@ jobs:
       # Saved before the tests, so a run that fails in them still leaves
       # its objects for the next
       - name: Save the compiler cache
-        if: steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || (github.event_name != 'pull_request' && !startsWith(steps.ccache.outputs.cache-matched-key, format('sccache-core-sanitizers-3-{0}-', env.SCCACHE_REF))))
+        if: matrix.shard == 1 && steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || (github.event_name != 'pull_request' && !startsWith(steps.ccache.outputs.cache-matched-key, format('sccache-core-sanitizers-3-{0}-', env.SCCACHE_REF))))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
@@ -349,17 +357,34 @@ jobs:
           sudo ip link set vcan0 mtu 72
           sudo ip link set up vcan0
 
+      # ctest starts the cases that took longest last time first (its cost
+      # data), so the slowest don't finish the run alone
+      - name: Restore the tests' cost data
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/Testing/Temporary/CTestCostData.txt
+          key: ctest-cost-san-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: ctest-cost-san-${{ matrix.shard }}-
+
       # ECUIO_VCAN_REQUIRED: test_vcan's suites and CliPluginRunTest fail
       # rather than skip without vcan0
       - name: Run tests
         env:
           UBSAN_OPTIONS: print_stacktrace=1
           ECUIO_VCAN_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error -I "${{ matrix.shard }},,2"
+
+      - name: Save the tests' cost data
+        if: success() || failure()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/Testing/Temporary/CTestCostData.txt
+          key: ctest-cost-san-${{ matrix.shard }}-${{ github.run_id }}
 
       # The interface down and up again needs CAP_NET_ADMIN: CI's one run
       # of SocketCanBusTest.TheInterfaceGoingDown...
       - name: SocketCAN as root (the interface down and up)
+        if: matrix.shard == 1
         env:
           UBSAN_OPTIONS: print_stacktrace=1
           ECUIO_VCAN_REQUIRED: '1'
