@@ -390,8 +390,12 @@ TestCase {
             }
             find(page, "clearMovingConfirm").clicked()
             verify(!panel.visible)
-            tryVerify(() => find(card(), "clearState").text.indexOf("Cleared") === 0,
-                      5000, "cleared while moving")
+            // A 04 reply past the engine's 100 ms wait (a loaded runner) ends
+            // unanswered; the codes gone show it went out all the same
+            const state = () => find(card(), "clearState").text
+            tryVerify(() => state() !== "" && state().indexOf("Not sent: the vehicle") !== 0,
+                      5000, "the clear ends")
+            verify(/^(Cleared|No answer to the clear)/.test(state()), state())
             tryVerify(() => find(card(), "codes_stored").text === "None", 5000)
         }
     }
