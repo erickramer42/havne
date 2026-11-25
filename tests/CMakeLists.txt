@@ -357,6 +357,9 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME TidyRatchetTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tidy_ratchet_selftest.py)
     set_tests_properties(TidyRatchetTest.SelfTest PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+    # scripts/tidy_cache.py, clang-tidy's result cache: its command rewrite and include list
+    add_test(NAME TidyCacheTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tidy_cache.py selftest)
     # scripts/filelength_check.py, the file-length ratchet (skip 77 where no git is found)
     add_test(NAME FileLengthTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/filelength_check.py selftest)
