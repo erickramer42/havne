@@ -566,8 +566,11 @@ jobs:
           try {
             $repo = $env:GITHUB_REPOSITORY
             $list = gh api "repos/$repo/actions/artifacts?name=tidy-cache-1&per_page=50" | ConvertFrom-Json
+            # never this run's own: a shard that starts late would find the
+            # others' artifacts and miss its own files
             $ok = @($list.artifacts | Where-Object {
-                -not $_.expired -and "$($_.workflow_run.head_repository_id)" -eq $env:REPO_ID
+                -not $_.expired -and "$($_.workflow_run.head_repository_id)" -eq $env:REPO_ID -and
+                "$($_.workflow_run.id)" -ne $env:GITHUB_RUN_ID
               } | Sort-Object created_at -Descending)
             $pick = @($ok | Where-Object { $_.workflow_run.head_branch -eq $env:BRANCH }) +
                     @($ok | Where-Object { $_.workflow_run.head_branch -eq 'dev' })
