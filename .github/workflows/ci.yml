@@ -507,6 +507,10 @@ jobs:
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 25
+    # actions: read lists and downloads the result caches of earlier runs
+    permissions:
+      contents: read
+      actions: read
     # Three runners each check a third of the files (round robin by name,
     # scripts/tidy.sh's HAVNE_TIDY_SHARD); together they check the whole tree
     strategy:
@@ -545,6 +549,46 @@ jobs:
           if (-not (Test-Path "$prefix\bin\qmake.exe")) { Write-Error "no Qt at $prefix"; exit 1 }
           "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      # clang-tidy's result cache (scripts/tidy_cache.py): the three shards'
+      # artifacts of the newest ci.yml run of this repository on this branch,
+      # else on dev, all three, so a file that moved shard still hits. None to
+      # be had leaves every file to run.
+      - name: Restore clang-tidy's result cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          REPO_ID: ${{ github.repository_id }}
+        run: |
+          $dir = "$env:RUNNER_TEMP\tidy-cache"
+          "HAVNE_TIDY_CACHE=$($dir -replace '\\', '/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $tier = 'none'
+          try {
+            $repo = $env:GITHUB_REPOSITORY
+            $list = gh api "repos/$repo/actions/artifacts?name=tidy-cache-1&per_page=50" | ConvertFrom-Json
+            $ok = @($list.artifacts | Where-Object {
+                -not $_.expired -and "$($_.workflow_run.head_repository_id)" -eq $env:REPO_ID
+              } | Sort-Object created_at -Descending)
+            $pick = @($ok | Where-Object { $_.workflow_run.head_branch -eq $env:BRANCH }) +
+                    @($ok | Where-Object { $_.workflow_run.head_branch -eq 'dev' })
+            foreach ($a in @($pick | Select-Object -First 3)) {
+              $id = $a.workflow_run.id
+              $r = gh api "repos/$repo/actions/runs/$id" | ConvertFrom-Json
+              if ($r.path -ne '.github/workflows/ci.yml' -or $r.head_repository.full_name -ne $repo) { continue }
+              $tmp = "$env:RUNNER_TEMP\tidy-dl"
+              gh run download $id -R $repo -n tidy-cache-1 -n tidy-cache-2 -n tidy-cache-3 -D $tmp
+              Get-ChildItem $tmp -Recurse -File -Filter *.log -ErrorAction SilentlyContinue | Move-Item -Destination $dir -Force
+              $n = (Get-ChildItem $dir -File | Measure-Object).Count
+              if ($n -gt 0) { $tier = "run $id on $($r.head_branch), $n entries"; break }
+            }
+          } catch {
+            Write-Host "result cache download failed: $_"
+          }
+          Write-Host "clang-tidy result cache: $tier"
+          "clang-tidy result cache: $tier" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          (Get-Date).ToUniversalTime().ToString('o') | Out-File "$env:RUNNER_TEMP\tidy-start.txt"
+          exit 0
+
       - name: clang-tidy (core, J2534, surrogate, CLI, app)
         env:
           HAVNE_TIDY_SHARD: ${{ matrix.shard }}/3
@@ -557,6 +601,25 @@ jobs:
             -DevCmdArguments '-arch=x64 -host_arch=x64'
           clang-tidy --version
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
+
+      # Only the entries this shard's run read or wrote go on: one written by
+      # a run that failed is a clean file's, as good as any
+      - name: Keep the entries this run used
+        if: success() || failure()
+        run: |
+          $start = [datetime]::Parse((Get-Content "$env:RUNNER_TEMP\tidy-start.txt"), $null, 'RoundtripKind')
+          Get-ChildItem $env:HAVNE_TIDY_CACHE -File | Where-Object { $_.LastWriteTimeUtc -lt $start } | Remove-Item -Force
+          Write-Host "$((Get-ChildItem $env:HAVNE_TIDY_CACHE -File | Measure-Object).Count) entries kept"
+
+      - name: Upload clang-tidy's result cache
+        if: success() || failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tidy-cache-${{ matrix.shard }}
+          path: ${{ runner.temp }}\tidy-cache
+          retention-days: 5
+          overwrite: true
+          if-no-files-found: ignore
 
   win-build:
     name: win-build (${{ matrix.shard }}/4)

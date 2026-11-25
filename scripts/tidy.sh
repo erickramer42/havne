@@ -34,6 +34,11 @@
 # Android-only sources (btstream.cpp, androidsession.cpp) aren't in a
 # desktop tree's database, so they aren't checked.
 #
+# A file's clean result is cached (scripts/tidy_cache.py, keyed on the file
+# preprocessed, every file it reads, its command, clang-tidy's version and the
+# .clang-tidy files) in $HAVNE_TIDY_CACHE, default Testing/tidy-cache; "off"
+# runs every file. An entry unused for 14 days is deleted.
+#
 # Otherwise nothing needs building first. clang-tidy is the pinned version in
 # .github/clang-tidy-requirements.txt: $CLANG_TIDY, else the venv below,
 # else PATH's. Another version finds other things, so the script refuses
@@ -145,7 +150,12 @@ if [ "$version" != "version $pin" ]; then
     echo "warning: clang-tidy $version, not CI's $pin" >&2
 fi
 mkdir -p "$LOGDIR"
-rm -f "$LOGDIR"/*.log
+rm -f "$LOGDIR"/*.log "$LOGDIR"/*.hit
+CACHE=${HAVNE_TIDY_CACHE:-Testing/tidy-cache}
+PY=python
+command -v python > /dev/null 2>&1 || PY=python3
+salt="$version $(git ls-files -z -- .clang-tidy '*/.clang-tidy' | xargs -0 cat |
+    "$PY" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
 
 root=$(pwd -W 2>/dev/null || pwd)
 # C and C++ sources in the source tree only (app/ in a tree with Qt): the database also lists
@@ -179,11 +189,20 @@ count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 
 start=$SECONDS
 jobs=$(nproc 2>/dev/null || echo 4)
-printf '%s\n' "$files" | xargs -P "$jobs" -I{} sh -c \
-    'rel=${3#"$5"/}; "$1" -p "$2" --quiet "$3" > "$4/$(printf %s "$rel" | tr / _).log" 2>&1' \
-    sh "$TIDY" "$TREE" {} "$LOGDIR" "$root"
-rc=$?
+if [ "$CACHE" = off ]; then
+    printf '%s\n' "$files" | xargs -P "$jobs" -I{} sh -c \
+        'rel=${3#"$5"/}; "$1" -p "$2" --quiet "$3" > "$4/$(printf %s "$rel" | tr / _).log" 2>&1' \
+        sh "$TIDY" "$TREE" {} "$LOGDIR" "$root"
+    rc=$?
+else
+    printf '%s\n' "$files" | xargs -P "$jobs" -I{} sh -c \
+        'rel=${3#"$5"/}; "$6" -I scripts/tidy_cache.py run "$1" "$2" "$3" "$4/$(printf %s "$rel" | tr / _).log" "$7" "$8"' \
+        sh "$TIDY" "$TREE" {} "$LOGDIR" "$root" "$PY" "$CACHE" "$salt"
+    rc=$?
+    find "$CACHE" -name '*.log' -mtime +14 -delete 2> /dev/null
+fi
 dur=$((SECONDS - start))
+cached=$(find "$LOGDIR" -name '*.hit' | wc -l | tr -d ' ')
 
 # A header's warning repeats in every file that includes it: print once.
 # The size checks are judged apart (the baseline), listed in size.txt.
@@ -218,5 +237,5 @@ if ! bash scripts/tidy-size-ratchet.sh "$LOGDIR/size.txt" scripts/tidy-size-base
         "$LOGDIR/checked.txt" "$sharded" "$UPDATE" "$LOGDIR/size-notes.txt"; then
     exit 1
 fi
-printf 'tidy        ok    %4s s  %s files, no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \
-    "$dur" "$count" "$nsized" "$LOGDIR" "$version"
+printf 'tidy        ok    %4s s  %s files (%s from the cache), no warnings; %s size lines, all allowed by the baseline, see %s/size.txt (%s)\n' \
+    "$dur" "$count" "$cached" "$nsized" "$LOGDIR" "$version"
