@@ -22,9 +22,10 @@ on:
   # smoke again. macos_repeat (-f macos_repeat='^BridgeTest\.Replay'
   # [-f macos_repeat_count=200]) runs the matching tests again on macOS
   # until one fails, for a failure seen once there (no Mac on hand).
-  # seed_upload=true makes a run on any ref upload win-build's compiler
-  # cache as the seed that dev's runs upload by default; seed_run=<run id>
-  # pins the run whose seed a cold win-build restores (docs/ci.md).
+  # seed_upload=true makes a run on any ref upload the compiler caches as
+  # the seeds that dev's runs upload by default; seed_run=<run id> pins
+  # the run whose seeds a job with no cache of its own restores
+  # (docs/ci.md).
   # coverage=true and vs_build=true add win-coverage and build-vs to a
   # lane branch's run, which skips both otherwise.
   workflow_dispatch:
@@ -63,15 +64,16 @@ on:
         default: false
       seed_upload:
         description: >-
-          Upload win-build's compiler cache as the sccache-win-seed artifact
-          (a run on dev always does)
+          Upload the compiler caches as the sccache-*-seed artifacts, even
+          from a warm build (a run on dev does when its build compiled 20
+          or more objects)
         type: boolean
         default: false
       seed_run:
         description: >-
-          The id of a ci.yml run of this repository whose sccache-win-seed
-          artifact a win-build with no cache of its own restores (empty:
-          the newest of dev's)
+          The id of a ci.yml run of this repository whose sccache-*-seed
+          artifacts a job with no cache of its own restores (empty: the
+          newest of dev's)
         type: string
         default: ''
 
@@ -169,6 +171,10 @@ jobs:
     if: ${{ needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # actions: read lists and downloads dev's seed artifact
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -187,10 +193,10 @@ jobs:
           "$RUNNER_TEMP/schema/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as linux-build's. Entries are keyed by ISO
-      # week and run, and saved on dev's and main's runs only (a lane
-      # branch or a PR restores what it may read and never saves), when the
-      # build compiled 20 or more objects.
+      # the release publishes, as linux-build's. Entries are keyed by ref,
+      # ISO week and run; saved on dev's and main's runs and on a lane
+      # branch's first (never a PR's), when the build compiled 20 or more
+      # objects. With no entry of its branch's a run takes dev's seed.
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -211,10 +217,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
-          restore-keys: |
-            sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-
-            sccache-core-and-tests-3-main-${{ env.SCCACHE_WEEK }}-
-            sccache-core-and-tests-3-main-
+          restore-keys: sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (scripts/ci_sccache.sh)
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: scripts/ci_sccache.sh seed sccache-core-and-tests-seed
 
       # systemtap-sdt-dev: <sys/sdt.h>, so core carries its USDT probes
       # (ADR-0034 section 4) and ProbeNotesTest runs
@@ -226,6 +239,7 @@ jobs:
             -DPython3_EXECUTABLE="$RUNNER_TEMP/schema/bin/python" \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          echo "Compiler cache tier: $SCCACHE_TIER" >> "$GITHUB_STEP_SUMMARY"
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
@@ -238,6 +252,19 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-core-and-tests-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled
+      - name: Upload the compiler cache as the seed
+        if: ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sccache-core-and-tests-seed
+          path: ${{ runner.temp }}/sccache-cache
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
 
       # ECUIO_SCHEMA_REQUIRED: SchemaFixturesTest fails rather than skips
       # without jsonschema; ECUIO_PYTEST_REQUIRED: PythonTest.* fail
@@ -289,14 +316,18 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # actions: read lists and downloads dev's seed artifact
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as linux-build's. Entries are keyed by ISO
-      # week and run, and saved on dev's and main's runs only (a lane
-      # branch or a PR restores what it may read and never saves), when the
-      # build compiled 20 or more objects.
+      # the release publishes, as linux-build's. Entries are keyed by ref,
+      # ISO week and run; saved on dev's and main's runs and on a lane
+      # branch's first (never a PR's), when the build compiled 20 or more
+      # objects. With no entry of its branch's a run takes dev's seed.
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -317,10 +348,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
-          restore-keys: |
-            sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-
-            sccache-core-sanitizers-3-main-${{ env.SCCACHE_WEEK }}-
-            sccache-core-sanitizers-3-main-
+          restore-keys: sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (scripts/ci_sccache.sh)
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: scripts/ci_sccache.sh seed sccache-core-sanitizers-seed
 
       # can-utils: candump, which CliTransferRunTest.candump logs vcan0
       # with (ECUIO_VCAN_REQUIRED fails it without one)
@@ -334,6 +372,7 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          echo "Compiler cache tier: $SCCACHE_TIER" >> "$GITHUB_STEP_SUMMARY"
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
@@ -346,6 +385,19 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-core-sanitizers-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled
+      - name: Upload the compiler cache as the seed
+        if: matrix.shard == 1 && ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sccache-core-sanitizers-seed
+          path: ${{ runner.temp }}/sccache-cache
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
 
       # The simulated CAN bus, as linux-build brings it up, so the
       # SocketCAN worker and the vcan suites run under the sanitizers too
@@ -420,6 +472,10 @@ jobs:
         fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module
         fuzz_security_store fuzz_sur_reply fuzz_signal_merge fuzz_conversation
         fuzz_guest
+    # actions: read lists and downloads dev's seed artifact
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -441,10 +497,10 @@ jobs:
           clang++ --version
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as linux-build's. Entries are keyed by ISO
-      # week and run, and saved on dev's and main's runs only (a lane
-      # branch or a PR restores what it may read and never saves), when the
-      # build compiled 20 or more objects.
+      # the release publishes, as linux-build's. Entries are keyed by ref,
+      # ISO week and run; saved on dev's and main's runs and on a lane
+      # branch's first (never a PR's), when the build compiled 20 or more
+      # objects. With no entry of its branch's a run takes dev's seed.
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -465,10 +521,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-fuzz-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
-          restore-keys: |
-            sccache-fuzz-3-${{ env.SCCACHE_REF }}-
-            sccache-fuzz-3-main-${{ env.SCCACHE_WEEK }}-
-            sccache-fuzz-3-main-
+          restore-keys: sccache-fuzz-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (scripts/ci_sccache.sh)
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: scripts/ci_sccache.sh seed sccache-fuzz-seed
 
       - name: Build fuzzers (Clang, ASan+UBSan)
         id: build
@@ -481,6 +544,7 @@ jobs:
             -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build-fuzz --target $FUZZERS
+          echo "Compiler cache tier: $SCCACHE_TIER" >> "$GITHUB_STEP_SUMMARY"
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
@@ -493,6 +557,19 @@ jobs:
         with:
           path: ${{ runner.temp }}/sccache-cache
           key: sccache-fuzz-3-${{ env.SCCACHE_REF }}-${{ env.SCCACHE_WEEK }}-${{ github.run_id }}
+
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled
+      - name: Upload the compiler cache as the seed
+        if: ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sccache-fuzz-seed
+          path: ${{ runner.temp }}/sccache-cache
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
 
       # Each harness runs 60 s on one core, as many at once as the runner
       # has cores, each into its own log, from its corpus folder (the
@@ -884,11 +961,12 @@ jobs:
           }
           exit 0
 
-      # The seed: dev's runs (any ref, with seed_upload) keep the cache as
-      # an artifact for a lane branch's first run (docs/ci.md). The entries
-      # are compressed objects already, so the zip stores them.
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled. The entries are compressed objects
+      # already, so the zip stores them.
       - name: Upload the compiler cache as the seed
-        if: matrix.shard == 1 && steps.build.outputs.save == 'true' && (github.ref == 'refs/heads/dev' || inputs.seed_upload)
+        if: matrix.shard == 1 && ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sccache-win-seed
@@ -1342,6 +1420,11 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # actions: read lists and downloads dev's seed artifact; actions: write
+    # deletes this branch's older cache entries
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1406,9 +1489,10 @@ jobs:
           "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as win-build's: the objects are cached
-      # (capped by SCCACHE_CACHE_SIZE) and saved by the first shard under
-      # the run's own key, on every ref, when it compiled 20 or more
+      # the release publishes, as win-build's, with its three tiers (own
+      # branch, dev's seed, cold): the objects are cached (capped by
+      # SCCACHE_CACHE_SIZE) and saved by the first shard under the run's
+      # own key, on every ref, when it compiled 20 or more
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1420,29 +1504,67 @@ jobs:
           echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
+          echo "SCCACHE_REF=${GITHUB_REF_NAME//[^A-Za-z0-9]/_}" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-2-${{ github.run_id }}
-          restore-keys: sccache-macos-build-2-
+          key: sccache-macos-build-3-${{ env.SCCACHE_REF }}-${{ github.run_id }}
+          restore-keys: sccache-macos-build-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (scripts/ci_sccache.sh)
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: scripts/ci_sccache.sh seed sccache-macos-build-seed
 
       - name: Build full app
         id: build
         run: |
           cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache             -DCMAKE_OBJCXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          echo "Compiler cache tier: $SCCACHE_TIER" >> "$GITHUB_STEP_SUMMARY"
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
 
       - name: Save the compiler cache
+        id: save
         if: matrix.shard == 1 && steps.build.outputs.save == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-2-${{ github.run_id }}
+          key: sccache-macos-build-3-${{ env.SCCACHE_REF }}-${{ github.run_id }}
+
+      # One entry for each branch, as win-build keeps
+      - name: Delete this branch's older compiler caches
+        if: matrix.shard == 1 && steps.save.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          scripts/ci_sccache.sh prune "sccache-macos-build-3-$SCCACHE_REF-"
+          "sccache-macos-build-3-$SCCACHE_REF-$GITHUB_RUN_ID"
+
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled
+      - name: Upload the compiler cache as the seed
+        if: matrix.shard == 1 && ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sccache-macos-build-seed
+          path: ${{ runner.temp }}/sccache-cache
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
 
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
@@ -1495,6 +1617,11 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    # actions: read lists and downloads dev's seed artifact; actions: write
+    # deletes this branch's older cache entries
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1557,11 +1684,11 @@ jobs:
           "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
       # sccache from its GitHub release, checked against the SHA-256 that
-      # the release publishes, as win-build's. Each run's first shard saves
-      # its cache under the run's own key after the build, on every ref,
-      # when it compiled 20 or more objects; a run restores the newest it
-      # may read (its branch's, else main's). 500 MB keeps each entry small
-      # inside the 10 GB
+      # the release publishes, as win-build's, with its three tiers (own
+      # branch, dev's seed, cold). Each run's first shard saves its cache
+      # under the run's own key after the build, on every ref, when it
+      # compiled 20 or more objects. 500 MB keeps each entry small inside
+      # the 10 GB
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1573,13 +1700,25 @@ jobs:
           echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=500M" >> "$GITHUB_ENV"
+          echo "SCCACHE_REF=${GITHUB_REF_NAME//[^A-Za-z0-9]/_}" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
+        id: ccache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-2-${{ github.run_id }}
-          restore-keys: sccache-linux-build-2-
+          key: sccache-linux-build-3-${{ env.SCCACHE_REF }}-${{ github.run_id }}
+          restore-keys: sccache-linux-build-3-${{ env.SCCACHE_REF }}-
+
+      # No entry of this branch's: seed the cache from dev's newest artifact
+      # (scripts/ci_sccache.sh)
+      - name: Seed the compiler cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWN_KEY: ${{ steps.ccache.outputs.cache-matched-key }}
+          SEED_RUN: ${{ inputs.seed_run }}
+          REPO_ID: ${{ github.repository_id }}
+        run: scripts/ci_sccache.sh seed sccache-linux-build-seed
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
@@ -1595,6 +1734,7 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python" \
             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_LINKER_TYPE=MOLD
           cmake --build build --target havne test_bridge bench_bridge test_qml havne-cli ecuio
+          echo "Compiler cache tier: $SCCACHE_TIER" >> "$GITHUB_STEP_SUMMARY"
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
           misses=$(sccache --show-stats | awk '/^Cache misses +[0-9]/ {print $3; exit}')
           if [ "${misses:-0}" -ge 20 ]; then echo "save=true"; else echo "save=false"; fi >> "$GITHUB_OUTPUT"
@@ -1602,11 +1742,37 @@ jobs:
       # Saved before the tests, so a run that fails or times out in them
       # still leaves its objects for the next
       - name: Save the compiler cache
+        id: save
         if: matrix.shard == 1 && steps.build.outputs.save == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-2-${{ github.run_id }}
+          key: sccache-linux-build-3-${{ env.SCCACHE_REF }}-${{ github.run_id }}
+
+      # One entry for each branch, as win-build keeps
+      - name: Delete this branch's older compiler caches
+        if: matrix.shard == 1 && steps.save.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          scripts/ci_sccache.sh prune "sccache-linux-build-3-$SCCACHE_REF-"
+          "sccache-linux-build-3-$SCCACHE_REF-$GITHUB_RUN_ID"
+
+      # The seed: dev's runs keep the cache as an artifact for a lane
+      # branch's first run (docs/ci.md); seed_upload uploads it on any ref,
+      # whatever the build compiled
+      - name: Upload the compiler cache as the seed
+        if: matrix.shard == 1 && ((steps.build.outputs.save == 'true' && github.ref == 'refs/heads/dev') || inputs.seed_upload)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sccache-linux-build-seed
+          path: ${{ runner.temp }}/sccache-cache
+          retention-days: 5
+          compression-level: 0
+          if-no-files-found: error
+
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
       # frames (the mock's 16-byte telemetry), whatever the kernel's
