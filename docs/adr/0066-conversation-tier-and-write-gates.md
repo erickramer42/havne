@@ -2331,18 +2331,23 @@ a dump.
   ring and a writer thread; it reads the writer's word before each
   request, so a difference or a failed write ends the run at the next
   request, not at the byte. An end is told only once the unfinished file
-  is gone, a cancel and a close included; a close waits for a seal already
-  under way.
+  is gone, a cancel and a close included; a close joins the writer before
+  it tells the end, so a seal under way runs to its end and the end told
+  is what the folder holds.
 - **A dump's bytes are kept out of every capture as it is written:** a
   `63`'s data after its service and a `76`'s after its block counter are
   zeroes in a recording's frames (flagged `ECUIO_FRAME_FLAG_ACCESS_CUT`)
-  and in the J2534 session log, with their length and SHA-256 in the
-  text, as a seed and a key are; the ELM327 wire log writes each line of a
-  23's or a 36's reply as its length and SHA-256. A recording takes an
+  and in the J2534 session log, with their length in the text; the ELM327
+  wire log writes each line of a 23's or a 36's reply as its length. None
+  names a SHA-256, as a seed's and a key's lines do: a chunk of a few
+  bytes is found from its hash by trying every value, and a run of such
+  chunks is the image. A recording takes an
   `operation` line when a run starts and when it ends
   (`dump,<plan's id>,<reply ID>,<image bytes>,<end>`), never the copy's
   name: the name is a fingerprint of the module's contents, and recordings
-  get shared.
+  get shared. Lines that find the recorder's ring full are carried in
+  their order, a start ahead of its end, and written at the close if they
+  never fit.
 - **An export has two forms:** the file itself (the only one that is still
   a copy), and the raw image as one `.bin` for each range, its start
   address in the name. A file brought back is filed under the name core
