@@ -59,6 +59,7 @@ const char* const ecuio_socketcan_query_keys[] = {
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -76,6 +77,13 @@ static_assert(SOCKETCAN_PROOF_QUIET_US == ECUIO_ISOTP_N_AS_US,
 std::atomic<int64_t> g_vcan_unproven_us{0};
 /* ecuio_socketcan_test_vcan_as_can's: vcan judged a car's link at attach */
 std::atomic<bool> g_vcan_as_can{false};
+
+/* TEST-ONLY: it can only make a vcan link ask consent, never skip one */
+bool vcan_as_can()
+{
+    const char* v = std::getenv("ECUIO_SOCKETCAN_TEST_VCAN_AS_CAN");
+    return g_vcan_as_can.load() || (v != nullptr && std::strcmp(v, "1") == 0);
+}
 
 /* The OS's words for an errno; may throw bad_alloc */
 std::string why(int err)
@@ -650,7 +658,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             }
         }
         /* The driver, not the name, says no car is on it (consent_gate.h) */
-        session->no_car_bus = link.is_vcan() && !g_vcan_as_can.load();
+        session->no_car_bus = link.is_vcan() && !vcan_as_can();
         impl->fd = open_socket(impl.get(), link.index);
         if (impl->fd < 0) {
             ecuio_detail_set("%s: %s", name, why(errno).c_str());
