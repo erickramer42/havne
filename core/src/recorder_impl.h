@@ -86,6 +86,9 @@ struct operation_body {
     char id[32];  /* terminated */
 };
 
+/* Two runs' lines: an end, the next run's start and end carried at once */
+constexpr uint32_t kCarryOperations = 4;
+
 struct timing_body {
     uint64_t host_us;
     ecuio_session_timing_t timing;
@@ -211,8 +214,8 @@ struct ecuio_recorder {
     link_body pending_link{};
     bool modules_pending = false;
     modules_body pending_modules{};
-    bool operation_pending = false;
-    operation_body pending_operation{};
+    uint32_t operations_pending = 0;
+    operation_body pending_operations[kCarryOperations] = {};
     uint64_t timing_next_us = kTimingEveryUs;
 
     /* The recording's set of conditions (NULL: none) and its attach, fixed

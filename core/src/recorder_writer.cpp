@@ -335,8 +335,6 @@ void ecuio_recorder::take_operation(const uint8_t* body, size_t size)
                operation_text(ob.id, ob.rx, ob.bytes, ob.end));
 }
 
-/* The link transition and module states the worker carried and never
- * put, written at the close */
 void ecuio_recorder::take_carried()
 {
     if (link_pending) {
@@ -346,6 +344,10 @@ void ecuio_recorder::take_carried()
     if (modules_pending) {
         take_modules(reinterpret_cast<const uint8_t*>(&pending_modules),
                      sizeof pending_modules);
+    }
+    for (uint32_t i = 0; i < operations_pending; ++i) {
+        take_operation(reinterpret_cast<const uint8_t*>(&pending_operations[i]),
+                       sizeof pending_operations[i]);
     }
 }
 

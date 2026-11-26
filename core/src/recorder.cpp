@@ -215,25 +215,26 @@ bool put_pending_modules(ecuio_recorder_t* r)
     return true;
 }
 
-/* The worker's: a carried operation line into the ring after the carried
- * module states; false while it still doesn't fit */
-bool put_pending_operation(ecuio_recorder_t* r)
+/* All or none, so no line waits behind one already put */
+bool put_pending_operations(ecuio_recorder_t* r)
 {
-    if (!r->operation_pending) {
+    const uint64_t size = sizeof(record_head) + sizeof(operation_body);
+    if (r->operations_pending == 0) {
         return true;
     }
-    const uint64_t size = sizeof(record_head) + sizeof(operation_body);
-    if (!ring_has_room(r, size)) {
+    if (!ring_has_room(r, size * r->operations_pending)) {
         return false;
     }
-    const uint64_t h = r->head.load(std::memory_order_relaxed);
-    const record_head rh{static_cast<uint32_t>(size), kRecordOperation, 0};
-    r->copy_in(h, &rh, sizeof rh);
-    r->copy_in(h + sizeof rh, &r->pending_operation,
-               sizeof r->pending_operation);
-    r->head.store(h + size, std::memory_order_release);
-    r->operation_pending = false;
-    r->put_host_us = (std::max)(r->put_host_us, r->pending_operation.host_us);
+    for (uint32_t i = 0; i < r->operations_pending; ++i) {
+        const operation_body& ob = r->pending_operations[i];
+        const uint64_t h = r->head.load(std::memory_order_relaxed);
+        const record_head rh{static_cast<uint32_t>(size), kRecordOperation, 0};
+        r->copy_in(h, &rh, sizeof rh);
+        r->copy_in(h + sizeof rh, &ob, sizeof ob);
+        r->head.store(h + size, std::memory_order_release);
+        r->put_host_us = (std::max)(r->put_host_us, ob.host_us);
+    }
+    r->operations_pending = 0;
     return true;
 }
 
@@ -242,7 +243,7 @@ bool put_pending_operation(ecuio_recorder_t* r)
 bool put_pending(ecuio_recorder_t* r)
 {
     return put_pending_conditions(r) && put_pending_link(r) &&
-           put_pending_modules(r) && put_pending_operation(r);
+           put_pending_modules(r) && put_pending_operations(r);
 }
 
 } // namespace
@@ -257,10 +258,12 @@ void ecuio_record_operation(ecuio_record_link* link, const char* id,
     if (r == nullptr) {
         return;
     }
-    operation_body& ob = r->pending_operation;
+    /* Carried in order, so a start still waiting goes in before its end */
+    const uint32_t at = (std::min)(r->operations_pending, kCarryOperations - 1);
+    operation_body& ob = r->pending_operations[at];
     ob = operation_body{host_us_now(*link), bytes, rx, end, {}};
     std::snprintf(ob.id, sizeof ob.id, "%s", id);
-    r->operation_pending = true;
+    r->operations_pending = at + 1;
     (void)put_pending(r);
     ecuio_record_unpin(*link);
 }
