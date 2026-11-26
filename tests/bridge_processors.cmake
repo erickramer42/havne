@@ -13,3 +13,7 @@ foreach(_name
         AStopInAPassesSecondCallEndsIt)
     set_tests_properties(RecordingViewTest.${_name} PROPERTIES PROCESSORS 2)
 endforeach()
+
+# A vcan0 user: the bus is shared
+set_tests_properties(BridgeTest.ASocketCanCarLinkWaitsForConsent PROPERTIES
+    RESOURCE_LOCK vcan0)
