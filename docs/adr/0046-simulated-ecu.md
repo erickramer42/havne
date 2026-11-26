@@ -461,3 +461,41 @@ more keys, in the grammar of "a car's pace" above.
   sim refuses `bus=` (`BAD_URI`), since its caller times its frames. The
   worker waits with `ppoll`, to the microsecond, as a frame's time is under
   a millisecond.
+
+## Appendix: the engine ECU's memory (2026-11-26)
+
+[ADR-0066](0066-conversation-tier-and-write-gates.md) section 4 reads a
+module's memory, so the simulated car has one to read
+(`core/src/sim_memory.h`, pure, with the caller's state). Everything in it
+is made up for the simulated car: the address, the bytes and the
+identification texts are no module's.
+
+- **Where:** the engine ECU, while no profile's set answers for it (a
+  `mem=` beside one is `BAD_URI`); `modules=2`'s second module, a
+  profile's DID nodes and an ECU answering from a recording have none
+  (`7F 23 11`). The fakes' ECU (`tests/fake_ecus.h`) answers from the same
+  header, so the ELM327 fake and the fake J2534 DLL hold the same memory.
+- **What:** one region of 64 KiB at `00010000`, each byte a fixed function
+  of its address, with the node's VIN written into it at `00018000`: an
+  image can carry a VIN that no scrub of a recording reaches. In the
+  extended session, once a security level is unlocked, service 23 reads it
+  by address and services 35, 36 and 37 upload it in blocks (1,024 data
+  bytes by default). DIDs `D220` and `D221` answer a hardware and a
+  software text in the session with no unlock.
+- **A read's refusals:** outside the session `7F 23 7F`; a request that
+  isn't its format's length, 13; a zero size or any byte outside the
+  region, 31; locked, 33; a reply longer than one ISO-TP message, 14.
+- **`mem=<fault>:<n>[,...]`** breaks a read on request, each fault once in
+  the key: `short`, `flip` and `refuse` make every nth data reply (a `63`
+  or a `76`) one byte short, one bit wrong or `7F <service> 22`, the wrong
+  bit another on each pass, so two readings back to back never agree on a
+  wrong byte; `seq` gives every nth `76` the wrong counter; `relock` locks
+  security again once the nth data reply is made; `ident` has `D221`
+  answer another text from the nth data reply on; `volatile:<hex offset>`
+  makes one byte read differently every time; `block:<hex>` is the block
+  length an upload's `75` names. The fake DLL takes the same words from
+  `ECUIO_FAKE_MEM`.
+
+`SimMemoryTest` and `FakeMemoryTest` pin the header, the session and the
+fakes; `SimMemoryBusTest` (on `vcan`) reads it through the kernel's
+ISO-TP.
