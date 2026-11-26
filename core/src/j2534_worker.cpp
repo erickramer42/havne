@@ -453,26 +453,24 @@ void take_reply(ecuio_j2534_transport* t, worker_state& w,
     j2534_hold_answered(w.hold, &e, o.chan);
 }
 
-/* Read first, then expire: a reply that reached the adapter after the
- * last read and by its deadline answers its request, though the worker
- * comes to the wait late (a host held up, a vendor whose empty read
- * returns at once). One read for each channel at most, until one is
- * empty; a read of 1 ms, since 0 asks for none that waits (the VX holds
- * it 50 ms) */
+/* Read first, then expire: a reply the adapter holds answers its wait,
+ * though the worker comes late. One 1 ms read per channel at most, until
+ * one is empty (0 waits on none; the VX holds it 50 ms) */
 void read_before_expiry(ecuio_j2534_transport* t, worker_state& w)
 {
     if (!ecuio_engine_wait_unread(&w.e, w.read_us, engine_now_us(t))) {
         return;
     }
-    for (uint32_t k = 0; k < t->chan_count; ++k) {
+    bool empty = false;
+    for (uint32_t k = 0; k < t->chan_count && !empty; ++k) {
         const read_outcome o = pump_one(t, 1);
         take_reply(t, w, o);
         update_health(w.h, o, false);
-        if (!o.got) {
-            break;
-        }
+        empty = !o.got;
     }
-    w.read_us = engine_now_us(t);
+    if (empty) {
+        w.read_us = engine_now_us(t);
+    }
 }
 
 void pass_start(ecuio_j2534_transport* t, worker_state& w)
