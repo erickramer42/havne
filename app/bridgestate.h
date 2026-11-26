@@ -247,8 +247,10 @@ struct BridgeState
     std::vector<uint16_t> m_absentIds;
     uint32_t m_identityGeneration[ECUIO_MAX_CHANNELS] = {};
     uint32_t m_diagnosticsGeneration[ECUIO_MAX_CHANNELS] = {};
-    // A clear asked of each channel, its outcome not yet logged
+    // A clear asked of each channel, its outcome not yet logged, and the
+    // generation it was asked at (cli::clear_settled)
     bool m_clearAsked[ECUIO_MAX_CHANNELS] = {};
+    uint32_t m_clearAskedGeneration[ECUIO_MAX_CHANNELS] = {};
     // A clear that stopped at the vehicle speed, waiting for the word on
     // a moving vehicle: the generation it ended on, the speed it read
     // (UINT32_MAX: none)

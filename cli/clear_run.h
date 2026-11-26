@@ -111,15 +111,6 @@ inline const char* clear_refused_word(ecuio_status_t st)
     return st == ECUIO_ERR_REPORT_CHANGED ? "report-changed" : "not-asked";
 }
 
-/* Whether d holds the outcome of a clear asked at report generation
- * asked: the worker takes a clear by moving the generation on with the
- * outcome none, which it stays while the clear runs (ECUIO_DIAG_CLEARING),
- * and settles it by moving it on again with an outcome */
-inline bool clear_settled(const ecuio_channel_diagnostics_t& d, uint32_t asked)
-{
-    return d.generation > asked && d.clear != ECUIO_CLEAR_NONE;
-}
-
 /* Whether the ECU's report is read again after the outcome: a 44, or no
  * answer to 04 (which may still have cleared) */
 inline bool clear_reads_again(uint8_t outcome)
