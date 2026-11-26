@@ -332,6 +332,10 @@ int run_stream(const StreamArgs& args)
     ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st = create_consented(out, args.uri, &session, &detail);
+    if (st != ECUIO_OK && consent_refused_exit() >= 0) {
+        ecuio_condition_set_free(conditions);
+        return consent_refused_exit();
+    }
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
         ecuio_condition_set_free(conditions);

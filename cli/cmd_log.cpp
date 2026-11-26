@@ -223,6 +223,10 @@ int log_connect(Output& out, const cli::LogArgs& args, LogRun& r)
     std::string detail;
     ecuio_status_t st = create_consented(out, args.uri, &session, &detail,
                                          /*start_first=*/true);
+    if (st != ECUIO_OK && consent_refused_exit() >= 0) {
+        ecuio_condition_set_free(conditions);
+        return consent_refused_exit();
+    }
     if (st != ECUIO_OK) {
         ecuio_condition_set_free(conditions);
         write_start(out);

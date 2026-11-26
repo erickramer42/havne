@@ -232,6 +232,43 @@ def run_case(cli, package):
     return 0
 
 
+def vcan_case(cli, package):
+    """No car is on vcan: core binds unasked, so no store is read"""
+    iface = os.environ.get("ECUIO_VCAN_IF", "vcan0")
+    if not os.path.exists(f"/sys/class/net/{iface}"):
+        if os.environ.get("ECUIO_VCAN_REQUIRED") == "1":
+            print(f"FAIL  no {iface}")
+            return 1
+        print(f"skipped: no {iface}")
+        return 77
+    sim = subprocess.Popen([cli, "sim", "mock://sim?values=canned", "--on",
+                            iface, "--seconds", "30"],
+                           stdout=subprocess.PIPE, text=True)
+    try:
+        for line in sim.stdout:
+            if json.loads(line)["type"] in ("sim", "error"):
+                break
+        with tempfile.TemporaryDirectory(prefix="havne-cli-consent-vcan-") as d:
+            bad = os.path.join(d, "bad.json")
+            with open(bad, "w", encoding="utf-8") as f:
+                f.write("not a store")
+            uri = (f"socketcan://{iface}?profile=plugin.talker3.base"
+                   "&identify=0&diagnose=0")
+            code, out, err = run(cli, ["stream", uri, "--plugin", package,
+                                       "--consent-store", bad, "--count", "1"])
+    finally:
+        sim.terminate()
+        sim.wait(timeout=10)
+    session = [r for r in rows_of(out) if r.get("type") == "session"
+               and "ecu" not in r]
+    if code != 0 or len(session) != 1 or "consent" in session[0] \
+            or "consent" in err:
+        print(f"FAIL  a vcan run: exit {code} {session!r} {err!r}")
+        return 1
+    print("ok    vcan runs with no store read")
+    return 0
+
+
 def unlock_stream(cli, package, consent, security, folder):
     """stream --unlock pcm:01 for 8 s on an emulator of its own, the
     exchanges logged in a temporary folder of its own: (exit, rows,
@@ -326,6 +363,8 @@ def main(argv):
         return unlock_case(argv[2], argv[3])
     if len(argv) == 4 and argv[1] == "run":
         return run_case(argv[2], argv[3])
+    if len(argv) == 4 and argv[1] == "vcan":
+        return vcan_case(argv[2], argv[3])
     if len(argv) >= 5 and argv[1] == "terms":
         return terms_case(argv[2], argv[3], argv[4], "--update" in argv[5:])
     if len(argv) == 4 and argv[1] == "store":
