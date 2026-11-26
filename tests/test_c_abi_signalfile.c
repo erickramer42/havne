@@ -45,6 +45,16 @@ static int expr_names_fail(void)
            count != 0u;
 }
 
+/* The module a def is read on, from C: obd2's first def is the engine's
+ * and a copy of it is no def of the set: 1 on a failure */
+static int def_module_fail(void)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    ecuio_signal_def_t copy = obd2->defs[0];
+    return ecuio_signal_set_def_module(obd2, &obd2->defs[0]) != 0u ||
+           ecuio_signal_set_def_module(obd2, &copy) != ECUIO_SIGNAL_MODULE_NONE;
+}
+
 int c_abi_signalfile(void)
 {
     {
@@ -169,7 +179,7 @@ int c_abi_signalfile(void)
                 strcmp(name, "volts") != 0 ||
                 ecuio_signal_file_expr_ref(file, volts, name, 5) !=
                     ECUIO_ERR_INVALID_ARGUMENT ||
-                expr_names_fail()) {
+                expr_names_fail() || def_module_fail()) {
                 ecuio_signal_file_free(file);
                 return 1;
             }

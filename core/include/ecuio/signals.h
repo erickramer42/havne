@@ -1286,6 +1286,27 @@ ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
                                      uint32_t count, const char* text_utf8,
                                      uint32_t* index);
 
+/* No module: a def read on none of a set's channels */
+#define ECUIO_SIGNAL_MODULE_NONE 0xFFFFFFFFu
+
+/*
+ * The module def is read on: its place in set's channels (the order
+ * ecuio_signal_file_module gives a file's modules in). A def a session
+ * asks for (a 41 <PID> or 62 <DID> key) is read where its request goes,
+ * by the rule a session enrols it by: the channel whose reply ID is its
+ * frame's, else channel 0. A def nothing asks is read on the channel
+ * whose reply ID is its frame's. A computed def is read on the module
+ * every number def under it is read on, through any chain, when they
+ * share one. ECUIO_SIGNAL_MODULE_NONE for a def nothing asks on no
+ * declared channel, a computed def whose inputs are read on two modules
+ * or none, a set that declares no channel, a def that isn't one of
+ * set's (another set's, or a copy) and a NULL argument. Reads the set
+ * alone; a computed def allocates a byte for each def of set (NONE when
+ * that fails). Any thread while the set lives.
+ */
+uint32_t ecuio_signal_set_def_module(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_def_t* def);
+
 /* ---- A merged set's parts (ADR-0065 section 9) ----
  * A set made of several files read together, in the order given: its
  * written form is a format 3 file with "parts", which names each part,

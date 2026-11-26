@@ -452,6 +452,7 @@ ECUIO_SIGNAL_GROUP_OXYGEN = 4
 ECUIO_SIGNAL_GROUP_VEHICLE = 6
 ECUIO_SIGNAL_KEY_LEN = 32
 ECUIO_SIGNAL_KEY_MAX = 31
+ECUIO_SIGNAL_MODULE_NONE = 0xffffffff
 ECUIO_SIGNAL_PART_NONE = 0xffffffff
 ECUIO_SIGNAL_SET_LAYOUT = 5
 ECUIO_SIGNAL_SET_MAX_BYTES = 0x400000
@@ -2104,6 +2105,7 @@ FUNCTIONS = {
     'ecuio_signal_file_source': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_source_t)]),  # signals.h
     'ecuio_signal_file_text': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(c_size_t)]),  # signals.h
     'ecuio_signal_group_name': (c_char_p, [c_uint32]),  # signals.h
+    'ecuio_signal_set_def_module': (c_uint32, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_set_find': (c_int, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_key_t), c_uint32, c_char_p, POINTER(c_uint32)]),  # signals.h
     'ecuio_signal_set_keys': (c_int, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_key_t), c_uint32, POINTER(c_uint32)]),  # signals.h
     'ecuio_sim_ask': (c_int, [POINTER(ecuio_sim_t), c_uint32, POINTER(c_uint8), c_uint32, c_int64, POINTER(ecuio_sim_reply_t), c_uint32, POINTER(c_uint32)]),  # sim.h
