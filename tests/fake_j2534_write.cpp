@@ -192,7 +192,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
      * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
      * bytes; Service 0x27 of any length (the engine ECU's security
-     * access): the adapter-framed logical message. With
+     * access) and 0x23 (its memory): the adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
      * Everything else keeps the deterministic echo semantics. */
@@ -208,7 +208,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                                        req[4] == 0x10 || req[4] == 0x3E)) ||
                            (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
-                           (n >= 5 && req[4] == 0x27) ||
+                           (n >= 5 && (req[4] == 0x27 || req[4] == 0x23)) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
                                        req[4] == 0x07 || req[4] == 0x0A)));
 

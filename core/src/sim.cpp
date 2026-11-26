@@ -293,6 +293,10 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
         }
         s->node_count = 1 + static_cast<int>(p.modules.count);
     }
+    if (!s->nodes[0].from_set && s->ecu.recording == nullptr) {
+        /* the engine ECU with security access has memory to read */
+        s->nodes[0].session.memory.vin = s->ecu.config.vin;
+    }
     if (config.gateway.given) {
         build_gateway(s, s->ecu.config.gateway); /* the sim's, kept */
     }

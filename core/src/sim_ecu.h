@@ -14,6 +14,9 @@
 // silence leaves it, and DIDs D200-D203 answer only in it. In that
 // session it has security access too (ADR-0066 section 2.7,
 // sim_security.h): 27 unlocks a level, and DID D210 answers once one is.
+// Unlocked, it has memory to read by address (sim_memory.h): 23 answers a
+// made-up region's bytes, and two identification DIDs answer in the
+// session.
 // sessions=1 gives a profile's modules the extended session as well (no
 // security access), so a session can be held on many modules at once.
 // replay://: a recording's replies at the ECU's time since it started
@@ -40,6 +43,7 @@
 #include "sim_canned.h"
 #include "sim_faults.h"
 #include "recording_stretch.h"
+#include "sim_memory.h"
 #include "sim_recording.h"
 #include "sim_security.h"
 #include "sim_timing.h"

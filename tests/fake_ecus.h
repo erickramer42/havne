@@ -6,13 +6,15 @@
 // module of the fake's own that answers Service 0x22 from its rows, an
 // ECU that isn't on the car, each ECU's diagnostic session (ADR-0060)
 // and security access (ADR-0066 section 2.7, core/src/sim_security.h,
-// the simulated ECU's own), and answer_for(), the one answer the fake
+// the simulated ECU's own), its memory (core/src/sim_memory.h, the
+// simulated ECU's too), and answer_for(), the one answer the fake
 // J2534 DLL, the fake ELM327 and the simulated bus's ECU all give.
 
 #ifndef ECUIO_TESTS_FAKE_ECUS_H
 #define ECUIO_TESTS_FAKE_ECUS_H
 
 #include "fake_ecu.h"
+#include "sim_memory.h"   /* core/src: the simulated ECU's, shared */
 #include "sim_security.h" /* core/src: the simulated ECU's, shared */
 
 #include <atomic>
@@ -208,7 +210,10 @@ inline void reset_sessions()
  * in its extended session, a state for each reply ID, locked again by
  * every 10 01 and 10 03 it answers. kGatedDid answers only once a level
  * is unlocked (7F 22 33 before it, in the session). The lockout's delay
- * runs on the steady clock, since the fakes keep none of their own. */
+ * runs on the steady clock, since the fakes keep none of their own.
+ * Its memory is the simulated ECU's as well (sim_memory.h): the region
+ * read by 23 once unlocked, holding kVin, and the two identification
+ * DIDs in the session. */
 constexpr uint16_t kGatedDid = ECUIO_SIM_GATED_DID;
 
 /* The lockout's delay in milliseconds, a knob: 0 is the simulated ECU's
@@ -232,6 +237,7 @@ inline std::atomic<bool>& security_strict()
 struct SecuritySlot {
     uint32_t rx = 0;
     ecuio_sim_security state;
+    ecuio_sim_memory memory;
 };
 
 struct SecurityTable {
@@ -245,22 +251,30 @@ inline SecurityTable& security_table()
     return table;
 }
 
-/* rx's state, a free slot taken (take) for a reply ID not seen yet;
- * NULL when it has none. The caller holds the table's mutex. */
-inline ecuio_sim_security* security_of(SecurityTable& t, uint32_t rx, bool take)
+/* rx's slot, a free one taken (take) for a reply ID not seen yet; NULL
+ * when it has none. The caller holds the table's mutex. */
+inline SecuritySlot* slot_of(SecurityTable& t, uint32_t rx, bool take)
 {
     for (SecuritySlot& s : t.slots) {
         if (s.rx == rx) {
-            return &s.state;
+            return &s;
         }
     }
     for (SecuritySlot& s : t.slots) {
         if (take && s.rx == 0) {
             s.rx = rx;
-            return &s.state;
+            s.memory.vin = kVin;
+            return &s;
         }
     }
     return nullptr;
+}
+
+/* rx's security state, as slot_of */
+inline ecuio_sim_security* security_of(SecurityTable& t, uint32_t rx, bool take)
+{
+    SecuritySlot* s = slot_of(t, rx, take);
+    return s != nullptr ? &s->state : nullptr;
 }
 
 /* Every ECU locked, no wrong key counted and no delay running */
@@ -289,32 +303,47 @@ inline void security_between(uint32_t rx)
     }
 }
 
-/* The engine ECU on rx's answer to a 27 request or to 22 <kGatedDid>,
- * into out; the length, 0 when it is neither (or the DID outside the
+/* The engine ECU on rx's answer to a 27 request, to 22 <kGatedDid>, to
+ * a memory read or to an identification DID, into out (kReplyMax
+ * bytes); the length, 0 when it is none of them (or a DID outside the
  * extended session, where answer() refuses it as any DID it lacks).
  * lock: a session request was answered, and the unlock goes with it. */
 inline size_t security_answer(uint32_t rx, const unsigned char* req,
                               size_t req_len, bool lock, unsigned char* out)
 {
+    static_assert(ECUIO_SIM_MEMORY_REPLY_MAX <= kReplyMax,
+                  "a memory read's longest reply fits the fakes' answer");
     const bool access = req_len >= 1 && req[0] == 0x27;
-    const bool gated =
-        req_len == 3 && req[0] == 0x22 &&
-        static_cast<uint16_t>((req[1] << 8) | req[2]) == kGatedDid;
-    if (!lock && !access && !gated) {
+    const bool memory = req_len >= 1 && ecuio_sim_memory_service(req[0]);
+    const uint16_t did = req_len == 3 && req[0] == 0x22
+                             ? static_cast<uint16_t>((req[1] << 8) | req[2])
+                             : 0;
+    const bool gated = did == kGatedDid;
+    const bool ident =
+        did == ECUIO_SIM_HARDWARE_DID || did == ECUIO_SIM_SOFTWARE_DID;
+    if (!lock && !access && !gated && !memory && !ident) {
         return 0;
     }
     SecurityTable& t = security_table();
     const std::lock_guard<std::mutex> guard(t.m);
-    ecuio_sim_security* s = security_of(t, rx, !lock);
-    if (s == nullptr) {
+    SecuritySlot* slot = slot_of(t, rx, !lock);
+    if (slot == nullptr) {
         return 0;
     }
+    ecuio_sim_security* s = &slot->state;
     if (lock) {
         ecuio_sim_security_lock(*s);
         return 0;
     }
     if (gated) {
         return ecuio_sim_security_did(*s, in_extended(rx), out);
+    }
+    if (ident) {
+        return ecuio_sim_memory_did(slot->memory, in_extended(rx), did, out);
+    }
+    if (memory) {
+        return ecuio_sim_memory_answer(slot->memory, *s, in_extended(rx), req,
+                                       static_cast<uint32_t>(req_len), out);
     }
     const unsigned ms = security_delay_ms().load();
     const int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -332,7 +361,8 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
  * nothing, any other value is the code. 10 and 3E (two bytes) are the
  * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
  * 27 and kGatedDid are the engine ECU's security access, strict under
- * security_strict(); a module refuses 27 as any service it lacks.
+ * security_strict(); a memory read and the identification DIDs are its
+ * memory's; a module refuses 27 and 23 as any service it lacks.
  * False when nothing answers, as for every request to absent_ecu(). */
 inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
                        long unsupported_nrc, unsigned char* out,

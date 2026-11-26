@@ -187,7 +187,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_j2534_hold.cpp test_j2534_hold_session.cpp test_j2534_hold_key.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
-    test_sim_gateway_view.cpp
+    test_sim_gateway_view.cpp test_sim_memory.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp)
 
@@ -299,6 +299,8 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # pace doesn't wait on another's (SocketCanTurnsTest).
 # test_vcan_conversation.cpp: a plugin's module bound to a session,
 # unlocking the simulated ECU (SocketCanConversationTest).
+# test_vcan_memory.cpp: the simulated ECU's memory read through the
+# kernel's ISO-TP socket (SimMemoryBusTest).
 # RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
 # every session's ID filter; every vcan0 user takes the lock, so they run
 # one at a time while the rest of the suite runs beside them.
@@ -308,7 +310,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests_close.cpp
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
                    test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
-                   test_vcan_conversation.cpp test_vcan_gateway.cpp)
+                   test_vcan_conversation.cpp test_vcan_gateway.cpp
+                   test_vcan_memory.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
