@@ -372,3 +372,15 @@ void SessionBridge::releaseTogether(bool all)
         m_together = {};
     }
 }
+
+QString SessionBridge::vehicleSetText(const QString& profile) const
+{
+    const ecuio_signal_set_t* set = nullptr;
+    const QByteArray name = profile.toUtf8();
+    if (ecuio_profile_lookup(name.constData(), &set) != ECUIO_OK) {
+        return {};
+    }
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(togetherFileOf(set), &length);
+    return QString::fromUtf8(text, static_cast<qsizetype>(length));
+}

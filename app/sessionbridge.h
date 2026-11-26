@@ -444,6 +444,8 @@ public:
     Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
     // pages: [{ name, cells }], the Dashboard's, cells as setPickGauges takes them
     Q_INVOKABLE QVariantMap roomHolders(const QVariantList& pages) const;
+    // The registered profile's merged file's text, "" for any other profile
+    Q_INVOKABLE QString vehicleSetText(const QString& profile) const;
     Q_INVOKABLE QVariantMap vehicleSet(const QStringList& picks,
                                        const QString& own,
                                        const QString& label = QString());

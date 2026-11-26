@@ -15,6 +15,8 @@
 #include <limits>
 
 #include "exprcheck.h"
+#include "sessionbridge.h"
+#include "bridge_support.h"
 
 namespace {
 
@@ -263,4 +265,82 @@ TEST(BridgeTest, ExprAnAgeBeyondTheRangeStillEvaluates)
     EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
     EXPECT_FALSE(r.value(QStringLiteral("hasValue")).toBool());
     EXPECT_EQ(r.value(QStringLiteral("why")).toString(), QStringLiteral("stale"));
+}
+
+// The form's needs: the names its expressions read, as written, each once
+TEST(BridgeTest, ExprReadNamesGivesNeedsForTheForm)
+{
+    ExprEditor editor;
+    const QVariantMap r = editor.readNames(
+        QStringLiteral("boost * 2 + obd2.map - boost + max(sec, 3)"));
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("names")).toStringList(),
+              (QStringList{"boost", "obd2.map", "sec"}))
+        << "no function's name, no number";
+    const QVariantMap bad = editor.readNames(QStringLiteral("boost +"));
+    EXPECT_FALSE(bad.value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(bad.value(QStringLiteral("words")).toString().isEmpty());
+    EXPECT_TRUE(bad.value(QStringLiteral("names")).toStringList().isEmpty());
+}
+
+// Against the vehicle's set, an expression reads another part's key and
+// the Insert list holds every part's signals; "" goes back to the own file
+TEST(BridgeTest, ExprChecksAgainstTheVehiclesSet)
+{
+    SettingsDirScope dir;
+    SessionBridge bridge;
+    const auto keep = [&bridge](const char* name, const char* key,
+                                const char* did) {
+        const QVariantMap r = bridge.keepSignalText(
+            QStringLiteral(
+                R"({"havne_signals":1,"name":"%1","source":{"name":"t"},)"
+                R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[{"key":"%2",)"
+                R"("name":"N %2","read":{"service":"22","number":"%3"},)"
+                R"("field":{"byte":0}}]})")
+                .arg(QLatin1String(name), QLatin1String(key),
+                     QLatin1String(did)),
+            {}, {}, {});
+        return r.value(QStringLiteral("profiles")).toStringList().value(0);
+    };
+    const QString mine = keep("Mine", "mine", "D100");
+    const QString theirs = keep("Theirs", "theirs", "D200");
+    const QString profile =
+        bridge.vehicleSet({QStringLiteral("obd2"), mine, theirs}, mine)
+            .value(QStringLiteral("profile"))
+            .toString();
+    ExprEditor editor;
+    ASSERT_TRUE(
+        editor
+            .setFile(QStringLiteral(
+                R"({"havne_signals":2,"name":"Mine","extends":"obd2",)"
+                R"("source":{"name":"t"},"ecus":[{"id":"pcm","rx":"7E8"}],)"
+                R"("signals":[{"key":"mine","name":"N mine","read":)"
+                R"({"service":"22","number":"D100"},"field":{"byte":0}}]})"))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    EXPECT_FALSE(editor.check({}, QStringLiteral("mine + theirs"))
+                     .value(QStringLiteral("ok"))
+                     .toBool())
+        << "the own file alone has no 'theirs'";
+    const QString text = bridge.vehicleSetText(profile);
+    ASSERT_FALSE(text.isEmpty());
+    EXPECT_TRUE(bridge.vehicleSetText(QStringLiteral("obd2")).isEmpty());
+    ASSERT_TRUE(
+        editor.setVehicleFile(text).value(QStringLiteral("ok")).toBool());
+    const QVariantMap r =
+        editor.check({}, QStringLiteral("mine + theirs + obd2.rpm"));
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    QStringList refs;
+    for (const QVariant& n : editor.names()) {
+        refs << n.toMap().value(QStringLiteral("ref")).toString();
+    }
+    EXPECT_TRUE(refs.contains(QStringLiteral("theirs")));
+    EXPECT_TRUE(refs.contains(QStringLiteral("mine")));
+    ASSERT_TRUE(editor.setVehicleFile({}).value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(editor.check({}, QStringLiteral("mine + theirs"))
+                     .value(QStringLiteral("ok"))
+                     .toBool())
+        << "back to the own file";
+    removeEveryPlugin(bridge);
 }
