@@ -397,3 +397,47 @@ TEST(ConsentSessionTest, ApplyIsRefusedWhileARecorderIsAttached)
     EXPECT_NE(recorded_events(b, "consent_after").find("\nconsent  "),
               std::string::npos);
 }
+
+TEST(ConsentSessionTest, TheSessionSaysWhetherAPartWantsConsent)
+{
+    using conversation_session::wants_consent;
+    Store store("consent-session-wants.json");
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, made3()));
+    EXPECT_EQ(wants_consent(b.session.get()), 1u);
+    ASSERT_EQ(ecuio_consent_store_give(store.store, b.plugin.get(), kUtc),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_apply_consent(b.session.get(), store.store,
+                                          bytes_of(print_of(b.plugin.get()))),
+              ECUIO_OK);
+    EXPECT_EQ(wants_consent(b.session.get()), 0u);
+
+    for (const char* uri : {"mock://x", "replay://x"}) {
+        Bound none;
+        ASSERT_NO_FATAL_FAILURE(make_session(&none, made3(), uri));
+        EXPECT_EQ(wants_consent(none.session.get()), 0u) << uri;
+    }
+    Bound two;
+    ASSERT_NO_FATAL_FAILURE(make_session(&two, made()));
+    EXPECT_EQ(wants_consent(two.session.get()), 0u);
+    {
+        DoorOpen open;
+        Bound door;
+        ASSERT_NO_FATAL_FAILURE(make_session(&door, made3()));
+        EXPECT_EQ(wants_consent(door.session.get()), 0u);
+    }
+    ecuio_session_t* plain = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://x", &plain), ECUIO_OK);
+    EXPECT_EQ(wants_consent(plain), 0u);
+    ecuio_session_destroy(plain);
+
+    Bound closed;
+    ASSERT_NO_FATAL_FAILURE(make_session(&closed, made3()));
+    ASSERT_EQ(ecuio_session_close(closed.session.get()), ECUIO_OK);
+    uint32_t out = 7;
+    EXPECT_EQ(ecuio_session_wants_consent(closed.session.get(), &out),
+              ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(out, 0u);
+    EXPECT_EQ(ecuio_session_wants_consent(closed.session.get(), nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+}

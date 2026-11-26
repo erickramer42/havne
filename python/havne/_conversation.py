@@ -58,6 +58,14 @@ class _Talk:
         check(lib.ecuio_session_apply_consent(self._handle(), store._handle(), fingerprint),
               "ecuio_session_apply_consent")
 
+    @property
+    def wants_consent(self):
+        """True while a module of the plugin would bind but for a consent"""
+        out = ctypes.c_uint32()
+        check(lib.ecuio_session_wants_consent(self._handle(), ctypes.byref(out)),
+              "ecuio_session_wants_consent")
+        return out.value == 1
+
     def _channel_of(self, ecu):
         """A channel by number, or by the plugin's id for the ECU"""
         if isinstance(ecu, int):

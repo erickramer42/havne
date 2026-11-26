@@ -2225,6 +2225,7 @@ FUNCTIONS = {
     'ecuio_session_set_focus_with': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
+    'ecuio_session_wants_consent': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint32)]),  # plugin.h
     'ecuio_shutdown': (None, []),  # core.h
     'ecuio_signal_address_key': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_signal_key_t)]),  # signals.h
     'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h

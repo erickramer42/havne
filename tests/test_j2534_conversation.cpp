@@ -238,3 +238,26 @@ TEST_F(J2534ConversationTest, TheSessionLogNamesAConsentAppliedOrWithheld)
     EXPECT_TRUE(any_holds(logs, "consent withheld  talker 1.2.0"))
         << "no session log names the part withheld";
 }
+
+TEST_F(J2534ConversationTest, TheSessionSaysWhetherAPartWantsConsent)
+{
+    conversation_test::Plugin plugin =
+        conversation_test::load_packed(conversation_session::made3().json());
+    ASSERT_NE(plugin, nullptr) << ecuio_last_error_detail();
+    char name[64] = {};
+    ASSERT_EQ(ecuio_plugin_register(plugin.get(), 0, name, sizeof name),
+              ECUIO_OK);
+    {
+        const std::string u =
+            uri("") + "?profile=" + name + "&identify=0&diagnose=0";
+        ecuio_session_t* raw = nullptr;
+        ASSERT_EQ(ecuio_session_create(u.c_str(), &raw), ECUIO_OK)
+            << u << ": " << ecuio_last_error_detail();
+        conversation_session::Session s(raw);
+        EXPECT_EQ(conversation_session::wants_consent(s.get()), 1u);
+        conversation_session::give_and_apply("j2534-consent-wants.json",
+                                             plugin.get(), s.get());
+        EXPECT_EQ(conversation_session::wants_consent(s.get()), 0u);
+    }
+    EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
+}

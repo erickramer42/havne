@@ -125,8 +125,10 @@ struct VcanAsCan {
     VcanAsCan& operator=(const VcanAsCan&) = delete;
 };
 
-/* Whether a session over profile on vcan0 bound its part at start */
-bool binds(const char* profile)
+/* Whether a session over profile on vcan0 bound its part at start;
+ * *wanted the getter's answer at create, then after a consent if given */
+bool binds(const char* profile, uint32_t* wanted,
+           const ecuio_plugin_t* consent_to = nullptr)
 {
     ecuio_session_t* raw = nullptr;
     const std::string uri = std::string("socketcan://") +
@@ -135,6 +137,12 @@ bool binds(const char* profile)
     EXPECT_EQ(ecuio_session_create(uri.c_str(), &raw), ECUIO_OK)
         << ecuio_last_error_detail();
     conversation_session::Session s(raw);
+    *wanted = conversation_session::wants_consent(s.get());
+    if (consent_to != nullptr) {
+        conversation_session::give_and_apply("vcan-consent.json", consent_to,
+                                             s.get());
+        *wanted = *wanted * 10 + conversation_session::wants_consent(s.get());
+    }
     EXPECT_EQ(ecuio_session_start(s.get()), ECUIO_OK)
         << ecuio_last_error_detail();
     const bool bound = s->talk != nullptr;
@@ -157,10 +165,17 @@ TEST_F(SocketCanConversationTest, VcanBindsWithoutConsentAndACarsLinkDoesnt)
     char name[64] = {};
     ASSERT_EQ(ecuio_plugin_register(plugin.get(), 0, name, sizeof name),
               ECUIO_OK);
-    EXPECT_TRUE(binds(name)) << "no car is on vcan: no consent is asked";
+    uint32_t wanted = 7;
+    EXPECT_TRUE(binds(name, &wanted))
+        << "no car is on vcan: no consent is asked";
+    EXPECT_EQ(wanted, 0u);
     {
         const VcanAsCan as_can;
-        EXPECT_FALSE(binds(name)) << "a car's link binds only with consent";
+        EXPECT_FALSE(binds(name, &wanted))
+            << "a car's link binds only with consent";
+        EXPECT_EQ(wanted, 1u);
+        EXPECT_TRUE(binds(name, &wanted, plugin.get()));
+        EXPECT_EQ(wanted, 10u) << "wanted at create, not once applied";
     }
     EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
     ecuio_sim_destroy(sim);

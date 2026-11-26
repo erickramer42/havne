@@ -395,6 +395,11 @@ ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,
                                            const ecuio_consent_store_t* store,
                                            const uint8_t* fingerprint);
 
+/* *out 1 while a module of the session's plugin would bind but for a
+ * consent, else 0 */
+ecuio_status_t ecuio_session_wants_consent(const ecuio_session_t* session,
+                                           uint32_t* out);
+
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
  * buffer too small for the whole text and its NUL */

@@ -200,6 +200,7 @@ def test_a_session_applies_a_consent_only_with_a_record(tmp_path, emulator):
     p = havne.Plugin(TALKER3)
     with havne.ConsentStore(tmp_path / "consent.json") as store:
         with havne.Session(emulator.uri(), plugin=p) as s:
+            assert s.wants_consent
             with pytest.raises(havne.Error) as none:
                 s.apply_consent(store)
             assert none.value.name == "CONSENT_REQUIRED"
@@ -209,10 +210,12 @@ def test_a_session_applies_a_consent_only_with_a_record(tmp_path, emulator):
         store.give(p, p.terms)
         with havne.Session(emulator.uri(), plugin=p) as s:
             s.apply_consent(store)
+            assert not s.wants_consent
             s.start()
             until("the module's conversation talks",
                   lambda: s.conversation("pcm").state == "talking")
     with havne.Session("mock://py") as plain:
+        assert not plain.wants_consent
         with havne.ConsentStore(tmp_path / "other.json") as store, \
                 pytest.raises(ValueError, match="plugin="):
             plain.apply_consent(store)
