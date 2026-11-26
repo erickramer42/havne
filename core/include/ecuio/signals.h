@@ -854,6 +854,41 @@ ecuio_status_t ecuio_signal_file_expr_ref(const ecuio_signal_file_t* file,
                                           const ecuio_signal_def_t* def,
                                           char* out, size_t cap);
 
+/* One name an expression reads, as written */
+typedef struct ecuio_expr_name {
+    char text[ECUIO_EXPR_REF_LEN]; /* NUL-terminated, zero to the end */
+} ecuio_expr_name_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_expr_name_t) == 64, "ecuio_expr_name_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_expr_name_t) == 64,
+               "ecuio_expr_name_t size is ABI");
+#endif
+
+/* The names expr (length bytes of UTF-8, no NUL needed) reads signals
+ * by, as written, each once in the order first read: a key ("boost"), a
+ * second key, an "obd2.<key>" (obd2's short name or its PID name, as
+ * written); never a function's name or a number. By the grammar alone, at
+ * its newest format, with no file: a key no signal has is listed as any
+ * other, so a caller tells a file's own, obd2's and what it needs apart.
+ * The serial ports' contract (serial.h) over names: *count is all of
+ * them, the first capacity are copied, and a capacity of 0 with names
+ * NULL asks for the count.
+ * ECUIO_ERR_INVALID_ARGUMENT, *count 0 and the loader's words in
+ * ecuio_last_error_detail() ("the expression ends where a value should
+ * be (at character 7)"), for what every file's loader refuses: the
+ * grammar's refusals, a name that can be no key (1 to 31 of a-z, 0-9
+ * and _) nor one of obd2's, more of obd2's fields than a program's
+ * inputs (with the keys counted as one more, since a file may give two
+ * keys one signal), and a length past ECUIO_EXPR_MAX_BYTES (none of its
+ * bytes read).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL count, a NULL expr with a length,
+ * or NULL names with a capacity; ECUIO_ERR_OUT_OF_MEMORY. Any thread. */
+ecuio_status_t ecuio_expr_names(const char* expr, size_t length,
+                                ecuio_expr_name_t* names, uint32_t capacity,
+                                uint32_t* count);
+
 /* The number defs under program, through any chain of computed defs:
  * what ecuio_signal_file_evaluate takes a value for. Their IDs, each
  * once, in the order the program and the programs of its computed

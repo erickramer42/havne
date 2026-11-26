@@ -726,6 +726,9 @@ class ecuio_export_report_t(Structure):
 class ecuio_expr_check_t(Structure):
     pass
 
+class ecuio_expr_name_t(Structure):
+    pass
+
 class ecuio_frame_t(Structure):
     pass
 
@@ -1278,6 +1281,9 @@ ecuio_expr_check_t._fields_ = [
     ('depth', c_uint32),
     ('reserved', (c_uint32 * 5)),
     ('program', ecuio_computed_t),
+]
+ecuio_expr_name_t._fields_ = [
+    ('text', (c_char * 64)),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -1943,6 +1949,7 @@ FUNCTIONS = {
     'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h
     'ecuio_export_estimate_with': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, ecuio_cancel_t, c_void_p, POINTER(ecuio_export_estimate_t)]),  # recording.h
     'ecuio_export_with': (c_int, [POINTER(ecuio_export_options_t), ecuio_cancel_t, c_void_p, POINTER(ecuio_export_report_t)]),  # recording.h
+    'ecuio_expr_names': (c_int, [c_char_p, c_size_t, POINTER(ecuio_expr_name_t), c_uint32, POINTER(c_uint32)]),  # signals.h
     'ecuio_health_export': (c_int, [POINTER(ecuio_health_options_t), POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_health_export_with': (c_int, [POINTER(ecuio_health_options_t), ecuio_cancel_t, c_void_p, POINTER(ecuio_health_report_t)]),  # recording.h
     'ecuio_identity_request_name': (c_char_p, [POINTER(c_uint8), c_uint8]),  # core.h

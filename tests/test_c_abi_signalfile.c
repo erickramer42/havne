@@ -28,6 +28,23 @@
 
 #include "test_c_abi_parts.h"
 
+/* The names an expression reads, from C with no file: 1 on a failure */
+static int expr_names_fail(void)
+{
+    ecuio_expr_name_t names[2];
+    uint32_t count = 0;
+    memset(names, 0, sizeof names);
+    if (ecuio_expr_names("boost * 2 + obd2.map", 20, names, 2, &count) !=
+            ECUIO_OK ||
+        count != 2u || strcmp(names[0].text, "boost") != 0 ||
+        strcmp(names[1].text, "obd2.map") != 0) {
+        return 1;
+    }
+    return ecuio_expr_names("boost +", 7, NULL, 0, &count) !=
+               ECUIO_ERR_INVALID_ARGUMENT ||
+           count != 0u;
+}
+
 int c_abi_signalfile(void)
 {
     {
@@ -151,7 +168,8 @@ int c_abi_signalfile(void)
                     ECUIO_OK ||
                 strcmp(name, "volts") != 0 ||
                 ecuio_signal_file_expr_ref(file, volts, name, 5) !=
-                    ECUIO_ERR_INVALID_ARGUMENT) {
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                expr_names_fail()) {
                 ecuio_signal_file_free(file);
                 return 1;
             }
