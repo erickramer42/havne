@@ -96,6 +96,7 @@ add_library(ecuio-core STATIC
     src/dump_export.cpp
     src/dump_file.cpp
     src/dump_record.cpp
+    src/operation_sink.cpp
     src/core_consent.cpp
     src/security_store_owner.cpp
     src/conversation.cpp

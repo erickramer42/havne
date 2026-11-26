@@ -75,6 +75,14 @@ bool listed(const std::string& name);
 /* The file at utf8 set read-only, as a copy is kept; false with *why */
 bool set_read_only(const std::string& utf8, std::string* why);
 
+/* A file of core's own making removed, read-only or not: whether it is
+ * gone. Throws nothing. */
+bool drop(const std::string& utf8) noexcept;
+
+/* The folder holding the file at utf8 flushed, so the file's name is on
+ * the disk as its bytes are; false with *why */
+bool flush_folder_of(const std::string& utf8, std::string* why);
+
 /* TEST-ONLY: the step of a file's writing that fails next, once, as a
  * disk that won't flush fails it; 0 none */
 constexpr int kFailFileFlush = 1;   /* the file's own flush */
