@@ -16,6 +16,38 @@
 #include <cstdint>
 #include <cstring>
 
+/* Service 22's answer into out, its length: 7F 22 31 but for a DID the
+ * node answers in its extended session (ecuio_sim_answer's rules) */
+inline uint32_t ecuio_sim_answer_did(const uint8_t* req, uint32_t len,
+                                     uint8_t* out, bool extended,
+                                     const ecuio_sim_security* security,
+                                     const ecuio_sim_memory* memory)
+{
+    uint32_t n = ecuio_sim_detail::refuse(0x22, 0x31, out);
+    if (extended && len == 3) {
+        const uint16_t did = static_cast<uint16_t>((req[1] << 8) | req[2]);
+        if (did == ECUIO_SIM_GATED_DID && security != nullptr) {
+            n = ecuio_sim_security_did(*security, extended, out);
+        }
+        if (memory != nullptr) {
+            const uint32_t m =
+                ecuio_sim_memory_did(*memory, extended, did, out);
+            n = m != 0 ? m : n;
+        }
+        for (const ecuio_sim_extended_did& d : ECUIO_SIM_EXTENDED_DIDS) {
+            if (d.did == did) {
+                out[0] = 0x62;
+                out[1] = req[1];
+                out[2] = req[2];
+                std::memcpy(out + 3, d.data, sizeof d.data);
+                n = 3 + sizeof d.data;
+                break;
+            }
+        }
+    }
+    return n;
+}
+
 /* The ECU's reply to req (len bytes, the service byte first) into out
  * (ECUIO_SIM_REPLY_MAX bytes), its length; 0 for none. functional: the
  * request came on 0x7DF, where ISO 14229-1 has an ECU keep its negative
@@ -101,28 +133,7 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
             break;
         }
     } else if (service == 0x22) {
-        n = refuse(0x22, 0x31, out);
-        if (extended && len == 3) {
-            const uint16_t did = static_cast<uint16_t>((req[1] << 8) | req[2]);
-            if (did == ECUIO_SIM_GATED_DID && security != nullptr) {
-                n = ecuio_sim_security_did(*security, extended, out);
-            }
-            if (memory != nullptr) {
-                const uint32_t m =
-                    ecuio_sim_memory_did(*memory, extended, did, out);
-                n = m != 0 ? m : n;
-            }
-            for (const ecuio_sim_extended_did& d : ECUIO_SIM_EXTENDED_DIDS) {
-                if (d.did == did) {
-                    out[0] = 0x62;
-                    out[1] = req[1];
-                    out[2] = req[2];
-                    std::memcpy(out + 3, d.data, sizeof d.data);
-                    n = 3 + sizeof d.data;
-                    break;
-                }
-            }
-        }
+        n = ecuio_sim_answer_did(req, len, out, extended, security, memory);
     } else {
         n = refuse(service, 0x11, out);
     }
