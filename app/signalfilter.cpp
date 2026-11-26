@@ -5,6 +5,7 @@
 
 #include <QVariantMap>
 
+#include <iterator>
 #include <map>
 
 #include "ecuio/signals.h"
@@ -120,6 +121,22 @@ void SignalFilter::toggleModule(int module)
         m_modules.insert(module);
     }
     emit changed();
+}
+
+// A chosen module the rows no longer have could never be unticked
+void SignalFilter::keepModules(const QVariantList& choices)
+{
+    std::set<int> present;
+    for (const QVariant& c : choices) {
+        present.insert(c.toMap().value(QStringLiteral("index")).toInt());
+    }
+    const size_t before = m_modules.size();
+    for (auto it = m_modules.begin(); it != m_modules.end();) {
+        it = present.count(*it) != 0 ? std::next(it) : m_modules.erase(it);
+    }
+    if (m_modules.size() != before) {
+        emit changed();
+    }
 }
 
 QVariantList SignalFilter::moduleChoices(const QVariantList& rows) const

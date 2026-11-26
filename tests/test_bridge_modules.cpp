@@ -215,3 +215,18 @@ TEST(BridgeTest, ModulesProfileSignalsGiveEachRowItsModuleAndTag)
               "Beta");
     removeEveryPlugin(bridge);
 }
+
+TEST(BridgeTest, ModulesChosenOneTheNextSetLacksIsDropped)
+{
+    const File two = load(kTwoModules);
+    const File one = load(onePart("One", "D200"));
+    SignalListModel m;
+    m.setSignalSet(ecuio_signal_file_set(two.get()), two.get());
+    LiveSignalModel live(&m);
+    live.filter()->toggleModule(1);
+    ASSERT_EQ(shownKeys(live), (QStringList{"bv", "fuel"}));
+    m.setSignalSet(ecuio_signal_file_set(one.get()), one.get());
+    EXPECT_FALSE(live.filter()->moduleChosen(1));
+    EXPECT_FALSE(live.filter()->active());
+    EXPECT_EQ(live.rowCount(), 1) << "Live shows the new set's row";
+}

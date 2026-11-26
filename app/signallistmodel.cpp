@@ -926,6 +926,7 @@ void LiveSignalModel::judgeGroups()
         }
     }
     const QVariantList modules = m_filter->moduleChoices(rows);
+    m_filter->keepModules(modules);
     QVariantList groups;
     for (const QVariant& choice : m_filter->groupChoices(codes)) {
         groups.append(choice.toMap().value(QStringLiteral("code")));

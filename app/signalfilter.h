@@ -53,6 +53,7 @@ public:
     Q_INVOKABLE void toggleGroup(int group);
     Q_INVOKABLE bool moduleChosen(int module) const;
     Q_INVOKABLE void toggleModule(int module);
+    void keepModules(const QVariantList& choices);
     Q_INVOKABLE void clear();
     // A choice for each group among codes: {code, name} in code order,
     // each once, a code core doesn't know counted as Other
