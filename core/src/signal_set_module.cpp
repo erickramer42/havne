@@ -13,6 +13,7 @@
 #include "request_engine_table.h"
 
 #include <cstdint>
+#include <functional>
 #include <new>
 #include <vector>
 
@@ -71,8 +72,9 @@ extern "C" uint32_t ecuio_signal_set_def_module(const ecuio_signal_set_t* set,
 {
     if (set == nullptr || def == nullptr || set->defs == nullptr ||
         set->channels == nullptr || set->channel_count == 0 ||
-        set->channel_count > ECUIO_MAX_CHANNELS || def < set->defs ||
-        def >= set->defs + set->count) {
+        set->channel_count > ECUIO_MAX_CHANNELS ||
+        std::less<const ecuio_signal_def_t*>()(def, set->defs) ||
+        !std::less<const ecuio_signal_def_t*>()(def, set->defs + set->count)) {
         return ECUIO_SIGNAL_MODULE_NONE;
     }
     uint32_t rx[ECUIO_MAX_CHANNELS];

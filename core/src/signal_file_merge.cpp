@@ -440,7 +440,7 @@ void check_parts(const ecuio_signal_file_t* const* parts, uint32_t count,
     }
     for (uint32_t p = 0; p < count; ++p) {
         const std::string which = "part " + std::to_string(p);
-        if (!parts[p]->parts.empty()) {
+        if (ecuio_sf::is_merged(*parts[p])) {
             throw refusal{which + " is a merged set: merge its parts instead"};
         }
         if (parts[p]->bytes.empty()) {

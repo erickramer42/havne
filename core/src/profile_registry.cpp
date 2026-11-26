@@ -200,9 +200,9 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
 void ecuio_profile_set_unknown_detail(const char* name)
 {
     if (std::strncmp(name, "merged.", 7) == 0) {
-        ecuio_detail_set("no profile is named '%s': a merged name is a "
-                         "vehicle's set, made when the app reads a vehicle's "
-                         "picks; with havne-cli, merge them with --together",
+        ecuio_detail_set("no profile is named '%s': a merged set's name, made "
+                         "from parts this program hasn't merged: merge the "
+                         "parts again",
                          name);
     } else {
         ecuio_detail_set("no profile is named '%s'", name);

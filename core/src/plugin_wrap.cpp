@@ -125,7 +125,7 @@ void check_signal_file(const char* file, size_t length)
 {
     ecuio_signal_file_t* f = nullptr;
     const ecuio_status_t s = ecuio_signal_file_load(file, length, &f);
-    const bool merged = ecuio_signal_file_part_count(f) > 0;
+    const bool merged = f != nullptr && ecuio_sf::is_merged(*f);
     ecuio_signal_file_free(f);
     if (s != ECUIO_OK) {
         throw passed{s};

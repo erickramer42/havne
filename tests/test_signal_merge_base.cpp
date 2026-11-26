@@ -157,3 +157,23 @@ TEST(MergeTest, BaseModulesNamesAnotherProfileThanTheFullBase)
                  ecuio_signal_file_profile(none.file.get()));
     EXPECT_EQ(channels_of(back.get()), (Channels{{0x7E8, 0x7E0}}));
 }
+
+// The modules alone are a merged set though they hold no part: a merge
+// refuses them as a part, as made and as read back
+TEST(MergeTest, AMergedSetWithNoPartIsRefusedAsAPart)
+{
+    File body = load(doc("Body", num("door", "D100"), "", 3, kBody));
+    ASSERT_TRUE(body) << ecuio_last_error_detail();
+    const Merged none = merge({}, ECUIO_MERGE_BASE_MODULES);
+    ASSERT_EQ(none.status, ECUIO_OK) << none.words;
+    File back = read_back(none.file.get());
+    ASSERT_TRUE(back);
+    for (const ecuio_signal_file_t* f : {none.file.get(), back.get()}) {
+        const Merged nested = merge({f, body.get()}, ECUIO_MERGE_BASE_MODULES);
+        EXPECT_EQ(nested.status, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_EQ(nested.words,
+                  "part 0 is a merged set: merge its parts instead");
+        EXPECT_EQ(merge({body.get(), f}).words,
+                  "part 1 is a merged set: merge its parts instead");
+    }
+}

@@ -323,15 +323,13 @@ TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
                                     rely on its own initialization */
 }
 
-// A merged name nothing registered (an older version's address, the
-// CLI, Python) is said to be a vehicle's set, by the create and the
-// lookup alike; any other name keeps the plain words
+// A merged name nothing registered is said to be a merged set's, by the
+// create and the lookup alike; any other name keeps the plain words
 TEST(CoreTest, ProfileAnUnknownMergedNameSaysWhatItIs)
 {
     const char* const words =
-        "no profile is named 'merged.0123456789abcdef': a merged name is a "
-        "vehicle's set, made when the app reads a vehicle's picks; with "
-        "havne-cli, merge them with --together";
+        "no profile is named 'merged.0123456789abcdef': a merged set's name, "
+        "made from parts this program hasn't merged: merge the parts again";
     ecuio_session_t* s = nullptr;
     EXPECT_EQ(
         ecuio_session_create("mock://x?profile=merged.0123456789abcdef", &s),

@@ -658,3 +658,27 @@ TEST(MergedTextTest, AMergedSetIsNeverImported)
               std::string::npos)
         << ecuio_last_error_detail();
 }
+
+// The modules alone are a merged set though they hold no part: a wrap
+// refuses them as it refuses any merged set
+TEST(MergedTextTest, AMergedSetWithNoPartIsNeverImported)
+{
+    ecuio_merge_options_t options{};
+    options.struct_size = sizeof options;
+    options.flags = ECUIO_MERGE_BASE_MODULES;
+    ecuio_signal_file_t* made = nullptr;
+    ASSERT_EQ(ecuio_signal_file_merge(nullptr, 0, &options, &made), ECUIO_OK)
+        << ecuio_last_error_detail();
+    File none(made);
+    ASSERT_EQ(ecuio_signal_file_part_count(none.get()), 0u);
+    size_t text_length = 0;
+    const char* text = ecuio_signal_file_text(none.get(), &text_length);
+    char* out = reinterpret_cast<char*>(1);
+    size_t length = 77;
+    EXPECT_EQ(ecuio_plugin_wrap(text, text_length, nullptr, &out, &length),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(out, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the file is a merged set, which isn't imported: import its "
+                 "plugins");
+}
