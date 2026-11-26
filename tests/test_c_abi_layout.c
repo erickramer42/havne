@@ -271,6 +271,30 @@ typedef char abi_plugin_level_delay_check
     [(offsetof(ecuio_plugin_security_level_t, delay_ms) == 12) ? 1 : -1];
 typedef char abi_plugin_level_flags_check
     [(offsetof(ecuio_plugin_security_level_t, flags) == 20) ? 1 : -1];
+typedef char abi_plugin_operation_size_check
+    [(sizeof(ecuio_plugin_operation_t) == 160) ? 1 : -1];
+typedef char abi_plugin_operation_class_check
+    [(offsetof(ecuio_plugin_operation_t, op_class) == 12) ? 1 : -1];
+typedef char abi_plugin_operation_image_check
+    [(offsetof(ecuio_plugin_operation_t, image_bytes) == 40) ? 1 : -1];
+typedef char abi_plugin_operation_id_check
+    [(offsetof(ecuio_plugin_operation_t, id) == 48) ? 1 : -1];
+typedef char abi_plugin_operation_title_check
+    [(offsetof(ecuio_plugin_operation_t, title) == 80) ? 1 : -1];
+typedef char abi_plugin_step_size_check
+    [(sizeof(ecuio_plugin_operation_step_t) == 88) ? 1 : -1];
+typedef char abi_plugin_step_address_check
+    [(offsetof(ecuio_plugin_operation_step_t, address) == 16) ? 1 : -1];
+typedef char abi_plugin_step_chunk_check
+    [(offsetof(ecuio_plugin_operation_step_t, chunk) == 32) ? 1 : -1];
+typedef char abi_plugin_step_dfi_check
+    [(offsetof(ecuio_plugin_operation_step_t, dfi) == 38) ? 1 : -1];
+typedef char abi_plugin_step_name_check
+    [(offsetof(ecuio_plugin_operation_step_t, name) == 40) ? 1 : -1];
+typedef char abi_plugin_ident_size_check
+    [(sizeof(ecuio_plugin_operation_ident_t) == 32) ? 1 : -1];
+typedef char abi_plugin_ident_role_check
+    [(offsetof(ecuio_plugin_operation_ident_t, role) == 12) ? 1 : -1];
 typedef char abi_plugin_value_line_check[(offsetof(ecuio_plugin_value_t, line) == 12) ? 1 : -1];
 typedef char abi_plugin_value_signal_check[(offsetof(ecuio_plugin_value_t, signal) == 16) ? 1 : -1];
 typedef char abi_plugin_value_def_check[(offsetof(ecuio_plugin_value_t, def) == 64) ? 1 : -1];

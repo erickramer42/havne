@@ -669,6 +669,113 @@ PUBLISHER = [
     for n in (0, 1, most, most + 1)
 ]
 
+# Format 3's operation tier (ADR-0066 section 4): plans of read and
+# upload steps against one of the conversation's ECUs. Every address and
+# identifier is made up. The rules only the loader holds (an ECU and a
+# level the conversation declares, ids given once, ranges apart, what
+# fits a step's address and size bytes) are PluginOperationTest's.
+READ = {"step": "read", "name": "cal", "session": "extended", "address": "00010000",
+        "bytes": 4096, "address_bytes": 4, "size_bytes": 2, "chunk": 256}
+UPLOAD = {"step": "upload", "name": "boot", "session": "extended", "address": "00020000",
+          "bytes": 4096, "address_bytes": 4, "size_bytes": 4, "dfi": "00"}
+PACKED4 = changed(PACKED3, ["tiers"], ["data", "conversation", "operation"])
+PACKED4["operations"] = [{
+    "id": "copy-cal", "kind": "dump", "title": "Calibration copy", "ecu": "pcm",
+    "level": "01", "ident": [{"did": "D220", "role": "software"}],
+    "steps": [READ, UPLOAD],
+}]
+
+
+def many(n, make):
+    return [make(i) for i in range(n)]
+
+
+def op_n(i):
+    return changed(PACKED4["operations"][0], ["id"], f"copy-{i}")
+
+
+def step_n(i):
+    return dict(READ, name=f"s{i}", address=f"{0x00010000 + 16 * i:08X}", bytes=16, chunk=16)
+
+
+def ident_n(i):
+    return {"did": f"D2{0x20 + i:02X}", "role": "software"}
+
+
+OPS = ["operations"]
+OP = OPS + [0]
+ID = OP + ["ident", 0]
+RD = OP + ["steps", 0]
+UP = OP + ["steps", 1]
+OPERATIONS = [
+    ("a plugin with an operation", PACKED4, [], None, True),
+    ("the operation tier with no operations", PACKED4, OPS, DELETE, False),
+    ("operations with no such tier", PACKED4, ["tiers"], ["data", "conversation"], False),
+    ("the operation tier in format 2", PACKED4, ["havne_plugin"], 2, False),
+    ("the operation tier with no conversation tier", PACKED4, ["tiers"],
+     ["data", "operation"], False),
+    ("operations that is an object", PACKED4, OPS, {}, False),
+    ("no operations in the list", PACKED4, OPS, [], False),
+    ("8 operations", PACKED4, OPS, many(8, op_n), True),
+    ("9 operations", PACKED4, OPS, many(9, op_n), False),
+    ("an operation key it doesn't take", PACKED4, OP + ["covers"], [], False),
+    ("an operation id in upper case", PACKED4, OP + ["id"], "Copy", False),
+    ("an operation id of 31 characters", PACKED4, OP + ["id"], "c" * 31, True),
+    ("an operation id of 32 characters", PACKED4, OP + ["id"], "c" * 32, False),
+    ("an operation id ending in a hyphen", PACKED4, OP + ["id"], "copy-", False),
+    ("an operation kind this Havne doesn't run", PACKED4, OP + ["kind"], "flash", False),
+    ("an operation with no kind", PACKED4, OP + ["kind"], DELETE, False),
+    ("an operation with no title", PACKED4, OP + ["title"], DELETE, False),
+    ("an empty operation title", PACKED4, OP + ["title"], "", False),
+    ("an operation title of 63 bytes", PACKED4, OP + ["title"], "t" * 63, True),
+    ("an operation title of 64 bytes", PACKED4, OP + ["title"], "t" * 64, False),
+    ("an operation with no ecu", PACKED4, OP + ["ecu"], DELETE, False),
+    ("an operation ecu that is a number", PACKED4, OP + ["ecu"], 1, False),
+    ("an operation with no level", PACKED4, OP + ["level"], DELETE, False),
+    ("an operation level of one digit", PACKED4, OP + ["level"], "1", False),
+    ("an operation level that is a number", PACKED4, OP + ["level"], 1, False),
+    ("an operation with no ident", PACKED4, OP + ["ident"], DELETE, True),
+    ("8 identifiers", PACKED4, OP + ["ident"], many(8, ident_n), True),
+    ("9 identifiers", PACKED4, OP + ["ident"], many(9, ident_n), False),
+    ("an identifier in lower case", PACKED4, ID + ["did"], "d220", False),
+    ("an identifier of three digits", PACKED4, ID + ["did"], "D22", False),
+    ("an identifier with no did", PACKED4, ID + ["did"], DELETE, False),
+    ("an identifier role it doesn't take", PACKED4, ID + ["role"], "serial", False),
+    ("an identifier with no role", PACKED4, ID + ["role"], DELETE, False),
+    ("an identifier key it doesn't take", PACKED4, ID + ["bytes"], 4, False),
+    ("an operation with no steps", PACKED4, OP + ["steps"], DELETE, False),
+    ("no steps in the list", PACKED4, OP + ["steps"], [], False),
+    ("64 steps", PACKED4, OP + ["steps"], many(64, step_n), True),
+    ("65 steps", PACKED4, OP + ["steps"], many(65, step_n), False),
+    ("a step kind this Havne doesn't run", PACKED4, RD + ["step"], "download", False),
+    ("a step with no kind", PACKED4, RD + ["step"], DELETE, False),
+    ("a step name with an underscore", PACKED4, RD + ["name"], "cal_1", False),
+    ("a step with no name", PACKED4, RD + ["name"], DELETE, False),
+    ("a step in the programming session", PACKED4, RD + ["session"], "programming", False),
+    ("a step with no session", PACKED4, RD + ["session"], DELETE, False),
+    ("a step address of three digits", PACKED4, RD + ["address"], "100", False),
+    ("a step address of ten digits", PACKED4, RD + ["address"], "0000010000", False),
+    ("a step address in lower case", PACKED4, RD + ["address"], "0001000a", False),
+    ("a step address that is a number", PACKED4, RD + ["address"], 65536, False),
+    ("a step of no bytes", PACKED4, RD + ["bytes"], 0, False),
+    ("a step past the image's bound", PACKED4, RD + ["bytes"], 67108865, False),
+    ("a step with no bytes", PACKED4, RD + ["bytes"], DELETE, False),
+    ("a step of no address bytes", PACKED4, RD + ["address_bytes"], 0, False),
+    ("a step of five address bytes", PACKED4, RD + ["address_bytes"], 5, False),
+    ("a step of no size bytes", PACKED4, RD + ["size_bytes"], 0, False),
+    ("a step of five size bytes", PACKED4, RD + ["size_bytes"], 5, False),
+    ("a read with no chunk", PACKED4, RD + ["chunk"], DELETE, False),
+    ("a read chunk of 0", PACKED4, RD + ["chunk"], 0, False),
+    ("a read chunk of 4094", PACKED4, RD + ["chunk"], 4094, True),
+    ("a read chunk of 4095", PACKED4, RD + ["chunk"], 4095, False),
+    ("a read with a dfi", PACKED4, RD + ["dfi"], "00", False),
+    ("an upload with a chunk", PACKED4, UP + ["chunk"], 256, False),
+    ("an upload with no dfi", PACKED4, UP + ["dfi"], DELETE, True),
+    ("an upload that is compressed", PACKED4, UP + ["dfi"], "10", False),
+    ("a step key it doesn't take", PACKED4, RD + ["erase"], True, False),
+]
+
+
 class Cli:
     def __init__(self, exe, scratch):
         self.exe = exe
@@ -800,7 +907,7 @@ def main():
 
         # Edge cases: one verdict from both
         cases = (list(CASES) + FORMAT2 + FORMAT3 + MERGED_SET + CONDITION_CASES +
-                 CONVERSATION + PAGES + PUBLISHER)
+                 CONVERSATION + PAGES + PUBLISHER + OPERATIONS)
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

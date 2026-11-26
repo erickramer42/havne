@@ -130,6 +130,41 @@ int c_abi_plugin(void)
              ecuio_plugin_terms(plugin, NULL, 0, &terms) ==
                  ECUIO_ERR_INVALID_ARGUMENT &&
              terms == 7u;
+        /* The operation tier's getters: a plugin without it has no plan */
+        {
+            ecuio_plugin_operation_t plan;
+            ecuio_plugin_operation_step_t step;
+            ecuio_plugin_operation_ident_t ident;
+            uint32_t plans = 7u;
+            memset(&plan, 0, sizeof plan);
+            plan.struct_size = sizeof plan;
+            memset(&step, 0, sizeof step);
+            step.struct_size = sizeof step;
+            memset(&ident, 0, sizeof ident);
+            ident.struct_size = sizeof ident;
+            ok = ok && ECUIO_PLUGIN_TIER_OPERATION == 0x4u &&
+                 ECUIO_OPERATION_KIND_DUMP == 1u &&
+                 ECUIO_OPERATION_CLASS_READ == 1u &&
+                 ECUIO_OPERATION_CLASS_WRITE == 2u && ECUIO_STEP_READ == 1u &&
+                 ECUIO_STEP_UPLOAD == 2u &&
+                 ECUIO_STEP_SESSION_PROGRAMMING == 2u &&
+                 ECUIO_STEP_SESSION_EXTENDED == 3u &&
+                 ECUIO_PLUGIN_MAX_OPERATIONS == 8u &&
+                 ECUIO_PLUGIN_MAX_STEPS == 64u &&
+                 ECUIO_PLUGIN_MAX_IDENTS == 8u &&
+                 ecuio_plugin_operation_count(plugin, &plans) == ECUIO_OK &&
+                 plans == 0u &&
+                 ecuio_plugin_operation_count(NULL, &plans) ==
+                     ECUIO_ERR_NULL_ARGUMENT &&
+                 ecuio_plugin_operation(plugin, 0, &plan) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_step(plugin, 0, 0, &step) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_ident(plugin, 0, 0, &ident) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation(plugin, 0, NULL) ==
+                     ECUIO_ERR_NULL_ARGUMENT;
+        }
         /* The consent store's record, and its calls' NULL refusals */
         ok = ok && sizeof(ecuio_consent_record_t) == 288u &&
              offsetof(ecuio_consent_record_t, given_utc) == 8u &&

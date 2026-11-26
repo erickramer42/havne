@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <new>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -202,9 +203,13 @@ std::string loader::variant_json(const ecuio_plugin& p, const variant& v,
     std::string json = ecuio_json::write(doc);
 
     ecuio_signal_file_t* back = nullptr;
-    const bool read = ecuio_signal_file_load_with(json.data(), json.size(),
-                                                  ECUIO_SIGNAL_FILE_LOAD_SET,
-                                                  &back) == ECUIO_OK;
+    const ecuio_status_t status = ecuio_signal_file_load_with(
+        json.data(), json.size(), ECUIO_SIGNAL_FILE_LOAD_SET, &back);
+    if (status == ECUIO_ERR_OUT_OF_MEMORY) {
+        ecuio_detail_clear();
+        throw std::bad_alloc(); /* the load's answer, never a refusal's words */
+    }
+    const bool read = status == ECUIO_OK;
     const bool same = read && same_set(back->set, v.file->set);
     if (!read) {
         /* The loader's words, past the place in the written text */

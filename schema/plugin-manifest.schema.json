@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
   "title": "Havne plugin manifest",
   "description": "A Havne plugin's manifest (formats 1 to 3, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. Format 3 adds the publisher, which a plugin with the conversation tier names. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp, core/src/plugin_publisher.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; the publisher's texts with no control character (the terms keep line feeds and tabs) and no character that shows as nothing or moves the text around it; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
+  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp, core/src/plugin_publisher.cpp, core/src/plugin_operations.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; the publisher's texts with no control character (the terms keep line feeds and tabs) and no character that shows as nothing or moves the text around it; an operation's ECU one of the conversation's, its level one the conversation's security declares for that ECU, and service 22 declared for its identifiers; an operation's id, an identifier's DID and a step's name given once each; a step's address and its range's end within its address bytes and its size within its size bytes; no two steps sharing an address, and at most 64 MiB of memory in one operation; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
   "type": "object",
   "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
   "properties": {
@@ -56,11 +56,11 @@
     "source": { "$ref": "signal-file.schema.json#/$defs/source" },
     "tiers": {
       "title": "Tiers",
-      "description": "What the plugin holds: \"data\" (signal files), which every plugin lists, and in format 2 \"conversation\" (a module that asks, described by \"conversation\"). A plugin naming another tier is refused.",
+      "description": "What the plugin holds: \"data\" (signal files), which every plugin lists, from format 2 \"conversation\" (a module that asks, described by \"conversation\"), and in format 3 \"operation\" (plans Havne runs against a module, listed by \"operations\"), which needs the conversation tier beside it. A plugin naming another tier is refused.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "enum": ["data", "conversation"] },
+      "items": { "enum": ["data", "conversation", "operation"] },
       "contains": { "const": "data" }
     },
     "match": {
@@ -109,6 +109,14 @@
       "items": { "$ref": "#/$defs/path" }
     },
     "conversation": { "$ref": "#/$defs/conversation" },
+    "operations": {
+      "title": "Operations",
+      "description": "The operation tier's plans (format 3, ADR-0066), 1 to 8, each id once.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/operation" }
+    },
     "publisher": { "$ref": "#/$defs/publisher" },
     "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
   },
@@ -130,6 +138,21 @@
         "required": ["conversation"]
       },
       "else": { "not": { "required": ["conversation"] } }
+    },
+    {
+      "$comment": "The operation tier and \"operations\" come together, in format 3, beside the conversation tier",
+      "if": {
+        "properties": { "tiers": { "contains": { "const": "operation" } } },
+        "required": ["tiers"]
+      },
+      "then": {
+        "properties": {
+          "havne_plugin": { "const": 3 },
+          "tiers": { "contains": { "const": "conversation" } }
+        },
+        "required": ["operations"]
+      },
+      "else": { "not": { "required": ["operations"] } }
     },
     {
       "$comment": "The publisher is format 3's, and format 3 names it with the conversation tier",
@@ -346,6 +369,156 @@
       "description": "A byte as two hex digits, the letters in upper case.",
       "type": "string",
       "pattern": "^[0-9A-F]{2}$"
+    },
+    "operation": {
+      "title": "Operation",
+      "description": "A plan Havne runs against one module (format 3, ADR-0066): its steps in order. A plan is data: Havne derives its class (a read, when every step is a \"read\" or an \"upload\"), how many sessions it unlocks in and its image's size from the steps, and refuses by name a kind or a step it doesn't run.",
+      "type": "object",
+      "required": ["id", "kind", "title", "ecu", "level", "steps"],
+      "properties": {
+        "id": {
+          "title": "ID",
+          "description": "The plan's id, 1 to 31 of a-z, 0-9 and -, a letter or digit at each end; once among the operations.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "kind": {
+          "title": "Kind",
+          "description": "What the plan does: \"dump\" copies a module's memory to a file.",
+          "enum": ["dump"]
+        },
+        "title": {
+          "title": "Title",
+          "description": "The plan's name for a person, 1 to 63 bytes, with no control character.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "ecu": {
+          "title": "ECU",
+          "description": "The module, one of the conversation's \"ecus\".",
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,31}$"
+        },
+        "level": {
+          "title": "Level",
+          "description": "The security-access level the plan reads under, two hex digits: one the conversation's \"security\" declares for the ECU.",
+          "$ref": "#/$defs/hexByte"
+        },
+        "ident": {
+          "title": "Identification",
+          "description": "The identifiers read before and after the copy and kept in its record, at most 8, each DID once; the conversation declares service 22 for them.",
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/operationIdent" }
+        },
+        "steps": {
+          "title": "Steps",
+          "description": "The plan's steps in order, 1 to 64, each name once, no two sharing an address, 64 MiB of memory in all.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/operationStep" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationIdent": {
+      "title": "Identification",
+      "description": "An identifier a dump reads with service 22 and keeps in its record, and what it tells of the module.",
+      "type": "object",
+      "required": ["did", "role"],
+      "properties": {
+        "did": {
+          "title": "DID",
+          "description": "The data identifier, four hex digits.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{4}$"
+        },
+        "role": {
+          "title": "Role",
+          "description": "What the identifier names: the module's hardware, its software or its base calibration.",
+          "enum": ["hardware", "software", "base"]
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationStep": {
+      "title": "Step",
+      "description": "One range of memory and how it is read: \"read\" asks it chunk by chunk (service 23), \"upload\" has the module send it block by block (services 35, 36 and 37). The loader also holds the address and the range's end to the address's bytes, and the size to the size's.",
+      "type": "object",
+      "required": ["step", "name", "session", "address", "bytes", "address_bytes", "size_bytes"],
+      "properties": {
+        "step": {
+          "title": "Step",
+          "description": "The step's kind.",
+          "enum": ["read", "upload"]
+        },
+        "name": {
+          "title": "Name",
+          "description": "The range's name in the copy's record, 1 to 31 of a-z, 0-9 and -, a letter or digit at each end; once among the steps.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "session": {
+          "title": "Session",
+          "description": "The diagnostic session the step runs in.",
+          "enum": ["extended"]
+        },
+        "address": {
+          "title": "Address",
+          "description": "The range's first address, 2 to 8 hex digits in pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "description": "The range's size in bytes, 1 to 67108864.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "address_bytes": {
+          "title": "Address bytes",
+          "description": "How many bytes the request's address takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "size_bytes": {
+          "title": "Size bytes",
+          "description": "How many bytes the request's size takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "chunk": {
+          "title": "Chunk",
+          "description": "A read's bytes for each request, 1 to 4094; an upload takes none (the module names its block).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094
+        },
+        "dfi": {
+          "title": "Data format identifier",
+          "description": "An upload's data format, \"00\" (neither compressed nor encrypted) alone; a read takes none.",
+          "const": "00"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "step": { "const": "read" } } },
+          "then": { "required": ["chunk"], "properties": { "dfi": false } },
+          "else": { "properties": { "chunk": false } }
+        }
+      ]
     },
     "conversation": {
       "title": "Conversation",

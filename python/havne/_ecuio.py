@@ -361,6 +361,9 @@ ECUIO_OBDB_NOTE_CHANGED = 1
 ECUIO_OBDB_NOTE_CONVERTED = 0
 ECUIO_OBDB_NOTE_FILE = 3
 ECUIO_OBDB_NOTE_SKIPPED = 2
+ECUIO_OPERATION_CLASS_READ = 1
+ECUIO_OPERATION_CLASS_WRITE = 2
+ECUIO_OPERATION_KIND_DUMP = 1
 ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
@@ -372,9 +375,12 @@ ECUIO_PLUGIN_LINEAGE_LEN = 32
 ECUIO_PLUGIN_MANIFEST_MAX = 0x100000
 ECUIO_PLUGIN_MAX_FILES = 64
 ECUIO_PLUGIN_MAX_FIXTURES = 16
+ECUIO_PLUGIN_MAX_IDENTS = 8
 ECUIO_PLUGIN_MAX_LEVELS = 32
+ECUIO_PLUGIN_MAX_OPERATIONS = 8
 ECUIO_PLUGIN_MAX_PAGES = 16
 ECUIO_PLUGIN_MAX_SERVICES = 16
+ECUIO_PLUGIN_MAX_STEPS = 64
 ECUIO_PLUGIN_MAX_SUBS = 14
 ECUIO_PLUGIN_MAX_VALUES = 0x1000
 ECUIO_PLUGIN_MAX_VARIANTS = 32
@@ -389,6 +395,7 @@ ECUIO_PLUGIN_PUBLISHER_NAME_MAX = 127
 ECUIO_PLUGIN_TERMS_MAX = 0x10000
 ECUIO_PLUGIN_TIER_CONVERSATION = 2
 ECUIO_PLUGIN_TIER_DATA = 1
+ECUIO_PLUGIN_TIER_OPERATION = 4
 ECUIO_PLUGIN_VARIANT_ID_MAX = 24
 ECUIO_PROFILE_MAX_REQUESTS = 0x400
 ECUIO_PROFILE_NAME_MAX = 63
@@ -523,6 +530,10 @@ ECUIO_SOURCE_MERGED = 2
 ECUIO_SOURCE_SHARE_ALIKE = 1
 ECUIO_SOURCE_TEXT_LEN = 0x208
 ECUIO_SOURCE_TEXT_MAX = 0x200
+ECUIO_STEP_READ = 1
+ECUIO_STEP_SESSION_EXTENDED = 3
+ECUIO_STEP_SESSION_PROGRAMMING = 2
+ECUIO_STEP_UPLOAD = 2
 ECUIO_STRETCH_CRUISES = 2
 ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR = 56.32704
 ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US = 0x989680
@@ -842,6 +853,15 @@ class ecuio_plugin_fingerprint_t(Structure):
     pass
 
 class ecuio_plugin_info_t(Structure):
+    pass
+
+class ecuio_plugin_operation_ident_t(Structure):
+    pass
+
+class ecuio_plugin_operation_step_t(Structure):
+    pass
+
+class ecuio_plugin_operation_t(Structure):
     pass
 
 class ecuio_plugin_page_t(Structure):
@@ -1575,6 +1595,44 @@ ecuio_plugin_info_t._fields_ = [
     ('page_count', c_uint32),
     ('reserved', (c_uint32 * 1)),
 ]
+ecuio_plugin_operation_ident_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('did', c_uint32),
+    ('role', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_plugin_operation_step_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('kind', c_uint32),
+    ('session', c_uint32),
+    ('address', c_uint64),
+    ('bytes', c_uint64),
+    ('chunk', c_uint32),
+    ('address_bytes', c_uint8),
+    ('size_bytes', c_uint8),
+    ('dfi', c_uint8),
+    ('reserved0', c_uint8),
+    ('name', (c_char * 32)),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_plugin_operation_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('kind', c_uint32),
+    ('op_class', c_uint32),
+    ('rx_id', c_uint32),
+    ('tx_id', c_uint32),
+    ('level', c_uint32),
+    ('step_count', c_uint32),
+    ('ident_count', c_uint32),
+    ('unlock_sessions', c_uint32),
+    ('image_bytes', c_uint64),
+    ('id', (c_char * 32)),
+    ('title', (c_char * 64)),
+    ('reserved', (c_uint32 * 4)),
+]
 ecuio_plugin_page_t._fields_ = [
     ('struct_size', c_uint32),
     ('form', c_uint32),
@@ -2131,6 +2189,10 @@ FUNCTIONS = {
     'ecuio_plugin_lineage': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_load': (c_int, [c_char_p, c_size_t, ecuio_plugin_read_t, c_void_p, POINTER(POINTER(ecuio_plugin_t))]),  # plugin.h
     'ecuio_plugin_match': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_vin_info_t), POINTER(c_uint32), c_uint32, POINTER(c_uint32)]),  # plugin.h
+    'ecuio_plugin_operation': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_t)]),  # plugin.h
+    'ecuio_plugin_operation_count': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint32)]),  # plugin.h
+    'ecuio_plugin_operation_ident': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_ident_t)]),  # plugin.h
+    'ecuio_plugin_operation_step': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_step_t)]),  # plugin.h
     'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
     'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
     'ecuio_plugin_publisher': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_publisher_t)]),  # plugin.h

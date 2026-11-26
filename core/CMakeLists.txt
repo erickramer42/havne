@@ -81,6 +81,7 @@ add_library(ecuio-core STATIC
     src/condition_eval.cpp
     src/plugin.cpp
     src/plugin_manifest.cpp
+    src/plugin_operations.cpp
     src/plugin_conversation.cpp
     src/plugin_fingerprint.cpp
     src/plugin_publisher.cpp

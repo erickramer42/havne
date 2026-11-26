@@ -133,6 +133,7 @@ struct Made {
     std::string files_extra; /* more of "files", each after a comma */
     std::string variant_files = R"(["a.json"])"; /* the one variant's files */
     std::string publisher; /* the manifest's "publisher", when not empty */
+    std::string operations;   /* its "operations", when not empty */
     std::string data = kData; /* a.json, the variant's file */
 
     std::string conversation() const
@@ -168,6 +169,9 @@ struct Made {
         }
         if (has_group) {
             out += ", \"conversation\": " + conversation();
+        }
+        if (!operations.empty()) {
+            out += ", \"operations\": " + operations;
         }
         return out + "}";
     }

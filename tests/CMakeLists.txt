@@ -51,7 +51,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_consent_store.cpp test_consent_lines.cpp test_consent_session.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
-    test_dump_record.cpp test_dump_export.cpp)
+    test_dump_record.cpp test_dump_export.cpp test_plugin_operations.cpp
+    test_operation_plan.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -1153,6 +1154,12 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckSaysWhatAConversationDeclares
             plugins-check-conversation.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/conversation.json)
+        # A format 3 plugin with the operation tier: each plan after the
+        # conversation line, its class derived, the services its steps send
+        # and its ranges
+        app_cli_golden(PluginsCheckListsAPluginsOperations
+            plugins-check-operation.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/operation.json)
         add_test(NAME CliPluginConversationTest.AFolderReadsAsItsPackedForm
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_conversation.py

@@ -60,8 +60,8 @@ inline uint32_t own_signals(const ecuio_signal_file_t* file,
 }
 
 // {"type":"plugin", package (its place among the command's packages),
-// id, version, name, tiers (["data"], and "conversation" after it for a
-// plugin with a module), variants [{id, profile}], fixtures (a folder's
+// id, version, name, tiers (["data"], "conversation" after it for a
+// plugin with a module, then "operation" for one with plans), variants [{id, profile}], fixtures (a folder's
 // fixture files), fingerprint (64 hex digits), publisher ({name, contact,
 // license}, or null for none)}
 inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
@@ -84,6 +84,9 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
         l.raw((info.tiers & ECUIO_PLUGIN_TIER_DATA) != 0 ? ",\"conversation\""
                                                          : "\"conversation\"");
+    }
+    if ((info.tiers & ECUIO_PLUGIN_TIER_OPERATION) != 0) {
+        l.raw(",\"operation\""); /* the tier comes with the two before it */
     }
     l.ch(']');
     l.key("variants");
