@@ -10,6 +10,7 @@
 #include "dump_file.h"
 #include "ecuio/recording.h" /* ecuio_cancel_t */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -73,6 +74,16 @@ bool listed(const std::string& name);
 
 /* The file at utf8 set read-only, as a copy is kept; false with *why */
 bool set_read_only(const std::string& utf8, std::string* why);
+
+/* TEST-ONLY: the step of a file's writing that fails next, once, as a
+ * disk that won't flush fails it; 0 none */
+constexpr int kFailFileFlush = 1;   /* the file's own flush */
+constexpr int kFailFolderFlush = 2; /* its folder's, after the rename */
+inline std::atomic<int> test_fail_step{0};
+
+/* TEST-ONLY: taken and called once with a written file's partial name,
+ * the file flushed and closed, before it is read back */
+inline std::atomic<void (*)(const char*)> test_before_read_back{nullptr};
 
 } // namespace ecuio_dump_handle
 

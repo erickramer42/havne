@@ -253,7 +253,8 @@ typedef struct ecuio_dump_entry {
 typedef struct ecuio_dump_export_result {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
     uint32_t flags;       /* zero */
-    uint32_t files;       /* the files written */
+    uint32_t files;       /* the files written; on a failure, the files
+                             put in place that couldn't be removed again */
     uint32_t vin_runs;    /* ECUIO_DUMP_EXPORT_IMAGE: the runs of the image
                              that read as a VIN */
     uint32_t reserved[4]; /* zero; ABI growth space */
@@ -392,9 +393,8 @@ ecuio_status_t ecuio_dump_list(const char* folder_utf8, ecuio_dump_entry_t* out,
  * damaged one is not exported.
  *
  *   ECUIO_DUMP_EXPORT_RESTORE  the file itself, byte for byte, under the
- *     name core gives it (ecuio_dump_verify's), read back from the disk
- *     and checked again before it is put in place. The one export that
- *     is still a copy: ecuio_dump_import takes it back.
+ *     name core gives it (ecuio_dump_verify's). The one export that is
+ *     still a copy: ecuio_dump_import takes it back.
  *   ECUIO_DUMP_EXPORT_IMAGE  the raw image as one file for each range,
  *     named <yyyymmdd>-<tx>-<first 12 hex of the copy's checksum>-<the
  *     range's start address, 8 hex>.bin. The bytes are the copy's,
@@ -404,10 +404,16 @@ ecuio_status_t ecuio_dump_list(const char* folder_utf8, ecuio_dump_entry_t* out,
  *     nothing here (a changed image is no longer the module's memory),
  *     and none found proves nothing.
  *
- * Each file is written under a partial name and renamed into place, and
- * any failure or cancel leaves nothing behind. cancel, when not NULL, is
- * asked between pieces (never call this handle's functions from it).
- * result may be NULL; on a failure it is zeroed but for its size.
+ * Each file is written under a partial name, flushed to the disk, read
+ * back and held to the checksum of the bytes written, then renamed into
+ * place and its folder flushed. The read back comes through the
+ * system's cache: it proves the write, not the medium. Any failure or
+ * cancel leaves nothing behind, but for a file already in place that
+ * can't be removed again (another program holds it open):
+ * result->files counts those, and a refusal's words end with the count.
+ * cancel, when not NULL, is asked between pieces (never call this
+ * handle's functions from it). result may be NULL; on a failure it is
+ * zeroed but for its size and that count.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL dump or folder;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown form or a result smaller
  * than the struct; ECUIO_ERR_LOAD_FAILED with words (never a path);
@@ -422,8 +428,8 @@ ecuio_status_t ecuio_dump_export(const ecuio_dump_t* dump, uint32_t form,
  * Brings a copy back: the file at path, under whatever name, is opened
  * and checked as ecuio_dump_verify checks one (its two checksums; its
  * name isn't judged), then copied into folder under the name core gives
- * it and set read-only, as a copy is kept. A file of that name there
- * refuses it. name_out (name_capacity at least ECUIO_DUMP_NAME_MAX, or
+ * it, written as an export's file is (flushed, read back) and set
+ * read-only, as a copy is kept. A file of that name there refuses it. name_out (name_capacity at least ECUIO_DUMP_NAME_MAX, or
  * NULL with 0) takes that name once the file is known sound, whether or
  * not the copy then lands. ECUIO_ERR_NULL_ARGUMENT for a NULL path or
  * folder, or a NULL name_out with a capacity;

@@ -7,6 +7,7 @@
 // that no other call deletes or changes a copy.
 
 #include "dump_file_support.h"
+#include "dump_handle.h"
 #include "partial_left.h"
 
 #include <gtest/gtest.h>
@@ -296,8 +297,8 @@ TEST(DumpExportTest, ACancelAnywhereLeavesNothing)
                   ECUIO_OK)
             << ecuio_last_error_detail();
         /* The check reads 3 pieces; a restore's copy and its read back 3
-         * each, an image's two ranges 2 and 1 */
-        EXPECT_EQ(count.asked, form == ECUIO_DUMP_EXPORT_RESTORE ? 9 : 6);
+         * each, an image's two ranges 2 and 1, each written and read back */
+        EXPECT_EQ(count.asked, 9);
         for (int stop = 0; stop < count.asked; ++stop) {
             Asks a;
             a.stop_at = stop;
@@ -360,6 +361,201 @@ TEST(DumpExportTest, AFileChangedAfterTheCheckIsNotExported)
         put(f.backups, name_for(bytes), bytes);
     }
 }
+
+/* A seam's failure for one call; none is left set for the next case */
+struct Failing {
+    explicit Failing(int step) { ecuio_dump_handle::test_fail_step = step; }
+    ~Failing() { ecuio_dump_handle::test_fail_step = 0; }
+    Failing(const Failing&) = delete;
+    Failing& operator=(const Failing&) = delete;
+
+    bool reached() const { return ecuio_dump_handle::test_fail_step == 0; }
+};
+
+/* A file whose flush fails, or whose folder's does once it is in place,
+ * is at no name afterwards, whichever call wrote it */
+TEST(DumpExportTest, AFileThatWontFlushIsNotKept)
+{
+    Folders f;
+    const std::string bytes = big_file();
+    const std::string path = put(f.backups, name_for(bytes), bytes);
+    const Dump d = open_dump(path);
+    ASSERT_NE(d, nullptr);
+    const struct {
+        int step;
+        const char* words;
+    } steps[] = {
+        {ecuio_dump_handle::kFailFileFlush, " can't be flushed to the disk"},
+        {ecuio_dump_handle::kFailFolderFlush,
+         " can't be put in place: its folder can't be flushed"}};
+    for (const auto& step : steps) {
+        for (const uint32_t form :
+             {ECUIO_DUMP_EXPORT_RESTORE, ECUIO_DUMP_EXPORT_IMAGE}) {
+            const Failing fail(step.step);
+            ecuio_dump_export_result_t result = fresh_result();
+            EXPECT_EQ(ecuio_dump_export(d.get(), form, f.out.c_str(), nullptr,
+                                        nullptr, &result),
+                      ECUIO_ERR_LOAD_FAILED);
+            EXPECT_EQ(std::string(ecuio_last_error_detail()),
+                      std::string(form == ECUIO_DUMP_EXPORT_RESTORE
+                                      ? "the copy"
+                                      : "the export") +
+                          step.words);
+            EXPECT_TRUE(fail.reached()) << form;
+            EXPECT_EQ(result.files, 0u);
+            EXPECT_EQ(names_in(f.out), std::vector<std::string>{}) << form;
+        }
+        const Failing fail(step.step);
+        EXPECT_EQ(ecuio_dump_import(path.c_str(), f.out.c_str(), nullptr, 0),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(std::string(ecuio_last_error_detail()),
+                  std::string("the copy") + step.words);
+        EXPECT_TRUE(fail.reached());
+        EXPECT_EQ(names_in(f.out), std::vector<std::string>{})
+            << "a read-only copy in place is taken away again too";
+    }
+    EXPECT_EQ(ecuio_dump_export(d.get(), ECUIO_DUMP_EXPORT_IMAGE, f.out.c_str(),
+                                nullptr, nullptr, nullptr),
+              ECUIO_OK)
+        << "a failure is one call's: " << ecuio_last_error_detail();
+}
+
+void change_last_byte(const char* path)
+{
+    std::fstream f(fs::u8path(path),
+                   std::ios::binary | std::ios::in | std::ios::out);
+    f.seekg(-1, std::ios::end);
+    const int c = f.get();
+    f.seekp(-1, std::ios::end);
+    f.put(static_cast<char>(c ^ 0x01));
+}
+
+/* Each file is read back before it takes its name, a range's as a
+ * copy's: one whose bytes aren't the ones written is at no name */
+TEST(DumpExportTest, AFileThatReadsBackChangedIsNotKept)
+{
+    Folders f;
+    const std::string bytes = big_file();
+    const std::string path = put(f.backups, name_for(bytes), bytes);
+    const Dump d = open_dump(path);
+    ASSERT_NE(d, nullptr);
+    for (const uint32_t form :
+         {ECUIO_DUMP_EXPORT_RESTORE, ECUIO_DUMP_EXPORT_IMAGE}) {
+        ecuio_dump_handle::test_before_read_back = change_last_byte;
+        EXPECT_EQ(ecuio_dump_export(d.get(), form, f.out.c_str(), nullptr,
+                                    nullptr, nullptr),
+                  ECUIO_ERR_LOAD_FAILED);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     form == ECUIO_DUMP_EXPORT_RESTORE
+                         ? "the copy didn't read back as it was written"
+                         : "the export didn't read back as it was written");
+        EXPECT_EQ(ecuio_dump_handle::test_before_read_back.exchange(nullptr),
+                  nullptr)
+            << "form " << form << " reads its file back";
+        EXPECT_EQ(names_in(f.out), std::vector<std::string>{}) << form;
+    }
+    ecuio_dump_handle::test_before_read_back = change_last_byte;
+    EXPECT_EQ(ecuio_dump_import(path.c_str(), f.out.c_str(), nullptr, 0),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the copy didn't read back as it was written");
+    EXPECT_EQ(ecuio_dump_handle::test_before_read_back.exchange(nullptr),
+              nullptr);
+    EXPECT_EQ(names_in(f.out), std::vector<std::string>{});
+}
+
+struct Gone {
+    int asked = 0;
+    std::string first; /* the first range's file, removed at ask 7 */
+};
+
+int remove_first(void* user)
+{
+    Gone* g = static_cast<Gone*>(user);
+    /* 3 asks for the check, 2 and 2 for the first range: it is in place */
+    if (g->asked++ != 7) {
+        return 0;
+    }
+    std::error_code ec;
+    EXPECT_TRUE(fs::remove(fs::u8path(g->first), ec)) << "it was in place";
+    return 1;
+}
+
+/* A file that is gone when a stopped export takes its files away again
+ * isn't one it left */
+TEST(DumpExportTest, AFileAlreadyGoneIsNotCountedLeft)
+{
+    Folders f;
+    const std::string bytes = big_file();
+    const std::string copy = name_for(bytes);
+    const Dump d = open_dump(put(f.backups, copy, bytes));
+    ASSERT_NE(d, nullptr);
+    Gone g;
+    g.first = f.out + "/" + bin_name(copy, "00010000");
+    ecuio_dump_export_result_t result = fresh_result();
+    EXPECT_EQ(ecuio_dump_export(d.get(), ECUIO_DUMP_EXPORT_IMAGE, f.out.c_str(),
+                                remove_first, &g, &result),
+              ECUIO_ERR_CANCELED);
+    EXPECT_EQ(g.asked, 8);
+    EXPECT_EQ(result.files, 0u);
+    EXPECT_EQ(names_in(f.out), std::vector<std::string>{});
+}
+
+#ifdef _WIN32
+/* Windows removes no file another handle holds. An image export that
+ * fails with its first file held says the file is left: in the count,
+ * and in a refusal's words. */
+struct Hold {
+    int asked = 0;
+    std::string first; /* the first range's file, held from ask 7 on */
+    std::ifstream held;
+    bool cancel = false; /* stop there; else the next flush fails */
+};
+
+int hold_first(void* user)
+{
+    Hold* h = static_cast<Hold*>(user);
+    /* 3 asks for the check, 2 and 2 for the first range: it is in place */
+    if (h->asked++ != 7) {
+        return 0;
+    }
+    h->held.open(fs::u8path(h->first), std::ios::binary);
+    if (!h->cancel) {
+        ecuio_dump_handle::test_fail_step = ecuio_dump_handle::kFailFileFlush;
+    }
+    return h->cancel ? 1 : 0;
+}
+
+TEST(DumpExportTest, AFailedImageExportSaysWhatItCouldNotRemove)
+{
+    for (const bool cancel : {true, false}) {
+        Folders f;
+        const std::string bytes = big_file();
+        const std::string copy = name_for(bytes);
+        const Dump d = open_dump(put(f.backups, copy, bytes));
+        ASSERT_NE(d, nullptr);
+        const std::string first = bin_name(copy, "00010000");
+        Hold h;
+        h.first = f.out + "/" + first;
+        h.cancel = cancel;
+        const Failing cleared(0);
+        ecuio_dump_export_result_t result = fresh_result();
+        EXPECT_EQ(ecuio_dump_export(d.get(), ECUIO_DUMP_EXPORT_IMAGE,
+                                    f.out.c_str(), hold_first, &h, &result),
+                  cancel ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED);
+        ASSERT_TRUE(h.held.is_open());
+        if (!cancel) {
+            EXPECT_STREQ(ecuio_last_error_detail(),
+                         "the export can't be flushed to the disk; 1 of its "
+                         "files couldn't be removed again");
+        }
+        EXPECT_EQ(result.files, 1u) << cancel;
+        EXPECT_EQ(result.vin_runs, 0u);
+        EXPECT_EQ(names_in(f.out), std::vector<std::string>{first}) << cancel;
+        h.held.close();
+    }
+}
+#endif
 
 TEST(DumpExportTest, ADamagedCopyIsNeitherExportedNorBroughtBack)
 {
