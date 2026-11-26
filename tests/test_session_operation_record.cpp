@@ -175,10 +175,15 @@ TEST(SessionOperationTest, ACloseDuringASlowSealSaysWhatTheFolderHolds)
         ASSERT_NO_FATAL_FAILURE(whole.start());
         ASSERT_EQ(whole.begin(), ECUIO_OK) << ecuio_last_error_detail();
         ASSERT_EQ(whole.until_ended().end, ECUIO_OPERATION_END_SAVED);
+        /* the engine's own poll goes out again once the run's hold ends */
+        const Bytes poll = {0x22,
+                            static_cast<uint8_t>(engine_talk_test::kDid >> 8),
+                            static_cast<uint8_t>(engine_talk_test::kDid)};
         for (size_t i = 0; i < whole.sent.size(); ++i) {
             const uint8_t sid = whole.sent[i][0];
-            if (sid == 0x22 || sid == 0x23 || sid == 0x35 || sid == 0x36 ||
-                sid == 0x37) {
+            if (whole.sent[i] != poll &&
+                (sid == 0x22 || sid == 0x23 || sid == 0x35 || sid == 0x36 ||
+                 sid == 0x37)) {
                 requests = i + 1;
             }
         }
