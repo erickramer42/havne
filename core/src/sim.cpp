@@ -231,6 +231,11 @@ ecuio_status_t plan_sim(const char* uri, bool unbound, sim_plan* p)
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }
+    if (p->config.memory.given && p->set != nullptr && p->modules.engine) {
+        ecuio_detail_set("mem: the engine ECU has no memory to break while a "
+                         "profile's set answers for it");
+        return ECUIO_ERR_BAD_URI;
+    }
     p->config.profile = nullptr; /* the URI's, gone after create */
     p->config.profile_len = 0;
     return ECUIO_OK;
@@ -296,6 +301,7 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
     if (!s->nodes[0].from_set && s->ecu.recording == nullptr) {
         /* the engine ECU with security access has memory to read */
         s->nodes[0].session.memory.vin = s->ecu.config.vin;
+        s->nodes[0].session.memory.faults = config.memory;
     }
     if (config.gateway.given) {
         build_gateway(s, s->ecu.config.gateway); /* the sim's, kept */

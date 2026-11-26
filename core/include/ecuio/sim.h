@@ -28,6 +28,7 @@ extern "C" {
  *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
  *          [&route=<class or service>:<outcome>[.<NRC>][@<reply ID>][,...]]
  *          [&sa=<form>][&sa_delay=<ms>][&gwopt=<knob>[,...]]
+ *          [&mem=<fault>:<n>[,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
@@ -54,6 +55,23 @@ extern "C" {
  * session (profile.h's lifetime). sessions=1 (only with profile=): each
  * of the set's modules has the extended session too (10 03 enters it,
  * 3E 00 keeps it, S3 of silence leaves it), with no security access.
+ * mem: the engine ECU's memory, which it has while no profile's set
+ * answers for it (mem= is refused where one does). The memory is made
+ * up for the simulated car, no module's: in the extended session, once
+ * a security level is unlocked, service 23 reads a 64 KiB region at
+ * 00010000 whose bytes are a fixed function of the address, the VIN
+ * written into it at 00018000, and services 35, 36 and 37 upload it in
+ * blocks; DIDs D220 and D221 answer a made-up hardware and software
+ * text in the session with no unlock. mem= breaks those reads, each
+ * fault once in the key (a later one in place of an earlier, a second
+ * mem= key adding to the first): short, flip and refuse:<n> make every
+ * nth data reply (a 63 or a 76) one byte short, one bit wrong or 7F
+ * <service> 22; seq:<n> gives every nth 76 the wrong counter;
+ * relock:<n> locks security again once the nth data reply is made;
+ * ident:<n> has D221 answer another text from the nth data reply on (n
+ * from 1 to 10000); volatile:<hex offset> makes one byte of the region
+ * read differently every time; block:<hex> (1 to FFF) is the block
+ * length an upload's 75 names, 402 by default.
  * replay://, a recording (its folder or its frames.csv): each request
  * gets the engine ECU's reply the recording held for it at the simulated
  * ECU's time since create, the car's own bitmaps, identification and

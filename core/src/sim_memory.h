@@ -9,7 +9,10 @@
 // car: the region's address, its bytes (a function of the address mixed
 // with the letters of "HAVNE") and the DIDs' texts. It is no module's
 // memory map. sim_ecu.h's engine ECU and the fakes' one ECU
-// (tests/fake_ecus.h) both answer from it.
+// (tests/fake_ecus.h) both answer from it. Its own faults (the URI's
+// mem=) break a read on request: a short or changed reply, a byte that
+// moves, an unlock lost, a wrong counter, a refusal, an identification
+// that changes.
 
 #ifndef ECUIO_SIM_MEMORY_H
 #define ECUIO_SIM_MEMORY_H
@@ -17,6 +20,7 @@
 #include "sim_security.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 /* A region: its first address and its length */
@@ -48,8 +52,12 @@ constexpr uint16_t ECUIO_SIM_SOFTWARE_DID = 0xD221;
 constexpr uint32_t ECUIO_SIM_IDENT_BYTES = 16;
 constexpr char ECUIO_SIM_HARDWARE_TEXT[] = "HAVNESIM-HW-0001";
 constexpr char ECUIO_SIM_SOFTWARE_TEXT[] = "HAVNESIM-SW-0001";
+/* What the software DID answers once the ident fault has struck */
+constexpr char ECUIO_SIM_SOFTWARE_CHANGED[] = "HAVNESIM-SW-0002";
 static_assert(sizeof ECUIO_SIM_HARDWARE_TEXT == ECUIO_SIM_IDENT_BYTES + 1 &&
-                  sizeof ECUIO_SIM_SOFTWARE_TEXT == ECUIO_SIM_IDENT_BYTES + 1,
+                  sizeof ECUIO_SIM_SOFTWARE_TEXT == ECUIO_SIM_IDENT_BYTES + 1 &&
+                  sizeof ECUIO_SIM_SOFTWARE_CHANGED ==
+                      ECUIO_SIM_IDENT_BYTES + 1,
               "each identification text is 16 bytes");
 
 /* An upload's block length, as a 75 names it: a 76's bytes with its
@@ -58,9 +66,34 @@ constexpr uint16_t ECUIO_SIM_MEMORY_BLOCK = 0x0402;
 
 /* The codes this header answers with, beside sim_security.h's */
 constexpr uint8_t ECUIO_SIM_NRC_TOO_LONG = 0x14;
+constexpr uint8_t ECUIO_SIM_NRC_CONDITIONS = 0x22;
 constexpr uint8_t ECUIO_SIM_NRC_RANGE = 0x31;
 constexpr uint8_t ECUIO_SIM_NRC_UPLOAD = 0x70;
 constexpr uint8_t ECUIO_SIM_NRC_COUNTER = 0x73;
+
+/* A fault's longest period, and the longest block length (a 76 fits
+ * ECUIO_SIM_MEMORY_REPLY_MAX) */
+constexpr uint32_t ECUIO_SIM_MEMORY_FAULT_MAX = 10000;
+constexpr uint32_t ECUIO_SIM_MEMORY_BLOCK_MAX = 0xFFF;
+
+/* The memory's own faults (mem=), 0 for off. A data reply is a 63 or a
+ * 76 the ECU would give: each read or block that passes every check
+ * counts one, whatever a fault then makes of it. */
+struct ecuio_sim_memory_faults {
+    bool given = false;  /* a mem= key named any of these */
+    uint32_t cut = 0;    /* short: every nth data reply is one byte short */
+    uint32_t flip = 0;   /* every nth data reply has one bit wrong */
+    uint32_t relock = 0; /* the nth data reply is the last before a lock */
+    uint32_t seq = 0;    /* every nth 76 carries the wrong counter */
+    uint32_t refuse = 0; /* every nth data reply is 7F <service> 22 */
+    uint32_t ident = 0;  /* from the nth data reply the software DID
+                            answers another text */
+    /* volatile: one byte of region A, at this offset, reads as the count
+     * of its own reads, so no two reads of it agree */
+    bool moving = false;
+    uint32_t moving_at = 0;
+    uint16_t block = ECUIO_SIM_MEMORY_BLOCK; /* what a 75 names */
+};
 
 /* One ECU's memory state */
 struct ecuio_sim_memory {
@@ -73,7 +106,10 @@ struct ecuio_sim_memory {
     uint32_t next = 0;
     uint32_t left = 0;
     uint8_t counter = 1;
-    uint16_t block = ECUIO_SIM_MEMORY_BLOCK; /* what a 75 names */
+    ecuio_sim_memory_faults faults;
+    uint32_t replies = 0; /* data replies counted */
+    uint32_t blocks = 0;  /* 76s counted */
+    uint32_t moved = 0;   /* reads of the volatile byte */
 };
 
 /* The diagnostic session changed, or lapsed: an upload ends with it */
@@ -161,9 +197,60 @@ inline bool in_a_region(const span& s)
     return false;
 }
 
+/* size bytes from address into out: the region's, the volatile byte
+ * counted where the faults name one inside them */
+inline void copy_out(ecuio_sim_memory& m, uint32_t address, uint32_t size,
+                     uint8_t* out)
+{
+    for (uint32_t i = 0; i < size; ++i) {
+        out[i] = ecuio_sim_memory_byte(m, address + i);
+    }
+    const uint32_t at = ECUIO_SIM_MEMORY_ADDRESS + m.faults.moving_at;
+    if (m.faults.moving && at >= address && at - address < size) {
+        out[at - address] = static_cast<uint8_t>(++m.moved);
+    }
+}
+
+/* What the faults make of a data reply, count its place among them:
+ * refused (nothing is read and nothing moves), else one byte short
+ * (cut) or one bit wrong (flip); relock locks once the reply is made */
+struct struck {
+    uint32_t count = 0;
+    bool refused = false;
+    bool cut = false;
+    bool flip = false;
+    bool relock = false;
+};
+
+inline struck strike(ecuio_sim_memory& m)
+{
+    struck s;
+    s.count = ++m.replies;
+    const ecuio_sim_memory_faults& f = m.faults;
+    const auto every = [&s](uint32_t n) { return n != 0 && s.count % n == 0; };
+    s.relock = f.relock != 0 && s.count == f.relock;
+    s.refused = every(f.refuse);
+    s.cut = !s.refused && every(f.cut);
+    s.flip = !s.refused && every(f.flip);
+    return s;
+}
+
+/* The faults applied to a reply of head bytes and size of data in out;
+ * its length */
+inline uint32_t broken(const struck& s, ecuio_sim_security& security,
+                       uint32_t head, uint32_t size, uint8_t* out)
+{
+    if (s.flip) {
+        out[head + s.count % size] ^= static_cast<uint8_t>(1u << (s.count % 8));
+    }
+    if (s.relock) {
+        ecuio_sim_security_lock(security);
+    }
+    return head + size - (s.cut ? 1u : 0u);
+}
+
 /* 23 <ALFID> <address> <size> */
-inline uint32_t read_bytes(const ecuio_sim_memory& m,
-                           const ecuio_sim_security& security,
+inline uint32_t read_bytes(ecuio_sim_memory& m, ecuio_sim_security& security,
                            const uint8_t* req, uint32_t len, uint8_t* out)
 {
     if (len < 3) {
@@ -185,13 +272,17 @@ inline uint32_t read_bytes(const ecuio_sim_memory& m,
     if (s.size > ECUIO_SIM_MEMORY_REPLY_MAX - 1) {
         return refuse(0x23, ECUIO_SIM_NRC_TOO_LONG, out);
     }
-    const uint32_t address = static_cast<uint32_t>(s.address);
+    const struck hit = strike(m);
+    if (hit.refused) {
+        if (hit.relock) {
+            ecuio_sim_security_lock(security);
+        }
+        return refuse(0x23, ECUIO_SIM_NRC_CONDITIONS, out);
+    }
     const uint32_t size = static_cast<uint32_t>(s.size);
     out[0] = 0x63;
-    for (uint32_t i = 0; i < size; ++i) {
-        out[1 + i] = ecuio_sim_memory_byte(m, address + i);
-    }
-    return 1 + size;
+    copy_out(m, static_cast<uint32_t>(s.address), size, out + 1);
+    return broken(hit, security, 1, size, out);
 }
 
 /* 35 <dataFormatIdentifier> <ALFID> <address> <size> */
@@ -224,20 +315,19 @@ inline uint32_t open_upload(ecuio_sim_memory& m,
     m.counter = 1;
     out[0] = 0x75;
     out[1] = 0x20; /* the block length that follows takes two bytes */
-    out[2] = static_cast<uint8_t>(m.block >> 8);
-    out[3] = static_cast<uint8_t>(m.block & 0xFF);
+    out[2] = static_cast<uint8_t>(m.faults.block >> 8);
+    out[3] = static_cast<uint8_t>(m.faults.block & 0xFF);
     return 4;
 }
 
 /* 36 <counter>: the upload's next block */
-inline uint32_t next_block(ecuio_sim_memory& m,
-                           const ecuio_sim_security& security,
+inline uint32_t next_block(ecuio_sim_memory& m, ecuio_sim_security& security,
                            const uint8_t* req, uint32_t len, uint8_t* out)
 {
     if (len != 2) {
         return refuse(0x36, ECUIO_SIM_NRC_LENGTH, out);
     }
-    if (!m.uploading || m.left == 0 || m.block < 3) {
+    if (!m.uploading || m.left == 0 || m.faults.block < 3) {
         return refuse(0x36, ECUIO_SIM_NRC_SEQUENCE, out);
     }
     if (security.unlocked == 0) {
@@ -246,17 +336,24 @@ inline uint32_t next_block(ecuio_sim_memory& m,
     if (req[1] != m.counter) {
         return refuse(0x36, ECUIO_SIM_NRC_COUNTER, out);
     }
-    const uint32_t room = m.block - 2u;
-    const uint32_t n = m.left < room ? m.left : room;
-    out[0] = 0x76;
-    out[1] = m.counter;
-    for (uint32_t i = 0; i < n; ++i) {
-        out[2 + i] = ecuio_sim_memory_byte(m, m.next + i);
+    const struck hit = strike(m);
+    if (hit.refused) {
+        if (hit.relock) {
+            ecuio_sim_security_lock(security);
+        }
+        return refuse(0x36, ECUIO_SIM_NRC_CONDITIONS, out);
     }
+    const uint32_t room = m.faults.block - 2u;
+    const uint32_t n = m.left < room ? m.left : room;
+    const uint32_t k = ++m.blocks;
+    const bool wrong = m.faults.seq != 0 && k % m.faults.seq == 0;
+    out[0] = 0x76;
+    out[1] = static_cast<uint8_t>(m.counter + (wrong ? 1 : 0));
+    copy_out(m, m.next, n, out + 2);
     m.next += n;
     m.left -= n;
     ++m.counter; /* FF wraps to 00 */
-    return 2 + n;
+    return broken(hit, security, 2, n, out);
 }
 
 /* 37: the upload's end */
@@ -302,9 +399,12 @@ inline bool ecuio_sim_memory_service(uint8_t service)
  * block length less 2 at most, the counter from 01 and FF wrapping to
  * 00: not two bytes 13; none open, or all handed over, 24; locked 33;
  * another counter 73. 37 ends it with 77: more than one byte 13; none
- * open, or bytes still left, 24. */
+ * open, or bytes still left, 24.
+ *
+ * m.faults break a 63 or a 76 that passed every check above; relock
+ * locks security once its reply is made. */
 inline uint32_t ecuio_sim_memory_answer(ecuio_sim_memory& m,
-                                        const ecuio_sim_security& security,
+                                        ecuio_sim_security& security,
                                         bool extended, const uint8_t* req,
                                         uint32_t len, uint8_t* out)
 {
@@ -337,11 +437,120 @@ inline uint32_t ecuio_sim_memory_did(const ecuio_sim_memory& m, bool extended,
     out[0] = 0x62;
     out[1] = static_cast<uint8_t>(did >> 8);
     out[2] = static_cast<uint8_t>(did & 0xFF);
+    const bool changed = m.faults.ident != 0 && m.replies >= m.faults.ident;
     std::memcpy(out + 3,
                 did == ECUIO_SIM_HARDWARE_DID ? ECUIO_SIM_HARDWARE_TEXT
+                : changed                     ? ECUIO_SIM_SOFTWARE_CHANGED
                                               : ECUIO_SIM_SOFTWARE_TEXT,
                 ECUIO_SIM_IDENT_BYTES);
     return 3 + ECUIO_SIM_IDENT_BYTES;
+}
+
+namespace ecuio_sim_memory_detail {
+
+/* A number of base 10 or 16 filling [s, s + n), at most max; false for
+ * none, another character or a larger one */
+inline bool number(const char* s, size_t n, uint32_t base, uint32_t max,
+                   uint32_t* out)
+{
+    uint32_t v = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const char c = s[i];
+        const uint32_t d = c >= '0' && c <= '9'                 ? c - '0'
+                           : base == 16 && c >= 'a' && c <= 'f' ? c - 'a' + 10u
+                           : base == 16 && c >= 'A' && c <= 'F' ? c - 'A' + 10u
+                                                                : 99u;
+        if (d >= base || v > max) {
+            return false;
+        }
+        v = v * base + d;
+    }
+    *out = v;
+    return n > 0 && v <= max;
+}
+
+/* One item, <fault>:<n>, into *f; false for any other shape */
+inline bool parse_item(const char* s, size_t n, ecuio_sim_memory_faults* f)
+{
+    size_t colon = 0;
+    while (colon < n && s[colon] != ':') {
+        ++colon;
+    }
+    if (colon == n) {
+        return false;
+    }
+    const auto is = [s, colon](const char* name) {
+        return std::strlen(name) == colon && std::strncmp(s, name, colon) == 0;
+    };
+    const char* v = s + colon + 1;
+    const size_t vn = n - colon - 1;
+    uint32_t value = 0;
+    if (is("volatile")) {
+        if (!number(v, vn, 16, ECUIO_SIM_MEMORY_BYTES - 1, &value)) {
+            return false;
+        }
+        f->moving = true;
+        f->moving_at = value;
+        return true;
+    }
+    if (is("block")) {
+        if (!number(v, vn, 16, ECUIO_SIM_MEMORY_BLOCK_MAX, &value) ||
+            value == 0) {
+            return false;
+        }
+        f->block = static_cast<uint16_t>(value);
+        return true;
+    }
+    uint32_t* slot = is("short")    ? &f->cut
+                     : is("flip")   ? &f->flip
+                     : is("relock") ? &f->relock
+                     : is("seq")    ? &f->seq
+                     : is("refuse") ? &f->refuse
+                     : is("ident")  ? &f->ident
+                                    : nullptr;
+    if (slot == nullptr ||
+        !number(v, vn, 10, ECUIO_SIM_MEMORY_FAULT_MAX, &value) || value == 0) {
+        return false;
+    }
+    *slot = value;
+    return true;
+}
+
+} // namespace ecuio_sim_memory_detail
+
+/* mem=<fault>:<n>[,...] into *out, adding to what it holds, so a second
+ * mem= key adds to the first (a later item in place of an earlier);
+ * false with why (a line) */
+inline bool ecuio_sim_parse_memory(const char* text, size_t len,
+                                   ecuio_sim_memory_faults* out, char* why,
+                                   size_t why_cap)
+{
+    size_t at = 0;
+    while (at < len) {
+        size_t end = at;
+        while (end < len && text[end] != ',') {
+            ++end;
+        }
+        if (!ecuio_sim_memory_detail::parse_item(text + at, end - at, out)) {
+            std::snprintf(why, why_cap,
+                          "mem: '%.*s' isn't <fault>:<n>: short, flip, relock, "
+                          "seq, refuse or ident with n from 1 to %u, volatile "
+                          "with a hex offset into the region (0 to %X) or "
+                          "block with a hex length from 1 to %X",
+                          static_cast<int>(end - at < 40 ? end - at : 40),
+                          text + at, ECUIO_SIM_MEMORY_FAULT_MAX,
+                          ECUIO_SIM_MEMORY_BYTES - 1,
+                          ECUIO_SIM_MEMORY_BLOCK_MAX);
+            return false;
+        }
+        at = end + 1;
+    }
+    if (len == 0 || text[len - 1] == ',') {
+        std::snprintf(why, why_cap, "mem: names none");
+        return false;
+    }
+    out->given = true;
+    return true;
 }
 
 #endif /* ECUIO_SIM_MEMORY_H */

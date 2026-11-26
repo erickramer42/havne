@@ -204,6 +204,7 @@ struct FakeMemoryTest : ::testing::Test {
         fake_ecu::set_module_dids(nullptr);
         fake_ecu::reset_sessions();
         fake_ecu::reset_security();
+        fake_ecu::set_memory_faults(nullptr);
     }
 
     static Bytes ask(uint32_t rx, const Bytes& req)

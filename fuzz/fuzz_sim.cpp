@@ -97,7 +97,7 @@ void check_upload(const ecuio_sim_session& s, const ecuio_sim_memory& was,
         abort();
     }
     if (n >= 1 && reply[0] == 0x76) {
-        if (!open || !was.uploading || n < 3 || n > was.block ||
+        if (!open || !was.uploading || n < 3 || n > was.faults.block ||
             n - 2 > was.left || reply[1] != was.counter ||
             s.memory.left != was.left - (n - 2)) {
             abort();
@@ -272,6 +272,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         }
         if (r == ecuio_sim_uri_result::ok) {
             check_timing(config.timing);
+            const ecuio_sim_memory_faults& m = config.memory;
+            const uint32_t periods[] = {m.cut, m.flip,   m.relock,
+                                        m.seq, m.refuse, m.ident};
+            for (const uint32_t every : periods) {
+                if (every > ECUIO_SIM_MEMORY_FAULT_MAX) {
+                    abort();
+                }
+            }
+            if (m.block == 0 || m.block > ECUIO_SIM_MEMORY_BLOCK_MAX ||
+                m.moving_at >= ECUIO_SIM_MEMORY_BYTES ||
+                (m.moving_at != 0 && !m.moving)) {
+                abort();
+            }
         }
         /* Each aim one 11-bit module's, its period as a fault's */
         for (uint32_t i = 0;

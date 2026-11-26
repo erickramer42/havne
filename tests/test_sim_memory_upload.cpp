@@ -69,7 +69,7 @@ TEST(SimMemoryTest, AnUploadHandsOverTheRegionBlockByBlock)
 TEST(SimMemoryTest, TheCountersWrapIsFromFFToZero)
 {
     Ecu e;
-    e.m.block = 0x82; /* 128 bytes of data: 512 blocks, two wraps */
+    e.m.faults.block = 0x82; /* 128 bytes of data: 512 blocks, two wraps */
     EXPECT_EQ(e.ask(upload_of(kBase, kSize)), (Bytes{0x75, 0x20, 0x00, 0x82}));
     for (int i = 1; i <= 0xFF; ++i) {
         ASSERT_EQ(e.ask({0x36, static_cast<uint8_t>(i)}).size(), 130u);
@@ -82,7 +82,7 @@ TEST(SimMemoryTest, TheCountersWrapIsFromFFToZero)
               bytes_of(kBase + 255 * 128, 128, e.m.vin));
 
     Ecu whole;
-    whole.m.block = 0x82;
+    whole.m.faults.block = 0x82;
     whole.ask(upload_of(kBase, kSize));
     uint32_t blocks = 0;
     EXPECT_EQ(take_blocks(whole, &blocks), bytes_of(kBase, kSize, whole.m.vin));
@@ -165,10 +165,10 @@ TEST(SimMemoryTest, EachUploadRefusalComesInItsOrder)
 TEST(SimMemoryTest, ABlockLengthUnderThreeHandsOverNothing)
 {
     Ecu e;
-    e.m.block = 2;
+    e.m.faults.block = 2;
     EXPECT_EQ(e.ask(upload_of(kBase, 16)), (Bytes{0x75, 0x20, 0x00, 0x02}));
     EXPECT_EQ(e.ask({0x36, 0x01}), nrc(0x36, 0x24));
-    e.m.block = 3;
+    e.m.faults.block = 3;
     EXPECT_EQ(e.ask({0x36, 0x01}),
               (Bytes{0x76, 0x01, ecuio_sim_memory_fill(kBase)}));
 }

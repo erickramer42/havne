@@ -241,6 +241,18 @@ inline taken take_gateway(const ecuio_uri::param& p, ecuio_sim_config* out,
                                                                : taken::bad;
 }
 
+/* mem= (sim_memory.h) */
+inline taken take_memory(const ecuio_uri::param& p, ecuio_sim_config* out,
+                         char* why, size_t why_cap)
+{
+    if (!p.is("mem")) {
+        return taken::other;
+    }
+    return ecuio_sim_parse_memory(p.val, p.val_len, &out->memory, why, why_cap)
+               ? taken::ok
+               : taken::bad;
+}
+
 /* One key, through each group in turn: a key belongs to one group only,
  * so their order changes nothing */
 inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
@@ -249,8 +261,8 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
     using reader =
         taken (*)(const ecuio_uri::param&, ecuio_sim_config*, char*, size_t);
     static const reader kReaders[] = {
-        take_mock_shape, take_profile, take_vin,    take_replay_span,
-        take_faults,     take_timing,  take_gateway};
+        take_mock_shape, take_profile, take_vin,     take_replay_span,
+        take_faults,     take_timing,  take_gateway, take_memory};
     for (const reader r : kReaders) {
         const taken t = r(p, out, why, why_cap);
         if (t != taken::other) {
@@ -265,6 +277,7 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
  *          [&timing][&gateway][&behind][&route][&sa][&sa_delay][&gwopt]
+ *          [&mem]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
  * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
@@ -291,10 +304,9 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values", "modules", "sessions", "profile", "vin",
-        "faults", "delay",   "fc",       "cf",      "seed",
-        "busy",   "bus",     "gateway",  "behind",  "route",
-        "gwopt",  "sa",      "sa_delay", nullptr};
+        "values", "modules", "sessions", "profile",  "vin", "faults",  "delay",
+        "fc",     "cf",      "seed",     "busy",     "bus", "gateway", "behind",
+        "route",  "gwopt",   "sa",       "sa_delay", "mem", nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
@@ -322,7 +334,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to"
                              : "values, modules, sessions, profile, "
-                               "gateway, behind, route, sa, sa_delay, gwopt");
+                               "gateway, behind, route, sa, sa_delay, gwopt, "
+                               "mem");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {

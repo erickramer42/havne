@@ -54,6 +54,8 @@
 //    ECUIO_FAKE_ABSENT_ECU=<reply ID, hex> leaves every request to that
 //    ECU with no answer: a module this car lacks. FFFFFFFF leaves every
 //    ECU's: a car with its ignition off.
+//    ECUIO_FAKE_MEM=<fault>:<n>[,...] breaks the engine ECU's memory
+//    reads as the simulated ECU's mem= does (core/src/sim_memory.h).
 //    ECUIO_FAKE_SECURITY_STRICT=1 has the engine ECU's security access
 //    want its key straight after its seed (fake_ecus.h).
 //    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to

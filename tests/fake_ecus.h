@@ -243,6 +243,7 @@ struct SecuritySlot {
 struct SecurityTable {
     std::mutex m;
     SecuritySlot slots[kSessionSlots];
+    ecuio_sim_memory_faults memory; /* set_memory_faults()'s */
 };
 
 inline SecurityTable& security_table()
@@ -285,6 +286,25 @@ inline void reset_security()
     for (SecuritySlot& s : t.slots) {
         s = SecuritySlot{};
     }
+}
+
+/* The memory's faults, a knob in sim_memory.h's mem= words
+ * ("flip:3,block:82"); NULL or "" for none. False, the knob unchanged,
+ * for words the grammar refuses. Each ECU counts its own replies, from
+ * reset_security() on. The fake DLL sets it from ECUIO_FAKE_MEM on each
+ * write, the in-process fakes' tests with this, and put it back. */
+inline bool set_memory_faults(const char* spec)
+{
+    ecuio_sim_memory_faults f;
+    char why[256];
+    if (spec != nullptr && spec[0] != '\0' &&
+        !ecuio_sim_parse_memory(spec, strlen(spec), &f, why, sizeof why)) {
+        return false;
+    }
+    SecurityTable& t = security_table();
+    const std::lock_guard<std::mutex> lock(t.m);
+    t.memory = f;
+    return true;
 }
 
 /* A request that is no 27 reached the engine ECU on rx: it comes
@@ -339,6 +359,7 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
     if (gated) {
         return ecuio_sim_security_did(*s, in_extended(rx), out);
     }
+    slot->memory.faults = t.memory;
     if (ident) {
         return ecuio_sim_memory_did(slot->memory, in_extended(rx), did, out);
     }

@@ -149,6 +149,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         /* Security access that wants its key straight after its seed */
         fake_ecu::security_strict() =
             fake_j2534::knob_on("ECUIO_FAKE_SECURITY_STRICT");
+        /* The memory's faults, in the simulated ECU's mem= words */
+        char mem[128];
+        (void)fake_ecu::set_memory_faults(
+            fake_j2534::read_knob("ECUIO_FAKE_MEM", mem, sizeof(mem))
+                ? mem
+                : nullptr);
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
