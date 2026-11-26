@@ -50,7 +50,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_security_store_owner.cpp test_conversation_registry.cpp
     test_consent_store.cpp test_consent_lines.cpp test_consent_session.cpp
     test_conversation_session.cpp test_core_conversation.cpp
-    test_access_cut.cpp test_core_awake.cpp)
+    test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
+    test_dump_record.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -2029,7 +2030,7 @@ endif()
 set(C_ABI_SOURCES test_c_abi.c test_c_abi_layout.c test_c_abi_conditions.c
     test_c_abi_core.c test_c_abi_signalfile.c test_c_abi_plugin.c
     test_c_abi_diag.c test_c_abi_recording.c test_c_abi_exchange.c
-    test_c_abi_frames.c)
+    test_c_abi_frames.c test_c_abi_dump.c)
 add_executable(test_c_abi ${C_ABI_SOURCES})
 set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
 app_enable_warnings(test_c_abi)
