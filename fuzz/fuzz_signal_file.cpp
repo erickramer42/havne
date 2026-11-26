@@ -20,6 +20,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -378,6 +379,39 @@ struct expr_case {
     }
 };
 
+/* The names a passed expression reads, worked out with no file
+ * (ecuio_expr_names), are each one of the file's keys or obd2's. With no
+ * file only obd2's fields count as inputs, the keys as one more, so four
+ * fields and a key in a field's place may be refused. */
+void names_agree(const ecuio_signal_file_t* a, const std::string& expr)
+{
+    uint32_t count = 0;
+    ecuio_status_t st =
+        ecuio_expr_names(expr.data(), expr.size(), nullptr, 0, &count);
+    if (st == ECUIO_ERR_OUT_OF_MEMORY) {
+        return;
+    }
+    if (st != ECUIO_OK) {
+        check(st == ECUIO_ERR_INVALID_ARGUMENT && count == 0 &&
+              std::string(ecuio_last_error_detail())
+                      .find("reads more than 4 signals") != std::string::npos);
+        return;
+    }
+    std::vector<ecuio_expr_name_t> names(count);
+    uint32_t again = 0;
+    st =
+        ecuio_expr_names(expr.data(), expr.size(), names.data(), count, &again);
+    if (st == ECUIO_ERR_OUT_OF_MEMORY) {
+        return;
+    }
+    check(st == ECUIO_OK && again == count && count > 0);
+    for (const ecuio_expr_name_t& n : names) {
+        check(memchr(n.text, '\0', sizeof n.text) != nullptr);
+        check(strncmp(n.text, "obd2.", 5) == 0 ||
+              ecuio_signal_file_find(a, n.text) != nullptr);
+    }
+}
+
 /* An expression checked against the file, and the file loaded with the
  * expression in it (ADR-0062): they must agree. The file's "x-expr" (a
  * tool's own key, which the loader passes by) is the expression, and
@@ -410,6 +444,7 @@ void check_expr_against_load(const ecuio_signal_file_t* a, const char* bytes,
         c.refused(words, out.at);
     } else {
         c.passed(out, ecuio_signal_file_format(a));
+        names_agree(a, c.expr);
     }
 }
 

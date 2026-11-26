@@ -2,7 +2,8 @@
 // Testing: FUZZ: signal files merged into one set (ADR-0065 section 9,
 //          ecuio_signal_file_merge)
 //
-// The first byte's low bit asks for obd2 as the base; the rest, cut at
+// The first byte's low two bits are the base flags (obd2 whole, its
+// modules alone; both is a refusal); the rest, cut at
 // each 0x1E byte, is up to four signal files. Those that load at a set's
 // bounds are the parts, in their order. fuzz/README.md lists what each
 // input must hold to.
@@ -41,11 +42,12 @@ struct merged {
     std::string words;
 };
 
-merged merge(const std::vector<const ecuio_signal_file_t*>& parts, bool base)
+merged merge(const std::vector<const ecuio_signal_file_t*>& parts,
+             uint32_t flags)
 {
     ecuio_merge_options_t options{};
     options.struct_size = sizeof options;
-    options.flags = base ? ECUIO_MERGE_BASE_OBD2 : 0u;
+    options.flags = flags;
     merged m;
     m.file = reinterpret_cast<ecuio_signal_file_t*>(1);
     m.status = ecuio_signal_file_merge(
@@ -86,13 +88,14 @@ std::vector<std::string> replaced_of(const ecuio_signal_file_t* f,
 
 /* Each def's part and keys: a base def has neither, a part's def has its
  * part and a key, and every key, own or replaced, finds its def and is
- * one signal's */
-void check_keys(const ecuio_signal_file_t* f, uint32_t parts, bool base)
+ * one signal's. obd2's modules alone may hold no def. */
+void check_keys(const ecuio_signal_file_t* f, uint32_t parts, bool base,
+                bool modules)
 {
     const ecuio_signal_set_t* set = ecuio_signal_file_set(f);
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
     const uint32_t first = base ? obd2->count : 0;
-    check(set->count > first);
+    check(set->count > first || modules);
     if (base) {
         check(memcmp(set->defs, obd2->defs, obd2->count * sizeof *set->defs) ==
               0);
@@ -160,7 +163,7 @@ void check_notes(const ecuio_signal_file_t* f, uint32_t parts)
 /* What an OK merge holds to */
 void check_merged(const ecuio_signal_file_t* f,
                   const std::vector<const ecuio_signal_file_t*>& parts,
-                  bool base)
+                  bool base, bool modules)
 {
     const ecuio_signal_set_t* set = ecuio_signal_file_set(f);
     const std::string profile = ecuio_signal_file_profile(f);
@@ -169,7 +172,14 @@ void check_merged(const ecuio_signal_file_t* f,
     check(ecuio_signal_file_part_count(f) == count);
     check(profile.compare(0, 7, "merged.") == 0 && profile.size() == 23);
     check(ecuio_validate_signal_set(set, nullptr) == ECUIO_VALIDATE_OK);
-    check_keys(f, count, base);
+    /* obd2's modules come first, whole or alone; alone, no obd2 def */
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    check(!(base || modules) ||
+          (set->channel_count >= obd2->channel_count &&
+           memcmp(set->channels, obd2->channels,
+                  obd2->channel_count * sizeof *set->channels) == 0));
+    check(!modules || ecuio_signal_file_extends(f)[0] == '\0');
+    check_keys(f, count, base, modules);
     check_notes(f, count);
 
     /* The text reads back to the same set, parts and keys */
@@ -182,7 +192,7 @@ void check_merged(const ecuio_signal_file_t* f,
     check(profile == ecuio_signal_file_profile(back));
     check(ecuio_signal_file_part_count(back) == count);
     check(ecuio_signal_file_note_count(back) == 0);
-    check_keys(back, count, base);
+    check_keys(back, count, base, modules);
     ecuio_signal_file_free(back);
 
     /* It registers under its profile, as a session needs */
@@ -195,14 +205,18 @@ void check_merged(const ecuio_signal_file_t* f,
 }
 
 void check_merge(const std::vector<const ecuio_signal_file_t*>& parts,
-                 bool base)
+                 uint32_t flags)
 {
-    /* The set extends obd2 when it is asked to or a part does */
-    bool with_base = base;
+    /* The set extends obd2 when it is asked to or a part does; obd2's
+     * modules alone are asked for and no part extends it */
+    bool with_base = (flags & ECUIO_MERGE_BASE_OBD2) != 0;
     for (const ecuio_signal_file_t* p : parts) {
         with_base = with_base || extends_obd2(p);
     }
-    const merged m = merge(parts, base);
+    const bool modules = (flags & ECUIO_MERGE_BASE_MODULES) != 0 && !with_base;
+    const merged m = merge(parts, flags);
+    const uint32_t both = ECUIO_MERGE_BASE_OBD2 | ECUIO_MERGE_BASE_MODULES;
+    check((flags & both) != both || m.status == ECUIO_ERR_INVALID_ARGUMENT);
     if (m.status != ECUIO_OK) {
         check(m.file == nullptr);
         check(m.status == ECUIO_ERR_OUT_OF_MEMORY ||
@@ -212,9 +226,9 @@ void check_merge(const std::vector<const ecuio_signal_file_t*>& parts,
         return;
     }
     check(m.file != nullptr && m.words.empty());
-    check_merged(m.file, parts, with_base);
+    check_merged(m.file, parts, with_base, modules);
     /* The same parts give the same bytes */
-    const merged again = merge(parts, base);
+    const merged again = merge(parts, flags);
     check(again.status == ECUIO_OK || again.status == ECUIO_ERR_OUT_OF_MEMORY);
     if (again.status == ECUIO_OK) {
         check(text_of(again.file) == text_of(m.file));
@@ -222,7 +236,7 @@ void check_merge(const std::vector<const ecuio_signal_file_t*>& parts,
     }
     /* A format 3 part merged alone is its own set */
     if (parts.size() == 1 && ecuio_signal_file_format(parts[0]) == 3 &&
-        with_base == extends_obd2(parts[0])) {
+        with_base == extends_obd2(parts[0]) && !modules) {
         check(same_tables(ecuio_signal_file_set(m.file),
                           ecuio_signal_file_set(parts[0])));
     }
@@ -236,7 +250,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     if (size < 2) {
         return 0;
     }
-    const bool base = (data[0] & 1u) != 0;
+    const uint32_t flags =
+        data[0] & (ECUIO_MERGE_BASE_OBD2 | ECUIO_MERGE_BASE_MODULES);
     std::vector<ecuio_signal_file_t*> loaded;
     const char* at = reinterpret_cast<const char*>(data) + 1;
     const char* const end = reinterpret_cast<const char*>(data) + size;
@@ -258,8 +273,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     }
     const std::vector<const ecuio_signal_file_t*> parts(loaded.begin(),
                                                         loaded.end());
-    if (!parts.empty()) {
-        check_merge(parts, base);
+    if (!parts.empty() || flags == ECUIO_MERGE_BASE_MODULES) {
+        check_merge(parts, flags);
     }
     for (ecuio_signal_file_t* f : loaded) {
         ecuio_signal_file_free(f);

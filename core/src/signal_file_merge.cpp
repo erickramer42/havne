@@ -100,8 +100,8 @@ Value written_source(const ecuio_signal_source_t& s)
 } // namespace
 
 merger::merger(const ecuio_signal_file_t* const* parts, uint32_t count,
-               bool base_asked)
-    : base_(base_asked)
+               bool base, bool modules)
+    : base_(base)
 {
     parts_.resize(count);
     for (uint32_t p = 0; p < count; ++p) {
@@ -118,11 +118,12 @@ merger::merger(const ecuio_signal_file_t* const* parts, uint32_t count,
         pt.ecus = ecuio_ecus::ecus_of(pt.root.find("ecus"));
         base_ = base_ || pt.file->extends == "obd2";
     }
+    base_modules_ = modules && !base_;
 }
 
 std::string merger::compose()
 {
-    if (base_) {
+    if (base_ || base_modules_) {
         /* The base's channels are the first modules, named by no part */
         const ecuio_signal_set_t* base = ecuio_obd2_signal_set();
         for (uint32_t c = 0; c < base->channel_count; ++c) {
@@ -238,7 +239,7 @@ void merger::leave_module_out(uint32_t p, const ecuio_ecus::ecu& e,
 void merger::check_bounds() const
 {
     const std::vector<size_t> list = alive();
-    if (list.empty()) {
+    if (list.empty() && !base_modules_) {
         throw refusal{"no signal of the " + parts_words(parts_.size()) +
                       " is left to read"};
     }
@@ -388,14 +389,21 @@ std::string merger::write() const
 {
     Value doc = empty_of(Type::object);
     add(doc, "havne_signals", whole_value(ECUIO_SIGNAL_FILE_FORMAT));
+    const size_t n = parts_.size();
     add(doc, "name",
-        text_value(parts_words(parts_.size()) +
-                   (parts_.size() == 1 ? " read alone" : " read together")));
+        text_value(n == 0   ? std::string("obd2's modules alone")
+                   : n == 1 ? parts_words(n) + " read alone"
+                            : parts_words(n) + " read together"));
     Value source = empty_of(Type::object);
-    add(source, "name", text_value("A merge of " + parts_words(parts_.size())));
+    add(source, "name",
+        text_value(n == 0 ? std::string("A merge of no part")
+                          : "A merge of " + parts_words(n)));
     add(doc, "source", std::move(source));
     if (base_) {
         add(doc, "extends", text_value("obd2"));
+    }
+    if (base_modules_) {
+        add(doc, "base_modules", text_value("obd2"));
     }
     add(doc, "parts", written_parts());
     Value ecus = written_ecus();
@@ -419,9 +427,10 @@ std::string merger::write() const
 namespace {
 
 /* The call's own refusals: what it is given, before anything is read */
-void check_parts(const ecuio_signal_file_t* const* parts, uint32_t count)
+void check_parts(const ecuio_signal_file_t* const* parts, uint32_t count,
+                 bool modules)
 {
-    if (count == 0) {
+    if (count == 0 && !modules) {
         throw refusal{"a merge takes at least one part"};
     }
     if (count > ECUIO_MERGE_MAX_PARTS) {
@@ -431,7 +440,7 @@ void check_parts(const ecuio_signal_file_t* const* parts, uint32_t count)
     }
     for (uint32_t p = 0; p < count; ++p) {
         const std::string which = "part " + std::to_string(p);
-        if (!parts[p]->parts.empty()) {
+        if (ecuio_sf::is_merged(*parts[p])) {
             throw refusal{which + " is a merged set: merge its parts instead"};
         }
         if (parts[p]->bytes.empty()) {
@@ -451,31 +460,36 @@ void check_parts(const ecuio_signal_file_t* const* parts, uint32_t count)
     }
 }
 
-/* Whether the options name obd2 as the base; a refusal for what this core
- * doesn't know of them */
-bool base_asked(const ecuio_merge_options_t* options)
+/* The options' base flags; a refusal for what this core doesn't know of
+ * them */
+uint32_t base_asked(const ecuio_merge_options_t* options)
 {
+    constexpr uint32_t kBases =
+        ECUIO_MERGE_BASE_OBD2 | ECUIO_MERGE_BASE_MODULES;
     if (options == nullptr) {
-        return false;
+        return 0;
     }
     if (options->struct_size < sizeof(ecuio_merge_options_t)) {
         throw refusal{"the options' struct_size is " +
                       std::to_string(options->struct_size) + ", under its " +
                       std::to_string(sizeof(ecuio_merge_options_t)) + " bytes"};
     }
-    if ((options->flags & ~ECUIO_MERGE_BASE_OBD2) != 0) {
+    if ((options->flags & ~kBases) != 0) {
         char flag[16];
-        std::snprintf(
-            flag, sizeof flag, "0x%x",
-            static_cast<unsigned>(options->flags & ~ECUIO_MERGE_BASE_OBD2));
+        std::snprintf(flag, sizeof flag, "0x%x",
+                      static_cast<unsigned>(options->flags & ~kBases));
         throw refusal{std::string("a merge takes no flag ") + flag};
+    }
+    if ((options->flags & kBases) == kBases) {
+        throw refusal{"a merge reads obd2 whole (ECUIO_MERGE_BASE_OBD2) or "
+                      "its modules alone (ECUIO_MERGE_BASE_MODULES), not both"};
     }
     for (const uint32_t r : options->reserved) {
         if (r != 0) {
             throw refusal{"the options' reserved words are zero"};
         }
     }
-    return (options->flags & ECUIO_MERGE_BASE_OBD2) != 0;
+    return options->flags & kBases;
 }
 
 } // namespace
@@ -504,9 +518,11 @@ ecuio_status_t ecuio_signal_file_merge(const ecuio_signal_file_t* const* parts,
         }
     }
     try {
-        const bool base = ecuio_merge::base_asked(options);
-        ecuio_merge::check_parts(parts, count);
-        ecuio_merge::merger merge(parts, count, base);
+        const uint32_t base = ecuio_merge::base_asked(options);
+        const bool modules = (base & ECUIO_MERGE_BASE_MODULES) != 0;
+        ecuio_merge::check_parts(parts, count, modules);
+        ecuio_merge::merger merge(parts, count,
+                                  (base & ECUIO_MERGE_BASE_OBD2) != 0, modules);
         const std::string text = merge.compose();
         ecuio_signal_file* made = nullptr;
         const ecuio_status_t status =

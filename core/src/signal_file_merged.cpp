@@ -116,13 +116,42 @@ ecuio_signal_file::part read_part(const Value& v, size_t index)
     return out;
 }
 
+/* A merged set's "base_modules" (modules, NULL for none): obd2's channels
+ * first, as "extends" gives them, with none of its defs. The set may then
+ * hold no signal, since the modules read the emissions codes. */
+void read_base_modules(const Value* modules, const Value* extends, parts& p,
+                       ecuio_signal_file& f)
+{
+    if (modules == nullptr) {
+        return;
+    }
+    expect(*modules, Type::string, "\"base_modules\"");
+    if (modules->text != "obd2") {
+        refuse(*modules, "\"base_modules\" " + q(modules->text) +
+                             " isn't a set whose modules a merged set reads: "
+                             "only \"obd2\"");
+    }
+    if (extends != nullptr) {
+        refuse(*modules, "a merged set takes \"extends\" or "
+                         "\"base_modules\", not both");
+    }
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    f.channels.assign(obd2->channels, obd2->channels + obd2->channel_count);
+    p.may_be_empty = true;
+}
+
 } // namespace
 
 void read_merged(const Value& root, uint32_t format, parts& p,
                  ecuio_signal_file& f)
 {
     const Value* list = root.find("parts");
+    const Value* modules = root.find("base_modules");
     if (list == nullptr) {
+        if (modules != nullptr) {
+            refuse(*modules, "\"base_modules\" is a merged set's: a file with "
+                             "no \"parts\" takes none");
+        }
         return;
     }
     if (format < 3) {
@@ -135,18 +164,24 @@ void read_merged(const Value& root, uint32_t format, parts& p,
                        "it, or the signals that wait are left out");
     }
     expect(*list, Type::array, "\"parts\"");
-    if (list->items.empty() || list->items.size() > ECUIO_MERGE_MAX_PARTS) {
+    const Value* extends = root.find("extends");
+    read_base_modules(modules, extends, p, f);
+    if ((list->items.empty() && modules == nullptr) ||
+        list->items.size() > ECUIO_MERGE_MAX_PARTS) {
         refuse(*list, "\"parts\" lists " + std::to_string(list->items.size()) +
                           ": a merged set has 1 to " +
-                          std::to_string(ECUIO_MERGE_MAX_PARTS));
+                          std::to_string(ECUIO_MERGE_MAX_PARTS) +
+                          " (0 with \"base_modules\")");
     }
     /* The profile's name: the set under the parts, then each part's
      * profile, in merge order */
-    const Value* extends = root.find("extends");
-    std::string named = extends != nullptr && extends->type == Type::string &&
-                                extends->text == "obd2"
-                            ? "obd2\n"
-                            : "";
+    std::string named;
+    if (modules != nullptr) {
+        named = "obd2 modules\n";
+    } else if (extends != nullptr && extends->type == Type::string &&
+               extends->text == "obd2") {
+        named = "obd2\n";
+    }
     std::unordered_set<std::string> profiles;
     for (size_t i = 0; i < list->items.size(); ++i) {
         f.parts.push_back(read_part(list->items[i], i));

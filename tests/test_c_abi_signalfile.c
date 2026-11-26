@@ -28,6 +28,33 @@
 
 #include "test_c_abi_parts.h"
 
+/* The names an expression reads, from C with no file: 1 on a failure */
+static int expr_names_fail(void)
+{
+    ecuio_expr_name_t names[2];
+    uint32_t count = 0;
+    memset(names, 0, sizeof names);
+    if (ecuio_expr_names("boost * 2 + obd2.map", 20, names, 2, &count) !=
+            ECUIO_OK ||
+        count != 2u || strcmp(names[0].text, "boost") != 0 ||
+        strcmp(names[1].text, "obd2.map") != 0) {
+        return 1;
+    }
+    return ecuio_expr_names("boost +", 7, NULL, 0, &count) !=
+               ECUIO_ERR_INVALID_ARGUMENT ||
+           count != 0u;
+}
+
+/* The module a def is read on, from C: obd2's first def is the engine's
+ * and a copy of it is no def of the set: 1 on a failure */
+static int def_module_fail(void)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    ecuio_signal_def_t copy = obd2->defs[0];
+    return ecuio_signal_set_def_module(obd2, &obd2->defs[0]) != 0u ||
+           ecuio_signal_set_def_module(obd2, &copy) != ECUIO_SIGNAL_MODULE_NONE;
+}
+
 int c_abi_signalfile(void)
 {
     {
@@ -151,7 +178,8 @@ int c_abi_signalfile(void)
                     ECUIO_OK ||
                 strcmp(name, "volts") != 0 ||
                 ecuio_signal_file_expr_ref(file, volts, name, 5) !=
-                    ECUIO_ERR_INVALID_ARGUMENT) {
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                expr_names_fail() || def_module_fail()) {
                 ecuio_signal_file_free(file);
                 return 1;
             }

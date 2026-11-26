@@ -86,7 +86,9 @@ ecuio_status_t ecuio_profile_unregister(const char* name);
 
 /* Lookup. Returns ECUIO_OK and stores the set (POSSIBLY NULL for "raw")
  * when the name is registered; ECUIO_ERR_UNKNOWN_PROFILE when it isn't,
- * the code ecuio_session_create returns for that ?profile=;
+ * the code ecuio_session_create returns for that ?profile=, with the
+ * create's words in ecuio_last_error_detail() ("no profile is named
+ * 'x'", and for a "merged." name what such a name is);
  * ECUIO_ERR_NULL_ARGUMENT for a NULL argument. *out_set is untouched on
  * failure. */
 ecuio_status_t ecuio_profile_lookup(const char* name,

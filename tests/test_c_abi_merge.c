@@ -149,7 +149,8 @@ static int merge_from_c(void)
     ecuio_signal_note_t note;
     int failed = 0;
 
-    if (ECUIO_MERGE_BASE_OBD2 != 0x1u || ECUIO_NOTE_REPLACED_BY_ADDRESS != 1u ||
+    if (ECUIO_MERGE_BASE_OBD2 != 0x1u || ECUIO_MERGE_BASE_MODULES != 0x2u ||
+        ECUIO_NOTE_REPLACED_BY_ADDRESS != 1u ||
         ECUIO_NOTE_REPLACED_BY_KEY != 2u || ECUIO_NOTE_KEY_TAKEN != 3u ||
         ECUIO_NOTE_BESIDE_BASE != 4u || ECUIO_NOTE_MODULE_RENAMED != 5u ||
         ECUIO_NOTE_MODULE_LEFT_OUT != 6u || ECUIO_NOTE_PART_LEFT_OUT != 7u ||
@@ -181,6 +182,18 @@ static int merge_from_c(void)
         note.other_part != 0u || note.def != 0u ||
         note.base_def != 0xFFFFFFFFu) {
         printf("FAIL: a merge from C: %s\n", ecuio_last_error_detail());
+        failed = 1;
+    }
+    ecuio_signal_file_free(merged);
+    merged = NULL;
+    /* obd2's modules alone, with no part: one channel and no signal */
+    options.flags = ECUIO_MERGE_BASE_MODULES;
+    if (!failed &&
+        (ecuio_signal_file_merge(NULL, 0, &options, &merged) != ECUIO_OK ||
+         ecuio_signal_file_set(merged)->count != 0u ||
+         ecuio_signal_file_set(merged)->channel_count != 1u)) {
+        printf("FAIL: obd2's modules merged from C: %s\n",
+               ecuio_last_error_detail());
         failed = 1;
     }
     ecuio_signal_file_free(merged);

@@ -85,6 +85,8 @@ typedef char abi_expr_check_reserved_check
 typedef char abi_expr_check_program_check
     [(offsetof(ecuio_expr_check_t, program) == 40) ? 1 : -1];
 typedef char
+    abi_expr_name_size_check[(sizeof(ecuio_expr_name_t) == 64) ? 1 : -1];
+typedef char
     abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
 typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
                                        ? 1

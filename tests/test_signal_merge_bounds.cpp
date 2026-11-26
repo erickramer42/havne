@@ -295,10 +295,10 @@ TEST(MergeTest, TheCallRefusesWhatItIsGivenInWords)
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "the options' struct_size is 31, under its 32 bytes");
     options.struct_size = sizeof options;
-    options.flags = 0x6;
+    options.flags = 0xC;
     EXPECT_EQ(ecuio_signal_file_merge(two, 2, &options, &out),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_STREQ(ecuio_last_error_detail(), "a merge takes no flag 0x6");
+    EXPECT_STREQ(ecuio_last_error_detail(), "a merge takes no flag 0xc");
     options.flags = 0;
     options.reserved[5] = 1;
     EXPECT_EQ(ecuio_signal_file_merge(two, 2, &options, &out),

@@ -141,8 +141,9 @@ struct note {
 class merger
 {
 public:
-    merger(const ecuio_signal_file_t* const* parts, uint32_t count,
-           bool base_asked);
+    /* base: obd2 whole asked; modules: obd2's modules alone asked */
+    merger(const ecuio_signal_file_t* const* parts, uint32_t count, bool base,
+           bool modules);
 
     /* The merged set's text, or a refusal thrown (std::bad_alloc too) */
     std::string compose();
@@ -189,7 +190,8 @@ private:
     size_t standing(size_t item) const;
 
     std::vector<part> parts_;
-    bool base_ = false;
+    bool base_ = false;         /* obd2 whole: asked, or a part extends it */
+    bool base_modules_ = false; /* obd2's modules alone, and no base_ */
     bool wide_ = false; /* the set's IDs are 29-bit */
     bool width_set_ = false;
     module_ids ids_;

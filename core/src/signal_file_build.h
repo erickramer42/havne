@@ -196,6 +196,12 @@ void no_formula(const ecuio_json::Value& v, const std::string& what);
  * ("coolant", "pid_0b", "pid_14_1"), or -1 */
 long obd2_def(const ecuio_signal_set_t* base, const std::string& key);
 
+/* A merged set by what its loader made it, though it holds no part */
+inline bool is_merged(const ecuio_signal_file& f)
+{
+    return (f.source.flags & ECUIO_SOURCE_MERGED) != 0;
+}
+
 /* The bytes a recording copies, "" for none */
 inline const std::string& bytes_of(const ecuio_signal_file& f)
 {
