@@ -121,25 +121,27 @@ void cut_command(transport* t, const char* sent)
     }
 }
 
-/* A line read, as the log shows it: "<" for a command's, "unasked:"
- * when no command was out (sent nullptr), which always goes in; a
- * security access's line and a memory read's as its length and SHA-256
- * alone */
+/* A line with no command out (sent nullptr) always goes in */
 void log_line(transport* t, const char* sent, const elm327_reader& r)
 {
     if (!elm327_log_is_open(t->log) || (sent != nullptr && !logging(t))) {
         return;
     }
     char text[ELM327_LINE_MAX * 4 + 1];
-    if (t->cutting) {
+    if (t->cut_memory) {
+        /* no hash: a frame's few bytes could be searched for */
+        std::snprintf(text, sizeof text,
+                      "(a memory read's line, cut: %u characters)",
+                      static_cast<unsigned>(r.len));
+    } else if (t->cutting) {
         ecuio_sha256::hasher h;
         h.add(r.line, r.len);
         uint8_t d[32];
         h.finish(d);
-        int n = std::snprintf(text, sizeof text,
-                              "(a %s's line, cut: %u characters, SHA-256 ",
-                              t->cut_memory ? "memory read" : "security access",
-                              static_cast<unsigned>(r.len));
+        int n = std::snprintf(
+            text, sizeof text,
+            "(a security access's line, cut: %u characters, SHA-256 ",
+            static_cast<unsigned>(r.len));
         for (uint8_t b : d) {
             n += std::snprintf(text + n, sizeof text - n, "%02x", b);
         }

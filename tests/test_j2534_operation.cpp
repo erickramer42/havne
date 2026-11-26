@@ -141,13 +141,10 @@ TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
     EXPECT_EQ(files(), std::vector<std::string>{v.name})
         << "the close keeps a sealed copy";
     s.reset();
-    /* The surrogate's session log: a read's answer and a transfer's as
-     * zeroes after the bytes kept, with the length and SHA-256 of what
-     * was cut, and none of the memory's bytes */
+    /* The session log holds neither the memory's bytes nor their SHA-256 */
     const std::string cut_read = "07 E8 63 00 00 00 00";
-    const std::string first_chunk = "(256 bytes cut, SHA-256 " +
-                                    ecuio_sha256::hex_of(want.data(), 256) +
-                                    ")";
+    const std::string first_chunk = "(256 bytes cut)";
+    const std::string first_sum = ecuio_sha256::hex_of(want.data(), 256);
     std::string eight;
     for (size_t i = 0; i < 8; ++i) {
         char b[4];
@@ -157,6 +154,7 @@ TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
     bool ours = false;
     for (const std::string& log : logs_since(since)) {
         EXPECT_EQ(log.find(eight), std::string::npos) << eight;
+        EXPECT_EQ(log.find(first_sum), std::string::npos) << first_sum;
         ours = ours || (log.find(cut_read) != std::string::npos &&
                         log.find(first_chunk) != std::string::npos &&
                         log.find("07 E8 76 01 00 00 00") != std::string::npos);

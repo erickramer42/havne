@@ -61,14 +61,19 @@ TEST(AccessCutTest, ACaptureKeepsEachCutAnswersFirstBytes)
             << sid;
     }
     EXPECT_EQ(cut, 4u);
-    /* the line counts and hashes what follows the bytes kept */
+    /* never hashed: a chunk of a byte or two is found from its SHA-256 */
     const uint8_t read[] = {0x63, 0x11, 0x22, 0x33, 0x44};
     char text[ECUIO_ACCESS_CUT_TEXT];
     ecuio_capture_cut_text(read, sizeof read, 1, text, sizeof text);
-    EXPECT_EQ(
-        std::string(text),
-        "4 bytes cut, SHA-256 "
-        "1a835ed8734f86355ca5b835d824d486993aabf1913cd3a011b7446c0514b7c9");
+    EXPECT_STREQ(text, "4 bytes cut");
+    const uint8_t block[] = {0x76, 0x01, 0x11};
+    ecuio_capture_cut_text(block, sizeof block, 2, text, sizeof text);
+    EXPECT_STREQ(text, "1 bytes cut");
+    for (unsigned sid = 0; sid < 256; ++sid) {
+        EXPECT_EQ(ecuio_capture_hashed(static_cast<uint8_t>(sid)),
+                  sid == 0x27 || sid == 0x67)
+            << sid;
+    }
 }
 
 /* The line names the bytes cut by their count and SHA-256 */

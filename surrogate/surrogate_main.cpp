@@ -133,11 +133,7 @@ static void stage(const char* fmt, ...)
                     static_cast<DWORD>(len), &written, nullptr);
 }
 
-/* "41 0C 1F 40" for the first ECUIO_SUR_MSG_MAX bytes, then " +N" for
- * the rest, so a long message can't overrun stage()'s line. A security
- * access's message (four ID bytes, then service 27 or 67) shows zeroes
- * after its sub-function, then their length and SHA-256; a memory read's
- * answer (63, 76) the same after the bytes it keeps (access_cut.h). */
+/* " +N" past ECUIO_SUR_MSG_MAX bytes keeps a message inside stage()'s line */
 static void format_hex(char* out, size_t cap, const unsigned char* data,
                        unsigned long size)
 {

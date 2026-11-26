@@ -57,8 +57,6 @@ void append_bytes(std::string& out, const uint8_t* p, uint16_t n, size_t kept)
     }
 }
 
-/* A cut frame's words for its cut line, "0x7E8 67 01: " or "0x7E8 63: "
- * (the ID and the bytes kept), then the length and SHA-256 of the rest */
 std::string cut_text(uint32_t id, const uint8_t* p, uint16_t n, size_t kept)
 {
     char text[ECUIO_ACCESS_CUT_TEXT + 32];

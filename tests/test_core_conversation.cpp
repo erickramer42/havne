@@ -621,13 +621,13 @@ TEST(CoreConversationTest, AMemoryReadsAnswerIsCutFromTheRecording)
     EXPECT_EQ(rows.find("11 22 33 44"), std::string::npos) << rows;
     EXPECT_NE(rows.find(",0x7E8,0x100,7F 23 31\n"), std::string::npos);
     EXPECT_NE(rows.find(",0x7E8,0x100,75 20 01 02\n"), std::string::npos);
-    const std::string sum =
-        ": 4 bytes cut, SHA-256 "
-        "1a835ed8734f86355ca5b835d824d486993aabf1913cd3a011b7446c0514b7c9\n";
-    EXPECT_NE(events.find("  cut  0x7E8 63" + sum), std::string::npos)
+    /* the length alone: a short chunk's SHA-256 would give its bytes */
+    EXPECT_NE(events.find("  cut  0x7E8 63: 4 bytes cut\n"), std::string::npos)
         << events;
-    EXPECT_NE(events.find("  cut  0x7E8 76 01" + sum), std::string::npos)
+    EXPECT_NE(events.find("  cut  0x7E8 76 01: 4 bytes cut\n"),
+              std::string::npos)
         << events;
+    EXPECT_EQ(events.find("1a835ed8734f8635"), std::string::npos) << events;
     {
         Bound bound;
         make_session(&bound, made(), "mock://x");

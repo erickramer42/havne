@@ -111,13 +111,21 @@ TEST_F(Elm327OperationTest, APlanThatFitsAFrameIsCopiedWhole)
         ASSERT_EQ(files(), std::vector<std::string>{v.name});
         EXPECT_EQ(session_operation::image_at(folder_.at(v.name)), memory);
     }
-    /* The wire log: each read's command whole, its reply's lines as
-     * their length and SHA-256, and none of the memory's bytes: seven of
-     * them, a Consecutive Frame's worth, spaced or not */
+    /* No hash either: a frame's few bytes would be found from one */
     const std::string log = logs.only_log();
     EXPECT_NE(log.find("> 231301000080"), std::string::npos) << log;
-    EXPECT_NE(log.find("< (a memory read's line, cut: "), std::string::npos)
-        << log;
+    const std::string cut = "< (a memory read's line, cut: ";
+    size_t cut_lines = 0;
+    for (size_t at = log.find(cut); at != std::string::npos;
+         at = log.find(cut, at + 1)) {
+        const size_t from = at + cut.size();
+        const size_t words = log.find_first_not_of("0123456789", from);
+        EXPECT_GT(words, from) << "the line's length";
+        EXPECT_EQ(log.compare(words, 12, " characters)"), 0)
+            << log.substr(at, 80);
+        ++cut_lines;
+    }
+    EXPECT_GT(cut_lines, 0u) << log;
     EXPECT_NE(log.find("< (a security access's line, cut: "),
               std::string::npos);
     std::string spaced;

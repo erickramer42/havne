@@ -55,18 +55,28 @@ inline size_t ecuio_capture_kept(const uint8_t* pdu, size_t len)
     return len > kept ? kept : 0;
 }
 
-/* "N bytes cut, SHA-256 <64 lower-case digits>" of the bytes after pdu's
- * first kept, into out (cap at least ECUIO_ACCESS_CUT_TEXT) */
+/* Memory gets no hash: a short chunk's would give its bytes to a search */
+constexpr bool ecuio_capture_hashed(uint8_t sid)
+{
+    return sid == 0x27 || sid == 0x67;
+}
+
+/* cap is at least ECUIO_ACCESS_CUT_TEXT */
 inline void ecuio_capture_cut_text(const uint8_t* pdu, size_t len, size_t kept,
                                    char* out, size_t cap)
 {
     const size_t cut = len > kept ? len - kept : 0;
+    int n = std::snprintf(out, cap, "%lu bytes cut",
+                          static_cast<unsigned long>(cut));
+    if (len == 0 || !ecuio_capture_hashed(pdu[0]) || n <= 0 ||
+        static_cast<size_t>(n) >= cap) {
+        return;
+    }
     ecuio_sha256::hasher h;
     h.add(pdu + (len > kept ? kept : len), cut);
     uint8_t digest[32];
     h.finish(digest);
-    int n = std::snprintf(out, cap, "%lu bytes cut, SHA-256 ",
-                          static_cast<unsigned long>(cut));
+    n += std::snprintf(out + n, cap - static_cast<size_t>(n), ", SHA-256 ");
     for (size_t i = 0; i < sizeof digest && n > 0 &&
                        static_cast<size_t>(n) + 2 < cap;
          ++i) {
