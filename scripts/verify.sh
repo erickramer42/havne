@@ -24,8 +24,8 @@
 #               the dev machine has a Pass-Thru driver installed;
 #               --no-devices for a machine without one
 #   cross-arch  J2534Routing, J2534Surrogate, J2534HealthTest,
-#               J2534ConnectTest, J2534TalkTest, J2534CarTest and
-#               J2534ConversationTest,
+#               J2534ConnectTest, J2534TalkTest, J2534CarTest,
+#               J2534ConversationTest and J2534OperationTest,
 #               against the x86 surrogate and fake
 #               (Windows, needs build-win32; skipped with -R). Its line
 #               names each case that skipped. Fails if the env-gated
@@ -404,7 +404,7 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     ECUIO_FAKE_DLL="$(cygpath -m "$PWD")/build-win32/tests/Release/fake_j2534.dll"
     export ECUIO_SURROGATE_EXE ECUIO_FAKE_DLL
     run cross-arch ctest --test-dir build -C Release -j "$jobs" --output-on-failure \
-        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car|Conversation|Modules)Test\."
+        --no-tests=error -R "J2534Routing|J2534Surrogate|J2534(Health|Connect|Talk|Car|Conversation|Modules|Operation)Test\."
     [ "$rc" = 0 ] || ctest_failed cross-arch
     summary=$(ctest_summary "$LOGDIR/cross-arch.log")
     skips=$(skipped_cases "$LOGDIR/cross-arch.log" | paste -sd ',' - | sed 's/,/, /g')

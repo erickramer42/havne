@@ -140,7 +140,9 @@ static_assert(ECUIO_ENGINE_S3_US - J2534_HOLD_S3_MARGIN_US <
 inline bool j2534_hold_applies(const j2534_hold& h,
                                const ecuio_request_engine* e)
 {
-    return h.on && e->chan_count > 1;
+    /* an operation's hold leaves each channel a talk and its session
+     * alone: nothing to take turns over */
+    return h.on && e->chan_count > 1 && !e->operation_hold;
 }
 
 /* Whether channel k has a request out that isn't in a pending wait */

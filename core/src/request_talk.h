@@ -36,6 +36,7 @@
 
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_WRITE_MAX; plain C */
 #include "tier2_ceiling.h"
+#include "tier3_ceiling.h"
 
 #include <cstdint>
 
@@ -67,7 +68,8 @@ enum class ecuio_talk_offer : uint8_t {
     too_long, /* past the transport's bound */
     refused,  /* outside the ceiling, not what its kind says (a 27 that
                  is no seed or key, a key with no window open or for
-                 another seed than the window's), or no request at all;
+                 another seed than the window's, a read that echoes more
+                 than its service), or no request at all;
                  from the engine's offer also a seed or key to a
                  functional address, and a seed while a functional
                  channel has a session (ecuio_engine_offer_talk) */
@@ -90,6 +92,10 @@ enum class ecuio_talk_kind : uint8_t {
     plain, /* on the guest's own list: its turn with the scan */
     seed,  /* its turn as plain; sent, it opens the channel's window */
     key,   /* only inside a window, ahead of everything; sent, it ends it */
+    read,  /* core's own read of a module's memory, inside tier 3's read
+              ceiling (tier3_ceiling.h): its turn as plain. Only an
+              operation's run offers one (request_operation.h); a plugin's
+              request is always plain */
 };
 
 struct ecuio_talk_result {
@@ -156,6 +162,12 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
     if (q.kind == ecuio_talk_kind::plain) {
         return !access;
     }
+    if (q.kind == ecuio_talk_kind::read) {
+        /* matched on its service alone: the run judges a 76's counter and
+         * a 63's length itself, so a wrong one is an answer, not a silence.
+         * Its ceiling holds no 27 (tier3_ceiling.h asserts it). */
+        return q.echo == 1;
+    }
     if (!access || q.len < 2) {
         return false;
     }
@@ -168,16 +180,28 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
            q.pdu[1] == static_cast<uint8_t>(w.seed + 1);
 }
 
-/* Whether q is inside tier 2's ceiling for its kind: a plain talk on the
+/* Whether q is inside the ceiling for its kind: a plain talk on the
  * guest's own list (the reads: the session and its keep-alive are core's
- * own step), a seed or a key anywhere in it (ecuio_talk_kind_fits then
- * holds it to 27) */
+ * own step), a seed or a key anywhere in tier 2's (ecuio_talk_kind_fits
+ * then holds it to 27), a read inside tier 3's read ceiling and nowhere
+ * in tier 2's */
 inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
 {
     const uint8_t sub = q.len < 2 ? uint8_t{0} : q.pdu[1];
+    if (q.kind == ecuio_talk_kind::read) {
+        return ecuio_tier3_read_allowed(q.pdu[0], sub);
+    }
     return q.kind == ecuio_talk_kind::plain
                ? ecuio_tier2_guest_may_send(q.pdu[0], sub)
                : ecuio_tier2_allowed(q.pdu[0], sub);
+}
+
+/* Whether q's echo is at least its service's own. A read's is one byte
+ * (ecuio_talk_kind_fits): a 63, a 75 and a 77 echo nothing more */
+inline bool ecuio_talk_echo_fits(const ecuio_talk_request& q)
+{
+    return q.kind == ecuio_talk_kind::read ||
+           q.echo >= ecuio_talk_echo_min(q.pdu[0]);
 }
 
 /* Offers q as the channel's talk at now_us. The door: a request outside
@@ -199,8 +223,7 @@ inline ecuio_talk_offer ecuio_engine_talk(ecuio_engine_talk_state& t,
 {
     if (q.pdu == nullptr || q.len == 0 || q.echo < 1 || q.echo > 3 ||
         q.echo > q.len || (q.len < 2 && ecuio_tier2_splits(q.pdu[0])) ||
-        !ecuio_talk_inside_ceiling(q) ||
-        q.echo < ecuio_talk_echo_min(q.pdu[0]) ||
+        !ecuio_talk_inside_ceiling(q) || !ecuio_talk_echo_fits(q) ||
         !ecuio_talk_kind_fits(q, w, now_us)) {
         return ecuio_talk_offer::refused;
     }
@@ -305,7 +328,8 @@ inline void ecuio_talk_settle(ecuio_engine_talk_state& t, ecuio_key_window& w,
         if (now_us + w.window_us < w.until_us) {
             w.until_us = now_us + w.window_us;
         }
-    } else if (t.kind != ecuio_talk_kind::plain) {
+    } else if (t.kind == ecuio_talk_kind::seed ||
+               t.kind == ecuio_talk_kind::key) {
         w.until_us = 0;
     }
     t.out = false;

@@ -275,6 +275,36 @@ ecuio_status_t judge(ecuio_session_t* s, ecuio_bound_channel& b, uint8_t level,
 
 } // namespace
 
+ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
+                                         ecuio_bound_channel& b,
+                                         uint32_t channel, uint8_t level,
+                                         uint32_t* out_wait_ms)
+{
+    uint32_t generation = 0;
+    {
+        const std::lock_guard<std::mutex> lock(session->support_mutex);
+        generation = b.generation;
+    }
+    const ecuio_status_t judged =
+        judge(session, b, level, generation, out_wait_ms);
+    if (judged != ECUIO_OK) {
+        return judged;
+    }
+    if (session->talk->kept && !b.vehicle_known) {
+        const ecuio_status_t first =
+            first_unlock(session, b, channel, level, out_wait_ms);
+        if (first != ECUIO_OK) {
+            return first;
+        }
+    }
+    const ecuio_status_t marked = ecuio_conversation_mark_word(
+        session, channel, level, b.vehicle, utc_now());
+    if (marked == ECUIO_OK) {
+        ++b.words_given;
+    }
+    return marked;
+}
+
 extern "C" {
 
 ecuio_status_t

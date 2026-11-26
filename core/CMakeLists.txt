@@ -97,6 +97,7 @@ add_library(ecuio-core STATIC
     src/dump_file.cpp
     src/dump_record.cpp
     src/operation_sink.cpp
+    src/core_operation.cpp
     src/core_consent.cpp
     src/security_store_owner.cpp
     src/conversation.cpp
@@ -138,6 +139,7 @@ set(ECUIO_PUBLIC_HEADERS
     include/ecuio/dump.h
     include/ecuio/j2534.h
     include/ecuio/obdb.h
+    include/ecuio/operation.h
     include/ecuio/plugin.h
     include/ecuio/profile.h
     include/ecuio/queue.h

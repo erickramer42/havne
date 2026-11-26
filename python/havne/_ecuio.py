@@ -8,7 +8,7 @@ from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char
                     c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,
                     c_void_p)
 
-HEADERS = ('conditions.h', 'core.h', 'dump.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
+HEADERS = ('conditions.h', 'core.h', 'dump.h', 'j2534.h', 'obdb.h', 'operation.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
 
 # --- constants: the ECUIO_ macros, then the enumerators ---------------
 ECUIO_ABSENT_AFTER_FRAMES = 3
@@ -363,7 +363,29 @@ ECUIO_OBDB_NOTE_FILE = 3
 ECUIO_OBDB_NOTE_SKIPPED = 2
 ECUIO_OPERATION_CLASS_READ = 1
 ECUIO_OPERATION_CLASS_WRITE = 2
+ECUIO_OPERATION_END_BAD_REPLY = 11
+ECUIO_OPERATION_END_CANCELED = 2
+ECUIO_OPERATION_END_DIFFER = 5
+ECUIO_OPERATION_END_FILE = 10
+ECUIO_OPERATION_END_IDENTITY_CHANGED = 6
+ECUIO_OPERATION_END_LINK_LOST = 9
+ECUIO_OPERATION_END_NONE = 0
+ECUIO_OPERATION_END_NO_ANSWER = 4
+ECUIO_OPERATION_END_REFUSED = 3
+ECUIO_OPERATION_END_SAVED = 1
+ECUIO_OPERATION_END_SESSION_LOST = 8
+ECUIO_OPERATION_END_UNLOCK_REFUSED = 7
 ECUIO_OPERATION_KIND_DUMP = 1
+ECUIO_OPERATION_MAY_UNLOCK = 1
+ECUIO_OPERATION_PHASE_CHECKING = 1
+ECUIO_OPERATION_PHASE_COMPARING = 5
+ECUIO_OPERATION_PHASE_DONE = 8
+ECUIO_OPERATION_PHASE_LEAVING = 7
+ECUIO_OPERATION_PHASE_NONE = 0
+ECUIO_OPERATION_PHASE_PRECONDITIONS = 2
+ECUIO_OPERATION_PHASE_READING = 4
+ECUIO_OPERATION_PHASE_SAVING = 6
+ECUIO_OPERATION_PHASE_UNLOCKING = 3
 ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
@@ -841,6 +863,12 @@ class ecuio_obdb_note_t(Structure):
     pass
 
 class ecuio_obdb_options_t(Structure):
+    pass
+
+class ecuio_operation_request_t(Structure):
+    pass
+
+class ecuio_operation_state_t(Structure):
     pass
 
 class ecuio_plugin_conversation_ecu_t(Structure):
@@ -1560,6 +1588,29 @@ ecuio_obdb_options_t._fields_ = [
     ('url', c_char_p),
     ('commit', c_char_p),
 ]
+ecuio_operation_request_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('operation', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 5)),
+]
+ecuio_operation_state_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('generation', c_uint32),
+    ('operation', c_uint32),
+    ('phase', c_uint32),
+    ('end', c_uint32),
+    ('pass', c_uint32),
+    ('step', c_uint32),
+    ('nrc', c_uint8),
+    ('reserved0', (c_uint8 * 3)),
+    ('bytes_done', c_uint64),
+    ('bytes_total', c_uint64),
+    ('differ_offset', c_uint64),
+    ('name', (c_char * 96)),
+    ('words', (c_char * 160)),
+    ('reserved', (c_uint32 * 6)),
+]
 ecuio_plugin_conversation_ecu_t._fields_ = [
     ('struct_size', c_uint32),
     ('rx_id', c_uint32),
@@ -2270,12 +2321,15 @@ FUNCTIONS = {
     'ecuio_session_get_error_state': (c_int, [POINTER(ecuio_session_t), POINTER(c_int32), POINTER(c_uint32)]),  # core.h
     'ecuio_session_get_info': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_info_t)]),  # core.h
     'ecuio_session_get_module': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_decl_t)]),  # profile.h
+    'ecuio_session_get_operation': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_state_t)]),  # operation.h
     'ecuio_session_get_replay_faults': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_replay_faults_t)]),  # core.h
     'ecuio_session_get_timing': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_timing_t), POINTER(ecuio_request_timing_t), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unasked_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unsplit_replies': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint64)]),  # profile.h
     'ecuio_session_get_unsupported_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_keep_awake': (c_int, [POINTER(ecuio_session_t), c_uint32, c_char_p]),  # core.h
+    'ecuio_session_operation_cancel': (c_int, [POINTER(ecuio_session_t)]),  # operation.h
+    'ecuio_session_operation_start': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_request_t), c_char_p]),  # operation.h
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h

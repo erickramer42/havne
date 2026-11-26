@@ -15,12 +15,16 @@
 //                              the settle, the rejoin, the publish
 //   ecuio_conversations_next_us   bounds the worker's wait
 //   ecuio_conversations_end    at the close, before the engine's 10 01
+//
+// A run of the plugin's operation (request_operation.h) is stepped from
+// the same calls, after the conversations: no worker's source names it.
 
 #ifndef ECUIO_REQUEST_CONVERSATION_H
 #define ECUIO_REQUEST_CONVERSATION_H
 
 #include "conversation_bind.h"
 #include "request_engine.h"
+#include "request_operation.h"
 #include "session.h"
 
 #include <chrono>
@@ -82,6 +86,7 @@ inline void ecuio_conversations_frame(ecuio_session_t* s,
     if (ecuio_bound_channel* b = ecuio_bound_channel_of(s, c)) {
         ecuio_conversation_frame(&b->conversation, e, bytes, len);
     }
+    ecuio_operation::on_frame(s, e, c, bytes, len);
 }
 
 /* A word's end to the store, as the report says it ended */
@@ -211,6 +216,7 @@ inline void ecuio_step_conversations(ecuio_session_t* s,
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         ecuio_step_one(s, *t, t->bound[k], e, now_us);
     }
+    ecuio_operation::on_pass(s, e, now_us);
 }
 
 /* The wait until the next conversation's step, from now_us (INT64_MAX
@@ -219,7 +225,7 @@ inline int64_t ecuio_conversations_next_us(ecuio_session_t* s,
                                            const ecuio_request_engine* e,
                                            int64_t now_us)
 {
-    int64_t next = INT64_MAX;
+    int64_t next = ecuio_operation::wait_us(s, e);
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         const ecuio_bound_channel& b = t->bound[k];
@@ -241,9 +247,9 @@ inline int64_t ecuio_conversations_next_us(ecuio_session_t* s,
 
 /* Each module's end, while its channel's session still stands (the
  * engine's 10 01 comes after): the report says ended */
-inline void ecuio_conversations_end(ecuio_session_t* s,
-                                    const ecuio_request_engine* e)
+inline void ecuio_conversations_end(ecuio_session_t* s, ecuio_request_engine* e)
 {
+    ecuio_operation::on_close(s, e);
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         ecuio_bound_channel& b = t->bound[k];
@@ -252,6 +258,11 @@ inline void ecuio_conversations_end(ecuio_session_t* s,
             c < e->chan_count &&
             e->chans[c].session_step == ECUIO_SESSION_STATE_ENTERED;
         ecuio_conversation_end(&b.conversation);
+        if (b.conversation.report.words_ended != b.ends_seen) {
+            /* a word a run owed and dropped at the close: its settle */
+            b.ends_seen = b.conversation.report.words_ended;
+            ecuio_conversation_settle(*t, b);
+        }
         const std::lock_guard<std::mutex> lock(s->support_mutex);
         b.published = b.conversation.report;
         ++b.generation;

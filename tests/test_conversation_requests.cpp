@@ -125,6 +125,13 @@ TEST(ConversationTest, EachRequestOutsideTheRulesIsAFault)
         {"a periodic read", {0x2A, 0x01, 0x10}, conv_fault::service},
         {"a write", {0x2E, 0xF1, 0x90, 0x00}, conv_fault::service},
         {"a clear", {0x14, 0xFF, 0xFF, 0xFF}, conv_fault::service},
+        /* tier 3's reads are core's own, never a module's */
+        {"a memory read",
+         {0x23, 0x24, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00},
+         conv_fault::service},
+        {"an upload", {0x35, 0x00, 0x44}, conv_fault::service},
+        {"a transfer", {0x36, 0x01}, conv_fault::service},
+        {"a transfer's exit", {0x37}, conv_fault::service},
         {"2C outside the ceiling", {0x2C, 0x02, 0xF3}, conv_fault::service},
         {"2C 03, not declared",
          {0x2C, 0x03, 0xF3, 0x00},
@@ -348,6 +355,36 @@ TEST(ConversationTest, ThePollIsPacedWhileTheModuleHasNothing)
     }
     EXPECT_TRUE(b.guest.requests.empty());
     EXPECT_LT(b.now - start, 8 * ECUIO_CONVERSATION_POLL_US);
+}
+
+/* Under an operation's hold the module is asked for no request, so none
+ * of its reads goes between a run's; a word (the run's own unlock) still
+ * runs, and the module's request goes once the hold ends */
+TEST(ConversationTest, TheModuleIsAskedNothingUnderAnOperationsHold)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    const Bytes q = {0x22, 0xD3, 0x05};
+    b.e->operation_hold = true;
+    b.guest.requests = {q};
+    const int polls = b.guest.polls;
+    const int64_t from = b.now;
+    while (b.now - from < 1000 * kMs) {
+        b.pass();
+    }
+    EXPECT_EQ(b.guest.polls, polls);
+    EXPECT_EQ(heard(b, q), 0u);
+    ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+    b.until_word_ended();
+    EXPECT_EQ(b.v->report.unlock, ecuio_unlock_state::unlocked);
+    EXPECT_EQ(heard(b, q), 0u);
+
+    b.e->operation_hold = false;
+    for (int i = 0; i < 40 && !b.guest.requests.empty(); ++i) {
+        b.pass();
+    }
+    b.passes(4);
+    EXPECT_EQ(heard(b, q), 1u);
 }
 
 /* What the next step is due for: now with a word or a settled talk,

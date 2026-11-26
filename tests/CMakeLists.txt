@@ -52,7 +52,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
     test_dump_record.cpp test_dump_export.cpp test_plugin_operations.cpp
-    test_operation_plan.cpp test_dump_writer.cpp)
+    test_operation_plan.cpp test_dump_writer.cpp test_session_operation.cpp
+    test_session_operation_ends.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -181,7 +182,8 @@ add_executable(test_obd2 test_obd2.cpp
     test_session_enter.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_tier3_ceiling.cpp
     test_sim_security.cpp
-    test_engine_talk.cpp test_key_window.cpp test_request_turns.cpp
+    test_engine_talk.cpp test_engine_hold.cpp test_key_window.cpp
+    test_request_turns.cpp
     test_request_turns_key.cpp test_request_turns_session.cpp
     test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
     test_request_quiet_reports.cpp test_request_counts.cpp
@@ -236,7 +238,8 @@ add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
     test_elm327_session_alloc.cpp
     test_serial_ports.cpp test_elm327_talk.cpp test_elm327_turns.cpp
     test_elm327_pack.cpp test_elm327_gate.cpp
-    test_elm327_conversation.cpp test_elm327_modules.cpp
+    test_elm327_conversation.cpp test_elm327_operation.cpp
+    test_elm327_modules.cpp
     test_elm327_awake.cpp test_elm327_consent.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -305,6 +308,8 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # unlocking the simulated ECU (SocketCanConversationTest).
 # test_vcan_memory.cpp: the simulated ECU's memory read through the
 # kernel's ISO-TP socket (SimMemoryBusTest).
+# test_vcan_operation.cpp: a plugin's dump run in a session, copying the
+# simulated ECU's memory (SocketCanOperationTest).
 # RESOURCE_LOCK vcan0: the cases share the bus, and an error frame passes
 # every session's ID filter; every vcan0 user takes the lock, so they run
 # one at a time while the rest of the suite runs beside them.
@@ -315,7 +320,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                    test_vcan_requests_simbus.cpp test_vcan_isotp.cpp
                    test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp
                    test_vcan_conversation.cpp test_vcan_gateway.cpp
-                   test_vcan_memory.cpp)
+                   test_vcan_memory.cpp test_vcan_operation.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
@@ -2038,7 +2043,7 @@ endif()
 set(C_ABI_SOURCES test_c_abi.c test_c_abi_layout.c test_c_abi_conditions.c
     test_c_abi_core.c test_c_abi_signalfile.c test_c_abi_plugin.c
     test_c_abi_diag.c test_c_abi_recording.c test_c_abi_exchange.c
-    test_c_abi_frames.c test_c_abi_dump.c)
+    test_c_abi_frames.c test_c_abi_dump.c test_c_abi_operation.c)
 add_executable(test_c_abi ${C_ABI_SOURCES})
 set_target_properties(test_c_abi PROPERTIES C_EXTENSIONS OFF)
 app_enable_warnings(test_c_abi)
@@ -2873,6 +2878,7 @@ if(WIN32)
         test_j2534_talk.cpp
         test_j2534_car.cpp
         test_j2534_conversation.cpp
+        test_j2534_operation.cpp
         test_j2534_modules.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
