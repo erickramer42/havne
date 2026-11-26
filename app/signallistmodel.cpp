@@ -4,6 +4,7 @@
 #include "signallistmodel.h"
 #include "sessionbridge.h"
 #include "ecuio/profile.h"
+#include "signalmodules.h"
 
 #include <QDateTime>
 #include <QVariantMap>
@@ -132,6 +133,12 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.unasked;
         case KeyRole:
             return QString::fromUtf8(e.key);
+        case ModuleRole:
+            return e.module;
+        case ModuleNameRole:
+            return e.moduleName;
+        case TagRole:
+            return e.tag;
         default: return QVariant();
     }
 }
@@ -162,7 +169,10 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {IsEnumRole, "isEnum"},
             {UnaskedRole, "unasked"},
             {HiddenWhyRole, "hiddenWhy"},
-            {KeyRole, "key"}};
+            {KeyRole, "key"},
+            {ModuleRole, "module"},
+            {ModuleNameRole, "moduleName"},
+            {TagRole, "tag"}};
 }
 
 const char* SignalListModel::whyWords(Entry::Why why)
@@ -303,6 +313,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         // judgePlotted's, below; a text row has nothing to plot
         e.subscribed = false;
     }
+    placeRows(set, file, keys);
     endResetModel();
     // A new set plots its defaults, whatever the last one plotted
     judgePlotted();
@@ -310,6 +321,19 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
     if (hadHidden) emit hiddenCountChanged();
 
     m_clock.restart();
+}
+
+void SignalListModel::placeRows(const ecuio_signal_set_t* set,
+                                const ecuio_signal_file_t* file,
+                                const std::vector<ecuio_signal_key_t>& keys)
+{
+    const std::vector<signal_modules::Row> rows =
+        signal_modules::of(set, file, keys);
+    for (size_t i = 0; i < m_entries.size() && i < rows.size(); ++i) {
+        m_entries[i].module = rows[i].module;
+        m_entries[i].moduleName = rows[i].moduleName;
+        m_entries[i].tag = rows[i].tag;
+    }
 }
 
 void SignalListModel::refreshAges()
@@ -824,7 +848,8 @@ bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceP
         m->data(i, SignalListModel::GroupRole).toInt(),
         m->data(i, SignalListModel::SubscribedRole).toBool() &&
             !m->data(i, SignalListModel::IsTextRole).toBool(),
-        !m->data(i, SignalListModel::UnaskedRole).toBool());
+        !m->data(i, SignalListModel::UnaskedRole).toBool(),
+        m->data(i, SignalListModel::ModuleRole).toInt());
 }
 
 void LiveSignalModel::refilter()
@@ -838,20 +863,28 @@ void LiveSignalModel::judgeGroups()
 {
     const QAbstractItemModel* m = sourceModel();
     QVariantList codes;
+    QVariantList rows;
     int shown = 0;
     for (int r = 0; r < m->rowCount(); ++r) {
         const QModelIndex i = m->index(r, 0);
         if (!m->data(i, SignalListModel::HiddenRole).toBool()) {
             codes.append(m->data(i, SignalListModel::GroupRole));
+            rows.append(
+                QVariantMap{{QStringLiteral("module"),
+                             m->data(i, SignalListModel::ModuleRole)},
+                            {QStringLiteral("moduleName"),
+                             m->data(i, SignalListModel::ModuleNameRole)}});
             ++shown;
         }
     }
+    const QVariantList modules = m_filter->moduleChoices(rows);
     QVariantList groups;
     for (const QVariant& choice : m_filter->groupChoices(codes)) {
         groups.append(choice.toMap().value(QStringLiteral("code")));
     }
-    if (groups != m_groups || shown != m_shownCount) {
+    if (groups != m_groups || modules != m_modules || shown != m_shownCount) {
         m_groups = groups;
+        m_modules = modules;
         m_shownCount = shown;
         emit groupsChanged();
     }

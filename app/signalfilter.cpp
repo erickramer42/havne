@@ -5,6 +5,8 @@
 
 #include <QVariantMap>
 
+#include <map>
+
 #include "ecuio/signals.h"
 
 SignalFilter::SignalFilter(QObject* parent) : QObject(parent) {}
@@ -47,15 +49,27 @@ QVariantList SignalFilter::groups() const
     return list;
 }
 
+QVariantList SignalFilter::modules() const
+{
+    QVariantList list;
+    for (int m : m_modules) {
+        list.append(m);
+    }
+    return list;
+}
+
 bool SignalFilter::active() const
 {
     return !m_words.isEmpty() || m_plottedOnly || m_askedOnly ||
-           !m_groups.empty();
+           !m_groups.empty() || !m_modules.empty();
 }
 
 bool SignalFilter::matches(const QString& name, const QString& unit, int group,
-                           bool plotted, bool asked) const
+                           bool plotted, bool asked, int module) const
 {
+    if (!m_modules.empty() && m_modules.count(module) == 0) {
+        return false;
+    }
     if (m_plottedOnly && !plotted) {
         return false;
     }
@@ -92,6 +106,41 @@ void SignalFilter::toggleGroup(int group)
     emit changed();
 }
 
+bool SignalFilter::moduleChosen(int module) const
+{
+    return m_modules.count(module) != 0;
+}
+
+void SignalFilter::toggleModule(int module)
+{
+    if (module < 0) {
+        return;
+    }
+    if (m_modules.erase(module) == 0) {
+        m_modules.insert(module);
+    }
+    emit changed();
+}
+
+QVariantList SignalFilter::moduleChoices(const QVariantList& rows) const
+{
+    std::map<int, QString> present;
+    for (const QVariant& r : rows) {
+        const QVariantMap row = r.toMap();
+        const int m = row.value(QStringLiteral("module"), -1).toInt();
+        if (m >= 0) {
+            present.emplace(m,
+                            row.value(QStringLiteral("moduleName")).toString());
+        }
+    }
+    QVariantList list;
+    for (const auto& p : present) {
+        list.append(QVariantMap{{QStringLiteral("index"), p.first},
+                                {QStringLiteral("name"), p.second}});
+    }
+    return list;
+}
+
 void SignalFilter::clear()
 {
     if (!active() && m_text.isEmpty()) {
@@ -102,6 +151,7 @@ void SignalFilter::clear()
     m_plottedOnly = false;
     m_askedOnly = false;
     m_groups.clear();
+    m_modules.clear();
     emit changed();
 }
 

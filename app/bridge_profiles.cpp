@@ -6,6 +6,7 @@
 #include "ecuio/serial.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/socketcan.h"
+#include "signalmodules.h"
 
 #include <QMetaObject>
 #include <QByteArray>
@@ -203,6 +204,11 @@ QVariantList SessionBridge::profileSignals(const QString& uri) const
     const uint32_t units = m_signalModel->unitSystem();
     QVariantList rows;
     rows.reserve(static_cast<qsizetype>(set->count));
+    std::vector<ecuio_signal_key_t> keys(set->count);
+    uint32_t keyCount = 0;
+    (void)ecuio_signal_set_keys(set, file, keys.data(), set->count, &keyCount);
+    const std::vector<signal_modules::Row> modules =
+        signal_modules::of(set, file, keys);
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
         const SignalListModel::DefFacts f =
@@ -244,6 +250,9 @@ QVariantList SessionBridge::profileSignals(const QString& uri) const
             {QStringLiteral("decodedLow"), f.rangeLow},
             {QStringLiteral("decodedHigh"), f.rangeHigh},
             {QStringLiteral("gauge"), gauge},
+            {QStringLiteral("module"), modules[i].module},
+            {QStringLiteral("moduleName"), modules[i].moduleName},
+            {QStringLiteral("tag"), modules[i].tag},
         });
     }
     return rows;

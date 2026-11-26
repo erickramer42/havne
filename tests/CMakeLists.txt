@@ -2304,6 +2304,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_signalfiles_plugin.cpp
         test_bridge_signalfiles_picks.cpp
         test_bridge_live.cpp
+        test_bridge_modules.cpp
         test_bridge_fake.cpp
         test_bridge_fake_pick.cpp
         test_bridge_fake_awake.cpp
