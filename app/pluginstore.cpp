@@ -612,7 +612,8 @@ QVariantMap PluginStore::remove(const QString& sha)
     QString id;
     const auto it = m_held.find(sha);
     if (it != m_held.end()) {
-        if (ecuio_plugin_free(it->second.plugin) == ECUIO_ERR_IN_USE) {
+        if (m_busy.contains(it->second.id) ||
+            ecuio_plugin_free(it->second.plugin) == ECUIO_ERR_IN_USE) {
             return refusal(QStringLiteral(
                 "A session decodes with it: disconnect, then remove it"));
         }

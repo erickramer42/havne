@@ -112,6 +112,9 @@ SessionBridge::fileOfSet(const ecuio_signal_set_t* set) const
         return nullptr;
     }
     const ecuio_signal_file_t* file = m_pluginStore.fileFor(set);
+    if (file == nullptr) {
+        file = togetherFileOf(set);
+    }
     for (auto it = m_replayFiles.begin();
          file == nullptr && it != m_replayFiles.end(); ++it) {
         if (ecuio_signal_file_set(it->second.file) == set) {

@@ -36,6 +36,11 @@ struct BridgeSeams : protected BridgeState
     void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int maxInFlightForTesting() { return MaxInFlightFrames; }
     ecuio_session_t* pendingSessionForTesting() const { return m_pendingSession.load(); }
+    int togetherMergesForTesting() const { return m_togetherMerges; }
+    int togetherRetiredForTesting() const
+    {
+        return static_cast<int>(m_togetherRetired.size());
+    }
     // Test seam: where recordings go instead of Documents/Havne/recordings
     void setRecordingsRootForTesting(const QString& root) { m_recordingsRoot = root; }
     // Test seam: the earlier name's recordings, instead of

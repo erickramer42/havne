@@ -275,6 +275,7 @@ QString SessionBridge::connectSession(const QString& typed)
     m_consent->begin(session, need);
     applyConnectedState(session, uri);
     applyAwake(session);
+    releaseTogether(false);
     return {};
 }
 
@@ -360,6 +361,7 @@ void SessionBridge::finishConnect(const QString& uri, QString err,
         applyAwake(session);
     }
     m_connecting = false;
+    releaseTogether(false);
     emit connectingChanged();
 
     if (err.isEmpty()) {
@@ -463,7 +465,7 @@ void SessionBridge::disconnectSession()
                 // no reason, the recording's end note keeps it
                 stopRecording(QStringLiteral("disconnected"), false,
                               QStringLiteral("Log ended"));
-                m_disconnecting = false;
+                endTeardown();
                 emit disconnectingChanged();
             },
             Qt::QueuedConnection);

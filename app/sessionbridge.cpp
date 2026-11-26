@@ -169,6 +169,7 @@ SessionBridge::~SessionBridge()
     }
     // Only now: no session is left to decode with the files' sets
     m_pluginStore.close();
+    releaseTogether(true);
     for (auto& held : m_replayFiles) {
         const QByteArray name = held.second.profile.toUtf8();
         (void)ecuio_profile_unregister(name.constData());

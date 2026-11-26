@@ -312,5 +312,14 @@ struct BridgeState
         QString profile; // rec.<16 hex>
     };
     std::map<QString, ReplayFile> m_replayFiles;
+    // Retired files stay registered until no session can decode with them
+    struct TogetherFile {
+        ecuio_signal_file_t* file = nullptr;
+        QString key;
+        QVariantMap answer;
+    };
+    TogetherFile m_together;
+    std::vector<ecuio_signal_file_t*> m_togetherRetired;
+    int m_togetherMerges = 0;
     int m_readOnceWaitMs = 3000;
 };
