@@ -85,12 +85,20 @@ int hex_value(char c)
     return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
 }
 
-/* Whether sent is a security access's command, and its form for the
- * log: "27NN" and its key's length and SHA-256 */
+/* Whether sent's reply is cut from the log, and its own form there: a
+ * security access's "27NN" and its key's length and SHA-256; a memory
+ * read's (23, 36) whole, since only its reply holds the module's bytes */
 void cut_command(transport* t, const char* sent)
 {
-    t->cutting = sent[0] == '2' && sent[1] == '7';
-    if (!t->cutting) {
+    const int s1 = hex_value(sent[0]);
+    const int s2 = s1 < 0 ? -1 : hex_value(sent[1]);
+    t->cut_memory =
+        s2 >= 0 && ecuio_memory_request(static_cast<uint8_t>(s1 << 4 | s2));
+    t->cutting = t->cut_memory || (sent[0] == '2' && sent[1] == '7');
+    if (t->cut_memory) {
+        std::snprintf(t->cut_sent, sizeof t->cut_sent, "%s", sent);
+    }
+    if (!t->cutting || t->cut_memory) {
         return;
     }
     uint8_t pdu[ELM327_CMD_MAX / 2] = {};
@@ -113,24 +121,27 @@ void cut_command(transport* t, const char* sent)
     }
 }
 
-/* A line read, as the log shows it: "<" for a command's, "unasked:"
- * when no command was out (sent nullptr), which always goes in; a
- * security access's line as its length and SHA-256 alone */
+/* A line with no command out (sent nullptr) always goes in */
 void log_line(transport* t, const char* sent, const elm327_reader& r)
 {
     if (!elm327_log_is_open(t->log) || (sent != nullptr && !logging(t))) {
         return;
     }
     char text[ELM327_LINE_MAX * 4 + 1];
-    if (t->cutting) {
+    if (t->cut_memory) {
+        /* no hash: a frame's few bytes could be searched for */
+        std::snprintf(text, sizeof text,
+                      "(a memory read's line, cut: %u characters)",
+                      static_cast<unsigned>(r.len));
+    } else if (t->cutting) {
         ecuio_sha256::hasher h;
         h.add(r.line, r.len);
         uint8_t d[32];
         h.finish(d);
-        int n = std::snprintf(text, sizeof text,
-                              "(a security access's line, cut: %u "
-                              "characters, SHA-256 ",
-                              static_cast<unsigned>(r.len));
+        int n = std::snprintf(
+            text, sizeof text,
+            "(a security access's line, cut: %u characters, SHA-256 ",
+            static_cast<unsigned>(r.len));
         for (uint8_t b : d) {
             n += std::snprintf(text + n, sizeof text - n, "%02x", b);
         }

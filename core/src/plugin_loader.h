@@ -18,6 +18,7 @@
 #include "ecuio/plugin.h"
 #include "json.h"
 #include "least_core.h"
+#include "operation_plan.h"
 #include "plugin_rules.h"
 #include "signal_file_build.h"
 
@@ -137,6 +138,8 @@ struct ecuio_plugin {
     uint32_t tiers = 0;
     /* NULL without the conversation tier */
     std::unique_ptr<ecuio_plugin_loader::conversation> conversation;
+    /* The operation tier's plans (plugin_operations.cpp); none without it */
+    std::vector<ecuio_operation::plan> operations;
     /* conversation's copy for the registry, made at the first register */
     std::shared_ptr<const ecuio_conversation_part> conversation_part;
     std::vector<ecuio_plugin_loader::match_rule> match;
@@ -210,6 +213,7 @@ private:
     static void check_page(const Value& root, page& out);
     bool is_page(const std::string& path) const;
     void read_conversation(const Value& root, ecuio_plugin& p);
+    static void read_operations(const Value& root, ecuio_plugin& p);
     void read_code(const Value& code, conversation& c);
     void packed_code(const Value& file, const std::string& path,
                      conversation& c);

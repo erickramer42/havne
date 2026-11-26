@@ -314,10 +314,10 @@ bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)
                                   &session->module_tx[c], 1);
 }
 
-bool ecuio_session_cuts_access(const ecuio_session_t* session,
-                               const ecuio_frame_t* frame)
+bool ecuio_session_cuts_frame(const ecuio_session_t* session,
+                              const ecuio_frame_t* frame)
 {
-    if (!ecuio_access_cut(frame->data, frame->data_length)) {
+    if (ecuio_capture_kept(frame->data, frame->data_length) == 0) {
         return false;
     }
     const uint32_t id = frame->arbitration_id;
@@ -417,7 +417,7 @@ bool ecuio_conversation_report_of(const ecuio_session_t* s, uint32_t c,
     return true;
 }
 
-ecuio_status_t ecuio_conversation_give_word(ecuio_session_t* s, uint32_t c,
+ecuio_status_t ecuio_conversation_mark_word(ecuio_session_t* s, uint32_t c,
                                             uint8_t level, uint64_t vehicle,
                                             int64_t utc)
 {
@@ -439,6 +439,19 @@ ecuio_status_t ecuio_conversation_give_word(ecuio_session_t* s, uint32_t c,
         }
     }
     b->vehicle = vehicle;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_conversation_give_word(ecuio_session_t* s, uint32_t c,
+                                            uint8_t level, uint64_t vehicle,
+                                            int64_t utc)
+{
+    const ecuio_status_t marked =
+        ecuio_conversation_mark_word(s, c, level, vehicle, utc);
+    if (marked != ECUIO_OK) {
+        return marked;
+    }
+    ecuio_bound_channel* b = ecuio_bound_channel_of(s, c);
     b->word_level.store(level, std::memory_order_relaxed);
     b->word_seq.fetch_add(1, std::memory_order_release);
     return ECUIO_OK;

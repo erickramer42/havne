@@ -53,6 +53,11 @@ struct ecuio_test_talk_slot {
 struct ecuio_session_talk; /* conversation_bind.h */
 void ecuio_session_talk_free(ecuio_session_talk* t) noexcept;
 
+namespace ecuio_operation {
+struct session_run; /* operation_session.h */
+}
+void ecuio_operation_free(ecuio_operation::session_run* o) noexcept;
+
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
      * it's released after every member that reads the set */
@@ -65,6 +70,13 @@ struct ecuio_session {
      * nothing is bound */
     std::unique_ptr<ecuio_session_talk, void (*)(ecuio_session_talk*)> talk{
         nullptr, ecuio_session_talk_free};
+    /* A run of one of the plugin's operations (operation_session.h): made
+     * at the first start under conversation_mutex and kept until destroy.
+     * operation_live is the same object for the worker, set once. */
+    std::unique_ptr<ecuio_operation::session_run,
+                    void (*)(ecuio_operation::session_run*)>
+        operation{nullptr, ecuio_operation_free};
+    std::atomic<ecuio_operation::session_run*> operation_live{nullptr};
     /* Held across each conversation call (the unlock, the getters, the
      * bind's hand-over and close's release); never by a worker */
     mutable std::mutex conversation_mutex;

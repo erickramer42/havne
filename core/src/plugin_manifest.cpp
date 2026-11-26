@@ -202,6 +202,7 @@ void loader::read_manifest(ecuio_plugin& p)
     }
     /* After the variants: the manifest's "ecus" are judged by then */
     read_conversation(root, p);
+    read_operations(root, p);
     read_fingerprint(root, p);
 }
 
@@ -231,7 +232,7 @@ void loader::read_format(const Value& root, ecuio_plugin& p)
     only_keys(root,
               {"havne_plugin", "id", "name", "version", "requires", "lineage",
                "source", "tiers", "match", "ecus", "variants", "fixtures",
-               "files", "conversation", "pages", "publisher"},
+               "files", "conversation", "pages", "publisher", "operations"},
               "the manifest");
 }
 
@@ -345,20 +346,27 @@ void loader::read_tiers(const Value& root, ecuio_plugin& p)
     }
     for (const Value& t : tiers->items) {
         expect(t, Type::string, "a tier");
-        if (t.text != "data" && t.text != "conversation") {
+        if (t.text != "data" && t.text != "conversation" &&
+            t.text != "operation") {
             refuse(t, "tier " + q(t.text) +
                           (p.format < 2
                                ? " isn't one format 1 takes: only \"data\""
-                               : " isn't one this Havne runs: \"data\" "
-                                 "and \"conversation\""));
+                               : " isn't one this Havne runs: \"data\", "
+                                 "\"conversation\" and \"operation\""));
         }
         const bool data = t.text == "data";
+        const bool operation = t.text == "operation";
+        if (operation && p.format < 3) {
+            refuse(t, "tier \"operation\" is format 3's: its manifest "
+                      "starts with \"havne_plugin\": 3");
+        }
         if (!data && p.format < 2) {
             refuse(t, "tier \"conversation\" is format 2's: its manifest "
                       "starts with \"havne_plugin\": 2");
         }
-        const uint32_t bit =
-            data ? ECUIO_PLUGIN_TIER_DATA : ECUIO_PLUGIN_TIER_CONVERSATION;
+        const uint32_t bit = data        ? ECUIO_PLUGIN_TIER_DATA
+                             : operation ? ECUIO_PLUGIN_TIER_OPERATION
+                                         : ECUIO_PLUGIN_TIER_CONVERSATION;
         if ((p.tiers & bit) != 0) {
             refuse(t, "tier " + q(t.text) + " is listed twice");
         }

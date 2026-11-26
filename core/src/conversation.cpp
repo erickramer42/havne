@@ -549,7 +549,8 @@ void ecuio_conversation_step(ecuio_conversation* v, ecuio_request_engine* e,
     if (talking(v)) {
         take_word(v, e, now_us);
     }
-    if (talking(v)) {
+    /* under an operation's hold the module is asked for no request */
+    if (talking(v) && !e->operation_hold) {
         poll(v, e, now_us);
     }
 }

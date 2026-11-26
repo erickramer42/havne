@@ -59,6 +59,7 @@ constexpr uint32_t kRecordLink = 2;
 constexpr uint32_t kRecordTiming = 3;
 constexpr uint32_t kRecordConditions = 4;
 constexpr uint32_t kRecordModules = 5;
+constexpr uint32_t kRecordOperation = 6;
 
 struct link_body {
     uint64_t host_us;
@@ -74,6 +75,19 @@ struct modules_body {
     uint32_t no_room;
     uint8_t reasons[ECUIO_MAX_CHANNELS];
 };
+
+/* A run's start or end (ecuio/operation.h): its plan's id, its module's
+ * reply ID, the image's bytes and how it ended (NONE: it started) */
+struct operation_body {
+    uint64_t host_us;
+    uint64_t bytes;
+    uint32_t rx;
+    uint32_t end; /* ECUIO_OPERATION_END_* */
+    char id[32];  /* terminated */
+};
+
+/* Two runs' lines: an end, the next run's start and end carried at once */
+constexpr uint32_t kCarryOperations = 4;
 
 struct timing_body {
     uint64_t host_us;
@@ -200,6 +214,8 @@ struct ecuio_recorder {
     link_body pending_link{};
     bool modules_pending = false;
     modules_body pending_modules{};
+    uint32_t operations_pending = 0;
+    operation_body pending_operations[kCarryOperations] = {};
     uint64_t timing_next_us = kTimingEveryUs;
 
     /* The recording's set of conditions (NULL: none) and its attach, fixed
@@ -391,6 +407,7 @@ struct ecuio_recorder {
 
     void take_link(const uint8_t* body, size_t size);
     void take_modules(const uint8_t* body, size_t size);
+    void take_operation(const uint8_t* body, size_t size);
     void take_carried();
 
     void take_timing(const uint8_t* body, size_t size);

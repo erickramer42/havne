@@ -7,6 +7,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "page_lines.h"
+#include "operation_lines.h"
 #include "plugin_lines.h"
 #include "signal_file_lines.h"
 
@@ -26,7 +27,8 @@ namespace cmd {
 
 namespace {
 
-// The conversation line of a plugin with the tier, after its plugin line
+// The conversation line of a plugin with the tier, after its plugin line,
+// then its operations' lines
 void write_conversation(Output& out, uint32_t package, const ecuio_plugin_t* p)
 {
     ecuio_plugin_conversation_t c{};
@@ -37,12 +39,26 @@ void write_conversation(Output& out, uint32_t package, const ecuio_plugin_t* p)
     BigLine b(cli::kConversationLineBytes);
     cli::conversation_line(b.line, package, p, c);
     write_line(out, b.line);
+
+    // An operation line for each plan of a plugin with that tier too
+    uint32_t plans = 0;
+    ecuio_plugin_operation_count(p, &plans);
+    for (uint32_t i = 0; i < plans; ++i) {
+        ecuio_plugin_operation_t o{};
+        o.struct_size = sizeof o;
+        if (ecuio_plugin_operation(p, i, &o) == ECUIO_OK) {
+            BigLine line(cli::kOperationLineBytes);
+            cli::operation_line(line.line, package, p, i, o, c.ecu_count);
+            write_line(out, line.line);
+        }
+    }
 }
 
 } // namespace
 
 // plugins list <pkg>... (ADR-0052): start, then a plugin line for each
-// package (and a conversation line for one with the tier), or a refused
+// package (and a conversation line and its operations' lines for one
+// with those tiers), or a refused
 // line saying why and going on; exit 3 when any was refused. No end line
 // (a list)
 int run_plugins_list(const std::vector<const char*>& paths)
@@ -508,7 +524,8 @@ void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
 
 // plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
 // package as a session would, then reads its value fixtures. start,
-// plugin, a conversation line for a plugin with the tier, for each
+// plugin, a conversation line for a plugin with the tier and an operation
+// line for each of its plans, for each
 // variant a variant line (its source's license), a
 // share_alike line when that license is share-alike, and its own signals'
 // signal_def lines, then a no_gauge note for each of its own number or

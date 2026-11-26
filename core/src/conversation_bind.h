@@ -130,10 +130,11 @@ static_assert(ECUIO_CONSENT_LOG_LINE_MAX >
               "the line holds the longest id, version and prefix");
 bool ecuio_consent_log_line(const ecuio_session_t* session, char* out,
                             size_t cap);
-/* Whether frame is a security access (access_cut.h) on the request or
- * response ID of a channel the part talks on: cut from the recording */
-bool ecuio_session_cuts_access(const ecuio_session_t* session,
-                               const ecuio_frame_t* frame);
+/* Whether frame is a security access or a memory read's answer
+ * (access_cut.h) on the request or response ID of a channel the part
+ * talks on: cut from the recording */
+bool ecuio_session_cuts_frame(const ecuio_session_t* session,
+                              const ecuio_frame_t* frame);
 
 /* At start, before the worker: binds what section 1 says, or nothing.
  * ECUIO_ERR_LOAD_FAILED or ECUIO_ERR_OUT_OF_MEMORY with nothing bound;
@@ -156,13 +157,30 @@ bool ecuio_conversation_report_of(const ecuio_session_t* session, uint32_t c,
                                   ecuio_conversation_report* out,
                                   uint32_t* generation);
 
-/* Gives channel c's conversation the word for level, after the store's
- * mark under (vehicle, the channel's rx, level) at UTC second utc when a
- * store is bound: ECUIO_ERR_INVALID_ARGUMENT for a channel nothing is
+/* The store's mark for an attempt on channel c's level, under (vehicle,
+ * the channel's rx, level) at UTC second utc when a store is bound, with
+ * no word given: ECUIO_ERR_INVALID_ARGUMENT for a channel nothing is
  * bound to, ECUIO_ERR_LOAD_FAILED with the store's words when the mark
- * can't be saved, ECUIO_ERR_OUT_OF_MEMORY; nothing given then */
+ * can't be saved, ECUIO_ERR_OUT_OF_MEMORY. Whoever marks owes the word,
+ * or its end. */
+ecuio_status_t ecuio_conversation_mark_word(ecuio_session_t* session,
+                                            uint32_t c, uint8_t level,
+                                            uint64_t vehicle, int64_t utc);
+
+/* ecuio_conversation_mark_word, then channel c's conversation is given
+ * the word for level; nothing given when the mark fails */
 ecuio_status_t ecuio_conversation_give_word(ecuio_session_t* session,
                                             uint32_t c, uint8_t level,
                                             uint64_t vehicle, int64_t utc);
+
+/* An unlock's refusals, its store key and its mark, with no word given
+ * (core_conversation.cpp): what ecuio_session_security_unlock checks and
+ * saves before its word, for a run that gives the word on the worker
+ * once its session is entered (request_operation.h). The caller holds
+ * conversation_mutex. OK counts the word as given: its end is owed. */
+ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
+                                         ecuio_bound_channel& b,
+                                         uint32_t channel, uint8_t level,
+                                         uint32_t* out_wait_ms);
 
 #endif /* ECUIO_CONVERSATION_BIND_H */

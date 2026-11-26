@@ -147,17 +147,18 @@ inline std::string name_for(const std::string& file, int64_t utc = kUtc,
     return ecuio_dump_file::name_of(utc, tx, sum);
 }
 
-/* One folder for a case */
+/* One folder for a case; a case that needs several gives each its own
+ * more, which ends the folder's name */
 struct Folder {
     fs::path path;
-    Folder()
+    explicit Folder(const std::string& more = std::string())
     {
         const char* tmp = std::getenv("TEMP");
         if (tmp == nullptr) {
             tmp = std::getenv("TMPDIR");
         }
-        path =
-            fs::path(tmp != nullptr ? tmp : "/tmp") / temp_name("ecuio-dump");
+        path = fs::path(tmp != nullptr ? tmp : "/tmp") /
+               (temp_name("ecuio-dump") + more);
         std::error_code ec;
         fs::permissions(path, fs::perms::owner_all, ec);
         fs::remove_all(path, ec);

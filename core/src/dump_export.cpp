@@ -36,6 +36,8 @@
 
 using ecuio_dump_file::kHeaderBytes;
 using ecuio_dump_handle::copy_text;
+using ecuio_dump_handle::drop;
+using ecuio_dump_handle::flush_folder_of;
 using ecuio_dump_handle::hash_file;
 using ecuio_dump_handle::kDamagedWords;
 using ecuio_dump_handle::kPiece;
@@ -50,59 +52,6 @@ namespace {
 bool seam_fails(int step)
 {
     return ecuio_dump_handle::test_fail_step.compare_exchange_strong(step, 0);
-}
-
-/* A file of this call's own removed, read-only or not: whether it is
- * gone. Throws nothing. */
-bool drop(const std::string& utf8) noexcept
-{
-    try {
-#ifdef _WIN32
-        const std::wstring w = files::wide(utf8);
-        if (w.empty()) {
-            return false;
-        }
-        SetFileAttributesW(w.c_str(), FILE_ATTRIBUTE_NORMAL);
-        return DeleteFileW(w.c_str()) != 0 ||
-               GetLastError() == ERROR_FILE_NOT_FOUND;
-#else
-        return unlink(utf8.c_str()) == 0 || errno == ENOENT;
-#endif
-    } catch (const std::bad_alloc&) {
-        return false; /* left: nothing more can be done without memory */
-    }
-}
-
-/* The folder holding the file at utf8 flushed, so the file's name is on
- * the disk as its bytes are. Windows keeps a rename in its own journal;
- * a file system that can't flush a folder passes. */
-bool flush_folder_of(const std::string& utf8, std::string* why)
-{
-    if (seam_fails(ecuio_dump_handle::kFailFolderFlush)) {
-        *why = "its folder can't be flushed";
-        return false;
-    }
-#ifdef _WIN32
-    (void)utf8;
-    return true;
-#else
-    const size_t slash = utf8.find_last_of('/');
-    const std::string folder = slash == std::string::npos ? "."
-                               : slash == 0 ? "/"
-                                            : utf8.substr(0, slash);
-    const int fd = open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd < 0) {
-        *why = "its folder can't be flushed: " + files::os_words(errno);
-        return false;
-    }
-    const bool flushed = fsync(fd) == 0 || files::not_supported(errno);
-    const int err = errno;
-    close(fd);
-    if (!flushed) {
-        *why = "its folder can't be flushed: " + files::os_words(err);
-    }
-    return flushed;
-#endif
 }
 
 /* A file written whole: made under a partial name, flushed to the disk,
@@ -565,6 +514,59 @@ ecuio_status_t remove_at(const std::string& utf8, std::string* why)
 } // namespace
 
 namespace ecuio_dump_handle {
+
+/* A file of this call's own removed, read-only or not: whether it is
+ * gone. Throws nothing. */
+bool drop(const std::string& utf8) noexcept
+{
+    try {
+#ifdef _WIN32
+        const std::wstring w = files::wide(utf8);
+        if (w.empty()) {
+            return false;
+        }
+        SetFileAttributesW(w.c_str(), FILE_ATTRIBUTE_NORMAL);
+        return DeleteFileW(w.c_str()) != 0 ||
+               GetLastError() == ERROR_FILE_NOT_FOUND;
+#else
+        return unlink(utf8.c_str()) == 0 || errno == ENOENT;
+#endif
+    } catch (const std::bad_alloc&) {
+        return false; /* left: nothing more can be done without memory */
+    }
+}
+
+/* The folder holding the file at utf8 flushed, so the file's name is on
+ * the disk as its bytes are. Windows keeps a rename in its own journal;
+ * a file system that can't flush a folder passes. */
+bool flush_folder_of(const std::string& utf8, std::string* why)
+{
+    if (seam_fails(ecuio_dump_handle::kFailFolderFlush)) {
+        *why = "its folder can't be flushed";
+        return false;
+    }
+#ifdef _WIN32
+    (void)utf8;
+    return true;
+#else
+    const size_t slash = utf8.find_last_of('/');
+    const std::string folder = slash == std::string::npos ? "."
+                               : slash == 0 ? "/"
+                                            : utf8.substr(0, slash);
+    const int fd = open(folder.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) {
+        *why = "its folder can't be flushed: " + files::os_words(errno);
+        return false;
+    }
+    const bool flushed = fsync(fd) == 0 || files::not_supported(errno);
+    const int err = errno;
+    close(fd);
+    if (!flushed) {
+        *why = "its folder can't be flushed: " + files::os_words(err);
+    }
+    return flushed;
+#endif
+}
 
 bool set_read_only(const std::string& utf8, std::string* why)
 {

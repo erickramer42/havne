@@ -272,7 +272,7 @@ void ecuio_session_dispatch_callbacks(
             recorder, host_us, frame, session->decoder.values.data(), count,
             changed > 0 ? conditions->events.data() : nullptr, changed,
             conditions != nullptr ? conditions->generation : 0,
-            ecuio_session_cuts_access(session, frame));
+            ecuio_session_cuts_frame(session, frame));
         ecuio_record_unpin(*link);
     }
     if (want_values && count > 0) {

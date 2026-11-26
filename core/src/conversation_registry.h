@@ -17,6 +17,7 @@
 #include "ecuio/core.h"
 #include "ecuio/plugin.h"
 #include "ecuio/signals.h"
+#include "operation_plan.h"
 
 #include <cstdint>
 #include <memory>
@@ -42,6 +43,8 @@ struct ecuio_conversation_part {
     std::vector<ecuio_plugin_service_t> services;
     std::vector<ecuio_plugin_security_level_t> levels;
     uint8_t fingerprint[32] = {}; /* its plugin's (ecuio_plugin_fingerprint) */
+    /* The operation tier's plans, in the manifest's order; none without it */
+    std::vector<ecuio_operation::plan> operations;
     bool has_publisher = false;   /* format 3: a consent can name it */
 };
 

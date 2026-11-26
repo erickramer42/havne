@@ -8,6 +8,8 @@
 
 #include "car_sized_set.h"
 
+#include <ecuio/operation.h>
+
 namespace {
 
 /* The car-sized set's two modules, 0x7E8 and 0x7E9, on the mock, a
@@ -145,4 +147,57 @@ TEST(RecorderModulesTest, AFullRingCarriesTheLatestModuleState)
     m.close();
     EXPECT_EQ(kind_lines(m.folder, "module"),
               (std::vector<std::string>{"0x7E8,closed", "0x7E9,closed"}));
+}
+
+namespace {
+
+void fill_the_ring(ModulesRecorded& m)
+{
+    ecuio_recorder_test_hold(m.recorder, 1);
+    for (int i = 0; i < 200; ++i) {
+        engine_speed(m.session.s, 1000000 + i * 10000u, 800);
+    }
+}
+
+void run_line(ModulesRecorded& m, const char* id, uint32_t end)
+{
+    ecuio_record_operation(m.session.s->record_link.get(), id, 0x7E8, 6144,
+                           end);
+}
+
+} // namespace
+
+TEST(RecorderModulesTest, AFullRingCarriesARunsStartBeforeItsEnd)
+{
+    ModulesRecorded m(0, 4096);
+    ASSERT_NE(m.recorder, nullptr);
+    fill_the_ring(m);
+    run_line(m, "first", ECUIO_OPERATION_END_NONE);
+    run_line(m, "first", ECUIO_OPERATION_END_REFUSED);
+    run_line(m, "second", ECUIO_OPERATION_END_NONE);
+    run_line(m, "second", ECUIO_OPERATION_END_CANCELED);
+    /* past what is carried: the newest gives way, the order stays */
+    run_line(m, "third", ECUIO_OPERATION_END_NONE);
+    ecuio_recorder_test_hold(m.recorder, 0);
+    m.drained();
+    engine_speed(m.session.s, 4000000, 800);
+    m.close();
+    EXPECT_EQ(kind_lines(m.folder, "operation"),
+              (std::vector<std::string>{"dump,first,0x7E8,6144,started",
+                                        "dump,first,0x7E8,6144,refused",
+                                        "dump,second,0x7E8,6144,started",
+                                        "dump,third,0x7E8,6144,started"}));
+}
+
+TEST(RecorderModulesTest, ACloseWritesTheRunLinesStillCarried)
+{
+    ModulesRecorded m(0, 4096);
+    ASSERT_NE(m.recorder, nullptr);
+    fill_the_ring(m);
+    run_line(m, "copy", ECUIO_OPERATION_END_NONE);
+    run_line(m, "copy", ECUIO_OPERATION_END_CANCELED);
+    m.close();
+    EXPECT_EQ(kind_lines(m.folder, "operation"),
+              (std::vector<std::string>{"dump,copy,0x7E8,6144,started",
+                                        "dump,copy,0x7E8,6144,canceled"}));
 }

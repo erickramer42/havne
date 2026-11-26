@@ -39,6 +39,7 @@ extern "C" {
 #define ECUIO_PLUGIN_FORMAT_MAX        3 /* the newest read; 1 and 2 too */
 #define ECUIO_PLUGIN_TIER_DATA    0x1u      /* signal files only */
 #define ECUIO_PLUGIN_TIER_CONVERSATION 0x2u /* a module that asks (below) */
+#define ECUIO_PLUGIN_TIER_OPERATION    0x4u /* plans core runs (below) */
 #define ECUIO_PLUGIN_MANIFEST_MAX 1048576u  /* a folder's manifest.json */
 #define ECUIO_PLUGIN_PACKAGE_MAX  16777216u /* everything read, packed or not */
 #define ECUIO_PLUGIN_MAX_FILES    64u
@@ -678,6 +679,155 @@ ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
 ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
                                            uint32_t index,
                                            ecuio_plugin_security_level_t* out);
+
+/*
+ * The operation tier (ADR-0066 section 4; "havne_plugin" 3, beside the
+ * conversation tier, which it needs): plans core itself runs on one of
+ * the conversation's ECUs. A manifest whose "tiers" lists "operation"
+ * has "operations", 1 to ECUIO_PLUGIN_MAX_OPERATIONS:
+ *
+ *   "operations": [{
+ *     "id": "dump-calibration", "kind": "dump", "title": "Calibration",
+ *     "ecu": "engine", "level": "01",
+ *     "ident": [{"did": "D220", "role": "hardware"}],
+ *     "steps": [{"step": "read", "name": "calibration",
+ *                "session": "extended", "address": "00010000",
+ *                "bytes": 65536, "address_bytes": 4, "size_bytes": 2,
+ *                "chunk": 1024}]
+ *   }]
+ *
+ *   - "id" and a step's "name": a-z, 0-9 and -, 1 to 31, each once.
+ *   - "kind" is "dump": a copy of the module's memory (ecuio/dump.h).
+ *   - "ecu" is one of the conversation's, and "level" a security level
+ *     its "security" declares for that ECU: a dump needs its unlock.
+ *   - "ident", at most ECUIO_PLUGIN_MAX_IDENTS: the DIDs that identify
+ *     what was read, each with a role of "hardware", "software" or
+ *     "base"; service 22 is then among the conversation's services.
+ *   - "steps", 1 to ECUIO_PLUGIN_MAX_STEPS, in the order they are read:
+ *     "step" is "read" (service 23, "chunk" bytes for each request, 1
+ *     to 4094) or "upload" (services 35, 36 and 37; no "chunk", the
+ *     module names its block; "dfi" may be given and is "00").
+ *     "address" is whole bytes of upper-case hex; "address_bytes" and
+ *     "size_bytes" (1 to 4 each) are how the request carries the
+ *     address and the size, and each number fits its bytes. "session"
+ *     is "extended". No two steps of a plan share an address, and
+ *     their bytes add to at most ECUIO_DUMP_IMAGE_MAX.
+ *
+ * A step kind or a session this Havne doesn't run is refused by its
+ * name, so a later Havne's plan never half-loads. Core derives three
+ * things and a manifest states none: a plan's class (read-class when
+ * every step only reads), the unlock attempts a run makes (one for each
+ * session it enters) and the image's size. A plan is data: a load sends
+ * nothing and runs nothing.
+ */
+#define ECUIO_PLUGIN_MAX_OPERATIONS 8u
+#define ECUIO_PLUGIN_MAX_STEPS      64u
+#define ECUIO_PLUGIN_MAX_IDENTS     8u
+
+/* ecuio_plugin_operation_t.kind, append-only */
+#define ECUIO_OPERATION_KIND_DUMP 1u
+
+/* ecuio_plugin_operation_t.op_class: derived by core, never declared */
+#define ECUIO_OPERATION_CLASS_READ  1u /* every step only reads */
+#define ECUIO_OPERATION_CLASS_WRITE 2u
+
+/* ecuio_plugin_operation_step_t.kind, append-only */
+#define ECUIO_STEP_READ   1u /* service 23 */
+#define ECUIO_STEP_UPLOAD 2u /* services 35, 36 and 37 */
+
+/* ecuio_plugin_operation_step_t.session: the session's own byte */
+#define ECUIO_STEP_SESSION_PROGRAMMING 2u
+#define ECUIO_STEP_SESSION_EXTENDED    3u
+
+/* One plan. POD, 160 bytes. */
+typedef struct ecuio_plugin_operation {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* zero */
+    uint32_t kind;        /* ECUIO_OPERATION_KIND_* */
+    uint32_t op_class;    /* ECUIO_OPERATION_CLASS_* */
+    uint32_t rx_id;       /* its ECU's response ID */
+    uint32_t tx_id;       /* and request ID */
+    uint32_t level;       /* the security level its steps need */
+    uint32_t step_count;
+    uint32_t ident_count;
+    uint32_t unlock_sessions; /* the unlock attempts a run makes */
+    uint64_t image_bytes;     /* the steps' bytes, added */
+    char id[32];
+    char title[64];
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_plugin_operation_t;
+
+/* One step of a plan: a range of the module's memory. POD, 88 bytes. */
+typedef struct ecuio_plugin_operation_step {
+    uint32_t struct_size;
+    uint32_t flags;   /* zero */
+    uint32_t kind;    /* ECUIO_STEP_* */
+    uint32_t session; /* ECUIO_STEP_SESSION_* */
+    uint64_t address;
+    uint64_t bytes;
+    uint32_t chunk;        /* a read's bytes for each request; 0 for an
+                              upload */
+    uint8_t address_bytes; /* the request's address, 1 to 4 bytes */
+    uint8_t size_bytes;    /* its size, 1 to 4 bytes */
+    uint8_t dfi;           /* an upload's data format, 00 */
+    uint8_t reserved0;     /* zero */
+    char name[32];
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_plugin_operation_step_t;
+
+/* One identification DID of a plan. POD, 32 bytes. */
+typedef struct ecuio_plugin_operation_ident {
+    uint32_t struct_size;
+    uint32_t flags; /* zero */
+    uint32_t did;
+    uint32_t role;        /* ecuio/dump.h's ECUIO_DUMP_ROLE_* */
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_plugin_operation_ident_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_operation_t) == 160,
+              "ecuio_plugin_operation_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_t, image_bytes) == 40,
+              "plugin operation image_bytes offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_t, title) == 80,
+              "plugin operation title offset is ABI");
+static_assert(sizeof(ecuio_plugin_operation_step_t) == 88,
+              "ecuio_plugin_operation_step_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_step_t, chunk) == 32,
+              "plugin operation step chunk offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_step_t, name) == 40,
+              "plugin operation step name offset is ABI");
+static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
+              "ecuio_plugin_operation_ident_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_operation_t) == 160,
+               "ecuio_plugin_operation_t size is ABI");
+_Static_assert(sizeof(ecuio_plugin_operation_step_t) == 88,
+               "ecuio_plugin_operation_step_t size is ABI");
+_Static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
+               "ecuio_plugin_operation_ident_t size is ABI");
+#endif
+
+/* How many plans plugin has: 0 without the tier. ECUIO_ERR_NULL_ARGUMENT
+ * for a NULL. */
+ecuio_status_t ecuio_plugin_operation_count(const ecuio_plugin_t* plugin,
+                                            uint32_t* count);
+
+/* The index-th plan, in the manifest's order; then a plan's index-th
+ * step and identification DID. Each a getter by index:
+ * ECUIO_ERR_INVALID_ARGUMENT at or past its count (so for a plugin
+ * without the tier) and for a struct_size smaller than the struct, out
+ * untouched; ECUIO_ERR_NULL_ARGUMENT for a NULL. */
+ecuio_status_t ecuio_plugin_operation(const ecuio_plugin_t* plugin,
+                                      uint32_t index,
+                                      ecuio_plugin_operation_t* out);
+ecuio_status_t ecuio_plugin_operation_step(const ecuio_plugin_t* plugin,
+                                           uint32_t operation, uint32_t index,
+                                           ecuio_plugin_operation_step_t* out);
+ecuio_status_t
+ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin, uint32_t operation,
+                             uint32_t index,
+                             ecuio_plugin_operation_ident_t* out);
 
 /*
  * Making and changing a packed plugin (ADR-0064): a signal file wrapped

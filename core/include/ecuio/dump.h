@@ -60,7 +60,8 @@
  *
  *   - "havne_dump" is the header's format, judged before the keys.
  *   - "kind" is "read": bytes read by service 23 or by an upload.
- *   - "utc" is the second the copy was sealed, 1 to the year 9999's last.
+ *   - "utc" is the second the read was started, 1 to the year 9999's
+ *     last; "read"'s "seconds" is how long it took.
  *   - "image" repeats the header's N and its SHA-256 (lower-case hex).
  *   - "ranges", 1 to ECUIO_DUMP_MAX_RANGES, tile the image: offsets
  *     ascend from 0 with no gap and the bytes add to N. "step" is "read"
@@ -429,9 +430,10 @@ ecuio_status_t ecuio_dump_export(const ecuio_dump_t* dump, uint32_t form,
  * and checked as ecuio_dump_verify checks one (its two checksums; its
  * name isn't judged), then copied into folder under the name core gives
  * it, written as an export's file is (flushed, read back) and set
- * read-only, as a copy is kept. A file of that name there refuses it. name_out (name_capacity at least ECUIO_DUMP_NAME_MAX, or
- * NULL with 0) takes that name once the file is known sound, whether or
- * not the copy then lands. ECUIO_ERR_NULL_ARGUMENT for a NULL path or
+ * read-only, as a copy is kept. A file of that name there refuses it.
+ * name_out (name_capacity at least ECUIO_DUMP_NAME_MAX, or NULL with 0)
+ * takes that name once the file is known sound, whether or not the copy
+ * then lands. ECUIO_ERR_NULL_ARGUMENT for a NULL path or
  * folder, or a NULL name_out with a capacity;
  * ECUIO_ERR_INVALID_ARGUMENT for a capacity below ECUIO_DUMP_NAME_MAX
  * that isn't 0; ECUIO_ERR_LOAD_FAILED with words;

@@ -457,6 +457,11 @@ struct ecuio_request_engine {
     std::vector<ecuio_engine_channel> chans;
     uint32_t chan_count = 0;
     bool probe = false;         /* section 4 on: walks run, explicit answers drop */
+    /* An operation's run holds the session (request_operation.h): each
+     * open module sends a one-shot it had taken, a key, its session's
+     * entry, a talk and its keep-alive, and nothing else; a module that
+     * isn't open, or is visiting, sends nothing until the hold ends */
+    bool operation_hold = false;
     /* The set derives more requests than a rotation holds: a row takes
      * its pool row when a focus first keeps it, and with no focus every
      * row is parked (ecuio_engine_pick_only) */

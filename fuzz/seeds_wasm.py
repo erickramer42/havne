@@ -119,7 +119,8 @@ def guest_seeds():
 
 def conversation_seeds():
     """fuzz_plugin_manifest's seeds for a format 2 plugin with the
-    conversation tier, and a format 3 one with its publisher, by name"""
+    conversation tier, a format 3 one with its publisher, and format 3
+    ones with the operation tier, by name"""
     data = {"havne_signals": 1, "signals": [
         {"key": "oil_temp", "name": "Oil Temp", "ecu": "pcm",
          "read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}}]}
@@ -127,7 +128,8 @@ def conversation_seeds():
     publisher = {"name": "Made-up Tools", "contact": "https://example.com/help",
                  "license": "MIT", "terms": "Use at your own risk.\nNo warranty."}
 
-    def plugin(module, packed, sha=None, level="01", format=2, publisher=None):
+    def plugin(module, packed, sha=None, level="01", format=2, publisher=None,
+               operations=None):
         doc = {"havne_plugin": 2, "id": "talker", "name": "Talker", "version": "1.0.0",
                "requires": {"core": "0.1.0"}, "source": {"name": "Havne's fuzz seeds"},
                "tiers": ["data", "conversation"],
@@ -149,7 +151,26 @@ def conversation_seeds():
         doc["havne_plugin"] = format
         if publisher is not None:
             doc["publisher"] = publisher
+        if operations is not None:
+            doc["tiers"].append("operation")
+            doc["operations"] = operations
         return json.dumps(doc, indent=1).encode()
+
+    # The operation tier (format 3): a dump of two ranges, a read and an
+    # upload, with every address and identifier made up; then a step kind
+    # no Havne runs yet, and two steps sharing an address
+    def step(kind, name, address, **more):
+        return dict({"step": kind, "name": name, "session": "extended",
+                     "address": address, "bytes": 4096, "address_bytes": 4,
+                     "size_bytes": 4}, **more)
+
+    def plan(steps):
+        return [{"id": "copy-memory", "kind": "dump", "title": "Copy the memory",
+                 "ecu": "pcm", "level": "01",
+                 "ident": [{"did": "D220", "role": "software"}], "steps": steps}]
+
+    dump = plan([step("read", "low", "00010000", chunk=256),
+                 step("upload", "high", "00011000", dfi="00")])
 
     module = guest_module()
     plain = guest_module(buffer_at=0)   # no 0x1E byte: a folder's piece
@@ -166,6 +187,18 @@ def conversation_seeds():
         "folder_conversation3": b"\x01" + plugin(plain, False, format=3, publisher=publisher) +
                                 SEP + json.dumps(data).encode() + SEP + plain,
         "packed_conversation3_no_publisher": b"\x00" + plugin(module, True, format=3),
+        "packed_operation": b"\x00" + plugin(module, True, format=3, publisher=publisher,
+                                             operations=dump),
+        "folder_operation": b"\x01" + plugin(plain, False, format=3, publisher=publisher,
+                                             operations=dump) +
+                            SEP + json.dumps(data).encode() + SEP + plain,
+        "packed_operation_later_step": b"\x00" + plugin(
+            module, True, format=3, publisher=publisher,
+            operations=plan([step("download", "low", "00010000")])),
+        "packed_operation_overlap": b"\x00" + plugin(
+            module, True, format=3, publisher=publisher,
+            operations=plan([step("read", "low", "00010000", chunk=256),
+                             step("read", "high", "00010800", chunk=256)])),
     }
 
 

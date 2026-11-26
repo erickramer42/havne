@@ -612,6 +612,33 @@ TEST(FolderExportTest, AScrubbedCopyKeepsTheModuleLines)
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 0u);
 }
 
+/* A scrubbed copy keeps a run's lines (ADR-0066 section 4): they name a
+ * plan, a module and a size, nothing of the car's */
+TEST(FolderExportTest, AScrubbedCopyKeepsTheOperationLines)
+{
+    Folder f;
+    conditions_recording(
+        f, "22:13:24.360  +4.110  operation  dump,copy,0x7E8,6144,started\n"
+           "22:13:24.960  +4.710  operation  dump,copy,0x7E8,6144,saved\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::string& out = e.files["events.log"];
+    EXPECT_NE(out.find("  +4.110  operation  dump,copy,0x7E8,6144,started\n"),
+              std::string::npos)
+        << out;
+    EXPECT_NE(out.find("  +4.710  operation  dump,copy,0x7E8,6144,saved\n"),
+              std::string::npos)
+        << out;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 0u);
+    /* and the reader opens the recording they stand in */
+    ecuio_recording_t* r = nullptr;
+    ASSERT_EQ(ecuio_recording_open((f.path / "rec").u8string().c_str(), nullptr,
+                                   nullptr, &r),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_close(r);
+}
+
 /* A range's held lines take a set's most keys, as the reader does: with
  * coolant_high and boost_low first, k61 is the 64th key before the range
  * and held, k62 the 65th and not */

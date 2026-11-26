@@ -101,6 +101,17 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }
+    if (e->operation_hold) {
+        /* the hold: a talk, else the keep-alive; no walk, list or row */
+        if (ecuio_talk_turn(ch.talk, false, false)) {
+            *r = ecuio_engine_talk_slot(ch, c);
+        } else if (ecuio_engine_keepalive_due(e, c, now_us)) {
+            *r = ECUIO_ENGINE_ONCE;
+        } else {
+            *r = ECUIO_ENGINE_NONE;
+        }
+        return true;
+    }
     if (ch.walking) {
         if (!ch.walk_timed) {
             ch.walk_timed = true;
@@ -337,6 +348,9 @@ inline bool ecuio_engine_visit_owes(const ecuio_engine_channel& ch)
 inline int64_t ecuio_engine_limited_next_us(const ecuio_request_engine* e,
                                             const ecuio_engine_channel& ch)
 {
+    if (e->operation_hold) {
+        return INT64_MAX; /* it sends nothing under an operation's hold */
+    }
     if (ch.module_state == ECUIO_MODULE_STATE_OPEN && ch.visiting) {
         return ch.outstanding == ECUIO_ENGINE_NONE &&
                        ecuio_engine_visit_sends(ch)
@@ -478,6 +492,10 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
+    if (e->operation_hold &&
+        (!ecuio_engine_module_open(e->chans[c]) || e->chans[c].visiting)) {
+        return ECUIO_ENGINE_NONE;
+    }
     if (!ecuio_engine_module_open(e->chans[c])) {
         return ecuio_engine_due_closing(e, c, now_us);
     }
@@ -605,6 +623,14 @@ inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
            ch.talk.offered || ecuio_engine_clear_asks(ch);
 }
 
+/* The same under an operation's hold: a talk offered, or a one-shot taken
+ * before the hold whose write is still owed */
+inline bool ecuio_engine_hold_asks(const ecuio_engine_channel& ch)
+{
+    return ch.talk.offered || ch.talk.out || ch.identifying || ch.diagnosing ||
+           ch.scanning || ch.clearing || ch.sessioning;
+}
+
 /* next_event_us's moment for open module ch: its reply's deadline, else
  * its next send behind the sweep floor, the quiet pace, the session's
  * keepalive and the key's hold (window: its key's window is open) */
@@ -658,7 +684,9 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         }
         const bool window = ecuio_key_window_open(ch.key, now_us);
         const bool items = ch.quiet && ecuio_engine_quiet_asks_items(e, ch);
-        const bool asks_more = ecuio_engine_asks_more(ch, items);
+        const bool asks_more = e->operation_hold
+                                   ? ecuio_engine_hold_asks(ch)
+                                   : ecuio_engine_asks_more(ch, items);
         if (ch.outstanding == ECUIO_ENGINE_NONE && !asks_more &&
             !ecuio_engine_session_live(e, ch) && !window) {
             continue;

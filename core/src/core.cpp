@@ -12,6 +12,7 @@
 #include "session.h"
 #include "consent_gate.h"
 #include "conversation_bind.h"
+#include "operation_session.h"
 #include "host_awake.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
@@ -412,7 +413,8 @@ ecuio_status_t ecuio_session_close(ecuio_session_t* session)
         delete session->transport;
         session->transport = nullptr;
     }
-    ecuio_conversation_unbind(session); /* the worker has joined */
+    ecuio_operation_closed(session); /* the worker has joined */
+    ecuio_conversation_unbind(session);
     /* After the detach, so the hold covers the close's 10 01 */
     ecuio_awake_release_all(session);
     /* The worker has stopped: the recorder takes no more frames, and its

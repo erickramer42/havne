@@ -11,6 +11,7 @@
 // loaded. fuzz/README.md lists what each input must hold to.
 
 #include <ecuio/core.h>
+#include <ecuio/dump.h>
 #include <ecuio/plugin.h>
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
@@ -323,6 +324,172 @@ void check_conversation(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     check_levels(a, c.level_count, ecus, sub_27);
 }
 
+bool is_id(const char* s, size_t cap)
+{
+    const size_t n = strnlen(s, cap);
+    if (n < 1 || n >= cap || s[0] == '-' || s[n - 1] == '-') {
+        return false;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Returns the steps' bytes, added */
+uint64_t check_steps(const ecuio_plugin_t* a, uint32_t op, uint32_t count)
+{
+    std::vector<ecuio_plugin_operation_step_t> seen;
+    uint64_t image = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_operation_step_t s{};
+        s.struct_size = sizeof s;
+        check(ecuio_plugin_operation_step(a, op, i, &s) == ECUIO_OK);
+        check(s.struct_size == sizeof s && s.flags == 0 && s.reserved0 == 0);
+        check(s.kind == ECUIO_STEP_READ || s.kind == ECUIO_STEP_UPLOAD);
+        check(s.session == ECUIO_STEP_SESSION_EXTENDED && s.dfi == 0);
+        check(s.address_bytes >= 1 && s.address_bytes <= 4);
+        check(s.size_bytes >= 1 && s.size_bytes <= 4);
+        const uint64_t last = (uint64_t{1} << (8 * s.address_bytes)) - 1;
+        const uint64_t most = (uint64_t{1} << (8 * s.size_bytes)) - 1;
+        check(s.bytes >= 1 && s.bytes <= ECUIO_DUMP_IMAGE_MAX);
+        check(s.address + s.bytes - 1 <= last);
+        if (s.kind == ECUIO_STEP_READ) {
+            check(s.chunk >= 1 && s.chunk <= 4094 && s.chunk <= most);
+        } else {
+            check(s.chunk == 0 && s.bytes <= most);
+        }
+        check(is_id(s.name, sizeof s.name));
+        for (const uint32_t r : s.reserved) {
+            check(r == 0);
+        }
+        for (const ecuio_plugin_operation_step_t& known : seen) {
+            check(strcmp(known.name, s.name) != 0);
+            check(s.address >= known.address + known.bytes ||
+                  known.address >= s.address + s.bytes);
+        }
+        seen.push_back(s);
+        image += s.bytes;
+    }
+    ecuio_plugin_operation_step_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_operation_step(a, op, count, &past) ==
+          ECUIO_ERR_INVALID_ARGUMENT);
+    return image;
+}
+
+void check_idents(const ecuio_plugin_t* a, uint32_t op, uint32_t count,
+                  uint32_t services)
+{
+    check(count <= ECUIO_PLUGIN_MAX_IDENTS);
+    bool reads = false;
+    for (uint32_t i = 0; i < services; ++i) {
+        ecuio_plugin_service_t sv{};
+        sv.struct_size = sizeof sv;
+        check(ecuio_plugin_service(a, i, &sv) == ECUIO_OK);
+        reads = reads || sv.sid == 0x22;
+    }
+    check(count == 0 || reads);
+    std::vector<uint32_t> seen;
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_operation_ident_t d{};
+        d.struct_size = sizeof d;
+        check(ecuio_plugin_operation_ident(a, op, i, &d) == ECUIO_OK);
+        check(d.struct_size == sizeof d && d.flags == 0 && d.did <= 0xFFFFu);
+        check(d.role == ECUIO_DUMP_ROLE_HARDWARE ||
+              d.role == ECUIO_DUMP_ROLE_SOFTWARE ||
+              d.role == ECUIO_DUMP_ROLE_BASE);
+        for (const uint32_t r : d.reserved) {
+            check(r == 0);
+        }
+        for (const uint32_t known : seen) {
+            check(known != d.did);
+        }
+        seen.push_back(d.did);
+    }
+    ecuio_plugin_operation_ident_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_operation_ident(a, op, count, &past) ==
+          ECUIO_ERR_INVALID_ARGUMENT);
+}
+
+bool unlocks(const ecuio_plugin_t* a, const ecuio_plugin_conversation_t& c,
+             const ecuio_plugin_operation_t& op)
+{
+    bool ecu = false;
+    for (uint32_t i = 0; i < c.ecu_count; ++i) {
+        ecuio_plugin_conversation_ecu_t e{};
+        e.struct_size = sizeof e;
+        check(ecuio_plugin_conversation_ecu(a, i, &e) == ECUIO_OK);
+        ecu = ecu || (e.rx_id == op.rx_id && e.tx_id == op.tx_id);
+    }
+    bool level = false;
+    for (uint32_t i = 0; i < c.level_count; ++i) {
+        ecuio_plugin_security_level_t lv{};
+        lv.struct_size = sizeof lv;
+        check(ecuio_plugin_security_level(a, i, &lv) == ECUIO_OK);
+        level = level || (lv.rx_id == op.rx_id && lv.level == op.level);
+    }
+    return ecu && level;
+}
+
+void check_operations(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
+                      uint32_t tiers)
+{
+    uint32_t count = 0xFFFFFFFFu;
+    uint32_t again = 0xFFFFFFFFu;
+    check(ecuio_plugin_operation_count(a, &count) == ECUIO_OK);
+    check(ecuio_plugin_operation_count(b, &again) == ECUIO_OK);
+    check(count == again);
+    ecuio_plugin_operation_t past{};
+    past.struct_size = sizeof past;
+    check(ecuio_plugin_operation(a, count, &past) ==
+          ECUIO_ERR_INVALID_ARGUMENT);
+    if ((tiers & ECUIO_PLUGIN_TIER_OPERATION) == 0) {
+        check(count == 0);
+        return;
+    }
+    check(count >= 1 && count <= ECUIO_PLUGIN_MAX_OPERATIONS);
+    ecuio_plugin_conversation_t c{};
+    c.struct_size = sizeof c;
+    check(ecuio_plugin_conversation(a, &c) == ECUIO_OK);
+    std::vector<std::string> ids;
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_plugin_operation_t op{};
+        op.struct_size = sizeof op;
+        ecuio_plugin_operation_t same = op;
+        check(ecuio_plugin_operation(a, i, &op) == ECUIO_OK);
+        check(ecuio_plugin_operation(b, i, &same) == ECUIO_OK);
+        check(memcmp(&op, &same, sizeof op) == 0);
+        check(op.struct_size == sizeof op && op.flags == 0);
+        check(op.kind == ECUIO_OPERATION_KIND_DUMP);
+        check(op.op_class == ECUIO_OPERATION_CLASS_READ);
+        check(unlocks(a, c, op));
+        check(op.step_count >= 1 && op.step_count <= ECUIO_PLUGIN_MAX_STEPS);
+        check(is_id(op.id, sizeof op.id));
+        const size_t title = strnlen(op.title, sizeof op.title);
+        check(title >= 1 && title < sizeof op.title);
+        for (const uint32_t r : op.reserved) {
+            check(r == 0);
+        }
+        for (const std::string& known : ids) {
+            check(known != op.id);
+        }
+        ids.push_back(op.id);
+        check(check_steps(a, i, op.step_count) == op.image_bytes);
+        check(op.image_bytes <= ECUIO_DUMP_IMAGE_MAX);
+        check(op.unlock_sessions == 1);
+        check_idents(a, i, op.ident_count, c.service_count);
+    }
+    past.struct_size = sizeof past - 1;
+    const ecuio_plugin_operation_t untouched = past;
+    check(ecuio_plugin_operation(a, 0, &past) == ECUIO_ERR_INVALID_ARGUMENT);
+    check(memcmp(&past, &untouched, sizeof past) == 0);
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -385,10 +552,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     ecuio_plugin_info_t info{};
     info.struct_size = sizeof info;
     check(ecuio_plugin_info(a, &info) == ECUIO_OK);
-    check(info.tiers == ECUIO_PLUGIN_TIER_DATA ||
-          info.tiers ==
-              (ECUIO_PLUGIN_TIER_DATA | ECUIO_PLUGIN_TIER_CONVERSATION));
+    const uint32_t talks =
+        ECUIO_PLUGIN_TIER_DATA | ECUIO_PLUGIN_TIER_CONVERSATION;
+    check(info.tiers == ECUIO_PLUGIN_TIER_DATA || info.tiers == talks ||
+          info.tiers == (talks | ECUIO_PLUGIN_TIER_OPERATION));
     check_conversation(a, b, info.tiers, info.variant_count);
+    check_operations(a, b, info.tiers);
     check_pages(a, b, info.page_count);
     check(info.variant_count >= 1 &&
           info.variant_count <= ECUIO_PLUGIN_MAX_VARIANTS);

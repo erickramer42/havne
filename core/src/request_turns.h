@@ -100,6 +100,9 @@ inline int64_t ecuio_engine_turn_own_us(const ecuio_request_engine* e,
     if (ch.outstanding != ECUIO_ENGINE_NONE) {
         return INT64_MAX;
     }
+    if (e->operation_hold) {
+        return ecuio_engine_hold_asks(ch) ? ch.next_send_us : INT64_MAX;
+    }
     int64_t at = INT64_MAX;
     if (ch.check_due || ecuio_engine_once_waiting(ch)) {
         at = ch.next_send_us;

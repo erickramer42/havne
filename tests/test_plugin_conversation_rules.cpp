@@ -74,8 +74,8 @@ TEST(PluginConversationTest, TheTiersAndTheGroupsRulesRefuseInTheirWords)
          "tier 'write' isn't one format 1 takes: only \"data\""},
         {"a tier no Havne has",
          [](Made& m) { m.tiers = R"(["data", "write"])"; },
-         "tier 'write' isn't one this Havne runs: \"data\" and "
-         "\"conversation\""},
+         "tier 'write' isn't one this Havne runs: \"data\", "
+         "\"conversation\" and \"operation\""},
         {"a key the group doesn't take",
          [](Made& m) { m.group.extra = R"(, "writes": [])"; },
          "unknown key 'writes' in \"conversation\""},

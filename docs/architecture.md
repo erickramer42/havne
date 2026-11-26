@@ -93,7 +93,8 @@ threads onto the GUI thread.
   the module after the engine takes it, before step 2, and steps the
   module each pass ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)'s
   appendix of 2026-11-22). A security access's seed and key reach the
-  module whole and the recording cut (`core/src/access_cut.h`).
+  module whole and the recording cut (`core/src/access_cut.h`), and so
+  are a memory read's bytes while a dump runs.
 - **Decode on the worker:** core runs the match and decode, so every
   front end gets values without a loop of its own, and the GUI thread's
   cost per frame doesn't grow with the profile
@@ -216,6 +217,19 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   talk door (`request_talk.h`). A security-access attempts' store
   (`security_store.h`) keeps the failed attempts and their delay across
   a restart. A module binds only behind the consent gate (`consent_gate.h`): a consent a person gave to the plugin's fingerprint and a front end applied, a `vcan` link or the test door; otherwise such a plugin is data only.
+- **Plugins' operation tier: the dump** ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)
+  section 4 and its appendix of 2026-11-26; built, with no start outside
+  the tests' door until the write flow's checks exist): a format 3
+  manifest may declare a plan that copies a module's memory. The start
+  (`ecuio/operation.h`, `core_operation.cpp`) checks the plan on the
+  caller's thread and hands it to the session's worker, which steps a
+  pure machine (`operation_run.h`) from the conversations' hooks
+  (`request_operation.h`) while the engine holds every other request
+  back. Core makes each request, inside the read ceiling
+  (`tier3_ceiling.h`). The bytes go through a ring to a writer thread
+  (`operation_sink.h`), which compares the second reading with what the
+  disk holds of the first and seals the copy under its checksum
+  (`ecuio/dump.h`, whose opening comment is the file's specification).
 - **Enumerations and computed signals:** an enum def is a raw number
   with a label from the set's table (`ecuio_enum_label`); a computed
   def reads no frame and runs a bounded program over up to four other

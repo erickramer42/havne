@@ -408,6 +408,24 @@ std::string absolute(const std::string& path)
 #endif
 }
 
+/* An operation line's words: "dump,<plan's id>,0x7E8,<image bytes>,<end>",
+ * the end "started" for a run's start, else how it ended, in
+ * ECUIO_OPERATION_END_*'s order. This Havne's one kind of run is a dump. */
+std::string operation_text(const char* id, uint32_t rx, uint64_t bytes,
+                           uint32_t end)
+{
+    static const char* const kEnds[] = {
+        "started",          "saved",          "canceled",
+        "refused",          "no-answer",      "differ",
+        "identity-changed", "unlock-refused", "session-lost",
+        "link-lost",        "file",           "bad-reply"};
+    char text[64];
+    std::snprintf(text, sizeof text, ",0x%X,%llu,", rx,
+                  static_cast<unsigned long long>(bytes));
+    return "dump," + one_line(id) + text +
+           (end < sizeof kEnds / sizeof kEnds[0] ? kEnds[end] : "ended");
+}
+
 /* A module's state in a module line's words: "0x7E9,closed", "0x7E9,no-room",
  * or open with the reasons that want it, "0x7E9,open,range+read" */
 std::string module_text(uint32_t rx, bool closed, bool no_room, uint8_t reasons)

@@ -10,7 +10,7 @@
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/surrogate_protocol.h"
 #include "ecuio/sur_fingerprint.h"
-#include "../core/src/access_cut.h" /* a security access cut from the log */
+#include "../core/src/access_cut.h" /* what the log keeps out */
 
 #include <chrono>
 #include <cstdio>
@@ -136,21 +136,18 @@ static void stage(const char* fmt, ...)
                     static_cast<DWORD>(len), &written, nullptr);
 }
 
-/* "41 0C 1F 40" for the first ECUIO_SUR_MSG_MAX bytes, then " +N" for
- * the rest, so a long message can't overrun stage()'s line. A security
- * access's message (four ID bytes, then service 27 or 67) shows zeroes
- * after its sub-function, then their length and SHA-256 (access_cut.h). */
+/* " +N" past ECUIO_SUR_MSG_MAX bytes keeps a message inside stage()'s line */
 static void format_hex(char* out, size_t cap, const unsigned char* data,
                        unsigned long size)
 {
-    const bool cut = size > 4 && ecuio_access_cut(data + 4, size - 4);
+    const size_t kept = size > 4 ? ecuio_capture_kept(data + 4, size - 4) : 0;
+    const bool cut = kept != 0;
     const unsigned long shown = (size < ECUIO_SUR_MSG_MAX)
                                 ? size : ECUIO_SUR_MSG_MAX;
     size_t pos = 0;
     out[0] = '\0';
     for (unsigned long i = 0; i < shown && pos + 4 < cap; ++i) {
-        const unsigned char b =
-            cut && i >= 4 + ECUIO_ACCESS_KEPT ? 0 : data[i];
+        const unsigned char b = cut && i >= 4 + kept ? 0 : data[i];
         pos += static_cast<size_t>(snprintf(out + pos, cap - pos,
                                             i ? " %02X" : "%02X", b));
     }
@@ -160,7 +157,7 @@ static void format_hex(char* out, size_t cap, const unsigned char* data,
     }
     if (cut && pos + 3 < cap) {
         char text[ECUIO_ACCESS_CUT_TEXT];
-        ecuio_access_cut_text(data + 4, size - 4, text, sizeof text);
+        ecuio_capture_cut_text(data + 4, size - 4, kept, text, sizeof text);
         (void)snprintf(out + pos, cap - pos, " (%s)", text);
     }
 }

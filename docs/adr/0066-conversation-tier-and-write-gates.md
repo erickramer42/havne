@@ -2265,3 +2265,103 @@ fingerprint, are not built).
   | `ecuio_plugin_fingerprint`, `ecuio_plugin_publisher`, `ecuio_plugin_terms`, the consent store's calls, `ecuio_consent_line`, `ecuio_session_apply_consent` and their structs | Additive | New names only; each struct takes the caller's `struct_size` and keeps `reserved` room; `ecuio_consent_line_t` holds pointers to static text |
   | `ECUIO_ERR_CONSENT_REQUIRED` (23) | Additive | Appended to the status codes |
   | `ECUIO_PLUGIN_FORMAT_MAX` 2 to 3 | Constant change | The newest manifest format this core reads; one line in `abi/api_changes.txt` |
+
+### Gate 1 as built: the dump and its file (2026-11-26)
+
+What step 2 built of section 4, and where it departs from sections 2.8
+and 4. Built: a copy's file and the calls that read, check, list, export,
+bring back and remove one (`ecuio/dump.h`); the manifest's operation tier
+(`ecuio/plugin.h`); the run of a dump in a session (`ecuio/operation.h`);
+and the simulated ECU's memory. Not built here: gate 2's checks before a
+run, a read in the programming session, and any front end's way to start
+a dump.
+
+- **No start outside the tests' door.** `ecuio_session_operation_start`
+  answers `ECUIO_ERR_NOT_IMPLEMENTED` ("a run needs the write flow's checks
+  before it, which this Havne has not got") unless the conversation tier's
+  test door is open. Every dump waits for gate 2's light envelope (the
+  engine off, the speeds read before the step, the parked confirmation,
+  the battery's floor read through the run), because entering a session
+  can stop a module's work. A copy's record has room for those readings
+  (`volts_mv`, `volts_min_mv`, `rpm`, `kmh`, `parked_tick`), which a run
+  leaves out until the checks exist. So `havne-cli` and the app have no
+  dump command.
+- **A copy's name holds the SHA-256 of the whole file,** not of the image
+  alone as section 4.2 says: `<yyyymmdd>-<tx>-<64 hex>.havnedump`, with no
+  VIN and no vehicle name. The hash seals the record beside the bytes, and
+  `sha256sum` checks a copy with no Havne. The header holds the image's and
+  the record's SHA-256, so a file under another name still verifies. The
+  format is specified in `core/include/ecuio/dump.h`'s opening comment.
+- **A file exists under its name only after four compares:** the second
+  reading against the first, byte for byte; that compare made against the
+  bytes read back from the flushed file, not against memory; the whole
+  file read back and held to the checksums of what was written; and the
+  module's identification DIDs before the first reading and after the
+  second. A difference ends the dump with nothing kept, and the state
+  names the step and the offset. There is no third reading and no resume.
+- **Each range is read twice back to back,** inside one unlock for each
+  session the plan reads in, not the whole image twice.
+- **The plan names its read:** a `read` step is service 23 and an `upload`
+  step is 35, 36 and 37. Core never tries one after the other is refused.
+  A manifest's step names the `extended` session alone; `programming` is a
+  later step's. A plugin's own block read waits for the plugin-supplied
+  sequence (section 3.4).
+- **The manifest's tier word is `operation`,** not `write` as section 2.8
+  says, and core derives a plan's class from its steps: only `read` and
+  `upload` steps make it read-class. A manifest can't call a write a read,
+  and consent shows a plan's own exposure.
+- **The requests are core's own, inside a read ceiling.** Tier 3's read
+  ceiling (`core/src/tier3_ceiling.h`) is services 23, 35, 36 and 37 and
+  nothing of tier 2's. The engine's talk door takes one only as a talk of
+  kind `read`, which only a run offers; a plugin's code asking for one of
+  those services is a fault, as before.
+- **A run holds the session.** While one is under way an open module is
+  sent the run's requests and its session's keep-alive, a module closing
+  or visiting nothing, and the plugin's code is asked for no request. The
+  readings, the scan, identification and a clear go on once the run's last
+  request has gone. One run for a session at a time (`ECUIO_ERR_IN_USE`).
+- **A dump may carry its unlock:** the start's `ECUIO_OPERATION_MAY_UNLOCK`
+  is the front end's word that the user confirmed, with the count of
+  attempts (`unlock_sessions`, one for each session the plan reads in) and
+  the lockout risk in the one confirmation. Core saves the attempt's mark
+  in the store before the run is handed to the worker, makes the attempt
+  under section 2.3's rules once the session is entered, and never
+  retries a refused key. A level found open costs no attempt.
+- **The copy is written off the worker.** The worker hands each chunk to a
+  ring and a writer thread; it reads the writer's word before each
+  request, so a difference or a failed write ends the run at the next
+  request, not at the byte. An end is told only once the unfinished file
+  is gone, a cancel and a close included; a close joins the writer before
+  it tells the end, so a seal under way runs to its end and the end told
+  is what the folder holds.
+- **A dump's bytes are kept out of every capture as it is written:** a
+  `63`'s data after its service and a `76`'s after its block counter are
+  zeroes in a recording's frames (flagged `ECUIO_FRAME_FLAG_ACCESS_CUT`)
+  and in the J2534 session log, with their length in the text; the ELM327
+  wire log writes each line of a 23's or a 36's reply as its length. None
+  names a SHA-256, as a seed's and a key's lines do: a chunk of a few
+  bytes is found from its hash by trying every value, and a run of such
+  chunks is the image. A recording takes an
+  `operation` line when a run starts and when it ends
+  (`dump,<plan's id>,<reply ID>,<image bytes>,<end>`), never the copy's
+  name: the name is a fingerprint of the module's contents, and recordings
+  get shared. Lines that find the recorder's ring full are carried in
+  their order, a start ahead of its end, and written at the close if they
+  never fit.
+- **An export has two forms:** the file itself (the only one that is still
+  a copy), and the raw image as one `.bin` for each range, its start
+  address in the name. A file brought back is filed under the name core
+  makes from its record and checksum. A copy stays until the user removes
+  it, by the one call that deletes.
+- **The simulated memory** is one pure header (`core/src/sim_memory.h`)
+  that the simulated ECU and the fakes' ECU both answer from
+  ([ADR-0046](0046-simulated-ecu.md)'s appendix of 2026-11-26).
+
+- **The ABI.**
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | `ecuio/dump.h`: `ecuio_dump_open`, `_close`, `_get_info`, `_get_range`, `_get_ident`, `_get_calibration`, `_read`, `_verify`, `_list`, `_export`, `_import`, `_remove` and their structs | Additive | A new header; each struct takes the caller's `struct_size` and keeps `reserved` room |
+  | `ecuio/plugin.h`: `ECUIO_PLUGIN_TIER_OPERATION`, `ecuio_plugin_operation_count`, `ecuio_plugin_operation`, `ecuio_plugin_operation_step` and their structs | Additive | New names only |
+  | `ecuio/operation.h`: `ecuio_session_operation_start`, `_cancel`, `ecuio_session_get_operation`, `ecuio_operation_request_t`, `ecuio_operation_state_t` | Additive | A new header; the copy's folder is the start's argument, so neither struct holds a pointer |
+  | `ECUIO_FRAME_FLAG_ACCESS_CUT` also on a memory read's `63` and `76` | Additive | The value and its meaning for a security access stand |
