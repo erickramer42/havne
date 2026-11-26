@@ -354,6 +354,93 @@ TEST(BridgeTest, TogetherRefusesAPartsUpdateWhileASessionReadsIt)
         << "free once the session is gone";
 }
 
+namespace {
+
+bool removed(Together& t, const QString& profile)
+{
+    return t.bridge.removePlugin(t.shaOf(profile))
+        .value(QStringLiteral("ok"))
+        .toBool();
+}
+
+} // namespace
+
+TEST(BridgeTest, TogetherKeepsTheSetThroughTheTeardownUntilItsEnd)
+{
+    Together t;
+    const QString a = t.keep(part(QStringLiteral("Alpha"), "a", "D100"));
+    const QString b = t.keep(part(QStringLiteral("Beta"), "b", "D200"));
+    const QString first = str(t.bridge.vehicleSet({a, b}, {}), "profile");
+    ASSERT_TRUE(
+        t.bridge.connectSession(QStringLiteral("mock://t?profile=") + first)
+            .isEmpty());
+    t.bridge.disconnectSession();
+    ASSERT_TRUE(t.bridge.disconnecting());
+    const QString second = str(t.bridge.vehicleSet({a}, {}), "profile");
+    EXPECT_TRUE(registered(first.toUtf8().constData()))
+        << "the teardown's thread still decodes with it";
+    EXPECT_EQ(t.bridge.togetherRetiredForTesting(), 1);
+    EXPECT_FALSE(removed(t, b)) << "its parts stay busy until the end";
+    ASSERT_TRUE(
+        spinUntil([&t] { return !t.bridge.disconnecting(); }, 5000, 10));
+    EXPECT_EQ(t.bridge.togetherRetiredForTesting(), 0);
+    EXPECT_FALSE(registered(first.toUtf8().constData()));
+    EXPECT_TRUE(registered(second.toUtf8().constData()));
+    EXPECT_TRUE(removed(t, b)) << "free once the teardown ends";
+}
+
+TEST(BridgeTest, TogetherKeepsWhatAnAsyncConnectMayReadUntilItsCompletion)
+{
+    Together t;
+    const QString a = t.keep(part(QStringLiteral("Alpha"), "a", "D100"));
+    const QString b = t.keep(part(QStringLiteral("Beta"), "b", "D200"));
+    const QString first = str(t.bridge.vehicleSet({a, b}, {}), "profile");
+    bool done = false;
+    QString err = QStringLiteral("unset");
+    QObject::connect(&t.bridge, &SessionBridge::connectResult,
+                     [&](const QString&, const QString& e) {
+                         err = e;
+                         done = true;
+                     });
+    t.bridge.connectSessionAsync(QStringLiteral("mock://t?profile=") + first);
+    ASSERT_TRUE(t.bridge.connecting());
+    EXPECT_FALSE(removed(t, b)) << "busy from the connect's start";
+    (void)t.bridge.vehicleSet({a}, {});
+    (void)t.bridge.vehicleSet({b}, {});
+    EXPECT_EQ(t.bridge.togetherRetiredForTesting(), 2)
+        << "nothing freed while the connect thread may look a name up";
+    EXPECT_FALSE(removed(t, a)) << "the connected set's parts, not the last";
+    ASSERT_TRUE(spinUntil([&done] { return done; }, 5000, 10));
+    EXPECT_EQ(err.toStdString(), "");
+    EXPECT_EQ(t.bridge.togetherRetiredForTesting(), 1)
+        << "the merge no session reads is freed at the completion";
+    EXPECT_TRUE(registered(first.toUtf8().constData()));
+    EXPECT_TRUE(disconnectAndWait(t.bridge));
+    EXPECT_EQ(t.bridge.togetherRetiredForTesting(), 0);
+    EXPECT_FALSE(registered(first.toUtf8().constData()));
+}
+
+TEST(BridgeTest, TogetherKeepsTheSetASyncConnectsHandlerRetires)
+{
+    Together t;
+    const QString a = t.keep(part(QStringLiteral("Alpha"), "a", "D100"));
+    const QString b = t.keep(part(QStringLiteral("Beta"), "b", "D200"));
+    const QString first = str(t.bridge.vehicleSet({a, b}, {}), "profile");
+    int seen = -1;
+    QObject::connect(&t.bridge, &SessionBridge::currentUriChanged, [&] {
+        if (seen < 0) {
+            (void)t.bridge.vehicleSet({a}, {});
+            seen = registered(first.toUtf8().constData()) ? 1 : 0;
+        }
+    });
+    ASSERT_TRUE(
+        t.bridge.connectSession(QStringLiteral("mock://t?profile=") + first)
+            .isEmpty());
+    EXPECT_EQ(seen, 1) << "kept while the apply still runs";
+    EXPECT_TRUE(registered(first.toUtf8().constData()));
+    EXPECT_TRUE(disconnectAndWait(t.bridge));
+}
+
 TEST(BridgeTest, TogetherFileOfSetIsTheMergedFile)
 {
     Together t;

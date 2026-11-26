@@ -258,9 +258,11 @@ QString SessionBridge::connectSession(const QString& typed)
     }
     applyFrameLoggingEnv();
     const ConsentNeed need = m_consent->needFor(uri, m_vehicleLabel);
+    holdUriSet(uri);
     ecuio_session_t* session = nullptr;
     err = connectCoreOnly(uri, &session);
     if (err.isEmpty()) {
+        m_heldSet = ecuio_session_signal_set(session);
         // Nothing waits for an answer here: with no record it reads only
         for (const QString& line : ConsentFlow::applyFound(session, need).lines) {
             emit logMessage(line);
@@ -268,6 +270,8 @@ QString SessionBridge::connectSession(const QString& typed)
         err = startSession(session, uri);
     }
     if (!err.isEmpty()) {
+        m_heldSet = nullptr;
+        releaseTogether(false);
         emit logMessage(QStringLiteral("Connect failed: %1 (%2)").arg(uri, err));
         return err;
     }
@@ -306,6 +310,7 @@ void SessionBridge::connectSessionAsync(const QString& typed)
         return;
     }
     m_connecting = true;
+    holdUriSet(uri);
     emit connectingChanged();
     emit logMessage(QStringLiteral("Connecting: %1").arg(uri));
     applyFrameLoggingEnv();   // before the connect thread spawns any surrogate
@@ -352,6 +357,7 @@ void SessionBridge::finishConnect(const QString& uri, QString err,
     // connect it starts is refused, never a second session over this one.
     ecuio_session_t* session = m_pendingSession.exchange(nullptr);
     if (err.isEmpty()) {
+        m_heldSet = ecuio_session_signal_set(session);
         err = startSession(session, uri);
     }
     if (err.isEmpty()) {
@@ -359,6 +365,8 @@ void SessionBridge::finishConnect(const QString& uri, QString err,
         m_consent->begin(session, need);
         applyConnectedState(session, uri);
         applyAwake(session);
+    } else {
+        m_heldSet = nullptr;
     }
     m_connecting = false;
     releaseTogether(false);
@@ -392,10 +400,10 @@ void SessionBridge::disconnectSession()
     // onFrame and handleFrameInternal drop everything, and the GUI
     // thread never touches the session again.
     ecuio_session_t* session = std::exchange(m_session, nullptr);
-    m_consent->end();
     m_accepting.store(false, std::memory_order_release);
     m_connected.store(false, std::memory_order_release);
     m_disconnecting = true;
+    m_consent->end();
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
     flushValues();         // and its values

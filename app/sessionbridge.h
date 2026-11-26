@@ -975,6 +975,7 @@ private:
     const ecuio_signal_file_t*
     togetherFileOf(const ecuio_signal_set_t* set) const;
     void releaseTogether(bool all);
+    void holdUriSet(const QString& uri);
     void endTeardown();
     // A signal file into the plugin store, as a new plugin or a variant
     QVariantMap keepFile(const QByteArray& file, const QString& into,

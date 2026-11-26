@@ -4,6 +4,7 @@
 
 #include <utility>
 
+#include "bridgeformats.h"
 #include "bridgetext.h"
 
 namespace {
@@ -328,6 +329,7 @@ SessionBridge::mergeTogether(const PluginStore::Parts& parts,
 void SessionBridge::endTeardown()
 {
     m_disconnecting = false;
+    m_heldSet = nullptr;
     releaseTogether(false);
 }
 
@@ -351,16 +353,15 @@ SessionBridge::togetherFileOf(const ecuio_signal_set_t* set) const
 
 void SessionBridge::releaseTogether(bool all)
 {
-    // A connect's or a teardown's thread may hold a session of a retired set
-    if (!all && (m_connecting || m_disconnecting)) {
+    const ecuio_signal_set_t* used = all ? nullptr : m_heldSet;
+    m_pluginStore.setBusy(togetherFileOf(used));
+    // The connect thread looks its profile up by name, maybe after a merge
+    if (!all && m_connecting) {
         return;
     }
-    const ecuio_signal_set_t* used =
-        m_session != nullptr ? ecuio_session_signal_set(m_session) : nullptr;
-    m_pluginStore.setBusy(all ? nullptr : togetherFileOf(used));
     std::vector<ecuio_signal_file_t*> kept;
     for (ecuio_signal_file_t* f : std::exchange(m_togetherRetired, {})) {
-        if (!all && ecuio_signal_file_set(f) == used) {
+        if (used != nullptr && ecuio_signal_file_set(f) == used) {
             kept.push_back(f);
         } else {
             dropMerged(f);
@@ -371,6 +372,16 @@ void SessionBridge::releaseTogether(bool all)
         dropMerged(m_together.file);
         m_together = {};
     }
+}
+
+void SessionBridge::holdUriSet(const QString& uri)
+{
+    const QByteArray name = BridgeFormats::profileOfUri(uri).toUtf8();
+    const ecuio_signal_set_t* set = nullptr;
+    m_heldSet = ecuio_profile_lookup(name.constData(), &set) == ECUIO_OK
+                    ? set
+                    : nullptr;
+    releaseTogether(false);
 }
 
 QString SessionBridge::vehicleSetText(const QString& profile) const

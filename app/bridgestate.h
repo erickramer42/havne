@@ -321,5 +321,7 @@ struct BridgeState
     TogetherFile m_together;
     std::vector<ecuio_signal_file_t*> m_togetherRetired;
     int m_togetherMerges = 0;
+    // Set at a connect's start, cleared after its failure or the teardown's destroy
+    const ecuio_signal_set_t* m_heldSet = nullptr;
     int m_readOnceWaitMs = 3000;
 };
