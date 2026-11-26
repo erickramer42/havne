@@ -91,7 +91,7 @@ ecuio_status_t take_profile(ecuio_session_t* s, const char* chosen,
     s->profile_hold.set = *set;
     if (found != ECUIO_OK) {
         if (found == ECUIO_ERR_UNKNOWN_PROFILE) {
-            ecuio_detail_set("no profile is named '%s'", chosen);
+            ecuio_profile_set_unknown_detail(chosen);
         }
         return found;
     }

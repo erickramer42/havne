@@ -323,6 +323,33 @@ TEST(CoreTest, ProfileLookupUnknownNameFailsWithoutTouchingOut) {
                                     rely on its own initialization */
 }
 
+// A merged name nothing registered (an older version's address, the
+// CLI, Python) is said to be a vehicle's set, by the create and the
+// lookup alike; any other name keeps the plain words
+TEST(CoreTest, ProfileAnUnknownMergedNameSaysWhatItIs)
+{
+    const char* const words =
+        "no profile is named 'merged.0123456789abcdef': a merged name is a "
+        "vehicle's set, made when the app reads a vehicle's picks; with "
+        "havne-cli, merge them with --together";
+    ecuio_session_t* s = nullptr;
+    EXPECT_EQ(
+        ecuio_session_create("mock://x?profile=merged.0123456789abcdef", &s),
+        ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_EQ(s, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(), words);
+    const ecuio_signal_set_t* set = nullptr;
+    EXPECT_EQ(ecuio_profile_lookup("merged.0123456789abcdef", &set),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_STREQ(ecuio_last_error_detail(), words);
+    EXPECT_EQ(ecuio_profile_lookup("mergedx", &set), ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_STREQ(ecuio_last_error_detail(), "no profile is named 'mergedx'");
+    EXPECT_EQ(ecuio_session_create("mock://x?profile=user.merged.x", &s),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "no profile is named 'user.merged.x'");
+}
+
 TEST(CoreTest, ProfileLookupRejectsNullArguments) {
     const ecuio_signal_set_t* set = nullptr;
     EXPECT_EQ(ecuio_profile_lookup(nullptr, &set), ECUIO_ERR_NULL_ARGUMENT);
