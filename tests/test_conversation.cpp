@@ -335,6 +335,45 @@ TEST(ConversationTest, ASessionLostBetweenTwoStepsLocksTheLevel)
     EXPECT_EQ(b.v->report.unlock, conv_unlock::lost);
 }
 
+/* A session lost while the word's seed waits its turn ends the attempt and
+ * takes the seed back: none goes for it, so no answer to it (a 36 or 37)
+ * goes untold, and the next word's seed is the only one */
+TEST(ConversationTest, ASeedWaitingWhenTheSessionIsLostNeverGoes)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+    ecuio_conversation_step(b.v.get(), b.e.get(), b.now);
+    ASSERT_EQ(b.v->report.unlock, conv_unlock::seed_offered);
+    b.now += ECUIO_ENGINE_S3_LATE_US; /* nothing sent: the session lapsed */
+    b.passes(10);
+    EXPECT_EQ(b.v->report.unlock, conv_unlock::ended);
+    EXPECT_EQ(b.guest.of_kind(ECUIO_GUEST_UNLOCK),
+              std::vector<Bytes>{unlock_end(0x01, ECUIO_GUEST_ENDED)});
+    EXPECT_EQ(heard(b, {0x27, 0x01}), 0u);
+    EXPECT_TRUE(talk_free(b));
+    ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+    b.until_word_ended();
+    EXPECT_EQ(b.v->report.unlock, conv_unlock::unlocked);
+    EXPECT_EQ(heard(b, {0x27, 0x01}), 1u);
+}
+
+/* The module's own request waiting as the session lapses still goes, in
+ * the session entered again, and its reply reaches the module */
+TEST(ConversationTest, AModulesRequestWaitingWhenTheSessionIsLostStillGoes)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    const Bytes read = {0x22, 0xD3, 0x00};
+    b.guest.requests.push_back(read);
+    ASSERT_NO_FATAL_FAILURE(b.until_offered());
+    b.now += ECUIO_ENGINE_S3_LATE_US; /* nothing sent: the session lapsed */
+    b.passes(10);
+    EXPECT_EQ(b.e->chans[0].session_lost, 1u);
+    EXPECT_EQ(heard(b, read), 1u);
+    EXPECT_EQ(b.guest.of_kind(ECUIO_GUEST_REPLY).size(), 1u);
+}
+
 /* The engine giving a loss back (a refusal that was the request's own)
  * is no loss: a level unlocked since stays open */
 TEST(ConversationTest, ALossGivenBackLeavesTheLevelOpen)

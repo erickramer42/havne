@@ -28,9 +28,9 @@
 # would have to guess; and URIs whose faults aim at one module.
 # fuzz_guest's are guest modules (seeds_wasm.py's guest_seeds()): from
 # nothing the fuzzer never writes the guest ABI's six exports.
-# fuzz_conversation's are runs that unlock a level (talk_seeds()):
-# the input's bytes are read by the harness and the table alike, so an
-# unlock is hard to find from nothing.
+# fuzz_conversation's are runs that unlock a level, and inputs the fuzzer
+# found (talk_seeds()): the input's bytes are read by the harness and the
+# table alike, so an unlock is hard to find from nothing.
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
@@ -767,6 +767,14 @@ def talk_seeds():
     seeds["two_words"] = (bytes([window_1s, 0x00, 0x01]) + honest + bytes([0x04, 0x00, 0x04, 0x01])
                           + honest + bytes([0x04, 0x01]) + honest)
     seeds["declined"] = bytes([window_1s, 0x00, 0x03]) + honest
+    # A word's seed offered as the session lapses past S3, then the module
+    # answering 7F 27 36 and a word after it: the seed never goes
+    seeds["seed_offered_session_lapsed"] = bytes.fromhex(
+        "99000300000300000c0c0c0c00000c0c0c0c000001007748e27eda000300000c0c0c"
+        "0c000c990c0ce5e5e50c0c0c0c0c0c0c0c0c0c99001d1d1d1d1d03e5e536000000e5"
+        "0c0c0c99001d1d1d1d1d03e5e536000000e50004e5e5e5e500005e0000000c0c0100"
+        "770c0c0c0c0c0c0ce5e5ec0c0c0c0c0c0c0c0c0c0c990003e5e50000000036000000"
+        "e50004e5e5e5e50000000c0c0c0c0c71717171717171710c0c0c0c0c")
     return seeds
 
 
