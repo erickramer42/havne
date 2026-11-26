@@ -21,11 +21,9 @@
 #include <string>
 #include <vector>
 
-using ecuio_dump_file::header;
 using ecuio_dump_file::judged;
 using ecuio_dump_file::kHeaderBytes;
 using ecuio_dump_file::record;
-using ecuio_dump_handle::kPiece;
 
 namespace {
 
