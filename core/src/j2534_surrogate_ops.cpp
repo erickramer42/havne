@@ -370,11 +370,14 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
         if (!alive) {
             sur_log(h, "close: the child had already exited (code %lu)",
                     static_cast<unsigned long>(code));
-        } else {
+        } else if (h->unresponsive || code == STILL_ACTIVE) {
             sur_log(h, "close: the child didn't shut down cleanly (%s)",
-                    h->unresponsive        ? "unresponsive, killed"
-                    : code == STILL_ACTIVE ? "still running, killed"
-                                           : "another exit code");
+                    h->unresponsive ? "unresponsive, killed"
+                                    : "still running, killed");
+        } else {
+            sur_log(h,
+                    "close: the child didn't shut down cleanly (exit code %lu)",
+                    static_cast<unsigned long>(code));
         }
     }
     if (h->pipe != INVALID_HANDLE_VALUE) CloseHandle(h->pipe);
