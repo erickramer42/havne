@@ -361,7 +361,7 @@ ecuio_status_t ecuio_j2534_sur_close(ecuio_j2534_sur_handle_t* h)
     }
     /* An unresponsive child won't exit on its own: the job close kills it. */
     DWORD code = STILL_ACTIVE;
-    if (h->process != nullptr && !h->unresponsive &&
+    if (h->process != nullptr && (!alive || !h->unresponsive) &&
         WaitForSingleObject(h->process, 1500) == WAIT_OBJECT_0) {
         (void)GetExitCodeProcess(h->process, &code);
     }

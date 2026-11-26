@@ -296,6 +296,8 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
     if (!ov_write(h->pipe, h->io_event, &req, sizeof(req), timeout_ms)) {
         SUR_LOG(h, "transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
                 req.request_id, req.opcode, GetLastError());
+        /* A canceled write can leave part of the request in the pipe */
+        h->unresponsive = true;
         return false;
     }
     pipe_read read{h, timeout_ms};

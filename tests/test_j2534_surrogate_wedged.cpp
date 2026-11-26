@@ -112,6 +112,50 @@ TEST(J2534SurrogateTest, ACloseFailsWhenTheChildExitedOnItsOwn)
         << log;
 }
 
+/* A failed write may leave part of a request in the pipe: the handle is done */
+TEST(J2534SurrogateTest, AFailedRequestWriteEndsTheHandle)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    const DWORD pid = fake_control::opener_pid(page);
+    ASSERT_NE(pid, 0u);
+    ASSERT_NE(pid, GetCurrentProcessId());
+    HANDLE child = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(TerminateProcess(child, 9));
+    EXPECT_EQ(WaitForSingleObject(child, 5000), WAIT_OBJECT_0);
+    CloseHandle(child);
+
+    unsigned long channel = 0;
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    size_t writes = 0;
+    for (size_t at = log.find("transact: ov_write failed");
+         at != std::string::npos;
+         at = log.find("transact: ov_write failed", at + 1)) {
+        ++writes;
+    }
+    EXPECT_EQ(writes, 1u) << log;
+    EXPECT_NE(log.find("close: the child had already exited (code 9)"),
+              std::string::npos)
+        << log;
+}
+
 /* A reply the client never asked for (the child answers OP_CONNECT
  * twice, ECUIO_SUR_TEST_REPLY_TWICE) leaves the pipe one reply behind:
  * the next transaction reads the reply before its own. That's the pipe
