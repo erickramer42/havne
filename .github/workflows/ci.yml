@@ -471,7 +471,7 @@ jobs:
         fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
         fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module
         fuzz_security_store fuzz_sur_reply fuzz_signal_merge fuzz_conversation
-        fuzz_guest fuzz_consent_store
+        fuzz_guest fuzz_consent_store fuzz_dump_file
     # actions: read lists and downloads dev's seed artifact
     permissions:
       contents: read

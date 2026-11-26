@@ -8,7 +8,7 @@ from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char
                     c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,
                     c_void_p)
 
-HEADERS = ('conditions.h', 'core.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
+HEADERS = ('conditions.h', 'core.h', 'dump.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
 
 # --- constants: the ECUIO_ macros, then the enumerators ---------------
 ECUIO_ABSENT_AFTER_FRAMES = 3
@@ -239,6 +239,38 @@ ECUIO_DROP_ACCESS = 4
 ECUIO_DROP_BITMAP = 1
 ECUIO_DROP_NOT_SUPPORTED = 2
 ECUIO_DROP_SERVICE = 3
+ECUIO_DUMP_ENTRY_NAME_CUT = 1
+ECUIO_DUMP_ENTRY_NAME_MAX = 0x100
+ECUIO_DUMP_EXPORT_IMAGE = 2
+ECUIO_DUMP_EXPORT_RESTORE = 1
+ECUIO_DUMP_FORMAT = 1
+ECUIO_DUMP_HAS_CALID = 1
+ECUIO_DUMP_HAS_CVN = 2
+ECUIO_DUMP_HAS_KMH = 8
+ECUIO_DUMP_HAS_OBD = 32
+ECUIO_DUMP_HAS_RPM = 4
+ECUIO_DUMP_HAS_VOLTS = 1
+ECUIO_DUMP_HAS_VOLTS_MIN = 2
+ECUIO_DUMP_HEADER_BYTES = 128
+ECUIO_DUMP_IDENT_MAX = 64
+ECUIO_DUMP_IMAGE_MAX = 0x4000000
+ECUIO_DUMP_KIND_READ = 1
+ECUIO_DUMP_MAX_CALIBRATIONS = 8
+ECUIO_DUMP_MAX_IDENTS = 8
+ECUIO_DUMP_MAX_RANGES = 64
+ECUIO_DUMP_NAME_MAX = 96
+ECUIO_DUMP_PARKED_TICK = 16
+ECUIO_DUMP_RECORD_MAX = 0x10000
+ECUIO_DUMP_ROLE_BASE = 3
+ECUIO_DUMP_ROLE_HARDWARE = 1
+ECUIO_DUMP_ROLE_SOFTWARE = 2
+ECUIO_DUMP_SESSION_EXTENDED = 3
+ECUIO_DUMP_SESSION_PROGRAMMING = 2
+ECUIO_DUMP_STATE_COPY = 1
+ECUIO_DUMP_STATE_INVALID = 3
+ECUIO_DUMP_STATE_UNFINISHED = 2
+ECUIO_DUMP_STEP_READ = 1
+ECUIO_DUMP_STEP_UPLOAD = 2
 ECUIO_ENGINE_START_RPM = 0x1f4
 ECUIO_ENGINE_STOPPED_RPM = 100
 ECUIO_ENUM_LABEL_MAX = 27
@@ -705,6 +737,27 @@ class ecuio_dropped_request_t(Structure):
     pass
 
 class ecuio_dtc_list_t(Structure):
+    pass
+
+class ecuio_dump_calibration_t(Structure):
+    pass
+
+class ecuio_dump_entry_t(Structure):
+    pass
+
+class ecuio_dump_export_result_t(Structure):
+    pass
+
+class ecuio_dump_ident_t(Structure):
+    pass
+
+class ecuio_dump_info_t(Structure):
+    pass
+
+class ecuio_dump_range_t(Structure):
+    pass
+
+class ecuio_dump_t(Structure):
     pass
 
 class ecuio_enum_entry_t(Structure):
@@ -1220,6 +1273,91 @@ ecuio_display_value_t._fields_ = [
     ('decimal_places', c_uint8),
     ('converted', c_uint8),
     ('reserved', (c_uint8 * 6)),
+]
+ecuio_dump_calibration_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('calid', (c_char * 20)),
+    ('cvn', (c_uint8 * 4)),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_dump_entry_t._fields_ = [
+    ('state', c_uint32),
+    ('flags', c_uint32),
+    ('kind', c_uint32),
+    ('writes_before', c_uint32),
+    ('utc', c_uint64),
+    ('image_bytes', c_uint64),
+    ('file_bytes', c_uint64),
+    ('rx_id', c_uint32),
+    ('tx_id', c_uint32),
+    ('name', (c_char * 256)),
+    ('words', (c_char * 128)),
+    ('reserved', (c_uint32 * 6)),
+]
+ecuio_dump_export_result_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('files', c_uint32),
+    ('vin_runs', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_dump_ident_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('did', c_uint32),
+    ('role', c_uint32),
+    ('length', c_uint32),
+    ('reserved0', c_uint32),
+    ('value', (c_uint8 * 64)),
+    ('reserved', (c_uint32 * 2)),
+]
+ecuio_dump_info_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('format', c_uint32),
+    ('kind', c_uint32),
+    ('image_bytes', c_uint64),
+    ('utc', c_uint64),
+    ('image_sha256', (c_uint8 * 32)),
+    ('record_sha256', (c_uint8 * 32)),
+    ('rx_id', c_uint32),
+    ('tx_id', c_uint32),
+    ('range_count', c_uint32),
+    ('ident_count', c_uint32),
+    ('calibration_count', c_uint32),
+    ('passes', c_uint32),
+    ('seconds', c_uint32),
+    ('volts_mv', c_uint32),
+    ('volts_min_mv', c_uint32),
+    ('rpm', c_uint32),
+    ('kmh', c_uint32),
+    ('unlocks', c_uint32),
+    ('writes_before', c_uint32),
+    ('reserved0', c_uint32),
+    ('core', (c_char * 16)),
+    ('plugin_id', (c_char * 32)),
+    ('plugin_version', (c_char * 16)),
+    ('operation', (c_char * 32)),
+    ('module_sha256', (c_uint8 * 32)),
+    ('fingerprint', (c_uint8 * 32)),
+    ('scheme', (c_char * 16)),
+    ('adapter', (c_char * 64)),
+    ('firmware', (c_char * 64)),
+    ('vin', (c_char * 20)),
+    ('ecu_name', (c_char * 24)),
+    ('reserved', (c_uint32 * 7)),
+]
+ecuio_dump_range_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('step', c_uint32),
+    ('session', c_uint32),
+    ('address', c_uint64),
+    ('bytes', c_uint64),
+    ('offset', c_uint64),
+    ('name', (c_char * 32)),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_enum_entry_t._fields_ = [
     ('raw', c_uint32),
@@ -1946,6 +2084,18 @@ FUNCTIONS = {
     'ecuio_dtc_title': (c_char_p, [c_uint16]),  # core.h
     'ecuio_dtc_title_notice': (c_char_p, []),  # core.h
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
+    'ecuio_dump_close': (None, [POINTER(ecuio_dump_t)]),  # dump.h
+    'ecuio_dump_export': (c_int, [POINTER(ecuio_dump_t), c_uint32, c_char_p, ecuio_cancel_t, c_void_p, POINTER(ecuio_dump_export_result_t)]),  # dump.h
+    'ecuio_dump_get_calibration': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_calibration_t)]),  # dump.h
+    'ecuio_dump_get_ident': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_ident_t)]),  # dump.h
+    'ecuio_dump_get_info': (c_int, [POINTER(ecuio_dump_t), POINTER(ecuio_dump_info_t)]),  # dump.h
+    'ecuio_dump_get_range': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_range_t)]),  # dump.h
+    'ecuio_dump_import': (c_int, [c_char_p, c_char_p, c_char_p, c_size_t]),  # dump.h
+    'ecuio_dump_list': (c_int, [c_char_p, POINTER(ecuio_dump_entry_t), c_size_t, POINTER(c_size_t)]),  # dump.h
+    'ecuio_dump_open': (c_int, [c_char_p, POINTER(POINTER(ecuio_dump_t))]),  # dump.h
+    'ecuio_dump_read': (c_int, [POINTER(ecuio_dump_t), c_uint64, POINTER(c_uint8), c_size_t, POINTER(c_size_t)]),  # dump.h
+    'ecuio_dump_remove': (c_int, [c_char_p, c_char_p]),  # dump.h
+    'ecuio_dump_verify': (c_int, [POINTER(ecuio_dump_t), ecuio_cancel_t, c_void_p, c_char_p, c_size_t]),  # dump.h
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h
     'ecuio_export_estimate': (c_int, [POINTER(ecuio_export_options_t), POINTER(c_uint32), c_uint32, POINTER(ecuio_export_estimate_t)]),  # recording.h

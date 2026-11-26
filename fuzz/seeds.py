@@ -37,6 +37,10 @@
 # fuzz_consent_store's are stores with no record, one, two of one id,
 # a record at each bound, a fingerprint twice, and as many of the longest
 # record as one holds and one more.
+# fuzz_dump_file's are dump files (seeds_dump.py's dump_seeds()): one range, as many as a
+# file holds, a record at its bounds, each behind the byte that parses it
+# from memory and the bytes that put it on the disk under each name, and
+# a file of each refusal. Every value is made up.
 # fuzz_signal_merge's are signal files in the order to merge them, the
 # example plugins' variants written as one file each (variant_file()).
 # fuzz_sur_reply's are scripts of requests and the replies the surrogate
@@ -56,6 +60,7 @@ import re
 import struct
 import sys
 
+from seeds_dump import dump_seeds
 from seeds_wasm import conversation_seeds, guest_seeds, wasm_seeds
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -727,6 +732,8 @@ def main(argv):
         write(out, "fuzz_sur_reply", name, data)
     for name, data in talk_seeds().items():
         write(out, "fuzz_conversation", name, data)
+    for name, data in dump_seeds().items():
+        write(out, "fuzz_dump_file", name, data)
     return 0
 
 

@@ -24,5 +24,6 @@ int c_abi_diag(void);
 int c_abi_recording(void);
 int c_abi_exchange(void);
 int c_abi_frames(void);
+int c_abi_dump(void);
 
 #endif
