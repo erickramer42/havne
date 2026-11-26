@@ -52,19 +52,28 @@ inline bool set_ranks(const ecuio_signal_set_t* set)
 // the set ranks none: set no focus, and the whole set is asked; with
 // `pick_only` the added defs are picked even then, and an empty result
 // asks nothing.
-inline std::vector<uint16_t> default_pick(const ecuio_signal_set_t* set,
-                                          const std::vector<uint16_t>& added,
-                                          bool pick_only = false)
+// `left_out`: ids the rank passes by (an obd2 def a part's signal is read
+// beside); `added` still takes them.
+inline std::vector<uint16_t>
+default_pick(const ecuio_signal_set_t* set, const std::vector<uint16_t>& added,
+             bool pick_only = false, const std::vector<uint16_t>& left_out = {})
 {
     std::vector<uint16_t> pick;
-    if (set == nullptr || set->defs == nullptr ||
-        (!pick_only && !set_ranks(set))) {
+    if (set == nullptr || set->defs == nullptr) {
+        return pick;
+    }
+    const auto has = [](const std::vector<uint16_t>& ids, uint16_t id) {
+        return std::find(ids.begin(), ids.end(), id) != ids.end();
+    };
+    const auto ranked = [&](const ecuio_signal_def_t& d) {
+        return ranked_def(d) && !has(left_out, d.id);
+    };
+    if (!pick_only && std::none_of(set->defs, set->defs + set->count, ranked)) {
         return pick;
     }
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& d = set->defs[i];
-        if (ranked_def(d) ||
-            std::find(added.begin(), added.end(), d.id) != added.end()) {
+        if (ranked(d) || has(added, d.id)) {
             pick.push_back(d.id);
         }
     }

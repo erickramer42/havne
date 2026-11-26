@@ -463,3 +463,83 @@ TEST(BridgeTest, TogetherBesideGivesEachNotesBaseAndStandingKey)
     ASSERT_EQ(folded.size(), 1);
     EXPECT_EQ(str(folded.first().toMap(), "kind").toStdString(), "besideBase");
 }
+
+#ifdef _WIN32
+
+namespace {
+
+// Old's RPM, at another address than obd2's, read beside obd2's ranked one
+const QByteArray kOldRpm = QByteArrayLiteral(
+    R"({"havne_signals":2,"name":"Old","source":{"name":"t"},)"
+    R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+    R"({"key":"my_rpm","name":"RPM","read":{"service":"22","number":"D100"},)"
+    R"("field":{"byte":0,"bits":8}}]})");
+
+bool obd2RpmUnasked(SessionBridge& bridge)
+{
+    SignalListModel* m = bridge.signalModel();
+    for (int r = 0; r < m->rowCount(); ++r) {
+        const QModelIndex i = m->index(r);
+        if (m->data(i, SignalListModel::IdRole).toInt() ==
+            static_cast<int>(ECUIO_OBD2_SIG_RPM_ID)) {
+            return m->data(i, SignalListModel::UnaskedRole).toBool();
+        }
+    }
+    return false;
+}
+
+QString pickLine(const QStringList& log)
+{
+    for (const QString& l : log) {
+        if (l.startsWith(QStringLiteral("Asking "))) {
+            return l;
+        }
+    }
+    return {};
+}
+
+QString fakeTogetherUri(const QString& profile)
+{
+    return QStringLiteral("j2534://%1?profile=%2&probe=0&identify=0&diagnose=0")
+        .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH), profile);
+}
+
+} // namespace
+
+TEST(BridgeTest, DefaultPickLeavesOutAReplacedObd2DefNothingReads)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    Together t;
+    const QString old = t.keep(kOldRpm);
+    const QString profile =
+        str(t.bridge.vehicleSet({QStringLiteral("obd2"), old}, {}), "profile");
+    ASSERT_TRUE(t.bridge.connectSession(fakeTogetherUri(profile)).isEmpty());
+    EXPECT_TRUE(pickLine(t.log).startsWith(QStringLiteral(
+        "Asking 13 signals: Engine Load, Coolant Temp, Vehicle Speed")))
+        << pickLine(t.log).toStdString();
+    EXPECT_TRUE(spinUntil([&t] { return obd2RpmUnasked(t.bridge); }, 5000))
+        << "obd2's RPM stayed asked beside Old's";
+    EXPECT_TRUE(disconnectAndWait(t.bridge));
+}
+
+TEST(BridgeTest, DefaultPickKeepsAReplacedObd2DefATickOrGaugeAdds)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    Together t;
+    const QString old = t.keep(kOldRpm);
+    const QString profile =
+        str(t.bridge.vehicleSet({QStringLiteral("obd2"), old}, {}), "profile");
+    t.bridge.setPickGauges({QVariant(
+        QStringList{QStringLiteral("id:%1").arg(ECUIO_OBD2_SIG_RPM_ID)})});
+    ASSERT_TRUE(t.bridge.connectSession(fakeTogetherUri(profile)).isEmpty());
+    EXPECT_TRUE(pickLine(t.log).startsWith(QStringLiteral(
+        "Asking 14 signals: Engine Load, Coolant Temp, RPM, Vehicle Speed")))
+        << pickLine(t.log).toStdString();
+    spinLoop(500);
+    EXPECT_FALSE(obd2RpmUnasked(t.bridge)) << "the gauge asks it";
+    EXPECT_TRUE(disconnectAndWait(t.bridge));
+}
+
+#endif // _WIN32
