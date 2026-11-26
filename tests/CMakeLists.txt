@@ -1178,10 +1178,10 @@ if(TARGET havne-cli)
         set_tests_properties(CliConsentRunTest.ARunTalksOnlyWithAConsentRecord
             PROPERTIES TIMEOUT 120)
         if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-            add_test(NAME CliConsentRunTest.VcanReadsNoStore
+            add_test(NAME CliConsentRunTest.SocketCanAsksOnlyACarsLink
                 COMMAND ${Python3_EXECUTABLE} ${_cli_consent} vcan
                         $<TARGET_FILE:havne-cli> ${_cli_plugins}/talker3.json)
-            set_tests_properties(CliConsentRunTest.VcanReadsNoStore PROPERTIES
+            set_tests_properties(CliConsentRunTest.SocketCanAsksOnlyACarsLink PROPERTIES
                 TIMEOUT 90 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         # stream --unlock on the emulator, its plugins written by a
