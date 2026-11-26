@@ -268,7 +268,8 @@ bool ecuio_session_may_talk(const ecuio_session_t* session)
         static_cast<uint32_t>(session->module_rx.size()));
 }
 
-bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c)
+bool ecuio_session_channel_wants_consent(const ecuio_session_t* session,
+                                         uint32_t c)
 {
     return session->conversation != nullptr &&
            session->conversation->has_publisher &&
@@ -298,7 +299,7 @@ bool ecuio_consent_log_line(const ecuio_session_t* session, char* out,
         return true;
     }
     for (uint32_t c = 0; c < session->module_rx.size(); ++c) {
-        if (ecuio_session_wants_consent(session, c)) {
+        if (ecuio_session_channel_wants_consent(session, c)) {
             snprintf(out, cap, "consent withheld  %s %s", p.plugin_id.c_str(),
                      p.plugin_version.c_str());
             return true;
