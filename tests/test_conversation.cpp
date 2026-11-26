@@ -335,6 +335,79 @@ TEST(ConversationTest, ASessionLostBetweenTwoStepsLocksTheLevel)
     EXPECT_EQ(b.v->report.unlock, conv_unlock::lost);
 }
 
+/* A session lost while the word's seed waits its turn ends the attempt and
+ * takes the seed back: none goes for it, so no answer to it (a 36 or 37)
+ * goes untold, and the next word's seed is the only one */
+TEST(ConversationTest, ASeedWaitingWhenTheSessionIsLostNeverGoes)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+    ecuio_conversation_step(b.v.get(), b.e.get(), b.now);
+    ASSERT_EQ(b.v->report.unlock, conv_unlock::seed_offered);
+    b.now += ECUIO_ENGINE_S3_LATE_US; /* nothing sent: the session lapsed */
+    b.passes(10);
+    EXPECT_EQ(b.v->report.unlock, conv_unlock::ended);
+    EXPECT_EQ(b.guest.of_kind(ECUIO_GUEST_UNLOCK),
+              std::vector<Bytes>{unlock_end(0x01, ECUIO_GUEST_ENDED)});
+    EXPECT_EQ(heard(b, {0x27, 0x01}), 0u);
+    EXPECT_TRUE(talk_free(b));
+    ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+    b.until_word_ended();
+    EXPECT_EQ(b.v->report.unlock, conv_unlock::unlocked);
+    EXPECT_EQ(heard(b, {0x27, 0x01}), 1u);
+}
+
+/* A seed on the wire when the session is lost (a link's recovery asks
+ * 10 03 again) and then refused 36 or 37 still starts the level's delay:
+ * the next word's seed waits it out, and nothing more is counted */
+TEST(ConversationTest, ASeedRefusedAfterItsSessionWasLostStartsTheDelay)
+{
+    for (const uint8_t nrc : {uint8_t{0x36}, uint8_t{0x37}}) {
+        Bench b;
+        ASSERT_NO_FATAL_FAILURE(b.start());
+        ASSERT_NO_FATAL_FAILURE(seed_out(b, 0x01, false));
+        ecuio_engine_rescan(b.e.get());
+        ecuio_conversation_step(b.v.get(), b.e.get(), b.now);
+        ASSERT_EQ(b.v->report.unlock, conv_unlock::ended) << int{nrc};
+        b.now += 4 * kMs;
+        b.frame({0x7F, 0x27, nrc});
+        const int64_t refused = b.now;
+        ecuio_conversation_step(b.v.get(), b.e.get(), b.now);
+        EXPECT_EQ(b.lvl(0x01).failed, 0u) << int{nrc};
+        EXPECT_EQ(b.lvl(0x01).wait_until_us, refused + 10000 * kMs);
+        ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+        b.until_word_ended();
+        EXPECT_EQ(b.v->report.unlock, conv_unlock::delayed) << int{nrc};
+        b.passes(10);
+        EXPECT_EQ(heard(b, {0x27, 0x01}), 1u) << int{nrc};
+        b.now = refused + 10000 * kMs;
+        b.passes(10); /* the session, lapsed meanwhile, entered again */
+        ASSERT_TRUE(ecuio_conversation_unlock(b.v.get(), 0x01));
+        b.until_word_ended();
+        EXPECT_EQ(b.v->report.unlock, conv_unlock::unlocked) << int{nrc};
+        EXPECT_EQ(heard(b, {0x27, 0x01}), 2u) << int{nrc};
+        EXPECT_EQ(b.guest.of_kind(ECUIO_GUEST_UNLOCK).front(),
+                  unlock_end(0x01, ECUIO_GUEST_ENDED));
+    }
+}
+
+/* The module's own request waiting as the session lapses still goes, in
+ * the session entered again, and its reply reaches the module */
+TEST(ConversationTest, AModulesRequestWaitingWhenTheSessionIsLostStillGoes)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    const Bytes read = {0x22, 0xD3, 0x00};
+    b.guest.requests.push_back(read);
+    ASSERT_NO_FATAL_FAILURE(b.until_offered());
+    b.now += ECUIO_ENGINE_S3_LATE_US; /* nothing sent: the session lapsed */
+    b.passes(10);
+    EXPECT_EQ(b.e->chans[0].session_lost, 1u);
+    EXPECT_EQ(heard(b, read), 1u);
+    EXPECT_EQ(b.guest.of_kind(ECUIO_GUEST_REPLY).size(), 1u);
+}
+
 /* The engine giving a loss back (a refusal that was the request's own)
  * is no loss: a level unlocked since stays open */
 TEST(ConversationTest, ALossGivenBackLeavesTheLevelOpen)

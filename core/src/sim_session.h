@@ -1,14 +1,16 @@
 // File/layer: core/src/sim_session.h | internal, C++17, Qt-free, header-only;
 //             no platform headers
-// Testing: UNIT: SimEcuTest, SimSecurityTest (test_obd2)
+// Testing: UNIT: SimEcuTest, SimSecurityTest, SimMemoryTest (test_obd2)
 //
 // A node's diagnostic session (ADR-0060) and the answer to services 10, 3E
-// and 27 (ADR-0066 section 2.7); a node's session state hangs here.
+// and 27 (ADR-0066 section 2.7) and to a memory read (sim_memory.h); a
+// node's session state hangs here.
 
 #ifndef ECUIO_SIM_SESSION_H
 #define ECUIO_SIM_SESSION_H
 
 #include "sim_types.h"
+#include "sim_memory.h"
 #include "sim_security.h"
 #include <cstdint>
 #include <cstring>
@@ -21,15 +23,20 @@ struct ecuio_sim_session {
     bool extended = false;
     int64_t heard_us = 0; /* the ECU's time of the last request heard */
     ecuio_sim_security security;
+    ecuio_sim_memory memory; /* answers where its vin is set */
 };
 
-/* S3 of silence at the ECU's time now_us leaves the extended session and
- * locks its security access */
+static_assert(ECUIO_SIM_MEMORY_REPLY_MAX == ECUIO_SIM_REPLY_MAX,
+              "a memory read's longest reply is the sim's");
+
+/* S3 of silence at the ECU's time now_us leaves the extended session,
+ * locks its security access and ends an upload */
 inline void ecuio_sim_session_lapse(ecuio_sim_session& s, int64_t now_us)
 {
     if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
         s.extended = false;
         ecuio_sim_security_lock(s.security);
+        ecuio_sim_memory_end(s.memory);
     }
 }
 
@@ -41,8 +48,11 @@ inline void ecuio_sim_session_lapse(ecuio_sim_session& s, int64_t now_us)
  * 3E 7F 3E 12; a wrong length 7F <service> 13. A node with security
  * access (has_security, an extended session too) answers 27 here
  * (sim_security.h), every session entered or left locks it, and any
- * other request comes between a strict one's seed and its key. Another
- * service: handled false, the caller's answer. A functional request
+ * other request comes between a strict one's seed and its key. A node
+ * with memory (memory.vin set) answers a memory read and an upload here
+ * too (sim_memory.h), out ECUIO_SIM_REPLY_MAX bytes; a session entered,
+ * left or lapsed ends an upload. Another service:
+ * handled false, the caller's answer. A functional request
  * never reaches this: session control and security access to 0x7DF go
  * unanswered and change nothing. */
 inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
@@ -60,6 +70,12 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
             s.security, s.extended, s.security.delay_us, now_us, req, len, out);
     }
     ecuio_sim_security_between(s.security);
+    if (s.memory.vin != nullptr && len > 0 &&
+        ecuio_sim_memory_service(req[0])) {
+        *handled = true;
+        return ecuio_sim_memory_answer(s.memory, s.security, s.extended, req,
+                                       len, out);
+    }
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);
     if (!*handled) {
         return 0;
@@ -81,6 +97,7 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
     if (req[1] == 0x01 || (req[1] == 0x03 && has_extended)) {
         s.extended = req[1] == 0x03;
         ecuio_sim_security_lock(s.security);
+        ecuio_sim_memory_end(s.memory);
         /* the session, then P2 = 50 ms and P2* = 5 s in 10 ms units */
         const uint8_t ok[6] = {0x50, req[1], 0x00, 0x32, 0x01, 0xF4};
         std::memcpy(out, ok, sizeof ok);

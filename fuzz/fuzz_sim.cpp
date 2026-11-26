@@ -83,12 +83,90 @@ void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
     }
 }
 
+/* What an upload's replies must hold, was the memory's state before the
+ * request: a 75 opens one only while none is open, a 76 hands over the
+ * open one's next bytes under its counter and never past what was
+ * asked, and a 77 ends one with nothing left */
+void check_upload(const ecuio_sim_session& s, const ecuio_sim_memory& was,
+                  const uint8_t* reply, uint32_t n)
+{
+    const bool open = s.extended && s.security.unlocked != 0;
+    if (n >= 1 && reply[0] == 0x75 &&
+        (!open || was.uploading || n != 4 || !s.memory.uploading ||
+         s.memory.left == 0)) {
+        abort();
+    }
+    if (n >= 1 && reply[0] == 0x76) {
+        if (!open || !was.uploading || n < 3 || n > was.faults.block ||
+            n - 2 > was.left || reply[1] != was.counter ||
+            s.memory.left != was.left - (n - 2)) {
+            abort();
+        }
+        for (uint32_t i = 0; i + 2 < n; ++i) {
+            if (reply[2 + i] != ecuio_sim_memory_byte(s.memory, was.next + i)) {
+                abort();
+            }
+        }
+    }
+    if (n >= 1 && reply[0] == 0x77 &&
+        (!s.extended || !was.uploading || was.left != 0 || n != 1)) {
+        abort();
+    }
+    if (s.memory.uploading && !s.extended) {
+        abort();
+    }
+}
+
+/* What the node's memory must hold after a reply to req: a region's
+ * bytes are answered only in the extended session while unlocked, to a
+ * read inside the region, and are the region's own at that address; an
+ * identification DID answers only in the session */
+void check_memory(const ecuio_sim_session& s, const uint8_t* req, size_t len,
+                  const uint8_t* reply, uint32_t n)
+{
+    if (n >= 1 && reply[0] == 0x63) {
+        if (!s.extended || s.security.unlocked == 0 || len < 4 ||
+            req[0] != 0x23) {
+            abort();
+        }
+        const size_t a = req[1] & 0x0F;
+        const size_t z = req[1] >> 4;
+        if (a < 1 || a > 4 || z < 1 || z > 4 || len != 2 + a + z) {
+            abort();
+        }
+        uint64_t address = 0;
+        uint64_t size = 0;
+        for (size_t i = 0; i < a; ++i) {
+            address = (address << 8) | req[2 + i];
+        }
+        for (size_t i = 0; i < z; ++i) {
+            size = (size << 8) | req[2 + a + i];
+        }
+        if (size == 0 || n != 1 + size || address < ECUIO_SIM_MEMORY_ADDRESS ||
+            address + size >
+                uint64_t{ECUIO_SIM_MEMORY_ADDRESS} + ECUIO_SIM_MEMORY_BYTES) {
+            abort();
+        }
+        for (uint64_t i = 0; i < size; ++i) {
+            if (reply[1 + i] !=
+                ecuio_sim_memory_byte(s.memory,
+                                      static_cast<uint32_t>(address + i))) {
+                abort();
+            }
+        }
+    }
+    if (n >= 3 && reply[0] == 0x62 && reply[1] == 0xD2 &&
+        (reply[2] == 0x20 || reply[2] == 0x21) && !s.extended) {
+        abort();
+    }
+}
+
 /* The ECU answering the requests in data as a node on a bus does: each
  * a length byte (bits 0-3, and bit 5 for 16 more) then that many bytes,
  * a tick of the car after each; with no recording the node has a
- * session and its security access (sim.cpp's order: the session's
- * services, then the ECU's). Its replies' bytes, run together, into
- * out. */
+ * session, its security access and its memory (sim.cpp's order: the
+ * session's services, then the ECU's); a functional request changes
+ * none of them. Its replies' bytes, run together, into out. */
 void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
          const uint8_t* data, size_t size, std::string* out)
 {
@@ -96,6 +174,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
     e.config = config;
     e.recording = rec;
     ecuio_sim_session session;
+    session.memory.vin = rec == nullptr ? e.config.vin : nullptr;
     ecuio_sim_counts counts;
     size_t at = 0;
     while (at < size) {
@@ -109,6 +188,10 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         memset(reply, 0xEE, sizeof reply);
         uint32_t n = 0;
         bool handled = false;
+        const uint8_t unlocked = session.security.unlocked;
+        const uint8_t seed_out = session.security.seed_out;
+        const bool extended = session.extended;
+        const ecuio_sim_memory was = session.memory;
         if (!functional && rec == nullptr) {
             n = ecuio_sim_session_answer(session, true, true, e.time_us,
                                          data + at, static_cast<uint32_t>(len),
@@ -123,6 +206,17 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         }
         if (rec == nullptr) {
             check_security(session, data + at, len, reply, n);
+            check_memory(session, data + at, len, reply, n);
+            check_upload(session, was, reply, n);
+        }
+        if (functional && (session.security.unlocked != unlocked ||
+                           session.security.seed_out != seed_out ||
+                           session.extended != extended ||
+                           session.memory.uploading != was.uploading ||
+                           session.memory.left != was.left ||
+                           (n > 0 && (reply[0] == 0x63 || reply[0] == 0x75 ||
+                                      reply[0] == 0x76 || reply[0] == 0x77)))) {
+            abort();
         }
         if (n > 0) {
             const bool negative = reply[0] == 0x7F;
@@ -178,6 +272,19 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         }
         if (r == ecuio_sim_uri_result::ok) {
             check_timing(config.timing);
+            const ecuio_sim_memory_faults& m = config.memory;
+            const uint32_t periods[] = {m.cut, m.flip,   m.relock,
+                                        m.seq, m.refuse, m.ident};
+            for (const uint32_t every : periods) {
+                if (every > ECUIO_SIM_MEMORY_FAULT_MAX) {
+                    abort();
+                }
+            }
+            if (m.block == 0 || m.block > ECUIO_SIM_MEMORY_BLOCK_MAX ||
+                m.moving_at >= ECUIO_SIM_MEMORY_BYTES ||
+                (m.moving_at != 0 && !m.moving)) {
+                abort();
+            }
         }
         /* Each aim one 11-bit module's, its period as a fault's */
         for (uint32_t i = 0;

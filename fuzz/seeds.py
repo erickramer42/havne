@@ -28,15 +28,19 @@
 # would have to guess; and URIs whose faults aim at one module.
 # fuzz_guest's are guest modules (seeds_wasm.py's guest_seeds()): from
 # nothing the fuzzer never writes the guest ABI's six exports.
-# fuzz_conversation's are runs that unlock a level (talk_seeds()):
-# the input's bytes are read by the harness and the table alike, so an
-# unlock is hard to find from nothing.
+# fuzz_conversation's are runs that unlock a level, and inputs the fuzzer
+# found (talk_seeds()): the input's bytes are read by the harness and the
+# table alike, so an unlock is hard to find from nothing.
 # fuzz_security_store's are stores with an entry of each kind, the
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
 # fuzz_consent_store's are stores with no record, one, two of one id,
 # a record at each bound, a fingerprint twice, and as many of the longest
 # record as one holds and one more.
+# fuzz_dump_file's are dump files (seeds_dump.py's dump_seeds()): one range, as many as a
+# file holds, a record at its bounds, each behind the byte that parses it
+# from memory and the bytes that put it on the disk under each name, and
+# a file of each refusal. Every value is made up.
 # fuzz_signal_merge's are signal files in the order to merge them, the
 # example plugins' variants written as one file each (variant_file()).
 # fuzz_sur_reply's are scripts of requests and the replies the surrogate
@@ -56,6 +60,7 @@ import re
 import struct
 import sys
 
+from seeds_dump import dump_seeds
 from seeds_wasm import conversation_seeds, guest_seeds, wasm_seeds
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -727,6 +732,8 @@ def main(argv):
         write(out, "fuzz_sur_reply", name, data)
     for name, data in talk_seeds().items():
         write(out, "fuzz_conversation", name, data)
+    for name, data in dump_seeds().items():
+        write(out, "fuzz_dump_file", name, data)
     return 0
 
 
@@ -767,6 +774,14 @@ def talk_seeds():
     seeds["two_words"] = (bytes([window_1s, 0x00, 0x01]) + honest + bytes([0x04, 0x00, 0x04, 0x01])
                           + honest + bytes([0x04, 0x01]) + honest)
     seeds["declined"] = bytes([window_1s, 0x00, 0x03]) + honest
+    # A word's seed offered as the session lapses past S3, then the module
+    # answering 7F 27 36 and a word after it: the seed never goes
+    seeds["seed_offered_session_lapsed"] = bytes.fromhex(
+        "99000300000300000c0c0c0c00000c0c0c0c000001007748e27eda000300000c0c0c"
+        "0c000c990c0ce5e5e50c0c0c0c0c0c0c0c0c0c99001d1d1d1d1d03e5e536000000e5"
+        "0c0c0c99001d1d1d1d1d03e5e536000000e50004e5e5e5e500005e0000000c0c0100"
+        "770c0c0c0c0c0c0ce5e5ec0c0c0c0c0c0c0c0c0c0c990003e5e50000000036000000"
+        "e50004e5e5e5e50000000c0c0c0c0c71717171717171710c0c0c0c0c")
     return seeds
 
 

@@ -20,6 +20,10 @@
 ecuio_status_t ecuio_profile_acquire(const char* name,
                                      const ecuio_signal_set_t** out_set);
 
+/* ecuio_last_error_detail() for a name no profile has: "no profile is
+ * named 'x'", and for a "merged." name what such a name is */
+void ecuio_profile_set_unknown_detail(const char* name);
+
 /* One use fewer; NULL is a no-op */
 void ecuio_profile_release(const ecuio_signal_set_t* set) noexcept;
 

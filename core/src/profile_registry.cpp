@@ -2,6 +2,7 @@
 // Testing: UNIT: CoreTest (test_core); PluginTest (test_signals)
 
 #include "ecuio/profile.h"
+#include "error_detail.h"
 #include "profile_hold.h"
 #include "request_engine.h"
 #include "session.h"
@@ -184,6 +185,7 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
         std::lock_guard<std::mutex> lock(registry_mutex());
         auto it = registry().find(std::string(name));
         if (it == registry().end()) {
+            ecuio_profile_set_unknown_detail(name);
             return ECUIO_ERR_UNKNOWN_PROFILE;
         }
         *out_set = it->second;   /* may be NULL: that IS "raw" */
@@ -194,6 +196,18 @@ ecuio_status_t ecuio_profile_lookup(const char* name,
 }
 
 } // extern "C"
+
+void ecuio_profile_set_unknown_detail(const char* name)
+{
+    if (std::strncmp(name, "merged.", 7) == 0) {
+        ecuio_detail_set("no profile is named '%s': a merged set's name, made "
+                         "from parts this program hasn't merged: merge the "
+                         "parts again",
+                         name);
+    } else {
+        ecuio_detail_set("no profile is named '%s'", name);
+    }
+}
 
 ecuio_status_t ecuio_profile_acquire(const char* name,
                                      const ecuio_signal_set_t** out_set)

@@ -111,7 +111,8 @@ void SessionBridge::pollChannelDiagnostics()
             changed = true;
         }
         bool clear_only = (s.flags & ECUIO_DIAG_CLEARING) != 0;
-        if (m_clearAsked[c] && !clear_only && s.clear != ECUIO_CLEAR_NONE) {
+        if (m_clearAsked[c] && !clear_only &&
+            cli::clear_settled(s, m_clearAskedGeneration[c])) {
             m_clearAsked[c] = false;
             clear_ended = true;
             emit logMessage(channelClearText(s, m_signalModel->unitSystem()));
@@ -294,6 +295,7 @@ QString SessionBridge::clearDiagnostics()
     for (uint32_t i = 0; i < n; ++i) {
         if (rc[i] == ECUIO_OK) {
             m_clearAsked[channels[i]] = true;
+            m_clearAskedGeneration[channels[i]] = reports[i].generation;
         } else {
             emit logMessage(
                 QStringLiteral("ECU %1 clear: not sent: %2")
@@ -359,6 +361,7 @@ void SessionBridge::clearDiagnosticsMoving()
         const uint32_t c = targets[k].channel;
         if (rc[k] == ECUIO_OK) {
             m_clearAsked[c] = true;
+            m_clearAskedGeneration[c] = targets[k].generation;
         } else {
             emit logMessage(QStringLiteral("ECU %1 clear: not sent: %2")
                                 .arg(hexId(m_diagnosticsShown[c].rx_id),

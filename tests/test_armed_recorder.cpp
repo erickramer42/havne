@@ -304,18 +304,29 @@ struct Armed {
     }
     /* The session gone, the writer's last pass seen (DRAINED): every
      * frame is written or let go (frames_passed), then the recorder
-     * closed */
+     * closed. The wait ends 10 s after the writer's last progress: a
+     * loaded runner makes a window's folder in half a second */
     ecuio_recorder_state_t finish(uint64_t frames)
     {
         ecuio_session_destroy(s);
         s = nullptr;
-        const auto give_up =
-            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        const auto taken = [](const ecuio_recorder_state_t& x) {
+            return x.frame_rows + x.frames_passed + x.records_dropped +
+                   x.windows;
+        };
         ecuio_recorder_state_t st = state();
+        uint64_t seen = taken(st);
+        auto give_up =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while ((st.flags & ECUIO_RECORDER_DRAINED) == 0 &&
                std::chrono::steady_clock::now() < give_up) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             st = state();
+            if (taken(st) != seen) {
+                seen = taken(st);
+                give_up =
+                    std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            }
         }
         EXPECT_NE(st.flags & ECUIO_RECORDER_DRAINED, 0u);
         EXPECT_EQ(st.frame_rows + st.frames_passed + st.records_dropped, frames)

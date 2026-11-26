@@ -155,6 +155,29 @@ bool backoff_sleep(transport* t, uint32_t ms)
 
 namespace {
 
+/* The start's probe for a session attach set up to listen: its answerers
+ * are the range alone (create fixed the modules, so none joins). A
+ * refusal leaves every module in range; the setup again restores the
+ * header and filter either way. */
+void probe_at_start(ecuio_session_t* session, transport* t)
+{
+    ecuio_probe p;
+    if (ecuio_start_probe_on().load() && run_probe(t, &p) != ECUIO_OK) {
+        elm327_log_write(t->log, "the start's probe was refused: %s",
+                         ecuio_last_error_detail());
+        ecuio_detail_clear();
+        return;
+    }
+    t->range = ecuio_probe_range(p, t->rx_ids, t->chan_count,
+                                 ecuio_engine_rpm_module_of(&t->engine));
+    session->module_range = t->range; /* before the worker reads it */
+    if (p.requests > 0) {
+        char line[160];
+        ecuio_probe_describe(p, line, sizeof line);
+        elm327_log_write(t->log, "%s", line);
+    }
+}
+
 ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
 {
     auto* t = static_cast<transport*>(impl);
@@ -166,8 +189,10 @@ ecuio_status_t elm327_start(ecuio_session_t* session, void* impl)
         elm327_log_write(t->log, "%s", line);
     }
     /* A consent applied since attach made a listening setup's session ask:
-     * the worker sets the adapter up again, flow control on */
+     * the probe runs, then the worker sets the adapter up again, flow
+     * control on */
     if (t->set_up_passive && !asks_nothing(t)) {
+        probe_at_start(session, t);
         t->configured = false;
     }
     t->stop_requested.store(false);

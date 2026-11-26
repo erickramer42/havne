@@ -109,8 +109,8 @@ void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
     expect(root, Type::object, "the file");
     const uint32_t format = format_of(root, "a signal file");
     only_keys(root,
-              {"havne_signals", "name", "source", "extends", "needs", "parts",
-               "ecus", "signals"},
+              {"havne_signals", "name", "source", "extends", "base_modules",
+               "needs", "parts", "ecus", "signals"},
               "the file");
 
     parts p;

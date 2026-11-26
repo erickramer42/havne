@@ -209,6 +209,16 @@ enum class seed_answer : uint8_t {
     no_seed,  /* no seed was asked: nothing changes */
 };
 
+/* A seed's end at now_us on l: 7F 27 36 or 37 starts the level's delay */
+inline void seed_refused(level_state& l, ecuio_talk_end end, uint8_t nrc,
+                         int64_t now_us)
+{
+    if (end == ecuio_talk_end::refused &&
+        (nrc == kNrcExceededAttempts || nrc == kNrcDelayNotExpired)) {
+        l.wait_until_us = now_us + l.delay_us;
+    }
+}
+
 /* The seed talk settled at now_us: its end and code, and for a positive
  * reply the seed's bytes (what follows 67 and the sub-function) */
 inline seed_answer seed(module_access& a, ecuio_talk_end end, uint8_t nrc,
@@ -220,10 +230,7 @@ inline seed_answer seed(module_access& a, ecuio_talk_end end, uint8_t nrc,
     level_state& l = a.levels[a.in_flight];
     a.at = phase::idle;
     if (end != ecuio_talk_end::answered) {
-        if (end == ecuio_talk_end::refused &&
-            (nrc == kNrcExceededAttempts || nrc == kNrcDelayNotExpired)) {
-            l.wait_until_us = now_us + l.delay_us;
-        }
+        seed_refused(l, end, nrc, now_us);
         return seed_answer::ended;
     }
     if (len != l.seed_bytes || bytes == nullptr) {
@@ -239,6 +246,17 @@ inline seed_answer seed(module_access& a, ecuio_talk_end end, uint8_t nrc,
     }
     a.at = phase::key_wanted;
     return seed_answer::key;
+}
+
+/* The seed of an attempt a lost session ended settled at now_us: a 36 or
+ * 37 still starts the delay of the level it asked (session_lost keeps
+ * in_flight). Nothing else changes, and nothing is counted. */
+inline void seed_after_loss(module_access& a, ecuio_talk_end end, uint8_t nrc,
+                            int64_t now_us)
+{
+    if (a.at == phase::idle && a.in_flight < a.count) {
+        seed_refused(a.levels[a.in_flight], end, nrc, now_us);
+    }
 }
 
 /* The module's code returned a key of len bytes: true when it is the
@@ -316,8 +334,9 @@ inline key_answer key_end(module_access& a, ecuio_talk_end end, int64_t now_us)
 }
 
 /* The channel's session was entered again at now_us: every level is
- * locked, and the attempt in flight ends. True when that counted a
- * failure: a key was on its way and its end hadn't been told. */
+ * locked, and the attempt in flight ends (in_flight stays its level).
+ * True when that counted a failure: a key was on its way and its end
+ * hadn't been told. */
 inline bool session_lost(module_access& a, int64_t now_us)
 {
     for (uint32_t k = 0; k < a.count; ++k) {

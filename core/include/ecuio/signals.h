@@ -854,6 +854,41 @@ ecuio_status_t ecuio_signal_file_expr_ref(const ecuio_signal_file_t* file,
                                           const ecuio_signal_def_t* def,
                                           char* out, size_t cap);
 
+/* One name an expression reads, as written */
+typedef struct ecuio_expr_name {
+    char text[ECUIO_EXPR_REF_LEN]; /* NUL-terminated, zero to the end */
+} ecuio_expr_name_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_expr_name_t) == 64, "ecuio_expr_name_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_expr_name_t) == 64,
+               "ecuio_expr_name_t size is ABI");
+#endif
+
+/* The names expr (length bytes of UTF-8, no NUL needed) reads signals
+ * by, as written, each once in the order first read: a key ("boost"), a
+ * second key, an "obd2.<key>" (obd2's short name or its PID name, as
+ * written); never a function's name or a number. By the grammar alone, at
+ * its newest format, with no file: a key no signal has is listed as any
+ * other, so a caller tells a file's own, obd2's and what it needs apart.
+ * The serial ports' contract (serial.h) over names: *count is all of
+ * them, the first capacity are copied, and a capacity of 0 with names
+ * NULL asks for the count.
+ * ECUIO_ERR_INVALID_ARGUMENT, *count 0 and the loader's words in
+ * ecuio_last_error_detail() ("the expression ends where a value should
+ * be (at character 7)"), for what every file's loader refuses: the
+ * grammar's refusals, a name that can be no key (1 to 31 of a-z, 0-9
+ * and _) nor one of obd2's, more of obd2's fields than a program's
+ * inputs (with the keys counted as one more, since a file may give two
+ * keys one signal), and a length past ECUIO_EXPR_MAX_BYTES (none of its
+ * bytes read).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL count, a NULL expr with a length,
+ * or NULL names with a capacity; ECUIO_ERR_OUT_OF_MEMORY. Any thread. */
+ecuio_status_t ecuio_expr_names(const char* expr, size_t length,
+                                ecuio_expr_name_t* names, uint32_t capacity,
+                                uint32_t* count);
+
 /* The number defs under program, through any chain of computed defs:
  * what ecuio_signal_file_evaluate takes a value for. Their IDs, each
  * once, in the order the program and the programs of its computed
@@ -1251,6 +1286,27 @@ ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
                                      uint32_t count, const char* text_utf8,
                                      uint32_t* index);
 
+/* No module: a def read on none of a set's channels */
+#define ECUIO_SIGNAL_MODULE_NONE 0xFFFFFFFFu
+
+/*
+ * The module def is read on: its place in set's channels (the order
+ * ecuio_signal_file_module gives a file's modules in). A def a session
+ * asks for (a 41 <PID> or 62 <DID> key) is read where its request goes,
+ * by the rule a session enrols it by: the channel whose reply ID is its
+ * frame's, else channel 0. A def nothing asks is read on the channel
+ * whose reply ID is its frame's. A computed def is read on the module
+ * every number def under it is read on, through any chain, when they
+ * share one. ECUIO_SIGNAL_MODULE_NONE for a def nothing asks on no
+ * declared channel, a computed def whose inputs are read on two modules
+ * or none, a set that declares no channel, a def that isn't one of
+ * set's (another set's, or a copy) and a NULL argument. Reads the set
+ * alone; a computed def allocates a byte for each def of set (NONE when
+ * that fails). Any thread while the set lives.
+ */
+uint32_t ecuio_signal_set_def_module(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_def_t* def);
+
 /* ---- A merged set's parts (ADR-0065 section 9) ----
  * A set made of several files read together, in the order given: its
  * written form is a format 3 file with "parts", which names each part,
@@ -1444,8 +1500,13 @@ ecuio_status_t ecuio_signal_file_note(const ecuio_signal_file_t* file,
 /* ---- Signal files merged into one set (ADR-0065 section 9) ---- */
 
 /* ecuio_merge_options_t's flags. Values are append-only. BASE_OBD2: the
- * set extends obd2 even when no part does. */
+ * set extends obd2 even when no part does. BASE_MODULES: the set reads
+ * obd2's modules (its channels, first, as BASE_OBD2 gives them) and none
+ * of its signals, so the emissions codes are still read; a part that
+ * extends obd2 makes it BASE_OBD2, since that part's expressions read
+ * obd2's signals. The two are refused together. */
 #define ECUIO_MERGE_BASE_OBD2 0x1u
+#define ECUIO_MERGE_BASE_MODULES 0x2u
 
 typedef struct ecuio_merge_options {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
@@ -1465,7 +1526,10 @@ _Static_assert(sizeof(ecuio_merge_options_t) == 32,
  * plugin variants' files) into one set, a new file in *out, freed with
  * ecuio_signal_file_free. It only reads the parts and keeps nothing of
  * them, so the result outlives them. The set extends obd2 when a part
- * does or options asks; options NULL asks nothing.
+ * does or options asks; options NULL asks nothing. With
+ * ECUIO_MERGE_BASE_MODULES and no part extending obd2, the set holds
+ * obd2's modules alone beside the parts', and it may have no part (count
+ * 0) and no signal: a set that reads the emissions codes only.
  *
  * The parts are read in the order given, a later one over an earlier:
  * - A signal with an earlier part's signal's key takes its place. So
@@ -1494,17 +1558,19 @@ _Static_assert(sizeof(ecuio_merge_options_t) == 32,
  * The result is the set its own text loads to (ecuio_signal_file_text,
  * read with ECUIO_SIGNAL_FILE_LOAD_SET): a format 3 file with "parts".
  * Its profile is "merged." and 16 hex digits (ecuio_signal_file_profile),
- * the same for the same parts in the same order; its name is "N parts
- * read together"; its notes (ecuio_signal_file_note) say what the merge
+ * the same for the same parts in the same order and the same base (obd2
+ * whole, its modules alone, or none); its name is "N parts read
+ * together"; its notes (ecuio_signal_file_note) say what the merge
  * replaced, renamed and left out. The same parts give the same bytes.
  *
  * ECUIO_ERR_NULL_ARGUMENT for a NULL out, NULL parts with a count, or a
  * NULL part. ECUIO_ERR_INVALID_ARGUMENT with the reason in
- * ecuio_last_error_detail(): no part or too many; a part given twice or
- * two parts of one profile; a part that is itself a merged set; a part
- * with no text (a variant whose copy doesn't read back); options with a
- * struct_size under the struct's, an unknown flag or a nonzero reserved
- * word; no signal left to read; and a bound of the set passed
+ * ecuio_last_error_detail(): no part (without BASE_MODULES) or too
+ * many; a part given twice or two parts of one profile; a part that is
+ * itself a merged set; a part with no text (a variant whose copy doesn't
+ * read back); options with a struct_size under the struct's, an unknown
+ * flag, both base flags or a nonzero reserved word; no signal left to
+ * read (without BASE_MODULES); and a bound of the set passed
  * (ECUIO_SIGNAL_SET_MAX_SIGNALS signals or replaced keys,
  * ECUIO_SIGNAL_SET_MAX_BYTES of text, ECUIO_SET_MAX_TABLE enum labels,
  * ECUIO_MODULE_MAX_REQUESTS requests of one module with the base's

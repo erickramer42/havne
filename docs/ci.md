@@ -85,51 +85,51 @@ template pins them) and linuxdeploy's pinned files (keyed on
 `make-appimage.sh`). The compiler caches (sccache in `win-build`,
 `win-coverage`, `macos-build`, `linux-build`, `core-and-tests`,
 `core-sanitizers` and `fuzz`; the Windows jobs and `linux-build` build with
-Ninja for it) save the same way, except the last three:
+Ninja for it) work differently:
 
 - **Each job's first shard** (`win-coverage`'s gtest leg) saves its
   cache right after the build, before the tests, under the run's own
-  key (`sccache-<job>-2-<run id>`; `win-build`'s is
-  `sccache-win-build-3-<ref slug>-<run id>`), on every ref, when the
-  build compiled 20 or more objects: a warm rerun adds no entry.
-- **A run restores the newest entry it may read:** its branch's own,
-  else `main`'s, since GitHub lets a branch read only its own caches and
-  the default branch's. A lane branch's first run therefore compiles
-  against `main`'s last entry, and its reruns and later commits against
-  its own. `win-build` is the exception, below.
-- **`win-build`'s three tiers.** `main`'s entry is as old as the last
-  release, and dev gets no run of its own that a lane branch could read,
-  so a lane's first run restoring `main`'s compiled most of the tree
-  again (about a quarter of its compiles hit). `win-build` therefore
-  restores only its own branch's newest entry (the key's slug is the
-  ref name with every character outside letters and digits as `_`, so
-  `main`'s entries never match another branch's prefix). With none, each
-  shard downloads dev's newest seed: the `sccache-win-seed` artifact a
-  run on `dev` uploads after its first shard's build (stored without
-  compression, kept 5 days, uploaded only when the build compiled 20 or
-  more objects), unpacked into `SCCACHE_DIR`. With no seed either it
-  builds cold. The step "Seed the compiler cache" prints the tier used
-  (own branch, dev seed, none) and the build step writes it to the run's
-  summary above sccache's statistics. The seed is trusted only from a
-  `ci.yml` run of this repository on `dev`; the dispatch input `seed_run`
-  (a run id) pins another run's, which only someone who can dispatch can
-  set, and `seed_upload=true` makes a run on any ref upload a seed. The
-  job's token has `actions: read` for the download and `actions: write`
-  for the next point.
-- **One entry for each branch:** after its save, the first shard deletes
-  the same ref's older `sccache-win-build-` entries (`gh cache list
-  --ref`, then `gh cache delete`), never another ref's, so the branch
-  holds one entry of about the cache's cap and the shared 10 GB is not
-  filled by reruns. A failed delete does not fail the run.
+  key, when the build compiled 20 or more objects: a warm rerun adds no
+  entry. `win-coverage` keys it `sccache-win-coverage-2-<run id>` and
+  restores the newest it may read (its branch's own, else `main`'s); it
+  runs on `main` and `dev`, and on a lane branch only on request.
+- **A lane branch can't read dev's caches:** GitHub lets a branch read
+  only its own and the default branch's, and `main`'s entries are as old
+  as the last release, so a lane's first run restoring them compiled most
+  of the tree again (about a quarter of its compiles hit on Windows).
+  Every other job therefore restores only its own branch's newest entry
+  (the key's slug is the ref name with every character outside letters
+  and digits as `_`, so no slug is the prefix of another, and `main`'s
+  entries never match another branch's prefix).
+- **The seed:** with no entry of its branch's, each shard downloads dev's
+  newest seed, the job's `sccache-<job>-seed` artifact (`win-build`'s is
+  `sccache-win-seed`, which `win-load` reads too), unpacked into
+  `SCCACHE_DIR`. A run on `dev` uploads it after the first shard's build
+  when that build compiled 20 or more objects (stored without
+  compression, kept 5 days); `seed_upload=true` uploads it from a run on
+  any ref, whatever the build compiled, so a dispatch on `dev` with it
+  makes every seed after a merge that changed only the workflow. With no
+  seed either the job builds cold. The step "Seed the compiler cache"
+  prints the tier used (own branch, a run's seed, none) and the build
+  step writes it to the run's summary above sccache's statistics. A seed
+  is trusted only from a `ci.yml` run of this repository on `dev`; the
+  dispatch input `seed_run` (a run id) pins another run's, which only
+  someone who can dispatch can set. `scripts/ci_sccache.sh` does this for
+  the Linux and macOS jobs, a PowerShell step for `win-build` and
+  `win-load`. The jobs' tokens have `actions: read` for the download.
+- **`win-build`, `macos-build` and `linux-build`** key their entries
+  `sccache-<job>-3-<ref slug>-<run id>` and save on every ref. After its
+  save the first shard deletes the same ref's older entries of its job
+  (`gh cache list --ref`, then `gh cache delete`; `actions: write`), never
+  another ref's, so the branch holds one entry of about the cache's cap
+  and the shared 10 GB is not filled by reruns. A failed delete does not
+  fail the run.
 - **`core-and-tests`, `core-sanitizers` and `fuzz`** key their entries
-  `sccache-<job>-3-<ref slug>-<ISO week>-<run id>` (the slug is the ref
-  name with every character outside letters and digits as `_`, so no slug
-  is the prefix of another). `main` and `dev` save on every run that
-  compiled 20 or more objects. A lane branch saves only when its restore
-  found no entry under its own slug (the restored key tells its own from
-  `main`'s), so its second run builds warm and its later runs add nothing
-  to the shared 10 GB. A pull request only restores. A run restores its
-  own newest entry, else `main`'s of this week, else `main`'s newest.
+  `sccache-<job>-3-<ref slug>-<ISO week>-<run id>`. `main` and `dev` save
+  on every run that compiled 20 or more objects. A lane branch saves only
+  when its restore found no entry of its own, so its second run builds
+  warm and its later runs add nothing to the shared 10 GB. A pull request restores or seeds
+  and never saves.
 - **Each cache is capped** at 500 MB (1 GB for `win-build`: a warm hit
   rate of about 93% needs 700-900 MB of objects).
 - **Why:** an entry for each job and week, frozen once saved and read
@@ -152,12 +152,12 @@ minutes cold on a busy runner, and less with a warm cache):
 |---|---|---|
 | `scope` | Ubuntu | Judges whether the change is docs alone (above), and when it is checks the docs' relative links. Every other job needs it and skips on a docs-only change. |
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
-| `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, and it runs `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo (CI's one run of it) and `CliTransferRunTest.candump` (`can-utils` gives it `candump`). Blocking since its first green run (2026-10-20). Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
+| `core-sanitizers` (1/2, 2/2) | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer, each shard running every second case (`-I k,,2`) with its own cost data. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. Each brings up `vcan0` and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, and the first runs `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo (CI's one run of it) and `CliTransferRunTest.candump` (`can-utils` gives it `candump`). Blocking since its first green run (2026-10-20). Builds under sccache (restored on every ref, saved by the first shard on `main`, `dev` and once for each lane branch). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) Builds under sccache (restored on every ref, saved on `main`, `dev` and once for each lane branch). |
 | `clang-tidy` (1/3 to 3/3) | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app, each runner a third of the files (`HAVNE_TIDY_SHARD=<k>/3`). Any warning fails it, and so does a baselined function whose lines or complexity grew. Shard 1 also runs `scripts/filelength_check.py` through `scripts/tidy.sh`: a new source file past 1,000 lines, or a listed file that grew, fails. Only the app's moc output is built. Each runner starts from the result cache (`scripts/tidy_cache.py`) of the newest earlier run on its branch, else on dev: all three shards' `tidy-cache-<k>` artifacts, kept 5 days, holding only the entries that run used; the tier goes to the job summary. |
 | `win-build` (1/4 to 4/4) | Windows, MSVC 2022 | Builds the full app with Ninja and sccache, then runs its quarter of ctest (the bridge, J2534 and QML suites included). sccache caches the build because the reproducible compile options are spelled `-Brepro` and `-d1trimfile:` (a `/` spelling reads as a second input file and nothing is cached). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `win-load` | Windows, MSVC 2022 | Builds only `bench_bridge` (`--target bench_bridge`) in the same Ninja tree settings as `win-build`, under the same compiler cache tiers (it restores the cache and never saves it), and runs the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([performance.md](performance.md#load-test-the-replay-fixture-through-the-bridge)). It installs no pytest: no ctest case runs there. |
-| `build-vs` | Windows, MSVC 2022 | Builds core, the shared library, the surrogate and the app with the Visual Studio generator, which `release.yml` builds with (no sccache, Qt restored as `win-build` does and never saved). It needs the scope job and skips a docs-only change. |
+| `build-vs` | Windows, MSVC 2022 | Builds core, the shared library, the surrogate and the app with the Visual Studio generator, which `release.yml` builds with (no sccache, Qt restored as `win-build` does and never saved). It needs the scope job and skips a docs-only change. Runs on pushes to `main`, the pull request to `main` and `dev`'s runs, and on another branch only with `-f vs_build=true`: its uncached build is CI's longest job, and a lane merges into `dev`, whose run builds it. |
 | `macos-build` (1/2, 2/2) | macOS (arm64), AppleClang | Builds the full app, then runs its half of ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `win-coverage` (gtest, ctest-1, ctest-2) | Windows, MSVC 2022 | On pushes to `main` and on `dev`'s runs, and on another branch only with `-f coverage=true`, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs its leg of `scripts/coverage.sh` (`--part`: the gtest binaries, or one of two slices of ctest's other cases) and uploads the report to Codecov, which merges the three ([testing.md](testing.md#coverage)). |
 | `linux-build` (1/2, 2/2) | Ubuntu, GCC | Builds the app, the bridge's and QML's tests (the `qt` label), `havne-cli` and the shared core, with Ninja and the mold linker, and runs its half of the Qt tests. The second shard brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners) and runs the Python package's vcan0 cases (`PythonTest.test_vcan`, `test_did_scan`, `test_isotp_fuzz`, selected by the `vcan` label) with `ECUIO_VCAN_REQUIRED=1` and `ECUIO_PYTEST_REQUIRED=1`, which no other job has both pytest and `vcan0` for; the first runs core's USDT probes under bpftrace (`tests/probe_trace.sh`) and the load test as on Windows. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. The Qt-free suites run in `core-and-tests` and `core-sanitizers`. |

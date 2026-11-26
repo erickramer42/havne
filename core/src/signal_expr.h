@@ -46,6 +46,9 @@ struct expr_scope {
     {
         return absent::unknown;
     }
+    /* Each name read, as written, at its offset from 0, before it is
+     * looked up */
+    virtual void read(const std::string& /*name*/, size_t /*at*/) const {}
 
 protected:
     ~expr_scope() = default;

@@ -149,6 +149,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         /* Security access that wants its key straight after its seed */
         fake_ecu::security_strict() =
             fake_j2534::knob_on("ECUIO_FAKE_SECURITY_STRICT");
+        /* The memory's faults, in the simulated ECU's mem= words */
+        char mem[128];
+        (void)fake_ecu::set_memory_faults(
+            fake_j2534::read_knob("ECUIO_FAKE_MEM", mem, sizeof(mem))
+                ? mem
+                : nullptr);
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -192,7 +198,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
      * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
      * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
      * bytes; Service 0x27 of any length (the engine ECU's security
-     * access): the adapter-framed logical message. With
+     * access) and 0x23, 0x35, 0x36 or 0x37 (its memory): the
+     * adapter-framed logical message. With
      * an active filter the ECU it's addressed to answers; without one an
      * ISO 15765 channel receives nothing, so the legacy echo applies.
      * Everything else keeps the deterministic echo semantics. */
@@ -208,7 +215,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                                        req[4] == 0x10 || req[4] == 0x3E)) ||
                            (n >= 7 && n <= 11 && req[4] == 0x01) ||
                            (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
-                           (n >= 5 && req[4] == 0x27) ||
+                           (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 ||
+                                       (req[4] >= 0x35 && req[4] <= 0x37))) ||
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
                                        req[4] == 0x07 || req[4] == 0x0A)));
 

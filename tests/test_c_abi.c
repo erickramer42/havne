@@ -28,6 +28,7 @@
  */
 
 #include "ecuio/conditions.h"
+#include "ecuio/dump.h"
 #include "ecuio/queue.h"
 #include "ecuio/obdb.h"
 #include "ecuio/recording.h"
@@ -81,6 +82,9 @@ int main(void)
         return 1;
     }
     if (c_abi_frames() != 0) {
+        return 1;
+    }
+    if (c_abi_dump() != 0) {
         return 1;
     }
     printf("log '%s'\n", INTERNAL(ecuio_j2534_sur_log_path(NULL), ""));

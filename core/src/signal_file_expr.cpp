@@ -3,7 +3,8 @@
 //
 // An expression against a loaded signal file (signals.h, ADR-0062): the
 // check an editor runs before the file is written, the name an
-// expression reads a def by, and a program worked out from given values.
+// expression reads a def by, the names an expression reads with no file,
+// and a program worked out from given values.
 // The compiler and the chain rules are the loader's (signal_expr.h), so a
 // check and a load judge alike; the machine and the age rule are the
 // frame decoder's (computed.h), so a preview and a session give one value.
@@ -563,6 +564,43 @@ struct evaluation {
     }
 };
 
+/* The names an expression reads with no file, as written. Every name a
+ * key may be reads one number signal: a file may give two keys one signal,
+ * so only obd2's fields count toward a program's inputs. */
+struct any_key_scope final : ecuio_sf::expr_scope {
+    bool find(const std::string& key, uint16_t* id,
+              expr_kind* kind) const override
+    {
+        *id = ECUIO_USER_SIG_ID_BASE;
+        *kind = expr_kind::number;
+        return ecuio_sf::key_ok(key);
+    }
+
+    void read(const std::string& name, size_t /*at*/) const override
+    {
+        if (std::find(seen.begin(), seen.end(), name) == seen.end()) {
+            seen.push_back(name);
+        }
+    }
+
+    mutable std::vector<std::string> seen;
+};
+
+/* expr's names in the order first read, or a refusal thrown */
+std::vector<std::string> names_read(const std::string& expr)
+{
+    any_key_scope scope;
+    scope.base = ecuio_obd2_signal_set();
+    std::vector<std::string> inputs;
+    try {
+        ecuio_sf::compile_expr(expr, scope, ecuio_sf::kGrammarFormat, &inputs);
+    } catch (const expr_refused& r) {
+        throw refusal{static_cast<uint32_t>(r.at + 1),
+                      "the expression " + r.words};
+    }
+    return scope.seen;
+}
+
 } // namespace
 
 extern "C" {
@@ -610,6 +648,44 @@ ecuio_status_t ecuio_signal_file_check_expr(const ecuio_signal_file_t* file,
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
         std::memcpy(out, &filled, sizeof filled);
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        ecuio_detail_set("out of memory");
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_expr_names(const char* expr, size_t length,
+                                ecuio_expr_name_t* names, uint32_t capacity,
+                                uint32_t* count)
+{
+    ecuio_detail_clear();
+    if (count == nullptr || (expr == nullptr && length != 0) ||
+        (names == nullptr && capacity != 0)) {
+        ecuio_detail_set("the names need a count, an expression and room "
+                         "for what the capacity says");
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    try {
+        std::vector<std::string> read;
+        try {
+            /* Judged before the copy: no byte past the bound is read */
+            if (length > ECUIO_EXPR_MAX_BYTES) {
+                throw refusal{1,
+                              "the expression " + ecuio_sf::too_long_words()};
+            }
+            read = names_read(std::string(expr != nullptr ? expr : "", length));
+        } catch (const refusal& r) {
+            *count = 0;
+            ecuio_detail_set("%s (at character %u)", r.words.c_str(),
+                             static_cast<unsigned>(r.at));
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        for (size_t i = 0; i < read.size() && i < capacity; ++i) {
+            std::memset(names[i].text, 0, sizeof names[i].text);
+            ecuio_sf::copy_text(names[i].text, sizeof names[i].text, read[i]);
+        }
+        *count = static_cast<uint32_t>(read.size());
         return ECUIO_OK;
     } catch (const std::bad_alloc&) {
         ecuio_detail_set("out of memory");

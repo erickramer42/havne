@@ -171,6 +171,7 @@ private:
 
     void input(size_t at, const std::string& name)
     {
+        scope_.read(name, at);
         uint16_t id = 0;
         if (name.compare(0, 5, "obd2.") == 0) {
             if (base_ == nullptr) {

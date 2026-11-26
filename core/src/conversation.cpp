@@ -200,6 +200,7 @@ void settle_seed(ecuio_conversation* v, ecuio_request_engine* e,
         word_ended(v, e, conv_unlock::ended, ECUIO_GUEST_ENDED, res.nrc);
         return;
     default: /* the session was lost meanwhile: the attempt is over */
+        ecuio_security::seed_after_loss(v->access, res.end, res.nrc, now_us);
         ecuio_engine_key_window_end(e, v->channel);
         return;
     }
@@ -248,10 +249,11 @@ void take_settled(ecuio_conversation* v, ecuio_request_engine* e,
 
 /* Step 2, after the talk's end (which decides wherever there is one): a
  * session entered again, or left, locks every level and ends an attempt
- * under way; a key on its way counts. Only a rise of the loss count is a
- * loss: the engine gives one back when a refusal was the request's own.
- * The step's leaving is watched too, since an abandoned session counts
- * no loss and the count saturates. */
+ * under way; a key on its way counts, and a seed not yet out is taken
+ * back (else it goes with no attempt to tell its 36 or 37 to). Only a
+ * rise of the loss count is a loss: the engine gives one back when a
+ * refusal was the request's own. The step's leaving is watched too,
+ * since an abandoned session counts no loss and the count saturates. */
 void check_session(ecuio_conversation* v, ecuio_request_engine* e,
                    int64_t now_us)
 {
@@ -270,6 +272,10 @@ void check_session(ecuio_conversation* v, ecuio_request_engine* e,
         open = open || v->access.levels[k].unlocked;
     }
     const bool counted = ecuio_security::session_lost(v->access, now_us);
+    if (v->own == ecuio_conversation_talk::seed &&
+        ecuio_talk_withdraw(chan(e, v).talk)) {
+        v->own = ecuio_conversation_talk::none; /* its answer has no attempt */
+    }
     if (running) {
         word_ended(v, e, counted ? conv_unlock::failed : conv_unlock::ended,
                    counted ? ECUIO_GUEST_REFUSED : ECUIO_GUEST_ENDED, 0);

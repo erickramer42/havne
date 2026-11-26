@@ -4,8 +4,8 @@
 //
 // Consent on the fake ELM327 (ADR-0066 section 2.4): the wire log names
 // a consent applied, or a part withheld for want of one, at start; and
-// an adapter set up to listen at attach is set up again at start once a
-// consent made the session ask.
+// an adapter set up to listen at attach is probed and set up again at
+// start once a consent made the session ask.
 
 #include "test_elm327_support.h"
 
@@ -140,4 +140,41 @@ TEST_F(Elm327SessionTest, AConsentAfterAPassiveSetupSetsTheAdapterUpAgain)
     EXPECT_LT(again, index_of(all, "1003")) << "before the first request";
     EXPECT_EQ(index_of(all, "ATMA"), all.size()) << "never a monitor";
     ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+}
+
+/* Such a session's start probe runs at start, before the setup again,
+ * and its line follows the consent's in the wire log */
+TEST_F(Elm327SessionTest, AConsentAfterAPassiveSetupProbesAtStart)
+{
+    Registered r(made3(true));
+    ASSERT_NE(r.plugin, nullptr);
+    const LogDir logs("elm327-consent-probe");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri(std::string("?profile=") + r.name +
+                               "&identify=0&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const std::vector<std::string> at_attach = fake_commands();
+        ASSERT_EQ(index_of(at_attach, kProbeCommand), at_attach.size())
+            << "a listening attach probes nothing";
+        ASSERT_NO_FATAL_FAILURE(
+            give_and_apply("elm327-consent-probe.json", r.plugin.get(), s.s));
+        s.start();
+        ASSERT_TRUE(wait_for([] { return fake_count("1003") > 0; }, 5000))
+            << "the module entered its session";
+        const std::vector<std::string> all = fake_commands();
+        const size_t probe = index_of(all, kProbeCommand, at_attach.size());
+        ASSERT_LT(probe, all.size()) << "the probe ran at start";
+        EXPECT_EQ(all[probe - 1], "ATSH7DF") << "under the functional header";
+        EXPECT_LT(probe, index_of(all, "ATCFC1", at_attach.size()))
+            << "before the setup again";
+        ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    }
+    const std::string log = logs.only_log();
+    const size_t consent = log.find("] consent applied  talker 1.2.0  ");
+    ASSERT_NE(consent, std::string::npos) << log;
+    EXPECT_NE(log.find("] emissions probe: 1 functional 01 00 in ", consent),
+              std::string::npos)
+        << log;
 }
