@@ -356,6 +356,7 @@ TEST(J2534SurrogateTest, ASplitRequestIsAssembledNotTakenForAClosedPipe)
         ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
                   ECUIO_OK);
     }
+    const std::string path = ecuio_j2534_sur_log_path(h);
     unsigned long channel = 0;
     ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
     unsigned char mask[4] = {};
@@ -368,6 +369,24 @@ TEST(J2534SurrogateTest, ASplitRequestIsAssembledNotTakenForAClosedPipe)
     EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel), ECUIO_OK);
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("read in two pieces, 8 bytes"), std::string::npos)
+        << log;
+}
+
+/* A value the knob can't split by leaves the read whole and says nothing */
+TEST(J2534SurrogateTest, ASplitKnobOutOfRangeSplitsNothing)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_SUR_TEST_SPLIT_REQUEST", "100000");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    const std::string log = read_session_log(path);
+    EXPECT_EQ(log.find("read in two pieces"), std::string::npos) << log;
 }
 
 #endif // _WIN32

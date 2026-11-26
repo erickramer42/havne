@@ -576,10 +576,10 @@ static bool read_request(ecuio_sur_request_t* req)
         const DWORD n = static_cast<DWORD>(strtoul(split, nullptr, 0));
         if (n > 0 && n < want) {
             want = n;
+            stage("the first request is read in two pieces, %lu bytes then the "
+                  "rest (ECUIO_SUR_TEST_SPLIT_REQUEST)",
+                  want);
         }
-        stage("the first request is read in two pieces, %lu bytes then the "
-              "rest (ECUIO_SUR_TEST_SPLIT_REQUEST)",
-              want);
     }
     g_split_read = true;
     DWORD have = 0;
