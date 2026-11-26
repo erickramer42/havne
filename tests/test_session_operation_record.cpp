@@ -6,10 +6,15 @@
 
 #include <ecuio/recording.h>
 
+#include "operation_sink.h"
+
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <thread>
 
 using namespace session_operation;
 
@@ -68,6 +73,15 @@ struct Recording {
 };
 
 const std::string kStarted = "dump,copy,0x7E8,6144,started";
+
+std::atomic<bool> g_writer_waits{false};
+
+void wait_on_the_writer()
+{
+    while (g_writer_waits.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
 
 } // namespace
 
@@ -151,4 +165,63 @@ TEST(SessionOperationTest, ARecordingNamesARunTheCloseEnded)
         ecuio_conversations_end(b.s, b.e.get());
         EXPECT_EQ(r.lines(b), std::vector<std::string>{});
     }
+}
+
+TEST(SessionOperationTest, ACloseDuringASlowSealSaysWhatTheFolderHolds)
+{
+    size_t requests = 0;
+    {
+        Bench whole;
+        ASSERT_NO_FATAL_FAILURE(whole.start());
+        ASSERT_EQ(whole.begin(), ECUIO_OK) << ecuio_last_error_detail();
+        ASSERT_EQ(whole.until_ended().end, ECUIO_OPERATION_END_SAVED);
+        for (size_t i = 0; i < whole.sent.size(); ++i) {
+            const uint8_t sid = whole.sent[i][0];
+            if (sid == 0x22 || sid == 0x23 || sid == 0x35 || sid == 0x36 ||
+                sid == 0x37) {
+                requests = i + 1;
+            }
+        }
+    }
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    Recording r;
+    ASSERT_NO_FATAL_FAILURE(r.attach(b));
+    const struct Held {
+        Held() { ecuio_operation::dump_test_before_take = wait_on_the_writer; }
+        ~Held()
+        {
+            g_writer_waits = false;
+            ecuio_operation::dump_test_before_take = nullptr;
+        }
+    } held; /* after the bench, whose close joins the writer */
+    /* the writer is idle at the run's last request: it holds the seal */
+    b.while_out = [requests](Bench& bench) {
+        if (bench.sent.size() == requests) {
+            g_writer_waits = true;
+            bench.waits_for_writer = false;
+        }
+    };
+    ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
+    b.until_phase(ECUIO_OPERATION_PHASE_SAVING);
+    b.passes(4);
+    ASSERT_GE(b.sent.size(), requests);
+    ASSERT_EQ(b.state().phase, ECUIO_OPERATION_PHASE_SAVING);
+    ASSERT_EQ(b.state().end, ECUIO_OPERATION_END_NONE);
+    ASSERT_EQ(b.s->operation->sink->state(),
+              ecuio_operation::sink_state::writing);
+    ASSERT_FALSE(b.s->operation->sink->idle()) << "the seal waits";
+    std::thread late([] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        g_writer_waits = false;
+    });
+    ecuio_conversations_end(b.s, b.e.get());
+    EXPECT_EQ(ecuio_session_close(b.s), ECUIO_OK);
+    late.join();
+    const ecuio_operation_state_t v = b.state();
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_EQ(v.phase, ECUIO_OPERATION_PHASE_DONE);
+    EXPECT_EQ(b.files(), std::vector<std::string>{v.name});
+    EXPECT_EQ(r.lines(b), (std::vector<std::string>{
+                              kStarted, "dump,copy,0x7E8,6144,saved"}));
 }

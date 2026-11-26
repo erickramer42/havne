@@ -26,7 +26,6 @@
 #include <mutex>
 #include <new>
 #include <string>
-#include <thread>
 
 namespace {
 
@@ -37,8 +36,6 @@ using ecuio_operation::sink_state;
 
 constexpr char kClosedWords[] =
     "the session closed before the read ended: nothing was kept";
-/* The close's wait for a seal already under way */
-constexpr int kSealWaitMs = 10000;
 
 int64_t utc_now()
 {
@@ -351,43 +348,35 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
     if (o == nullptr) {
         return;
     }
-    const uint8_t stage = o->stage.load();
-    if (stage == ecuio_operation::kStageArmed ||
-        stage == ecuio_operation::kStageRunning) {
-        /* A seal under way gets its end: the copy may be whole */
-        const bool sealing = stage == ecuio_operation::kStageRunning &&
-                             o->closed_sink &&
-                             o->r.result == ecuio_operation::run_end::complete;
-        for (int ms = 0; sealing && ms < kSealWaitMs &&
-                         o->sink->state() == sink_state::writing;
-             ms += 2) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        }
-        const bool saved = sealing && o->sink->state() == sink_state::saved;
-        /* An armed run never began: it has no start line to end */
-        if (stage == ecuio_operation::kStageRunning) {
-            ecuio_record_operation(s->record_link.get(), o->p->id.c_str(),
-                                   o->p->rx_id,
-                                   ecuio_operation::image_bytes(*o->p),
-                                   saved ? ECUIO_OPERATION_END_SAVED
-                                         : ECUIO_OPERATION_END_CANCELED);
-        }
-        const std::lock_guard<std::mutex> lock(s->support_mutex);
-        ecuio_operation_state_t& v = o->view;
-        v.phase = ECUIO_OPERATION_PHASE_DONE;
-        v.pass = 0;
-        v.end =
-            saved ? ECUIO_OPERATION_END_SAVED : ECUIO_OPERATION_END_CANCELED;
-        if (saved) {
-            std::memcpy(v.name, o->sink->name(), sizeof v.name);
-        } else {
-            std::memcpy(v.words, kClosedWords, sizeof kClosedWords);
-        }
-        o->stage.store(ecuio_operation::kStageEnded);
-    }
+    /* Joined before the end is told: a seal under way may still place */
     if (o->sink != nullptr) {
-        o->sink->close(); /* joined; nothing unsealed stays */
+        o->sink->close();
     }
+    const uint8_t stage = o->stage.load();
+    if (stage != ecuio_operation::kStageArmed &&
+        stage != ecuio_operation::kStageRunning) {
+        return;
+    }
+    const bool saved = o->sink->state() == sink_state::saved;
+    const uint32_t end =
+        saved ? ECUIO_OPERATION_END_SAVED : ECUIO_OPERATION_END_CANCELED;
+    /* An armed run never began: it has no start line to end */
+    if (stage == ecuio_operation::kStageRunning) {
+        ecuio_record_operation(s->record_link.get(), o->p->id.c_str(),
+                               o->p->rx_id, ecuio_operation::image_bytes(*o->p),
+                               end);
+    }
+    const std::lock_guard<std::mutex> lock(s->support_mutex);
+    ecuio_operation_state_t& v = o->view;
+    v.phase = ECUIO_OPERATION_PHASE_DONE;
+    v.pass = 0;
+    v.end = end;
+    if (saved) {
+        std::memcpy(v.name, o->sink->name(), sizeof v.name);
+    } else {
+        std::memcpy(v.words, kClosedWords, sizeof kClosedWords);
+    }
+    o->stage.store(ecuio_operation::kStageEnded);
 }
 
 extern "C" {

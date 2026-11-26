@@ -59,6 +59,7 @@ struct Bench {
     Script script;
     std::function<bool(const Bytes&)> unsent; /* the adapter takes it not */
     std::function<void(Bench&)> while_out; /* a request is on the wire */
+    bool waits_for_writer = true;
 
     /* The session bound, the engine made and the module's begin past:
      * the extended session entered, nothing unlocked. worker false: bound
@@ -149,7 +150,8 @@ struct Bench {
     {
         const ecuio_operation::session_run* o = s->operation.get();
         for (int i = 0;
-             i < 5000 && o != nullptr && o->sink != nullptr &&
+             waits_for_writer && i < 5000 && o != nullptr &&
+             o->sink != nullptr &&
              o->stage.load() == ecuio_operation::kStageRunning &&
              o->sink->state() == ecuio_operation::sink_state::writing &&
              !o->sink->idle();
