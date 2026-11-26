@@ -310,9 +310,9 @@ Keep commits terse: the subject line says what, a short body says why, and
 1. Discuss anything non-trivial in an issue first.
 2. Branch from `main` (or `dev` if it has moved ahead), keep the diff small:
    a PR that mixes refactors with behavior changes will be asked to split.
-3. Every changed source file needs the `// File/layer:` and `// Testing:`
-   headers the rest of the code carries, describing how your change is
-   tested and at what tier.
+3. Keep code comments to the minimum: none unless the code cannot say it
+   (a trap, a constraint, a non-obvious reason), and then one line. Don't
+   add file headers.
 4. Update what the change touches: STATUS.md test counts, docs/testing.md,
    a line under CHANGELOG.md's "Unreleased" if a user would notice the
    change, an ADR for a new decision, and an engineering-log row if the
