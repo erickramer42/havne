@@ -40,6 +40,7 @@ class SignalListModel : public QAbstractListModel
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
     // The rows Live shows that the focus leaves unasked (applyUnasked)
     Q_PROPERTY(int unaskedCount READ unaskedCount NOTIFY unaskedCountChanged)
+    Q_PROPERTY(int noRoomCount READ noRoomCount NOTIFY noRoomCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
@@ -127,8 +128,8 @@ public:
                          * which reads back as 0), so a layout file never
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
-        IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
-        UnaskedRole, /* the session's focus leaves it unasked
+        IsEnumRole,    /* the def's kind is ENUM. Fixed per signal set. */
+        UnaskedRole,   /* the session's focus leaves it unasked
                       * (applyUnasked, ecuio_session_get_unasked_signals):
                       * Live and the Dashboard say "not asked" in place of
                       * a value */
@@ -138,10 +139,14 @@ public:
                         * unsupported first when both hold; "" for a shown
                         * row. Notified with HiddenRole, including when the
                         * reason changes under a row that stays hidden. */
-        KeyRole        /* the key the signal is kept under (ADR-0065
+        KeyRole,       /* the key the signal is kept under (ADR-0065
                         * section 9, ecuio_signal_set_keys with the set's
                         * file): what a vehicle's ticks and a recording
                         * name it by. Fixed per signal set. */
+        ModuleRole,    // ecuio_signal_set_def_module's index, -1 for none
+        ModuleNameRole,
+        TagRole, // what tells apart the rows of one name, "" for a name one row has
+        UnaskedWhyRole // "pick" (unasked), "room" (wanted, its module has no room) or ""
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -235,6 +240,11 @@ public:
     // (ecuio_session_get_unasked_signals): those rows say "not asked".
     // Each call judges every row afresh; a new set leaves none unasked.
     void applyUnasked(const std::vector<uint16_t>& ids);
+    // The modules whose report says ECUIO_SUPPORT_NO_ROOM
+    void applyNoRoom(const std::vector<int>& modules);
+    int noRoomCount() const { return m_noRoomCount; }
+    // "<module>'s <name>" for each shown row with no room
+    QStringList noRoomNames() const;
     // The unasked rows Live shows, for its "N signals not asked" line
     int unaskedCount() const { return m_unaskedCount; }
 
@@ -312,6 +322,7 @@ signals:
     void tickedCountChanged();
     void hiddenCountChanged();
     void unaskedCountChanged();
+    void noRoomCountChanged();
     // A tick or untick, or a vehicle's choices set: the default pick
     // follows them
     void ticksChanged();
@@ -345,10 +356,14 @@ private:
         enum class Why : unsigned char { None, Unsupported, Absent };
         Why why = Why::None;      // the reason it's hidden, unsupported first
         bool unasked = false;     // core: the focus leaves it unasked
+        bool noRoom = false;
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
         uint8_t group = 0;        // the def's group (ADR-0050)
+        int module = -1;
+        QString moduleName;
+        QString tag;
         // The user's tick or untick; Default follows plotDefault
         PlotChoice choice = PlotChoice::Default;
         bool plotDefault = false; // judgePlotted's default for the row
@@ -374,6 +389,8 @@ private:
     void rejudgeHidden();
     // The unasked rows Live shows; notifies a change
     void recountUnasked();
+    void placeRows(const ecuio_signal_set_t* set, const ecuio_signal_file_t* file,
+                   const std::vector<ecuio_signal_key_t>& keys);
     // Each row's default and so its subscribed state, and the plotted
     // count; notifies the rows that changed and the count. Run after
     // anything that moves the defaults: a new set, hidden or refused
@@ -403,6 +420,9 @@ private:
     int m_tickedCount = 0;
     int m_hiddenCount = 0;
     int m_unaskedCount = 0;
+    std::vector<int> m_noRoomModules;
+    int m_noRoomCount = 0;
+    void rejudgeNoRoom();
     bool m_ranked = false;      // the set ranks a def (plot_rank)
     bool m_pickOnly = false;    // the session is asked only its picks
     // The texts of the last setPlotChoices that no keyed row answered
@@ -424,6 +444,8 @@ class LiveSignalModel : public QSortFilterProxyModel
     Q_PROPERTY(SignalFilter* filter READ filter CONSTANT)
     // The groups' codes among the rows core leaves in, for the choices
     Q_PROPERTY(QVariantList groups READ groups NOTIFY groupsChanged)
+    // SignalFilter::moduleChoices over the rows core leaves in
+    Q_PROPERTY(QVariantList modules READ modules NOTIFY groupsChanged)
     // The rows core leaves in, before the filter: what "of N" counts
     Q_PROPERTY(int shownCount READ shownCount NOTIFY groupsChanged)
 
@@ -432,6 +454,7 @@ public:
 
     SignalFilter* filter() const { return m_filter; }
     QVariantList groups() const { return m_groups; }
+    QVariantList modules() const { return m_modules; }
     int shownCount() const { return m_shownCount; }
 
 signals:
@@ -446,5 +469,6 @@ private:
 
     SignalFilter* m_filter;
     QVariantList m_groups;
+    QVariantList m_modules;
     int m_shownCount = 0;
 };

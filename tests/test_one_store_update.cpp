@@ -345,7 +345,7 @@ TEST(BridgeTest, OneStoreAVehiclesPicksKeepTheirOrderAndTheFirstObd2OneStandsIn)
     p = b.bridge.pickVariant(full, plain);
     EXPECT_FALSE(ok(p));
     EXPECT_EQ(words(p),
-              "A vehicle picks at most 16 variants: unpick one first");
+              "A vehicle picks at most 16 plugin variants: unpick one first");
     EXPECT_EQ(list(p, "picks"), full);
     p = b.bridge.pickVariant(full.mid(1), plain);
     EXPECT_TRUE(ok(p)) << words(p);

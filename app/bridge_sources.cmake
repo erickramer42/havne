@@ -16,9 +16,11 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_profiles.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recorder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recordings.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_room.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_sessioninfo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_store.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_support.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_together.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridgeformats.h
     ${CMAKE_CURRENT_LIST_DIR}/bridgeseams.h
     ${CMAKE_CURRENT_LIST_DIR}/bridgestate.h
@@ -33,5 +35,7 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/sessionbridge.h
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/signallistmodel.h
+    ${CMAKE_CURRENT_LIST_DIR}/signalmodules.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/signalmodules.h
     ${CMAKE_CURRENT_LIST_DIR}/signalplot.cpp
 )

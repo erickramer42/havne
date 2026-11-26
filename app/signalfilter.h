@@ -26,6 +26,7 @@ class SignalFilter : public QObject
     Q_PROPERTY(bool askedOnly READ askedOnly WRITE setAskedOnly NOTIFY changed)
     // The chosen groups' codes (ECUIO_SIGNAL_GROUP_*), in code order
     Q_PROPERTY(QVariantList groups READ groups NOTIFY changed)
+    Q_PROPERTY(QVariantList modules READ modules NOTIFY changed)
     // Anything narrows the list
     Q_PROPERTY(bool active READ active NOTIFY changed)
 
@@ -39,18 +40,26 @@ public:
     bool askedOnly() const { return m_askedOnly; }
     void setAskedOnly(bool on);
     QVariantList groups() const;
+    QVariantList modules() const;
     bool active() const;
 
     // asked: the session asks the row (the default pick's "not asked"
     // rows aren't)
+    // A row with no module (-1) passes only while no module is chosen
     Q_INVOKABLE bool matches(const QString& name, const QString& unit,
-                             int group, bool plotted, bool asked = true) const;
+                             int group, bool plotted, bool asked = true,
+                             int module = -1) const;
     Q_INVOKABLE bool chosen(int group) const;
     Q_INVOKABLE void toggleGroup(int group);
+    Q_INVOKABLE bool moduleChosen(int module) const;
+    Q_INVOKABLE void toggleModule(int module);
+    void keepModules(const QVariantList& choices);
     Q_INVOKABLE void clear();
     // A choice for each group among codes: {code, name} in code order,
     // each once, a code core doesn't know counted as Other
     Q_INVOKABLE QVariantList groupChoices(const QVariantList& codes) const;
+    // rows: [{ module, moduleName }]; gives [{ index, name }] in module order
+    Q_INVOKABLE QVariantList moduleChoices(const QVariantList& rows) const;
 
     // A code core doesn't name is Other's (ADR-0050)
     static int known(int group);
@@ -65,4 +74,5 @@ private:
     bool m_plottedOnly = false;
     bool m_askedOnly = false;
     std::set<int> m_groups;
+    std::set<int> m_modules;
 };

@@ -47,6 +47,8 @@ class PluginStore
 public:
     // The most variants one vehicle picks, so the profile row stays a row
     static constexpr int MaxPicks = 16;
+    // Never a merge's part: it asks the merge for obd2 as the base
+    static constexpr const char* Obd2Pick = "obd2";
 
     // <HAVNE_SETTINGS_DIR>/plugins when the variable is set (the tests),
     // else <AppDataLocation>/plugins
@@ -207,15 +209,27 @@ public:
 
     // A vehicle's picks as the profile row shows them, in their order:
     // { profile, sha256, id, name, version, variant, extends, missing,
-    // standIn }. missing: no plugin loaded has the variant. standIn, on
-    // an adapter only: the first pick that extends obd2, which takes
-    // Default's place
+    // standIn, builtIn }. missing: no plugin loaded has the variant.
+    // standIn, on an adapter only: the first pick that extends obd2,
+    // which takes Default's place
     QVariantList pickRow(const QStringList& picks, bool adapter);
 
     // picks with profile added last: { ok, words, picks }. Refused, the
     // list as it was, for a variant no plugin loaded has and past
     // MaxPicks; a profile picked already changes nothing
     QVariantMap pick(const QStringList& picks, const QString& profile);
+
+    // Borrowed files: they live while their plugins stay loaded
+    struct Parts {
+        std::vector<const ecuio_signal_file_t*> files;
+        QStringList profiles;
+        QStringList hashes;
+        QStringList missing;
+        bool obd2 = false;
+    };
+    Parts partFiles(const QStringList& picks, const QString& own);
+    // The merge copies its parts, so core's in-use check never sees them
+    void setBusy(const ecuio_signal_file_t* merged);
     static QStringList unpick(const QStringList& picks, const QString& profile);
 
     // A vehicle's picks the store has, as a layout file names what it
@@ -346,4 +360,5 @@ private:
     // plugin for nullptr
     QVariantMap forgetImports(const QString* vehicle);
     std::function<void(const QString&)> m_log;
+    QStringList m_busy;
 };

@@ -34,6 +34,11 @@ public:
     // { ok, words }: words are core's when it refuses the file, after
     // which every call answers "no file"
     Q_INVOKABLE QVariantMap setFile(const QString& text);
+    // A vehicle's merged set (SessionBridge::vehicleSetText) the other calls
+    // read in place of setFile's while it is loaded; "" goes back to it
+    Q_INVOKABLE QVariantMap setVehicleFile(const QString& text);
+    // { ok, words, names }: the names expr reads, as written (ecuio_expr_names)
+    Q_INVOKABLE QVariantMap readNames(const QString& expr) const;
 
     // One row for each def of the file's set, in the set's order: { ref,
     // name, unit, usable, why }. ref is the text an expression names the
@@ -69,8 +74,14 @@ private:
     const ecuio_signal_def_t* defOf(uint16_t id) const;
     QString refOf(const ecuio_signal_def_t& def, QString* why) const;
     void release();
+    void dropProgram();
+    const ecuio_signal_file_t* file() const
+    {
+        return m_vehicle != nullptr ? m_vehicle : m_file;
+    }
 
     ecuio_signal_file_t* m_file = nullptr;
+    ecuio_signal_file_t* m_vehicle = nullptr;
     bool m_hasProgram = false;
     ecuio_computed_t m_program{};
     std::vector<Leaf> m_leaves;

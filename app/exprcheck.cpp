@@ -25,14 +25,18 @@ ExprEditor::ExprEditor(QObject* parent) : QObject(parent) {}
 ExprEditor::~ExprEditor()
 {
     release();
+    ecuio_signal_file_free(m_vehicle);
 }
 
 void ExprEditor::release()
 {
-    if (m_file != nullptr) {
-        (void)ecuio_signal_file_free(m_file);
-        m_file = nullptr;
-    }
+    ecuio_signal_file_free(m_file);
+    m_file = nullptr;
+    dropProgram();
+}
+
+void ExprEditor::dropProgram()
+{
     m_hasProgram = false;
     m_leaves.clear();
 }
@@ -48,18 +52,68 @@ QVariantMap ExprEditor::setFile(const QString& text)
 {
     release();
     const QByteArray bytes = text.toUtf8();
-    ecuio_signal_file_t* file = nullptr;
-    if (ecuio_signal_file_load(bytes.constData(), static_cast<size_t>(bytes.size()),
-                               &file) != ECUIO_OK) {
+    ecuio_signal_file_t* loaded = nullptr;
+    if (ecuio_signal_file_load(bytes.constData(),
+                               static_cast<size_t>(bytes.size()),
+                               &loaded) != ECUIO_OK) {
         return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), detail()}};
     }
-    m_file = file;
+    m_file = loaded;
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
+}
+
+QVariantMap ExprEditor::setVehicleFile(const QString& text)
+{
+    ecuio_signal_file_free(m_vehicle);
+    m_vehicle = nullptr;
+    dropProgram();
+    if (text.isEmpty()) {
+        return {{QStringLiteral("ok"), true},
+                {QStringLiteral("words"), QString()}};
+    }
+    const QByteArray bytes = text.toUtf8();
+    ecuio_signal_file_t* loaded = nullptr;
+    if (ecuio_signal_file_load_with(
+            bytes.constData(), static_cast<size_t>(bytes.size()),
+            ECUIO_SIGNAL_FILE_LOAD_SET, &loaded) != ECUIO_OK) {
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("words"), detail()}};
+    }
+    m_vehicle = loaded;
+    return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
+}
+
+QVariantMap ExprEditor::readNames(const QString& expr) const
+{
+    const QByteArray bytes = expr.toUtf8();
+    uint32_t count = 0;
+    std::vector<ecuio_expr_name_t> names;
+    ecuio_status_t rc =
+        ecuio_expr_names(bytes.constData(), static_cast<size_t>(bytes.size()),
+                         nullptr, 0, &count);
+    if (rc == ECUIO_OK && count > 0) {
+        names.resize(count);
+        rc = ecuio_expr_names(bytes.constData(),
+                              static_cast<size_t>(bytes.size()), names.data(),
+                              count, &count);
+    }
+    if (rc != ECUIO_OK) {
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("words"), detail()},
+                {QStringLiteral("names"), QStringList()}};
+    }
+    QStringList list;
+    for (uint32_t i = 0; i < count && i < names.size(); ++i) {
+        list << QString::fromUtf8(names[i].text);
+    }
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("words"), QString()},
+            {QStringLiteral("names"), list}};
 }
 
 const ecuio_signal_def_t* ExprEditor::defOf(uint16_t id) const
 {
-    const ecuio_signal_set_t* set = ecuio_signal_file_set(m_file);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(file());
     for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
         if (set->defs[i].id == id) {
             return &set->defs[i];
@@ -71,7 +125,7 @@ const ecuio_signal_def_t* ExprEditor::defOf(uint16_t id) const
 QString ExprEditor::refOf(const ecuio_signal_def_t& def, QString* why) const
 {
     char out[ECUIO_EXPR_REF_LEN] = {};
-    if (ecuio_signal_file_expr_ref(m_file, &def, out, sizeof out) != ECUIO_OK) {
+    if (ecuio_signal_file_expr_ref(file(), &def, out, sizeof out) != ECUIO_OK) {
         if (why != nullptr) {
             *why = detail();
         }
@@ -83,7 +137,7 @@ QString ExprEditor::refOf(const ecuio_signal_def_t& def, QString* why) const
 QVariantList ExprEditor::names() const
 {
     QVariantList rows;
-    const ecuio_signal_set_t* set = ecuio_signal_file_set(m_file);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(file());
     for (uint32_t i = 0; set != nullptr && i < set->count; ++i) {
         const ecuio_signal_def_t& def = set->defs[i];
         QString why;
@@ -117,9 +171,8 @@ QVariantMap ExprEditor::describe(uint16_t id) const
 
 QVariantMap ExprEditor::check(const QString& key, const QString& expr)
 {
-    m_hasProgram = false;
-    m_leaves.clear();
-    if (m_file == nullptr) {
+    dropProgram();
+    if (file() == nullptr) {
         return noFile();
     }
     const QByteArray keyBytes = key.toUtf8();
@@ -127,7 +180,7 @@ QVariantMap ExprEditor::check(const QString& key, const QString& expr)
     ecuio_expr_check_t out{};
     out.struct_size = sizeof out;
     const ecuio_status_t rc = ecuio_signal_file_check_expr(
-        m_file, keyBytes.isEmpty() ? nullptr : keyBytes.constData(),
+        file(), keyBytes.isEmpty() ? nullptr : keyBytes.constData(),
         exprBytes.constData(), static_cast<size_t>(exprBytes.size()), &out);
     if (rc != ECUIO_OK) {
         return {{QStringLiteral("ok"), false},
@@ -143,12 +196,13 @@ QVariantMap ExprEditor::check(const QString& key, const QString& expr)
     }
     uint32_t count = 0;
     std::vector<uint16_t> ids;
-    if (ecuio_signal_file_expr_leaves(m_file, &out.program, nullptr, 0, &count) == ECUIO_OK
-        && count > 0) {
+    if (ecuio_signal_file_expr_leaves(file(), &out.program, nullptr, 0,
+                                      &count) == ECUIO_OK &&
+        count > 0) {
         ids.resize(count);
         uint32_t filled = 0;
-        if (ecuio_signal_file_expr_leaves(m_file, &out.program, ids.data(), count,
-                                          &filled) != ECUIO_OK) {
+        if (ecuio_signal_file_expr_leaves(file(), &out.program, ids.data(),
+                                          count, &filled) != ECUIO_OK) {
             ids.clear();
         }
     }
@@ -170,7 +224,7 @@ QVariantMap ExprEditor::check(const QString& key, const QString& expr)
 
 QVariantMap ExprEditor::evaluate(const QVariantList& values) const
 {
-    if (m_file == nullptr || !m_hasProgram) {
+    if (file() == nullptr || !m_hasProgram) {
         return noFile();
     }
     std::vector<ecuio_eval_input_t> inputs;
@@ -198,8 +252,9 @@ QVariantMap ExprEditor::evaluate(const QVariantList& values) const
     }
     ecuio_eval_result_t out{};
     out.struct_size = sizeof out;
-    if (ecuio_signal_file_evaluate(m_file, &m_program, inputs.data(),
-                                   static_cast<uint32_t>(inputs.size()), &out) != ECUIO_OK) {
+    if (ecuio_signal_file_evaluate(file(), &m_program, inputs.data(),
+                                   static_cast<uint32_t>(inputs.size()),
+                                   &out) != ECUIO_OK) {
         return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), detail()}};
     }
     QString why;

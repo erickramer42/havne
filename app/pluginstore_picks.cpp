@@ -94,6 +94,15 @@ QVariantList PluginStore::pickRow(const QStringList& picks, bool adapter)
     QVariantList out;
     bool stood = false;
     for (const QString& profile : picks) {
+        if (profile == QLatin1String(Obd2Pick)) {
+            out << QVariantMap{{QStringLiteral("profile"), profile},
+                               {QStringLiteral("name"),
+                                QStringLiteral("OBD-II standard signals")},
+                               {QStringLiteral("builtIn"), true},
+                               {QStringLiteral("missing"), false},
+                               {QStringLiteral("standIn"), false}};
+            continue;
+        }
         int at = 0;
         const auto it = heldWithProfile(profile, &at);
         const bool missing = it == m_held.end();
@@ -113,7 +122,8 @@ QVariantList PluginStore::pickRow(const QStringList& picks, bool adapter)
              missing ? QString() : it->second.variants.at(at)},
             {QStringLiteral("extends"), extends},
             {QStringLiteral("missing"), missing},
-            {QStringLiteral("standIn"), standIn}};
+            {QStringLiteral("standIn"), standIn},
+            {QStringLiteral("builtIn"), false}};
     }
     return out;
 }
@@ -130,19 +140,69 @@ QVariantMap PluginStore::pick(const QStringList& picks, const QString& profile)
     if (picks.contains(profile)) {
         return answer(true, QString(), picks);
     }
+    if (profile == QLatin1String(Obd2Pick)) {
+        return answer(true, QString(), picks + QStringList{profile});
+    }
     int at = 0;
     if (heldWithProfile(profile, &at) == m_held.end()) {
         return answer(false, QStringLiteral("No plugin here has that variant"),
                       picks);
     }
-    if (picks.size() >= MaxPicks) {
+    if (picks.size() - (picks.contains(QLatin1String(Obd2Pick)) ? 1 : 0) >=
+        MaxPicks) {
         return answer(false,
-                      QStringLiteral("A vehicle picks at most %1 variants: "
-                                     "unpick one first")
+                      QStringLiteral("A vehicle picks at most %1 plugin "
+                                     "variants: unpick one first")
                           .arg(MaxPicks),
                       picks);
     }
     return answer(true, QString(), picks + QStringList{profile});
+}
+
+PluginStore::Parts PluginStore::partFiles(const QStringList& picks,
+                                          const QString& own)
+{
+    (void)all();
+    Parts parts;
+    QStringList order = picks;
+    if (!own.isEmpty() && order.removeAll(own) > 0) {
+        order << own;
+    }
+    for (const QString& profile : order) {
+        if (profile == QLatin1String(Obd2Pick)) {
+            parts.obd2 = true;
+            continue;
+        }
+        int at = 0;
+        const auto it = heldWithProfile(profile, &at);
+        const ecuio_signal_file_t* file =
+            it == m_held.end()
+                ? nullptr
+                : ecuio_plugin_variant_file(it->second.plugin,
+                                            static_cast<uint32_t>(at));
+        if (file == nullptr) {
+            parts.missing << profile;
+            continue;
+        }
+        parts.files.push_back(file);
+        parts.profiles << profile;
+        parts.hashes << it->first;
+    }
+    return parts;
+}
+
+void PluginStore::setBusy(const ecuio_signal_file_t* merged)
+{
+    m_busy.clear();
+    const uint32_t count = ecuio_signal_file_part_count(merged);
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_signal_part_t part{};
+        part.struct_size = sizeof part;
+        if (ecuio_signal_file_part(merged, i, &part) == ECUIO_OK &&
+            (part.flags & ECUIO_PART_PLUGIN) != 0) {
+            m_busy << QString::fromUtf8(part.plugin_id);
+        }
+    }
 }
 
 QStringList PluginStore::unpick(const QStringList& picks,

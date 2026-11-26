@@ -2313,11 +2313,13 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_replay.cpp
         test_bridge_replay_carryover.cpp
         test_bridge_replay_end.cpp
+        test_bridge_room.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
         test_bridge_signalfiles_plugin.cpp
         test_bridge_signalfiles_picks.cpp
         test_bridge_live.cpp
+        test_bridge_modules.cpp
         test_bridge_fake.cpp
         test_bridge_fake_pick.cpp
         test_bridge_fake_awake.cpp
@@ -2325,6 +2327,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_signals.cpp
         test_bridge_signals_trace.cpp
         test_bridge_ticks.cpp
+        test_bridge_together.cpp
         test_bridge_recorder.cpp
         test_bridge_recorder_armed.cpp
         test_bridge_conditions.cpp

@@ -442,6 +442,13 @@ public:
     // The picks the store has as a layout file names what it needs
     // (PluginStore::pickFiles): { profile, name, sha256, from }
     Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
+    // pages: [{ name, cells }], the Dashboard's, cells as setPickGauges takes them
+    Q_INVOKABLE QVariantMap roomHolders(const QVariantList& pages) const;
+    // The registered profile's merged file's text, "" for any other profile
+    Q_INVOKABLE QString vehicleSetText(const QString& profile) const;
+    Q_INVOKABLE QVariantMap vehicleSet(const QStringList& picks,
+                                       const QString& own,
+                                       const QString& label = QString());
     // A page's text from the loaded plugin with the id, by its entry's
     // pages index (PluginStore::pageText): "" for no such plugin or page
     Q_INVOKABLE QString pluginPageText(const QString& id, int index);
@@ -963,6 +970,13 @@ private:
     QVariantMap previewObdbBytes(const QByteArray& bytes,
                                  const QString& refusal, int modelYear,
                                  const QString& name);
+    ecuio_signal_file_t* mergeTogether(const PluginStore::Parts& parts,
+                                       const QString& own, QVariantMap* answer);
+    const ecuio_signal_file_t*
+    togetherFileOf(const ecuio_signal_set_t* set) const;
+    void releaseTogether(bool all);
+    void holdUriSet(const QString& uri);
+    void endTeardown();
     // A signal file into the plugin store, as a new plugin or a variant
     QVariantMap keepFile(const QByteArray& file, const QString& into,
                          const QString& variant, const QString& vehicle);

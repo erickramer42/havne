@@ -203,6 +203,13 @@ void SessionBridge::pollChannelSupport()
     // Live says which signals their ECU refused, and with what (ADR-0051
     // section 3): the drops a negative reply made, by the defs they read
     if (changed) {
+        std::vector<int> noRoom;
+        for (uint32_t c = 0; c < m_channelCount; ++c) {
+            if ((m_supportReports[c].flags & ECUIO_SUPPORT_NO_ROOM) != 0) {
+                noRoom.push_back(static_cast<int>(c));
+            }
+        }
+        m_signalModel->applyNoRoom(noRoom);
         std::vector<SignalListModel::Refusal> refused;
         for (const cli::RefusedSignal& r :
              cli::refused_signals(ecuio_session_signal_set(m_session),
@@ -368,6 +375,23 @@ QString pickText(const ecuio_signal_set_t* set,
                   : QStringLiteral("Asking %1%2: %3").arg(count, pace, list);
 }
 
+// The obd2 defs a merge's BESIDE_BASE notes name: a part reads its own beside them
+std::vector<uint16_t> besideBase(const ecuio_signal_file_t* merged)
+{
+    std::vector<uint16_t> ids;
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(merged);
+    const uint32_t count = ecuio_signal_file_note_count(merged);
+    for (uint32_t i = 0; set != nullptr && i < count; ++i) {
+        ecuio_signal_note_t n{};
+        n.struct_size = sizeof n;
+        if (ecuio_signal_file_note(merged, i, &n) == ECUIO_OK &&
+            n.kind == ECUIO_NOTE_BESIDE_BASE && n.base_def < set->count) {
+            ids.push_back(set->defs[n.base_def].id);
+        }
+    }
+    return ids;
+}
+
 } // namespace
 
 bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
@@ -389,7 +413,8 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
         added.insert(added.end(), ticked.begin(), ticked.end());
     }
     const bool pickOnly = (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) != 0;
-    const std::vector<uint16_t> ids = cli::default_pick(set, added, pickOnly);
+    const std::vector<uint16_t> ids = cli::default_pick(
+        set, added, pickOnly, besideBase(togetherFileOf(set)));
     if (m_pickSet && !again && ids == m_pickIds &&
         m_minSweepMs == m_pickMinSweepMs) {
         return true;
@@ -505,10 +530,26 @@ QString BridgeFormats::refusedUnnamedText(
     return parts.join(QStringLiteral("; "));
 }
 
+namespace {
+
+QStringList moduleStateText(const ecuio_channel_support_t& s)
+{
+    if ((s.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+        return {QStringLiteral("closed: nothing read on it")};
+    }
+    if ((s.flags & ECUIO_SUPPORT_NO_ROOM) != 0) {
+        return {QStringLiteral(
+            "no room: every module the adapter listens to is in use")};
+    }
+    return {};
+}
+
+} // namespace
+
 QString BridgeFormats::channelSupportText(const ecuio_channel_support_t& s)
 {
 
-    QStringList parts;
+    QStringList parts = moduleStateText(s);
     if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
         // core's count of the data PIDs, and the last its bitmaps cover
         if ((s.flags & ECUIO_SUPPORT_COMPLETE) != 0) {

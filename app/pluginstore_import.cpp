@@ -192,7 +192,8 @@ QVariantMap PluginStore::install(const QByteArray& bytes, const QString& sha,
         if (old.open(QIODevice::ReadOnly)) {
             oldBytes = old.readAll();
         }
-        if (ecuio_plugin_free(it->second.plugin) == ECUIO_ERR_IN_USE) {
+        if (m_busy.contains(id) ||
+            ecuio_plugin_free(it->second.plugin) == ECUIO_ERR_IN_USE) {
             dropCopy();
             QVariantMap busy = refusal(
                 QStringLiteral("A session decodes with %1 %2: disconnect, "

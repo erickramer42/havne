@@ -192,6 +192,23 @@ TEST(CliPickTest, ThePickIsTheRankedDefsAndTheAddedInTheSetsOrder)
     EXPECT_TRUE(cli::default_pick(nullptr, {10}).empty());
 }
 
+/* The left-out ids lose their rank alone: an added one is still picked,
+ * and a set whose ranked defs are all left out ranks none */
+TEST(CliPickTest, TheLeftOutListAppliesToRankedDefsOnly)
+{
+    Set s;
+    s.defs[0].plot_rank = 1;
+    s.defs[2].plot_rank = 2;
+    EXPECT_EQ(cli::default_pick(&s.set, {}, false, {12}),
+              std::vector<uint16_t>{10});
+    EXPECT_EQ(cli::default_pick(&s.set, {12}, false, {12}),
+              (std::vector<uint16_t>{10, 12}));
+    EXPECT_TRUE(cli::default_pick(&s.set, {13}, false, {10, 12}).empty())
+        << "nothing ranked is left: the set is asked whole";
+    EXPECT_EQ(cli::default_pick(&s.set, {13}, true, {10, 12}),
+              std::vector<uint16_t>{13});
+}
+
 /* On a pick-only session an unranked set's pick is the added defs alone,
  * and with none added nothing; the flag changes nothing on a set that
  * ranks, and its default (false) keeps the whole-set rule */
