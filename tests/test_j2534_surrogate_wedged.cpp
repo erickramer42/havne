@@ -156,6 +156,24 @@ TEST(J2534SurrogateTest, AFailedRequestWriteEndsTheHandle)
         << log;
 }
 
+/* The fake's PassThruClose ends the child with 11 after it answers OP_SHUTDOWN */
+TEST(J2534SurrogateTest, ACloseNamesTheExitCodeOfAChildEndingAtShutdown)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_FAKE_EXIT_ON_CLOSE", "1");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(
+        log.find("close: the child didn't shut down cleanly (exit code 11)"),
+        std::string::npos)
+        << log;
+}
+
 /* A reply the client never asked for (the child answers OP_CONNECT
  * twice, ECUIO_SUR_TEST_REPLY_TWICE) leaves the pipe one reply behind:
  * the next transaction reads the reply before its own. That's the pipe

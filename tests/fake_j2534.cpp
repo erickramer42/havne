@@ -109,7 +109,8 @@
 //    ERR_BUFFER_OVERFLOW (v04.04's form of frames lost).
 //    ECUIO_FAKE_READ_DELAY_MS stalls the first read after load, once.
 //    ECUIO_FAKE_EXIT_ON_READ=1 ends a surrogate's process at its next
-//    read (a vendor DLL that crashes).
+//    read (a vendor DLL that crashes); ECUIO_FAKE_EXIT_ON_CLOSE=1 at
+//    PassThruClose, with exit code 11.
 //  * ECUIO_FAKE_VX=1 models the OBDX Pro VX as measured
 //    (docs/bench-sessions/2026-10-22.md and its vehicle sheet): batch
 //    reads held for their timeout, a short batch with STATUS_NOERROR
@@ -177,6 +178,10 @@ long __stdcall PassThruClose(unsigned long DeviceID)
         if (fake_control::Page* page = fake_control::attach()) {
             InterlockedIncrement(&page->closes);
         }
+    }
+    if (fake_j2534::knob_on("ECUIO_FAKE_EXIT_ON_CLOSE") &&
+        fake_j2534::in_a_surrogate()) {
+        TerminateProcess(GetCurrentProcess(), 11);
     }
     return STATUS_NOERROR;
 }
