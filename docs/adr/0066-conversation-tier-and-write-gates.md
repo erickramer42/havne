@@ -2365,3 +2365,45 @@ a dump.
   | `ecuio/plugin.h`: `ECUIO_PLUGIN_TIER_OPERATION`, `ecuio_plugin_operation_count`, `ecuio_plugin_operation`, `ecuio_plugin_operation_step` and their structs | Additive | New names only |
   | `ecuio/operation.h`: `ecuio_session_operation_start`, `_cancel`, `ecuio_session_get_operation`, `ecuio_operation_request_t`, `ecuio_operation_state_t` | Additive | A new header; the copy's folder is the start's argument, so neither struct holds a pointer |
   | `ECUIO_FRAME_FLAG_ACCESS_CUT` also on a memory read's `63` and `76` | Additive | The value and its meaning for a security access stand |
+
+### Appendix: one consent model across transports (2026-11-26)
+
+This amends the appendix of 2026-11-24 in two bullets: the store is
+asked on SocketCAN too, and a SocketCAN car link refuses in words as
+ELM327 and J2534 do.
+
+- **The getter.** `ecuio_session_wants_consent(session, &out)` (`plugin.h`)
+  sets `out` to 1 while a module of the session's plugin would bind but
+  for a consent, else 0, judged at the call on any transport: a part with
+  a publisher, no consent applied, no `vcan` link and no test door, on a
+  module the session's tables hold. `mock://` and `replay://` answer 0. A
+  closed session is `ECUIO_ERR_SESSION_CLOSED`. Python's
+  `Session.wants_consent` reads it.
+- **SocketCAN.** Only core tells a `vcan` link from a car's `can` link,
+  at attach, so both front ends ask the getter after create. `havne-cli`
+  arms the check before create on `socketcan://` and opens no store;
+  after create, when the getter says 1, it finds and applies a record, or
+  refuses in words on standard error with nothing on standard output
+  (exit 2; a store that doesn't read exit 3). The app's `needFor` counts
+  `socketcan://` with `elm327://` and `j2534://`, and the connect thread's
+  `applyFound` opens the store and shows the consent screen only when the
+  getter says 1, on every transport. A `vcan` link reads no store and
+  shows no screen.
+- **The trade-off.** ELM327 and J2534 refuse before create, so a refused
+  run takes no connection. A SocketCAN refusal comes after create: the
+  socket is open and attach's own functional `01 00` probe has gone out on
+  the bus. The plugin's code never runs, since nothing binds before start.
+  Judging the link before create would need a second public call for the
+  link's driver, which a front end would then have to keep in step with
+  core's judgment; one getter after create keeps the judgment in core.
+- **The tests' car link.** `vcan0` stands in for a car's link two ways:
+  `ecuio_socketcan_test_vcan_as_can` (`internal.h`) for core's and the
+  app's cases, and `ECUIO_SOCKETCAN_TEST_VCAN_AS_CAN=1`, read at attach,
+  for a `havne-cli` child. Either can only make a `vcan` link ask consent,
+  never skip one.
+
+- **The ABI.**
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | `ecuio_session_wants_consent` | Additive | A new name; `out` is a `uint32_t` |

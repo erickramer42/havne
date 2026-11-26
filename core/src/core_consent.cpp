@@ -86,3 +86,22 @@ ecuio_session_apply_consent(ecuio_session_t* session,
     }
     return ECUIO_OK;
 }
+
+extern "C" ecuio_status_t
+ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t* out)
+{
+    ecuio_detail_clear();
+    if (session == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = 0;
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    for (uint32_t c = 0; c < session->module_rx.size(); ++c) {
+        if (ecuio_session_channel_wants_consent(session, c)) {
+            *out = 1;
+        }
+    }
+    return ECUIO_OK;
+}

@@ -331,6 +331,13 @@ inline void give_and_apply(const char* file, const ecuio_plugin_t* p,
     std::remove((path + ".lock").c_str());
 }
 
+inline uint32_t wants_consent(const ecuio_session_t* s)
+{
+    uint32_t out = 7;
+    EXPECT_EQ(ecuio_session_wants_consent(s, &out), ECUIO_OK);
+    return out;
+}
+
 /* The first 16 hex digits of p's fingerprint, as a refusal and the
  * session logs show it */
 inline std::string print_prefix_of(const ecuio_plugin_t* p)

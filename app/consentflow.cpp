@@ -296,10 +296,10 @@ ConsentNeed ConsentFlow::needFor(const QString& uri,
                                 sizeof pub.terms_sha256);
         n.screen = readScreen(plugin);
     }
-    // A car is on these; core judges SocketCAN's link, the mock and a
-    // replay bind nothing
+    // applyFound asks core again after create: vcan binds unasked
     const bool car = uri.startsWith(QLatin1String("elm327://")) ||
-                     uri.startsWith(QLatin1String("j2534://"));
+                     uri.startsWith(QLatin1String("j2534://")) ||
+                     uri.startsWith(QLatin1String("socketcan://"));
     n.asks = car && named && !n.screen.isEmpty();
     n.declined = m_declined.contains(n.fingerprint);
     return n;
@@ -320,7 +320,10 @@ ConsentFound ConsentFlow::applyFound(ecuio_session_t* session,
                                   "the security store doesn't read: %1")
                        .arg(detail());
     }
-    if (!need.asks) {
+    uint32_t wants = 0;
+    if (!need.asks ||
+        ecuio_session_wants_consent(session, &wants) != ECUIO_OK ||
+        wants == 0) {
         return f;
     }
     if (need.declined) {

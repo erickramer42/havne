@@ -312,7 +312,6 @@ int run_stream(const StreamArgs& args)
     }
     stream->limit = args.count;
 
-    write_start(out);
     // --conditions, else a replay's own copy
     ecuio_condition_set_t* conditions = nullptr;
     if (args.conditions != nullptr) {
@@ -320,6 +319,7 @@ int run_stream(const StreamArgs& args)
         ecuio_status_t loaded = ECUIO_OK;
         conditions = load_conditions_file(args.conditions, &loaded, &why);
         if (conditions == nullptr) {
+            write_start(out);
             write_error(out, loaded, why.c_str());
             return ended(out, kExitConnect);
         }
@@ -331,7 +331,13 @@ int run_stream(const StreamArgs& args)
     const bool judging = conditions != nullptr;
     ecuio_session_t* session = nullptr;
     std::string detail;
-    ecuio_status_t st = create_consented(out, args.uri, &session, &detail);
+    ecuio_status_t st = create_consented(out, args.uri, &session, &detail,
+                                         /*start_first=*/true);
+    if (st != ECUIO_OK && consent_refused_exit() >= 0) {
+        ecuio_condition_set_free(conditions);
+        return consent_refused_exit();
+    }
+    write_start(out);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
         ecuio_condition_set_free(conditions);

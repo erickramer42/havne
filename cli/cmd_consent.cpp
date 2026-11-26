@@ -300,34 +300,26 @@ ecuio_consent_store_t* g_found_store = nullptr;
 uint8_t g_found_print[32] = {};
 uint64_t g_found_utc = 0;
 
-// Whether uri names a transport a car is on: no store opens for the
-// mock, a replay or SocketCAN, where core judges the link (vcan binds)
-bool car_transport(const char* uri)
+// Only core tells a SocketCAN link's vcan from a car's CAN, at create
+struct JudgedAfterCreate {
+    bool armed = false;
+    cli::ConsentFacts facts;
+    const char* package = nullptr;
+    const char* named = nullptr;
+};
+JudgedAfterCreate g_after_create;
+int g_refused_exit = -1;
+
+bool starts(const char* uri, const char* scheme)
 {
-    const std::string u = uri != nullptr ? uri : "";
-    return u.rfind("elm327://", 0) == 0 || u.rfind("j2534://", 0) == 0;
+    return uri != nullptr &&
+           std::strncmp(uri, scheme, std::strlen(scheme)) == 0;
 }
 
-} // namespace
-
-SessionConsent g_session_consent;
-
-int need_consent(const char* uri, const char* package, const char* named)
+// -1 with the record's store kept for the apply, else the exit code
+int find_or_refuse(const cli::ConsentFacts& f, const char* package,
+                   const char* named)
 {
-    cli::ConsentFacts f;
-    if (g_plugin == nullptr || !car_transport(uri)) {
-        return -1;
-    }
-    if (!cli::consent_facts(g_plugin, &f)) {
-        std::fprintf(stderr,
-                     "havne-cli: the plugin's consent facts don't "
-                     "read: %s\n",
-                     ecuio_last_error_detail());
-        return kExitConnect;
-    }
-    if (f.set == 0 || !f.has_publisher) {
-        return -1;
-    }
     const std::string path = store_path(named);
     if (path.empty()) {
         return kExitUsage;
@@ -358,6 +350,40 @@ int need_consent(const char* uri, const char* package, const char* named)
     return kExitUsage;
 }
 
+} // namespace
+
+SessionConsent g_session_consent;
+
+int need_consent(const char* uri, const char* package, const char* named)
+{
+    cli::ConsentFacts f;
+    const bool after_create = starts(uri, "socketcan://");
+    if (g_plugin == nullptr || !(after_create || starts(uri, "elm327://") ||
+                                 starts(uri, "j2534://"))) {
+        return -1;
+    }
+    if (!cli::consent_facts(g_plugin, &f)) {
+        std::fprintf(stderr,
+                     "havne-cli: the plugin's consent facts don't "
+                     "read: %s\n",
+                     ecuio_last_error_detail());
+        return kExitConnect;
+    }
+    if (f.set == 0 || !f.has_publisher) {
+        return -1;
+    }
+    if (after_create) {
+        g_after_create = {true, f, package, named};
+        return -1;
+    }
+    return find_or_refuse(f, package, named);
+}
+
+int consent_refused_exit()
+{
+    return g_refused_exit;
+}
+
 bool take_consent_store(int& argc, char** argv, const char** store)
 {
     *store = nullptr;
@@ -384,6 +410,19 @@ ecuio_status_t create_consented(Output& out, const char* uri,
                                 bool start_first)
 {
     ecuio_status_t st = create_within(out, uri, session, detail, start_first);
+    uint32_t wants = 0;
+    if (st == ECUIO_OK && g_after_create.armed &&
+        ecuio_session_wants_consent(*session, &wants) == ECUIO_OK &&
+        wants == 1) {
+        g_refused_exit = find_or_refuse(
+            g_after_create.facts, g_after_create.package, g_after_create.named);
+        if (g_refused_exit >= 0) {
+            ecuio_session_destroy(*session);
+            *session = nullptr;
+            *detail = "no consent applied";
+            return ECUIO_ERR_CONSENT_REQUIRED;
+        }
+    }
     if (st != ECUIO_OK || g_found_store == nullptr) {
         return st;
     }

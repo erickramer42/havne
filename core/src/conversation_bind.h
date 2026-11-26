@@ -115,15 +115,9 @@ bool ecuio_session_may_talk(const ecuio_session_t* session);
  * bind makes, by the same rule */
 bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c);
 
-/* Whether channel c's module is the part's and would bind but for a
- * consent its plugin can be given (a publisher named; consent_gate.h):
- * the unlock's ECUIO_ERR_CONSENT_REQUIRED */
-bool ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t c);
-/* The session log's consent line at start (ADR-0066 section 2.4), into
- * out (cap bytes): "consent applied  <id> <version>  <16 hex>" for a
- * consent applied, "consent withheld  <id> <version>" for a part that
- * would bind but for one (ecuio_session_wants_consent); false and ""
- * for neither. Allocates nothing. */
+bool ecuio_session_channel_wants_consent(const ecuio_session_t* session,
+                                         uint32_t c);
+/* ADR-0066 section 2.4's start line into out; allocates nothing */
 constexpr size_t ECUIO_CONSENT_LOG_LINE_MAX = 96;
 static_assert(ECUIO_CONSENT_LOG_LINE_MAX >
                   17 + ECUIO_PLUGIN_ID_MAX + 1 + 15 + 2 + 16,

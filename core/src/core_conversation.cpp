@@ -402,7 +402,7 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(session, channel);
-    if (b == nullptr && ecuio_session_wants_consent(session, channel)) {
+    if (b == nullptr && ecuio_session_channel_wants_consent(session, channel)) {
         ecuio_detail_set("no consent was given to the plugin whose code "
                          "talks on this channel");
         return ECUIO_ERR_CONSENT_REQUIRED;

@@ -97,6 +97,28 @@ TEST_F(Elm327SessionTest, TheWireLogNamesAPartWithheldForWantOfConsent)
     EXPECT_EQ(log.find("consent applied"), std::string::npos) << log;
 }
 
+TEST_F(Elm327SessionTest, TheSessionSaysWhetherAPartWantsConsent)
+{
+    for (const bool consented : {false, true}) {
+        Registered r(made3());
+        ASSERT_NE(r.plugin, nullptr);
+        Session s;
+        ASSERT_EQ(s.create(uri(std::string("?profile=") + r.name +
+                               "&identify=0&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(conversation_session::wants_consent(s.s), 1u);
+        if (consented) {
+            give_and_apply("elm327-consent-wants.json", r.plugin.get(), s.s);
+        }
+        EXPECT_EQ(conversation_session::wants_consent(s.s),
+                  consented ? 0u : 1u);
+        s.start();
+        EXPECT_EQ(conversation_session::wants_consent(s.s),
+                  consented ? 0u : 1u);
+    }
+}
+
 /* A part with no publisher can't be consented to, and one behind the
  * test door binds: neither is withheld for want of consent */
 TEST_F(Elm327SessionTest, NoConsentLineForAFormat2PartOrBehindTheDoor)

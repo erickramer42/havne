@@ -174,6 +174,8 @@ int c_abi_plugin(void)
              offsetof(ecuio_consent_record_t, reserved) == 256u &&
              ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_consent_store_close(NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_session_wants_consent(NULL, NULL) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
              ECUIO_ERR_CONSENT_REQUIRED == 23;
         /* A consent line: static text, its size by the pointer width */
         ok = ok &&

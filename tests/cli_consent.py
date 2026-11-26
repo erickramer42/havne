@@ -232,6 +232,86 @@ def run_case(cli, package):
     return 0
 
 
+def vcan_runs(cli, package, iface, d):
+    """The vcan case's runs; None, or what failed"""
+    print_ = fingerprint_of(cli, package)
+    store = os.path.join(d, "consent.json")
+    bad = os.path.join(d, "bad.json")
+    with open(bad, "w", encoding="utf-8") as f:
+        f.write("not a store")
+    car = dict(os.environ, ECUIO_SOCKETCAN_TEST_VCAN_AS_CAN="1")
+    uri = (f"socketcan://{iface}?profile=plugin.talker3.base"
+           "&identify=0&diagnose=0")
+
+    def stream(where, env=None):
+        return run(cli, ["stream", uri, "--plugin", package,
+                         "--consent-store", where, "--count", "1"], env)
+
+    def session_of(out):
+        return [r for r in rows_of(out) if r.get("type") == "session"
+                and "ecu" not in r]
+
+    code, out, err = stream(bad)
+    shown = session_of(out)
+    if code != 0 or len(shown) != 1 or "consent" in shown[0] \
+            or "consent" in err:
+        return f"vcan read a store: exit {code} {out!r} {err!r}"
+    code, out, err = stream(store, car)
+    if code != 2 or out or "this plugin needs your consent" not in err \
+            or f"fingerprint {print_[:16]}\n" not in err:
+        return f"a car's link without a record: exit {code} {out!r} {err!r}"
+    code, out, err = run(cli, ["log", uri, os.path.join(d, "rec"),
+                               "--plugin", package, "--consent-store", store,
+                               "--seconds", "1"], car)
+    if code != 2 or out or "this plugin needs your consent" not in err:
+        return (f"log on a car's link without a record: exit {code} "
+                f"{out!r} {err!r}")
+    code, out, err = stream(bad, car)
+    if code != 3 or out or "consent store doesn't read" not in err:
+        return (f"a car's link, an unreadable store: exit {code} {out!r} "
+                f"{err!r}")
+    code, _, err = run(cli, ["plugins", "consent", package,
+                             "--consent-store", store, "--give", print_])
+    if code != 0:
+        return f"--give: exit {code} {err!r}"
+    code, out, err = stream(store, car)
+    shown = session_of(out)
+    if code != 0 or len(shown) != 1 \
+            or shown[0].get("consent", {}).get("fingerprint") != print_:
+        return f"a car's link with a record: exit {code} {shown!r} {err!r}"
+    return None
+
+
+def vcan_case(cli, package):
+    """vcan binds unasked and reads no store; judged a car's link
+    (ECUIO_SOCKETCAN_TEST_VCAN_AS_CAN), it refuses as ELM327 does until a
+    record is given"""
+    iface = os.environ.get("ECUIO_VCAN_IF", "vcan0")
+    if not os.path.exists(f"/sys/class/net/{iface}"):
+        if os.environ.get("ECUIO_VCAN_REQUIRED") == "1":
+            print(f"FAIL  no {iface}")
+            return 1
+        print(f"skipped: no {iface}")
+        return 77
+    sim = subprocess.Popen([cli, "sim", "mock://sim?values=canned", "--on",
+                            iface, "--seconds", "60"],
+                           stdout=subprocess.PIPE, text=True)
+    try:
+        for line in sim.stdout:
+            if json.loads(line)["type"] in ("sim", "error"):
+                break
+        with tempfile.TemporaryDirectory(prefix="havne-cli-consent-vcan-") as d:
+            failed = vcan_runs(cli, package, iface, d)
+    finally:
+        sim.terminate()
+        sim.wait(timeout=10)
+    if failed is not None:
+        print(f"FAIL  {failed}")
+        return 1
+    print("ok    vcan reads no store; a car's link refuses, then runs consented")
+    return 0
+
+
 def unlock_stream(cli, package, consent, security, folder):
     """stream --unlock pcm:01 for 8 s on an emulator of its own, the
     exchanges logged in a temporary folder of its own: (exit, rows,
@@ -326,6 +406,8 @@ def main(argv):
         return unlock_case(argv[2], argv[3])
     if len(argv) == 4 and argv[1] == "run":
         return run_case(argv[2], argv[3])
+    if len(argv) == 4 and argv[1] == "vcan":
+        return vcan_case(argv[2], argv[3])
     if len(argv) >= 5 and argv[1] == "terms":
         return terms_case(argv[2], argv[3], argv[4], "--update" in argv[5:])
     if len(argv) == 4 and argv[1] == "store":

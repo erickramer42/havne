@@ -5,7 +5,7 @@
 //          (conversation_session_support.h), in a settings folder per case
 
 // Core's internal headers before Qt's: they name members slots and signal
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
 #include "conversation_session_support.h"
 #endif
 
@@ -240,6 +240,22 @@ TEST(BridgeTest, AllowAppliesAndBinds)
     EXPECT_TRUE(disconnectAndWait(bridge));
 }
 
+// The door stands in for vcan: a part core binds unasked shows no screen
+TEST(BridgeTest, TheConsentScreenIsJudgedAgainAfterCreate)
+{
+    ConsentCase k;
+    SessionBridge bridge;
+    ASSERT_TRUE(k.setUp(bridge));
+    conversation_session::DoorOpen open;
+    bridge.connectSessionAsync(k.uri());
+    ASSERT_TRUE(connects(bridge));
+    EXPECT_FALSE(bridge.consent()->waiting());
+    EXPECT_FALSE(k.logged(QStringLiteral("Consent asked:")));
+    EXPECT_TRUE(talks(bridge, 10000));
+    EXPECT_TRUE(recordsOf(bridge).isEmpty());
+    EXPECT_TRUE(disconnectAndWait(bridge));
+}
+
 TEST(BridgeTest, ADeclineIsRememberedForTheRun)
 {
     ConsentCase k;
@@ -375,3 +391,49 @@ TEST(BridgeTest, AnUnlockWithNoVehicleNamedSaysHowToNameOne)
 }
 
 #endif // _WIN32
+
+#ifdef __linux__
+
+// A link core judges a car's waits for the screen, as ELM327's does
+TEST(BridgeTest, ASocketCanCarLinkWaitsForConsent)
+{
+    const QString iface =
+        qEnvironmentVariable("ECUIO_VCAN_IF", QStringLiteral("vcan0"));
+    if (!QFile::exists(QStringLiteral("/sys/class/net/") + iface)) {
+        if (qgetenv("ECUIO_VCAN_REQUIRED") == "1") {
+            FAIL() << "no " << iface.toStdString();
+        }
+        GTEST_SKIP() << "no " << iface.toStdString();
+    }
+    SettingsDirScope scope;
+    QTemporaryDir folder;
+    ASSERT_TRUE(scope.valid() && folder.isValid());
+    const QString path =
+        folder.filePath(QStringLiteral("talker.havne-plugin.json"));
+    QFile f(path);
+    const std::string text = conversation_session::made3().json();
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    ASSERT_EQ(f.write(text.data(), static_cast<qint64>(text.size())),
+              static_cast<qint64>(text.size()));
+    f.close();
+    SessionBridge bridge;
+    const QStringList profiles = bridge.importPlugin(QUrl::fromLocalFile(path))
+                                     .value(QStringLiteral("profiles"))
+                                     .toStringList();
+    ASSERT_FALSE(profiles.isEmpty());
+    ecuio_socketcan_test_vcan_as_can(1);
+    bridge.connectSessionAsync(
+        QStringLiteral("socketcan://%1?profile=%2&identify=0&diagnose=0")
+            .arg(iface, profiles.first()));
+    const bool waited = spinUntil(
+        [&]() { return bridge.consent()->waiting(); }, 10000, 10);
+    ecuio_socketcan_test_vcan_as_can(0);
+    ASSERT_TRUE(waited);
+    bridge.consent()->answer(false);
+    ASSERT_TRUE(spinUntil(
+        [&]() { return bridge.connected() && !bridge.connecting(); }, 10000,
+        10));
+    EXPECT_TRUE(disconnectAndWait(bridge));
+}
+
+#endif // __linux__

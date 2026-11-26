@@ -35,6 +35,8 @@ ecuio_status_t create_within(Output& out, const char* uri,
 ecuio_status_t create_consented(Output& out, const char* uri,
                                 ecuio_session_t** session, std::string* detail,
                                 bool start_first = false);
+// -1, or the exit code of a refusal create_consented wrote on stderr
+int consent_refused_exit();
 // The consent a run applied (create_consented): the session line's
 // "consent" key, absent when none was
 struct SessionConsent {
