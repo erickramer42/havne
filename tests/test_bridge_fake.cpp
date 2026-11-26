@@ -4,6 +4,9 @@
 // Cases for sessions against the fake J2534 DLL: async open, teardown, VIN, the clear (one request over the ECUs too), withheld PIDs, the default pick.
 
 #include "test_bridge_fake_support.h"
+#include "worker_hold.h" // the worker parked in a frame
+
+#include <functional>
 
 #ifdef _WIN32
 
@@ -673,6 +676,71 @@ TEST(BridgeTest, AClearWhileMovingAsksOnceMore)
             << "one saved file";
         ASSERT_TRUE(disconnectAndWait(bridge));
     }
+}
+
+/* A clear asked again over a report holding the last clear's outcome:
+ * until the worker takes the request, the poll reads that old MOVING
+ * at the generation asked, which is no end of the new clear. The worker
+ * is parked in a frame while the ticks run, so the poll comes first */
+TEST(BridgeTest, AClearAskedAgainEndsOnlyWithItsOwnOutcome)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm moving("ECUIO_FAKE_SPEED_KMH", "48");
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    WorkerHold hold;
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto clear_lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 clear: "));
+    };
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1?probe=0&identify=0")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_EQ(hold.attach(bridge.sessionForTesting()), ECUIO_OK);
+    WorkerHold::Release release{hold};
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return !log.filter(QStringLiteral("ECU 0x7E8 diagnostics: "))
+                        .isEmpty();
+        },
+        5000));
+    EXPECT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.clearMoving().isEmpty(); }, 5000))
+        << log.join('\n').toStdString();
+
+    /* Asked again, then the moving word, each while the worker is parked */
+    const auto parked = [&](const std::function<void()>& ask) {
+        const qsizetype before = clear_lines().size();
+        ASSERT_TRUE(hold.hold(5000)) << "the worker parks in a frame";
+        ask();
+        spinLoop(400);
+        EXPECT_EQ(clear_lines().size(), before) << log.join('\n').toStdString();
+        EXPECT_TRUE(bridge.clearMoving().isEmpty())
+            << "no outcome before the worker takes the clear";
+        hold.release();
+    };
+    parked([&]() { EXPECT_FALSE(bridge.clearDiagnostics().isEmpty()); });
+    ASSERT_TRUE(spinUntil([&]() { return clear_lines().size() == 2; }, 5000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().at(1).toStdString(),
+              "ECU 0x7E8 clear: not sent: moving (48 km/h)");
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.clearMoving().isEmpty(); }, 5000));
+    parked([&]() { bridge.clearDiagnosticsMoving(); });
+    ASSERT_TRUE(spinUntil([&]() { return clear_lines().size() == 3; }, 5000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(clear_lines().at(2).toStdString(),
+              "ECU 0x7E8 clear: cleared (2000 rpm, 48 km/h)")
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* With the fake's engine stopped the clear goes through: its line, then

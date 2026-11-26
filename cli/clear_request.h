@@ -1,7 +1,10 @@
 // File/layer: cli/clear_request.h | havne-cli and the app's bridge: one
-//             clear request over many ECUs; public headers only
+//             clear request over many ECUs, and when one has ended;
+//             public headers only
 // Testing: HARNESS: CliClearRunTest.TwoEcusAreOneRequest (tests/
-//          cli_clear.py); BridgeTest.ClearCodesAsksEveryEcuInOneRequest
+//          cli_clear.py); BridgeTest.ClearCodesAsksEveryEcuInOneRequest,
+//          .AClearAskedAgainEndsOnlyWithItsOwnOutcome; UNIT:
+//          CliClearTest.AClearSettlesPastItsGeneration
 //
 // Core takes one clear request at a time and refuses a whole request
 // when one target's report has moved since the caller read it
@@ -32,6 +35,16 @@ inline bool clear_report_still(ecuio_session_t* s,
            d.generation == target.generation &&
            (d.flags & ECUIO_DIAG_COMPLETE) != 0 &&
            (d.flags & ECUIO_DIAG_CLEARING) == 0;
+}
+
+/* Whether d holds the outcome of a clear asked at report generation
+ * asked: the worker takes a clear by moving the generation on with the
+ * outcome none, which it stays while the clear runs (ECUIO_DIAG_CLEARING),
+ * and settles it by moving it on again with an outcome. Until the take,
+ * the report keeps the last clear's outcome at the generation asked */
+inline bool clear_settled(const ecuio_channel_diagnostics_t& d, uint32_t asked)
+{
+    return d.generation > asked && d.clear != ECUIO_CLEAR_NONE;
 }
 
 /* One clear request (ADR-0038) for targets under flags; each target's
