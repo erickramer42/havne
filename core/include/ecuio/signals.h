@@ -1500,8 +1500,13 @@ ecuio_status_t ecuio_signal_file_note(const ecuio_signal_file_t* file,
 /* ---- Signal files merged into one set (ADR-0065 section 9) ---- */
 
 /* ecuio_merge_options_t's flags. Values are append-only. BASE_OBD2: the
- * set extends obd2 even when no part does. */
+ * set extends obd2 even when no part does. BASE_MODULES: the set reads
+ * obd2's modules (its channels, first, as BASE_OBD2 gives them) and none
+ * of its signals, so the emissions codes are still read; a part that
+ * extends obd2 makes it BASE_OBD2, since that part's expressions read
+ * obd2's signals. The two are refused together. */
 #define ECUIO_MERGE_BASE_OBD2 0x1u
+#define ECUIO_MERGE_BASE_MODULES 0x2u
 
 typedef struct ecuio_merge_options {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
@@ -1521,7 +1526,10 @@ _Static_assert(sizeof(ecuio_merge_options_t) == 32,
  * plugin variants' files) into one set, a new file in *out, freed with
  * ecuio_signal_file_free. It only reads the parts and keeps nothing of
  * them, so the result outlives them. The set extends obd2 when a part
- * does or options asks; options NULL asks nothing.
+ * does or options asks; options NULL asks nothing. With
+ * ECUIO_MERGE_BASE_MODULES and no part extending obd2, the set holds
+ * obd2's modules alone beside the parts', and it may have no part (count
+ * 0) and no signal: a set that reads the emissions codes only.
  *
  * The parts are read in the order given, a later one over an earlier:
  * - A signal with an earlier part's signal's key takes its place. So
@@ -1550,17 +1558,19 @@ _Static_assert(sizeof(ecuio_merge_options_t) == 32,
  * The result is the set its own text loads to (ecuio_signal_file_text,
  * read with ECUIO_SIGNAL_FILE_LOAD_SET): a format 3 file with "parts".
  * Its profile is "merged." and 16 hex digits (ecuio_signal_file_profile),
- * the same for the same parts in the same order; its name is "N parts
- * read together"; its notes (ecuio_signal_file_note) say what the merge
+ * the same for the same parts in the same order and the same base (obd2
+ * whole, its modules alone, or none); its name is "N parts read
+ * together"; its notes (ecuio_signal_file_note) say what the merge
  * replaced, renamed and left out. The same parts give the same bytes.
  *
  * ECUIO_ERR_NULL_ARGUMENT for a NULL out, NULL parts with a count, or a
  * NULL part. ECUIO_ERR_INVALID_ARGUMENT with the reason in
- * ecuio_last_error_detail(): no part or too many; a part given twice or
- * two parts of one profile; a part that is itself a merged set; a part
- * with no text (a variant whose copy doesn't read back); options with a
- * struct_size under the struct's, an unknown flag or a nonzero reserved
- * word; no signal left to read; and a bound of the set passed
+ * ecuio_last_error_detail(): no part (without BASE_MODULES) or too
+ * many; a part given twice or two parts of one profile; a part that is
+ * itself a merged set; a part with no text (a variant whose copy doesn't
+ * read back); options with a struct_size under the struct's, an unknown
+ * flag, both base flags or a nonzero reserved word; no signal left to
+ * read (without BASE_MODULES); and a bound of the set passed
  * (ECUIO_SIGNAL_SET_MAX_SIGNALS signals or replaced keys,
  * ECUIO_SIGNAL_SET_MAX_BYTES of text, ECUIO_SET_MAX_TABLE enum labels,
  * ECUIO_MODULE_MAX_REQUESTS requests of one module with the base's

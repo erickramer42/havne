@@ -59,6 +59,14 @@ std::string merged(const std::string& parts, const std::string& signals,
 
 const std::string kTwo = part("user.a") + "," + part("user.b");
 
+/* A file with no "parts" that names a base's modules */
+std::string doc_with_base_modules()
+{
+    return R"({"havne_signals":3,"name":"Alone","source":{"name":"s"},)"
+           R"("base_modules":"obd2","signals":[)" +
+           sig("x", "D100") + "]}";
+}
+
 ecuio_signal_part_t part_at(const ecuio_signal_file_t* f, uint32_t index)
 {
     ecuio_signal_part_t p;
@@ -220,6 +228,12 @@ TEST(MergedTextTest, TheProfileIsTheHashOfTheBaseAndThePartsInOrder)
          "merged.8e77046ac51ceaad"},
         /* sha256("user.a\n") */
         {merged(part("user.a"), a_then_b), "merged.01667a2a5c272063"},
+        /* sha256("obd2 modules\nuser.a\nuser.b\n") */
+        {merged(kTwo, a_then_b, R"("base_modules":"obd2",)"),
+         "merged.393bef76a64e5775"},
+        /* sha256("obd2 modules\n"): no part, no signal */
+        {merged("", "", R"("base_modules":"obd2",)"),
+         "merged.68ebfb1f570ad19a"},
     };
     for (const auto& c : cases) {
         File f = load(c.json);
@@ -250,9 +264,21 @@ TEST(MergedTextTest, EveryRuleOfTheWrittenFormIsRefusedInItsWords)
         /* "parts" itself */
         {merged(kTwo, x, "", 2),
          "\"parts\" is signal-file format 3's, and this file is format 2"},
-        {merged("", x), "\"parts\" lists 0: a merged set has 1 to 16"},
-        {merged(many, x), "\"parts\" lists 17: a merged set has 1 to 16"},
+        {merged("", x), "\"parts\" lists 0: a merged set has 1 to 16 (0 with "
+                        "\"base_modules\")"},
+        {merged(many, x), "\"parts\" lists 17: a merged set has 1 to 16 (0 "
+                          "with \"base_modules\")"},
         {merged(kTwo, x, R"("needs":["y"],)"), "a merged set has no \"needs\""},
+        {merged(kTwo, ""), "\"signals\" lists none"},
+        /* "base_modules" */
+        {merged(kTwo, x, R"("base_modules":"mock",)"),
+         "\"base_modules\" 'mock' isn't a set whose modules a merged set "
+         "reads: only \"obd2\""},
+        {merged(kTwo, x, R"("base_modules":"obd2","extends":"obd2",)"),
+         "a merged set takes \"extends\" or \"base_modules\", not both"},
+        {doc_with_base_modules(),
+         "\"base_modules\" is a merged set's: a file with no \"parts\" takes "
+         "none"},
         {merged("7", x), "part 0 is a number, not an object"},
         /* A part */
         {merged(R"({"name":"P","format":3,"source":{"name":"s"}})", x),
