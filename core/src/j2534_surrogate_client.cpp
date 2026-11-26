@@ -221,7 +221,6 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     /* The DLL path reaches the child as UTF-16 on its command line. */
     wchar_t wdll[ECUIO_J2534_DLL_PATH_LEN];
     if (!ecuio_utf8_to_wide(dll_path, wdll, _countof(wdll))) {
-        SUR_LOG(nullptr, "open: dll path is not UTF-8 or too long\n");
         ecuio_detail_set("the DLL path isn't valid UTF-8, or is too long");
         return ECUIO_ERR_LOAD_FAILED;
     }

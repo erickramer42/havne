@@ -247,11 +247,12 @@ void log_refused_reply(const ecuio_j2534_sur_handle_t* h,
 
 namespace ecuio_sur_client {
 
-/* Client trace line to stderr and the session log (a GUI launch has no
- * stderr), local-time stamped like the child's. One WriteFile per line so
- * the two sides never splice mid-line. h may be null. */
+/* One WriteFile per line; never stderr, whose handle a host's dup2 can free for a pipe to reuse */
 void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
 {
+    if (h == nullptr || h->log == INVALID_HANDLE_VALUE) {
+        return;
+    }
     SYSTEMTIME t;
     GetLocalTime(&t);
     char line[512];
@@ -268,14 +269,10 @@ void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
     va_end(ap);
     size_t len = strlen(line);
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) --len;
-    line[len] = '\0';
-    fprintf(stderr, "%s\n", line);
-    if (h != nullptr && h->log != INVALID_HANDLE_VALUE) {
-        line[len++] = '\r';
-        line[len++] = '\n';
-        DWORD written = 0;
-        (void)WriteFile(h->log, line, static_cast<DWORD>(len), &written, nullptr);
-    }
+    line[len++] = '\r';
+    line[len++] = '\n';
+    DWORD written = 0;
+    (void)WriteFile(h->log, line, static_cast<DWORD>(len), &written, nullptr);
 }
 
 /* One request and its reply. frames receives a READ's messages (room for

@@ -5,6 +5,11 @@
 
 #ifdef _WIN32
 
+#include "session_log_dir.h"
+
+#include <fcntl.h>
+#include <io.h>
+
 /* A vendor PassThruOpen that blocks (adapter absent) must
  * fail at the open's timeout with the child ALIVE, not wedge and
  * not require process-death to detect. The child inherits the parent's
@@ -19,9 +24,9 @@ TEST(J2534SurrogateTest, BlockedVendorOpenFailsAtHandshakeTimeout)
     const auto t0 = std::chrono::steady_clock::now();
 
     ecuio_j2534_sur_handle_t* h = nullptr;
-    testing::internal::CaptureStderr();
+    SessionLogDir logs;
     const ecuio_status_t rc = ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h);
-    const std::string log = testing::internal::GetCapturedStderr();
+    const std::string log = logs.text();
     const std::string detail = ecuio_last_error_detail();
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -85,6 +90,34 @@ TEST(J2534SurrogateTest, ClientAndChildLinesShareTheSessionLog)
         pos = eol + 1;
     }
     EXPECT_GE(lines, 4);   /* client spawn line + child startup stages */
+}
+
+/* A host's stderr may be a stale handle that the session's pipe reuses */
+TEST(J2534SurrogateTest, TheClientsLinesNeverReachTheHostsStderr)
+{
+    char dir[MAX_PATH] = {};
+    char path[MAX_PATH] = {};
+    ASSERT_GT(GetTempPathA(MAX_PATH, dir), 0u);
+    ASSERT_NE(GetTempFileNameA(dir, "ers", 0, path), 0u);
+    fflush(stderr);
+    const int saved = _dup(_fileno(stderr));
+    const int into = _open(path, _O_WRONLY | _O_TRUNC);
+    ASSERT_GE(saved, 0);
+    ASSERT_GE(into, 0);
+    ASSERT_EQ(_dup2(into, _fileno(stderr)), 0);
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    const ecuio_status_t opened =
+        ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h);
+    const ecuio_status_t closed = ecuio_j2534_sur_close(h);
+    fflush(stderr);
+    _dup2(saved, _fileno(stderr));
+    _close(saved);
+    _close(into);
+    EXPECT_EQ(opened, ECUIO_OK);
+    EXPECT_EQ(closed, ECUIO_OK);
+    const std::string err = read_session_log(path);
+    DeleteFileA(path);
+    EXPECT_EQ(err.find("[sur "), std::string::npos) << err;
 }
 
 namespace {
