@@ -208,7 +208,7 @@ ecuio_status_t find_plan(const ecuio_session_t* s,
 ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                            const ecuio_bound_channel* b)
 {
-    if (b == nullptr && ecuio_session_wants_consent(s, channel)) {
+    if (b == nullptr && ecuio_session_channel_wants_consent(s, channel)) {
         return refuse(ECUIO_ERR_CONSENT_REQUIRED,
                       "no consent was given to the plugin whose code talks "
                       "on this channel");
