@@ -73,6 +73,34 @@ TEST_F(J2534HealthTest, VxAReplyEndsTheReadThatWaitsForIt)
     EXPECT_LT(p50, 10000u) << "the read held its slice past the reply";
 }
 
+/* Each reply 94 ms after its request, inside the 100 ms wait: the fake
+ * answers an empty read at once, so the last read before the deadline
+ * comes about 90 ms in, before the reply. The pass reads what the
+ * adapter holds before it ends the wait, so no request times out */
+TEST_F(J2534HealthTest, AReplyInTheAdapterWhenItsWaitRunsOutAnswersIt)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "94"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kPollRpm));
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ASSERT_EQ(ecuio_session_get_timing(session, &t, rows.data(),
+                                           static_cast<uint32_t>(rows.size()),
+                                           &count),
+                  ECUIO_OK);
+        if (count == 1 && rows[0].answered + rows[0].timeouts >= 8) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    ASSERT_EQ(count, 1u);
+    EXPECT_GE(rows[0].answered, 8u);
+    EXPECT_EQ(rows[0].timeouts, 0u) << "a reply in the adapter was lost";
+}
+
 /* PID 0x5F is one the fake's ECU doesn't support, and it answers
  * 7F 01 12, as the first vehicle did for 0x5C. The negative reply ends
  * the request like a positive one, so requests keep the floor's pace

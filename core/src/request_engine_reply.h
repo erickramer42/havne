@@ -62,6 +62,32 @@ inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
     return false;
 }
 
+/* How far a read from read_at to read_end covered, asked to wait
+ * timeout_us: an empty read that waited it out to its end, so a vendor
+ * that holds its reads costs no read more; any other to its start */
+inline int64_t ecuio_engine_read_covers(int64_t read_at, int64_t read_end,
+                                        int64_t timeout_us, bool got)
+{
+    return !got && read_end - read_at >= timeout_us ? read_end : read_at;
+}
+
+/* Whether a wait has run out at now that no read covered: its deadline
+ * past read_us, the time up to which the adapter is known to have held
+ * nothing more. A reply that came before it may wait in the adapter,
+ * so the worker reads before ecuio_engine_expire ends the wait */
+inline bool ecuio_engine_wait_unread(const ecuio_request_engine* e,
+                                     int64_t read_us, int64_t now_us)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        if (ch.outstanding != ECUIO_ENGINE_NONE && ch.deadline_us <= now_us &&
+            ch.deadline_us > read_us) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Ends channel c's request once its wait has run out: true when one
  * timed out, which is that request's outcome. Its reply may still come,
  * so the channel is out of step until a positive reply. A bitmap that

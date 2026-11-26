@@ -2,7 +2,8 @@
 // Testing: UNIT: RequestCountsTest (each module's lost, busy, pending and
 //          late replies and the engine's overflow and refused-write counts,
 //          ecuio_engine_counts in request_engine_state.h, counted in
-//          request_engine_reply.h; ADR-0065 section 11)
+//          request_engine_reply.h; ADR-0065 section 11); RequestEngineTest
+//          (a wait run out that no read covered, ecuio_engine_wait_unread)
 
 #include <gtest/gtest.h>
 
@@ -44,6 +45,34 @@ struct OneRow {
 };
 
 const Bytes kRpm = {0x41, 0x0C, 0x1A, 0xF8};
+
+/* A wait run out whose deadline no read covered (ecuio_engine_wait_unread):
+ * the worker reads before it ends the wait. A read that covered the
+ * deadline, a wait not yet run out, or one ended, leaves nothing unread */
+TEST(RequestEngineTest, AWaitRunOutThatNoReadCoveredIsUnread)
+{
+    OneRow t;
+    constexpr int64_t d = ECUIO_ENGINE_WAIT_US;
+    EXPECT_FALSE(ecuio_engine_wait_unread(&t.e, 0, d)) << "nothing out";
+    t.send(0);
+    EXPECT_FALSE(ecuio_engine_wait_unread(&t.e, 0, d - 1)) << "still waiting";
+    EXPECT_TRUE(ecuio_engine_wait_unread(&t.e, d - 1, d));
+    EXPECT_TRUE(ecuio_engine_wait_unread(&t.e, 0, d + 50 * kMs));
+    EXPECT_FALSE(ecuio_engine_wait_unread(&t.e, d, d)) << "read to it";
+    EXPECT_FALSE(ecuio_engine_wait_unread(&t.e, d + 1, d + 2));
+    EXPECT_TRUE(ecuio_engine_expire(&t.e, 0, d));
+    EXPECT_FALSE(ecuio_engine_wait_unread(&t.e, 0, d)) << "ended";
+}
+
+/* An empty read that waited out its timeout covers to its end; one that
+ * returned early, or brought a frame, only to its start */
+TEST(RequestEngineTest, AReadCoversToItsEndOnlyEmptyAndWaitedOut)
+{
+    EXPECT_EQ(ecuio_engine_read_covers(90, 100, 10, false), 100);
+    EXPECT_EQ(ecuio_engine_read_covers(90, 101, 10, false), 101);
+    EXPECT_EQ(ecuio_engine_read_covers(90, 99, 10, false), 90) << "early";
+    EXPECT_EQ(ecuio_engine_read_covers(90, 100, 10, true), 90) << "a frame";
+}
 
 TEST(RequestCountsTest, AWaitRunOutWithNothingIsALostReply)
 {

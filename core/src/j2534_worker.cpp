@@ -13,6 +13,8 @@
 //          The hold (Known Issue #42): UNIT: J2534HoldTest; on the fake,
 //          tests/test_j2534_hold_bus.cpp (J2534HealthTest)
 //          The filters following the modules: J2534ModulesTest
+//          Read before a wait ends: J2534HealthTest.AReplyInTheAdapter
+//          WhenItsWaitRunsOutAnswersIt
 //
 // The J2534 session's worker: the read pump, a request's write, the
 // link-health feed and the close's 10 01. j2534_transport.cpp starts it
@@ -390,6 +392,9 @@ struct worker_state {
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
     ecuio_modules_seen modules_seen; /* what ecuio_take_modules took */
     int64_t timing_at = 0;
+    /* how far the last read covered (ecuio_engine_wait_unread): an empty
+     * read that waited out its timeout to its end, any other its start */
+    int64_t read_us = 0;
     /* made after attach's ecuio_engine_init: its chosen rows are this
      * table's, and it ends with the worker */
     j2534_hold hold;
@@ -430,11 +435,52 @@ void begin_worker(ecuio_j2534_transport* t, worker_state& w)
     }
 }
 
+/* A read's matched frame, to the engine, the conversations and the hold */
+void take_reply(ecuio_j2534_transport* t, worker_state& w,
+                const read_outcome& o)
+{
+    if (!w.requests || !o.matched) {
+        return;
+    }
+    ecuio_request_engine& e = w.e;
+    /* the refresh interval on the adapter's clock (ADR-0042) */
+    e.stamp_set = true;
+    e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
+    e.stamp_breaks = t->clock.host_steps;
+    (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len, engine_now_us(t),
+                                nullptr);
+    ecuio_conversations_frame(t->session, &e, o.chan, o.payload, o.len);
+    j2534_hold_answered(w.hold, &e, o.chan);
+}
+
+/* Read first, then expire: a reply that reached the adapter after the
+ * last read and by its deadline answers its request, though the worker
+ * comes to the wait late (a host held up, a vendor whose empty read
+ * returns at once). One read for each channel at most, until one is
+ * empty; a read of 1 ms, since 0 asks for none that waits (the VX holds
+ * it 50 ms) */
+void read_before_expiry(ecuio_j2534_transport* t, worker_state& w)
+{
+    if (!ecuio_engine_wait_unread(&w.e, w.read_us, engine_now_us(t))) {
+        return;
+    }
+    for (uint32_t k = 0; k < t->chan_count; ++k) {
+        const read_outcome o = pump_one(t, 1);
+        take_reply(t, w, o);
+        update_health(w.h, o, false);
+        if (!o.got) {
+            break;
+        }
+    }
+    w.read_us = engine_now_us(t);
+}
+
 void pass_start(ecuio_j2534_transport* t, worker_state& w)
 {
     link_judge_waiting(w.h);
     if (w.requests) {
         ecuio_key_windows_judge(&w.e, w.h);
+        read_before_expiry(t, w);
         ask_channels(t, w.e, w.h, w.hold);
     }
 }
@@ -477,17 +523,12 @@ read_step read_pass(ecuio_j2534_transport* t, worker_state& w)
             return rs;
         }
     } else {
+        const int64_t read_at = engine_now_us(t);
         o = pump_one(t, rs.timeout_ms);
-        if (requests && o.matched) {
-            /* the refresh interval on the adapter's clock (ADR-0042) */
-            e.stamp_set = true;
-            e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
-            e.stamp_breaks = t->clock.host_steps;
-            (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
-                                        engine_now_us(t), nullptr);
-            ecuio_conversations_frame(t->session, &e, o.chan, o.payload, o.len);
-            j2534_hold_answered(w.hold, &e, o.chan);
-        }
+        const int64_t read_end = engine_now_us(t);
+        w.read_us = ecuio_engine_read_covers(
+            read_at, read_end, int64_t{rs.timeout_ms} * 1000, o.got);
+        take_reply(t, w, o);
         const bool unpicked = !asking && ecuio_engine_unpicked(&e);
         update_health(w.h, o, !asking && !unpicked);
         if (unpicked && !hard_read(o)) {
