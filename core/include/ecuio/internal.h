@@ -428,8 +428,7 @@ ecuio_status_t ecuio_j2534_stop_msg_filter(ecuio_j2534_handle_t* handle,
                                            unsigned long channel,
                                            unsigned long filter_id);
 
-/* A line of core's own in the session's log (the surrogate client's, with
- * its stamp; standard error too). handle may be NULL: stderr alone. */
+/* A line of core's own in the session's log; a NULL handle drops it */
 void ecuio_j2534_log_line(ecuio_j2534_handle_t* handle, const char* line);
 
 /* PassThruReadVersion relay: the adapter's firmware, its DLL and the

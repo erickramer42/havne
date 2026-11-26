@@ -112,6 +112,68 @@ TEST(J2534SurrogateTest, ACloseFailsWhenTheChildExitedOnItsOwn)
         << log;
 }
 
+/* A failed write may leave part of a request in the pipe: the handle is done */
+TEST(J2534SurrogateTest, AFailedRequestWriteEndsTheHandle)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    const DWORD pid = fake_control::opener_pid(page);
+    ASSERT_NE(pid, 0u);
+    ASSERT_NE(pid, GetCurrentProcessId());
+    HANDLE child = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pid);
+    ASSERT_NE(child, nullptr);
+    ASSERT_TRUE(TerminateProcess(child, 9));
+    EXPECT_EQ(WaitForSingleObject(child, 5000), WAIT_OBJECT_0);
+    CloseHandle(child);
+
+    unsigned long channel = 0;
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel),
+              ECUIO_ERR_SURROGATE_FAILED);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+
+    const std::string log = read_session_log(path);
+    size_t writes = 0;
+    for (size_t at = log.find("transact: ov_write failed");
+         at != std::string::npos;
+         at = log.find("transact: ov_write failed", at + 1)) {
+        ++writes;
+    }
+    EXPECT_EQ(writes, 1u) << log;
+    EXPECT_NE(log.find("close: the child had already exited (code 9)"),
+              std::string::npos)
+        << log;
+}
+
+/* The fake's PassThruClose ends the child with 11 after it answers OP_SHUTDOWN */
+TEST(J2534SurrogateTest, ACloseNamesTheExitCodeOfAChildEndingAtShutdown)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_FAKE_EXIT_ON_CLOSE", "1");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_ERR_SURROGATE_FAILED);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(
+        log.find("close: the child didn't shut down cleanly (exit code 11)"),
+        std::string::npos)
+        << log;
+}
+
 /* A reply the client never asked for (the child answers OP_CONNECT
  * twice, ECUIO_SUR_TEST_REPLY_TWICE) leaves the pipe one reply behind:
  * the next transaction reads the reply before its own. That's the pipe
@@ -345,6 +407,48 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
             DeleteFileA(p->c_str());
         }
     }
+}
+
+/* The knob splits the first request (OP_OPEN): the child must assemble it, not end */
+TEST(J2534SurrogateTest, ASplitRequestIsAssembledNotTakenForAClosedPipe)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_SUR_TEST_SPLIT_REQUEST", "8");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    unsigned char mask[4] = {};
+    unsigned char pattern[4] = {};
+    unsigned long filter_id = 0;
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(
+                  h, channel, ECUIO_PT_PASS_FILTER, mask, sizeof(mask), pattern,
+                  sizeof(pattern), nullptr, 0, 0, &filter_id),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    const std::string log = read_session_log(path);
+    EXPECT_NE(log.find("read in two pieces, 8 bytes"), std::string::npos)
+        << log;
+}
+
+/* A value the knob can't split by leaves the read whole and says nothing */
+TEST(J2534SurrogateTest, ASplitKnobOutOfRangeSplitsNothing)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_SUR_TEST_SPLIT_REQUEST", "100000");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    const std::string path = ecuio_j2534_sur_log_path(h);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+    const std::string log = read_session_log(path);
+    EXPECT_EQ(log.find("read in two pieces"), std::string::npos) << log;
 }
 
 #endif // _WIN32
