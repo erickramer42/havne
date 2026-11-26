@@ -200,6 +200,7 @@ void settle_seed(ecuio_conversation* v, ecuio_request_engine* e,
         word_ended(v, e, conv_unlock::ended, ECUIO_GUEST_ENDED, res.nrc);
         return;
     default: /* the session was lost meanwhile: the attempt is over */
+        ecuio_security::seed_after_loss(v->access, res.end, res.nrc, now_us);
         ecuio_engine_key_window_end(e, v->channel);
         return;
     }
