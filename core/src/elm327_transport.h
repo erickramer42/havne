@@ -179,8 +179,10 @@ struct ecuio_elm327_transport {
      * takes its lines only with frame logging */
     bool in_ask = false;
     /* The command out is a security access's: its key and every line of
-     * its reply are cut from the wire log (access_cut.h) */
+     * its reply are cut from the wire log (access_cut.h); or a memory
+     * read's (cut_memory): its reply's lines are */
     bool cutting = false;
+    bool cut_memory = false;
     char cut_sent[ELM327_CMD_MAX + ECUIO_ACCESS_CUT_TEXT + 4] = {};
     /* BUFFER FULL came: the next frame dispatched carries
      * ECUIO_FRAME_FLAG_OVERFLOW */

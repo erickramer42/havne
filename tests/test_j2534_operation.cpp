@@ -5,8 +5,9 @@
 // A plugin's dump run in a J2534 session behind the test door (ADR-0066
 // section 4), end to end through the public calls and the surrogate
 // against the fake DLL's engine ECU, whose memory is the simulated ECU's:
-// the copy saved is the memory's bytes, a read that differs between the
-// two passes keeps nothing, and a cancel leaves the folder empty.
+// the copy saved is the memory's bytes and none of them is in the
+// surrogate's session log, a read that differs between the two passes
+// keeps nothing, and a cancel leaves the folder empty.
 
 #include <gtest/gtest.h>
 
@@ -16,7 +17,13 @@
 #include "fake_ecu.h"
 #include "j2534_backend_fixture.h"
 #include "operation_plan_support.h"
+#include "sha256.h" /* core/src */
 
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -26,6 +33,25 @@ using session_operation::kHighAt;
 using session_operation::kHighBytes;
 using session_operation::kLowAt;
 using session_operation::kLowBytes;
+
+/* Every surrogate session log in TEMP written from since on */
+std::vector<std::string> logs_since(std::filesystem::file_time_type since)
+{
+    namespace fs = std::filesystem;
+    std::vector<std::string> out;
+    for (const auto& e : fs::directory_iterator(fs::temp_directory_path())) {
+        const std::string name = e.path().filename().u8string();
+        if (name.rfind("ecuio-surrogate", 0) != 0 ||
+            e.path().extension() != ".log" || e.last_write_time() < since) {
+            continue;
+        }
+        std::ifstream in(e.path(), std::ios::binary);
+        std::stringstream all;
+        all << in.rdbuf();
+        out.push_back(all.str());
+    }
+    return out;
+}
 
 class J2534OperationTest : public j2534_backends::BackendTest
 {
@@ -94,6 +120,9 @@ protected:
 
 TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
 {
+    const j2534_backends::EnvSwap frame_logging("ECUIO_SUR_LOG_FRAMES", "1");
+    const auto since =
+        std::filesystem::file_time_type::clock::now() - std::chrono::seconds(2);
     conversation_session::Session s;
     ASSERT_NO_FATAL_FAILURE(open(&s));
     ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
@@ -111,6 +140,28 @@ TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
     EXPECT_EQ(ecuio_session_close(s.get()), ECUIO_OK);
     EXPECT_EQ(files(), std::vector<std::string>{v.name})
         << "the close keeps a sealed copy";
+    s.reset();
+    /* The surrogate's session log: a read's answer and a transfer's as
+     * zeroes after the bytes kept, with the length and SHA-256 of what
+     * was cut, and none of the memory's bytes */
+    const std::string cut_read = "07 E8 63 00 00 00 00";
+    const std::string first_chunk = "(256 bytes cut, SHA-256 " +
+                                    ecuio_sha256::hex_of(want.data(), 256) +
+                                    ")";
+    std::string eight;
+    for (size_t i = 0; i < 8; ++i) {
+        char b[4];
+        std::snprintf(b, sizeof b, i > 0 ? " %02X" : "%02X", want[i]);
+        eight += b;
+    }
+    bool ours = false;
+    for (const std::string& log : logs_since(since)) {
+        EXPECT_EQ(log.find(eight), std::string::npos) << eight;
+        ours = ours || (log.find(cut_read) != std::string::npos &&
+                        log.find(first_chunk) != std::string::npos &&
+                        log.find("07 E8 76 01 00 00 00") != std::string::npos);
+    }
+    EXPECT_TRUE(ours) << "no session log holds the cut answers";
 }
 
 /* The fake's memory answers every third data reply with one bit wrong:

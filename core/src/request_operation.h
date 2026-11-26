@@ -39,6 +39,7 @@
 
 #include "conversation_bind.h"
 #include "operation_session.h"
+#include "recorder.h"
 #include "request_engine.h"
 #include "session.h"
 
@@ -147,10 +148,18 @@ inline void publish(ecuio_session_t* s, session_run& o)
     v.bytes_done = o.r.handed;
 }
 
+/* A recording's operation line for the run's start (end NONE) or end */
+inline void record_line(ecuio_session_t* s, const session_run& o, uint32_t end)
+{
+    ecuio_record_operation(s->record_link.get(), o.p->id.c_str(), o.p->rx_id,
+                           image_bytes(*o.p), end);
+}
+
 /* The run's end to the view, and the run back to the caller */
 inline void end_run(ecuio_session_t* s, session_run& o, uint32_t end,
                     const char* words)
 {
+    record_line(s, o, end);
     {
         const std::lock_guard<std::mutex> lock(s->support_mutex);
         ecuio_operation_state_t& v = o.view;
@@ -428,6 +437,7 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
         begin(o->r, *o->p);
         o->began_us = now_us;
         e->operation_hold = true;
+        record_line(s, *o, ECUIO_OPERATION_END_NONE);
         stage = kStageRunning;
         o->stage.store(stage, std::memory_order_release);
     }

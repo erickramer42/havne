@@ -16,6 +16,7 @@
 #include "conversation_bind.h"
 #include "error_detail.h"
 #include "operation_session.h"
+#include "recorder.h"
 #include "request_engine_ident.h"
 #include "session.h"
 
@@ -363,6 +364,14 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         const bool saved = sealing && o->sink->state() == sink_state::saved;
+        /* An armed run never began: it has no start line to end */
+        if (stage == ecuio_operation::kStageRunning) {
+            ecuio_record_operation(s->record_link.get(), o->p->id.c_str(),
+                                   o->p->rx_id,
+                                   ecuio_operation::image_bytes(*o->p),
+                                   saved ? ECUIO_OPERATION_END_SAVED
+                                         : ECUIO_OPERATION_END_CANCELED);
+        }
         const std::lock_guard<std::mutex> lock(s->support_mutex);
         ecuio_operation_state_t& v = o->view;
         v.phase = ECUIO_OPERATION_PHASE_DONE;

@@ -594,3 +594,47 @@ TEST(CoreConversationTest, ASecurityAccessIsCutFromTheRecording)
         << rows;
     EXPECT_EQ(events.find("  cut  "), std::string::npos);
 }
+
+/* A module's memory stays out of a recording as a seed does: a read's
+ * answer is zeroes past its service, a transfer's past its block counter,
+ * each with its cut line; a refusal and a request are recorded whole */
+TEST(CoreConversationTest, AMemoryReadsAnswerIsCutFromTheRecording)
+{
+    DoorOpen open;
+    const std::vector<std::vector<uint8_t>> frames = {
+        {0x63, 0x11, 0x22, 0x33, 0x44},
+        {0x76, 0x01, 0x11, 0x22, 0x33, 0x44},
+        {0x7F, 0x23, 0x31},
+        {0x75, 0x20, 0x01, 0x02}};
+    std::string rows;
+    std::string events;
+    {
+        Bound bound;
+        make_session(&bound, made());
+        ASSERT_NO_FATAL_FAILURE(
+            recorded(bound, "memory_cut", frames, &rows, &events));
+    }
+    EXPECT_NE(rows.find(",0x7E8,0x500,63 00 00 00 00\n"), std::string::npos)
+        << rows;
+    EXPECT_NE(rows.find(",0x7E8,0x500,76 01 00 00 00 00\n"), std::string::npos)
+        << rows;
+    EXPECT_EQ(rows.find("11 22 33 44"), std::string::npos) << rows;
+    EXPECT_NE(rows.find(",0x7E8,0x100,7F 23 31\n"), std::string::npos);
+    EXPECT_NE(rows.find(",0x7E8,0x100,75 20 01 02\n"), std::string::npos);
+    const std::string sum =
+        ": 4 bytes cut, SHA-256 "
+        "1a835ed8734f86355ca5b835d824d486993aabf1913cd3a011b7446c0514b7c9\n";
+    EXPECT_NE(events.find("  cut  0x7E8 63" + sum), std::string::npos)
+        << events;
+    EXPECT_NE(events.find("  cut  0x7E8 76 01" + sum), std::string::npos)
+        << events;
+    {
+        Bound bound;
+        make_session(&bound, made(), "mock://x");
+        ASSERT_NO_FATAL_FAILURE(
+            recorded(bound, "memory_uncut", frames, &rows, &events));
+    }
+    EXPECT_NE(rows.find(",0x7E8,0x100,63 11 22 33 44\n"), std::string::npos)
+        << rows;
+    EXPECT_EQ(events.find("  cut  "), std::string::npos);
+}

@@ -43,18 +43,34 @@ void append_u64(std::string& out, uint64_t v)
 }
 
 /* A frame's bytes as frames.csv holds them, "67 01 00 00": zeroes past
- * the sub-function where the frame is a security access cut */
-void append_bytes(std::string& out, const uint8_t* p, uint16_t n, bool cut)
+ * its first kept where the frame is cut (kept 0: whole) */
+void append_bytes(std::string& out, const uint8_t* p, uint16_t n, size_t kept)
 {
     static const char kHex[] = "0123456789ABCDEF";
     for (uint16_t i = 0; i < n; ++i) {
         if (i > 0) {
             out += ' ';
         }
-        const uint8_t b = cut && i >= ECUIO_ACCESS_KEPT ? 0 : p[i];
+        const uint8_t b = kept != 0 && i >= kept ? 0 : p[i];
         out += kHex[b >> 4];
         out += kHex[b & 0x0F];
     }
+}
+
+/* A cut frame's words for its cut line, "0x7E8 67 01: " or "0x7E8 63: "
+ * (the ID and the bytes kept), then the length and SHA-256 of the rest */
+std::string cut_text(uint32_t id, const uint8_t* p, uint16_t n, size_t kept)
+{
+    char text[ECUIO_ACCESS_CUT_TEXT + 32];
+    int at = std::snprintf(text, sizeof text, "0x%X", id);
+    for (size_t i = 0; i < kept; ++i) {
+        at += std::snprintf(text + at, sizeof text - static_cast<size_t>(at),
+                            " %02X", p[i]);
+    }
+    at += std::snprintf(text + at, sizeof text - static_cast<size_t>(at), ": ");
+    ecuio_capture_cut_text(p, n, kept, text + at,
+                           sizeof text - static_cast<size_t>(at));
+    return text;
 }
 
 void append_hex(std::string& out, uint32_t v)
@@ -309,6 +325,18 @@ void ecuio_recorder::take_modules(const uint8_t* body, size_t size)
     written_no_room = mb.no_room;
 }
 
+void ecuio_recorder::take_operation(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(operation_body)) {
+        return;
+    }
+    operation_body ob;
+    std::memcpy(&ob, body, sizeof ob);
+    ob.id[sizeof ob.id - 1] = '\0';
+    event_line(ob.host_us, "operation",
+               operation_text(ob.id, ob.rx, ob.bytes, ob.end));
+}
+
 /* The link transition and module states the worker carried and never
  * put, written at the close */
 void ecuio_recorder::take_carried()
@@ -431,17 +459,14 @@ void ecuio_recorder::take_frame(const uint8_t* body, size_t size)
     frame_out += ',';
     append_hex(frame_out, fb.flags);
     frame_out += ',';
-    const bool cut = (fb.flags & ECUIO_FRAME_FLAG_ACCESS_CUT) != 0 &&
-                     ecuio_access_cut(body + at, fb.length);
-    append_bytes(frame_out, body + at, fb.length, cut);
+    const size_t kept = (fb.flags & ECUIO_FRAME_FLAG_ACCESS_CUT) != 0
+                            ? ecuio_capture_kept(body + at, fb.length)
+                            : 0;
+    append_bytes(frame_out, body + at, fb.length, kept);
     frame_out += '\n';
-    if (cut) {
-        char text[ECUIO_ACCESS_CUT_TEXT + 32];
-        const int n = std::snprintf(text, sizeof text, "0x%X %02X %02X: ",
-                                    fb.id, body[at], body[at + 1]);
-        ecuio_access_cut_text(body + at, fb.length, text + n,
-                              sizeof text - static_cast<size_t>(n));
-        event_line(fb.host_us, "cut", text);
+    if (kept != 0) {
+        event_line(fb.host_us, "cut",
+                   cut_text(fb.id, body + at, fb.length, kept));
     }
     at += fb.length;
     frame_rows.fetch_add(1, std::memory_order_relaxed);
@@ -527,6 +552,9 @@ bool ecuio_recorder::drain_ring()
             break;
         case kRecordModules:
             take_modules(scratch.data(), body);
+            break;
+        case kRecordOperation:
+            take_operation(scratch.data(), body);
             break;
         default:
             break;

@@ -141,6 +141,17 @@ void ecuio_record_modules(ecuio_record_link* link, uint32_t closed,
                           uint32_t no_room, const uint8_t* reasons,
                           uint32_t count);
 
+/* When a run of an operation starts or ends (ecuio/operation.h), on the
+ * requesting worker or, for a run the close ends, on the closing thread
+ * once the worker has joined: the plan's id, its module's reply ID, the
+ * image's bytes and the end (ECUIO_OPERATION_END_NONE at the start),
+ * pinned here; link may be NULL. One that doesn't fit is carried, the
+ * latest, as a link transition is. The line never names the copy: its
+ * name is the module's contents' checksum, and recordings get shared.
+ * Never blocks, never allocates. */
+void ecuio_record_operation(ecuio_record_link* link, const char* id,
+                            uint32_t rx, uint64_t bytes, uint32_t end);
+
 /* On a requesting worker, as it publishes reply timing: the rows every
  * 10 s of session time and when final, pinned here; link may be NULL.
  * The final one, the worker's last record, waits up to 1 s for room and

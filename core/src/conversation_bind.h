@@ -130,10 +130,11 @@ static_assert(ECUIO_CONSENT_LOG_LINE_MAX >
               "the line holds the longest id, version and prefix");
 bool ecuio_consent_log_line(const ecuio_session_t* session, char* out,
                             size_t cap);
-/* Whether frame is a security access (access_cut.h) on the request or
- * response ID of a channel the part talks on: cut from the recording */
-bool ecuio_session_cuts_access(const ecuio_session_t* session,
-                               const ecuio_frame_t* frame);
+/* Whether frame is a security access or a memory read's answer
+ * (access_cut.h) on the request or response ID of a channel the part
+ * talks on: cut from the recording */
+bool ecuio_session_cuts_frame(const ecuio_session_t* session,
+                              const ecuio_frame_t* frame);
 
 /* At start, before the worker: binds what section 1 says, or nothing.
  * ECUIO_ERR_LOAD_FAILED or ECUIO_ERR_OUT_OF_MEMORY with nothing bound;

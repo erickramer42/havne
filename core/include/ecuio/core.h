@@ -49,7 +49,12 @@ typedef struct ecuio_session ecuio_session_t;
                                                          their length and
                                                          SHA-256 in events.log's
                                                          cut line (ADR-0066
-                                                         section 5) */
+                                                         section 5); a memory
+                                                         read's 63 after its
+                                                         service and 76 after
+                                                         its block counter
+                                                         the same way
+                                                         (section 4) */
 
 /* The most payload a frame carries: room for a whole ISO 15765-2 message
  * on classic CAN (4095 bytes, its 12-bit length), so a reassembled

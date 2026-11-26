@@ -314,10 +314,10 @@ bool ecuio_session_talks_on(const ecuio_session_t* session, uint32_t c)
                                   &session->module_tx[c], 1);
 }
 
-bool ecuio_session_cuts_access(const ecuio_session_t* session,
-                               const ecuio_frame_t* frame)
+bool ecuio_session_cuts_frame(const ecuio_session_t* session,
+                              const ecuio_frame_t* frame)
 {
-    if (!ecuio_access_cut(frame->data, frame->data_length)) {
+    if (ecuio_capture_kept(frame->data, frame->data_length) == 0) {
         return false;
     }
     const uint32_t id = frame->arbitration_id;

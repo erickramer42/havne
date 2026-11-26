@@ -5,8 +5,9 @@
 // A plugin's dump run in an ELM327 session behind the test door (ADR-0066
 // section 4), end to end through the public calls against the fake
 // ELM327, whose engine ECU's memory is the simulated ECU's: a plan whose
-// requests fit one frame is copied whole, and one asked in more bytes
-// than the adapter types is refused before anything is sent.
+// requests fit one frame is copied whole with none of its bytes in the
+// wire log, and one asked in more bytes than the adapter types is refused
+// before anything is sent.
 
 #include <gtest/gtest.h>
 
@@ -17,6 +18,7 @@
 #include "operation_plan_support.h"
 #include "test_elm327_support.h"
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -95,15 +97,39 @@ protected:
 
 TEST_F(Elm327OperationTest, APlanThatFitsAFrameIsCopiedWhole)
 {
-    conversation_session::Session s;
-    ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
-    ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
-    const ecuio_operation_state_t v = session_operation::ended(s.get());
-    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
-    EXPECT_EQ(v.bytes_done, 2u * kLowBytes);
-    ASSERT_EQ(files(), std::vector<std::string>{v.name});
-    EXPECT_EQ(session_operation::image_at(folder_.at(v.name)),
-              session_operation::memory_of(fake_ecu::kVin, kLowAt, kLowBytes));
+    const EnvSet frame_logging("ECUIO_SUR_LOG_FRAMES", "1");
+    const LogDir logs("elm327-operation");
+    const std::vector<uint8_t> memory =
+        session_operation::memory_of(fake_ecu::kVin, kLowAt, kLowBytes);
+    {
+        conversation_session::Session s;
+        ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
+        ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = session_operation::ended(s.get());
+        ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+        EXPECT_EQ(v.bytes_done, 2u * kLowBytes);
+        ASSERT_EQ(files(), std::vector<std::string>{v.name});
+        EXPECT_EQ(session_operation::image_at(folder_.at(v.name)), memory);
+    }
+    /* The wire log: each read's command whole, its reply's lines as
+     * their length and SHA-256, and none of the memory's bytes: seven of
+     * them, a Consecutive Frame's worth, spaced or not */
+    const std::string log = logs.only_log();
+    EXPECT_NE(log.find("> 231301000080"), std::string::npos) << log;
+    EXPECT_NE(log.find("< (a memory read's line, cut: "), std::string::npos)
+        << log;
+    EXPECT_NE(log.find("< (a security access's line, cut: "),
+              std::string::npos);
+    std::string spaced;
+    std::string bare;
+    for (size_t i = 5; i < 12; ++i) {
+        char b[4];
+        std::snprintf(b, sizeof b, "%02X", memory[i]);
+        spaced += std::string(i > 5 ? " " : "") + b;
+        bare += b;
+    }
+    EXPECT_EQ(log.find(spaced), std::string::npos) << spaced;
+    EXPECT_EQ(log.find(bare), std::string::npos) << bare;
 }
 
 TEST_F(Elm327OperationTest, APlanAskedInMoreThanAFrameIsRefusedAtTheStart)
