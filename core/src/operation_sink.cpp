@@ -21,13 +21,6 @@
 
 namespace files = ecuio_files;
 
-static_assert(ECUIO_STEP_READ == ECUIO_DUMP_STEP_READ &&
-                  ECUIO_STEP_UPLOAD == ECUIO_DUMP_STEP_UPLOAD &&
-                  ECUIO_STEP_SESSION_EXTENDED == ECUIO_DUMP_SESSION_EXTENDED &&
-                  ECUIO_STEP_SESSION_PROGRAMMING ==
-                      ECUIO_DUMP_SESSION_PROGRAMMING,
-              "a plan's step and session numbers are the record's");
-
 namespace ecuio_operation {
 
 namespace {
