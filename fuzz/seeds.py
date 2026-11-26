@@ -25,7 +25,8 @@
 # from nothing the fuzzer rarely gets a module past its header.
 # fuzz_sim's are runs of requests that enter the simulated ECU's extended
 # session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
-# would have to guess; and URIs whose faults aim at one module.
+# would have to guess; a run of the enhanced DIDs; and URIs whose faults
+# aim at one module.
 # fuzz_guest's are guest modules (seeds_wasm.py's guest_seeds()): from
 # nothing the fuzzer never writes the guest ABI's six exports.
 # fuzz_conversation's are runs that unlock a level, and inputs the fuzzer
@@ -668,6 +669,10 @@ def main(argv):
         "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
     }.items():
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
+    # The enhanced DIDs ('E' after the ECU's byte), the drive cycle's car
+    enhanced = sim_run(0x00, [b"\x22\xFD\x00", b"\x22\xFD\x05", b"\x22\xFD\x06",
+                              b"\x22\xFD\x80", b"\x22\xFD\x81"])
+    write(out, "fuzz_sim", "enhanced", enhanced[:1] + b"E" + enhanced[1:])
     # Its URIs (an odd first byte): faults and timing for every module and
     # aimed at one
     for name, uri in {
@@ -679,6 +684,7 @@ def main(argv):
         "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
         "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
         "uri-busy-bus": "mock://sim?modules=2&busy=ignore,21@7E9&bus=500",
+        "uri-enhanced": "mock://sim?enhanced=1&faults=late:3@7E9",
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
 

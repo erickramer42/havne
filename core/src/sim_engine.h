@@ -13,6 +13,7 @@
 #include "sim_session.h"
 #include "sim_security.h"
 #include "sim_recording.h"
+#include "sim_enhanced.h"
 #include <cstdint>
 #include <cstring>
 
@@ -46,6 +47,21 @@ inline uint32_t ecuio_sim_answer_did(const uint8_t* req, uint32_t len,
         }
     }
     return n;
+}
+
+inline uint32_t ecuio_sim_answer_22(ecuio_sim_ecu& e, const uint8_t* req,
+                                    uint32_t len, uint8_t* out, bool extended,
+                                    const ecuio_sim_security* security,
+                                    const ecuio_sim_memory* memory)
+{
+    const uint32_t n =
+        e.config.enhanced
+            ? ecuio_sim_enhanced_answer(e.enhanced, e.car, ECUIO_SIM_REPLY_ID,
+                                        req, len, out)
+            : 0;
+    return n != 0 ? n
+                  : ecuio_sim_answer_did(req, len, out, extended, security,
+                                         memory);
 }
 
 /* The ECU's reply to req (len bytes, the service byte first) into out
@@ -133,7 +149,7 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
             break;
         }
     } else if (service == 0x22) {
-        n = ecuio_sim_answer_did(req, len, out, extended, security, memory);
+        n = ecuio_sim_answer_22(e, req, len, out, extended, security, memory);
     } else {
         n = refuse(service, 0x11, out);
     }

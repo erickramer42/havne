@@ -1,0 +1,73 @@
+{
+  "sim_enhanced_truth": 1,
+  "uri": "mock://?enhanced=1",
+  "byte": "from the first data byte, after 62 and the DID",
+  "dids": [
+    {"module": "7E8", "request": "7E0", "did": "FD00", "fields": [
+        {"id": 19000, "key": "rpm", "name": "Engine speed", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "le", "signed": false, "scale": 0.25, "offset": 0, "unit": "RPM", "wanted": "engine_speed"},
+        {"id": 19001, "key": "coolant", "name": "Coolant", "kind": "signal", "byte": 2, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 0.1, "offset": 0, "unit": "°C", "wanted": "coolant_temp"},
+        {"id": 19002, "key": "iat", "name": "Intake air", "kind": "signal", "byte": 4, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 0.75, "offset": -48, "unit": "°C", "wanted": "intake_air_temp"},
+        {"id": 19003, "key": "map", "name": "Manifold pressure", "kind": "signal", "byte": 5, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.01, "offset": 0, "unit": "kPa", "wanted": "manifold_pressure"},
+        {"id": 19004, "key": "speed", "name": "Road speed", "kind": "signal", "byte": 7, "bit": 0, "bits": 16, "order": "le", "signed": false, "scale": 0.01, "offset": 0, "unit": "km/h", "wanted": "vehicle_speed"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD01", "fields": [
+        {"id": 19005, "key": "load", "name": "Load", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.0015259021896696422, "offset": 0, "unit": "%", "wanted": "engine_load"},
+        {"id": 19006, "key": "throttle", "name": "Throttle", "kind": "signal", "byte": 2, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 0.39215686274509803, "offset": 0, "unit": "%", "wanted": "throttle_position"},
+        {"id": 19007, "key": "maf", "name": "Air flow", "kind": "signal", "byte": 3, "bit": 0, "bits": 16, "order": "le", "signed": false, "scale": 0.01, "offset": 0, "unit": "g/s", "wanted": "mass_air_flow"},
+        {"id": 19008, "key": "baro", "name": "Barometric pressure", "kind": "signal", "byte": 5, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 0.5, "offset": 0, "unit": "kPa", "wanted": "barometric_pressure"},
+        {"id": 19009, "key": "battery", "name": "Battery", "kind": "signal", "byte": 6, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.001, "offset": 0, "unit": "V", "wanted": "battery_voltage"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD02", "fields": [
+        {"id": 19010, "key": "timing", "name": "Ignition timing", "kind": "signal", "byte": 0, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 0.5, "offset": -64, "unit": "deg", "wanted": "ignition_timing"},
+        {"id": 19011, "key": "knock", "name": "Knock retard", "kind": "signal", "byte": 1, "bit": 0, "bits": 8, "order": "le", "signed": true, "scale": 0.25, "offset": 0, "unit": "deg", "wanted": "knock_retard"},
+        {"id": 19012, "key": "knock_1", "name": "Knock retard cylinder 1", "kind": "signal", "byte": 2, "bit": 0, "bits": 8, "order": "le", "signed": true, "scale": 0.25, "offset": 0, "unit": "deg", "wanted": "knock_retard"},
+        {"id": 19013, "key": "knock_2", "name": "Knock retard cylinder 2", "kind": "signal", "byte": 3, "bit": 0, "bits": 8, "order": "le", "signed": true, "scale": 0.25, "offset": 0, "unit": "deg", "wanted": "knock_retard"},
+        {"id": 19014, "key": "knock_3", "name": "Knock retard cylinder 3", "kind": "signal", "byte": 4, "bit": 0, "bits": 8, "order": "le", "signed": true, "scale": 0.25, "offset": 0, "unit": "deg", "wanted": "knock_retard"},
+        {"id": 19015, "key": "knock_4", "name": "Knock retard cylinder 4", "kind": "signal", "byte": 5, "bit": 0, "bits": 8, "order": "le", "signed": true, "scale": 0.25, "offset": 0, "unit": "deg", "wanted": "knock_retard"},
+        {"id": 19016, "key": "adaptation", "name": "Knock adaptation", "kind": "signal", "byte": 6, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 0.39215686274509803, "offset": 0, "unit": "%", "wanted": "knock_adaptation"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD03", "fields": [
+        {"id": 19017, "key": "cam_target", "name": "Intake cam target", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 0.01, "offset": 0, "unit": "deg", "wanted": "intake_cam_target"},
+        {"id": 19018, "key": "cam", "name": "Intake cam", "kind": "signal", "byte": 2, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 0.01, "offset": 0, "unit": "deg", "wanted": "intake_cam"},
+        {"id": 19019, "key": "lambda_commanded", "name": "Commanded lambda", "kind": "signal", "byte": 4, "bit": 0, "bits": 16, "order": "le", "signed": false, "scale": 3.0517578125e-05, "offset": 0, "unit": "", "wanted": "lambda_commanded"},
+        {"id": 19020, "key": "lambda", "name": "Lambda", "kind": "signal", "byte": 6, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 3.0517578125e-05, "offset": 0, "unit": "", "wanted": "lambda"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD04", "fields": [
+        {"id": 19021, "key": "oil", "name": "Oil temperature", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "le", "signed": true, "scale": 0.1, "offset": 0, "unit": "°C", "wanted": "oil_temp"},
+        {"id": 19022, "key": "boost_target", "name": "Boost target", "kind": "signal", "byte": 2, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 0.1, "offset": 0, "unit": "kPa", "wanted": "boost_target"},
+        {"id": 19023, "key": "boost", "name": "Boost", "kind": "signal", "byte": 4, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 0.1, "offset": 0, "unit": "kPa", "wanted": "boost"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD05", "fields": [
+        {"id": 19024, "key": "brake", "name": "Brake", "kind": "bit", "byte": 0, "bit": 0, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "brake_switch"},
+        {"id": 19025, "key": "clutch", "name": "Clutch", "kind": "bit", "byte": 0, "bit": 1, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "clutch_switch"},
+        {"id": 19026, "key": "fan", "name": "Fan", "kind": "bit", "byte": 0, "bit": 2, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "cooling_fan"},
+        {"id": 19027, "key": "door", "name": "Door", "kind": "bit", "byte": 0, "bit": 3, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "door_open", "on_in_key_on": [2, 4]},
+        {"id": 19028, "key": "lights", "name": "Lights", "kind": "bit", "byte": 0, "bit": 4, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "headlights", "on_in_key_on": [6, 8]},
+        {"id": 19029, "key": "ac", "name": "A/C request", "kind": "bit", "byte": 0, "bit": 5, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "ac_request", "on_in_key_on": [10, 12]}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD06", "fields": [
+        {"id": 19030, "key": "counter", "name": "Counter", "kind": "counter", "byte": 0, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null},
+        {"id": 19031, "key": "noise", "name": "Noise", "kind": "noise", "byte": 1, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null},
+        {"id": 19032, "key": "static_a", "name": "Static A", "kind": "static", "byte": 3, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 90},
+        {"id": 19033, "key": "static_b", "name": "Static B", "kind": "static", "byte": 4, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 195},
+        {"id": 19034, "key": "static_c", "name": "Static C", "kind": "static", "byte": 5, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 1},
+        {"id": 19035, "key": "checksum", "name": "Checksum", "kind": "checksum", "byte": 6, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null}
+    ]},
+    {"module": "7E9", "request": "7E1", "did": "FD80", "fields": [
+        {"id": 19036, "key": "tft", "name": "Fluid temperature", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.125, "offset": -40, "unit": "°C", "wanted": "transmission_fluid_temp"},
+        {"id": 19037, "key": "gear_commanded", "name": "Commanded gear", "kind": "signal", "byte": 2, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "gear_commanded"},
+        {"id": 19038, "key": "gear", "name": "Gear", "kind": "signal", "byte": 3, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "gear"},
+        {"id": 19039, "key": "output_rpm", "name": "Output shaft speed", "kind": "signal", "byte": 4, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "RPM", "wanted": "output_shaft_speed"},
+        {"id": 19040, "key": "input_rpm", "name": "Input shaft speed", "kind": "signal", "byte": 6, "bit": 0, "bits": 16, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "RPM", "wanted": "turbine_speed"},
+        {"id": 19041, "key": "slip", "name": "Slip", "kind": "signal", "byte": 8, "bit": 0, "bits": 16, "order": "be", "signed": true, "scale": 1, "offset": 0, "unit": "RPM", "wanted": "converter_slip"},
+        {"id": 19042, "key": "locked", "name": "Locked", "kind": "bit", "byte": 10, "bit": 0, "bits": 1, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": "converter_lock"},
+        {"id": 19043, "key": "line_pressure", "name": "Line pressure", "kind": "signal", "byte": 11, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "kPa", "wanted": "line_pressure"}
+    ]},
+    {"module": "7E9", "request": "7E1", "did": "FD81", "fields": [
+        {"id": 19044, "key": "tcm_counter", "name": "Counter", "kind": "counter", "byte": 0, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null},
+        {"id": 19045, "key": "tcm_static_a", "name": "Static A", "kind": "static", "byte": 1, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 0},
+        {"id": 19046, "key": "tcm_static_b", "name": "Static B", "kind": "static", "byte": 2, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 127},
+        {"id": 19047, "key": "tcm_checksum", "name": "Checksum", "kind": "checksum", "byte": 3, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null}
+    ]}
+  ]
+}

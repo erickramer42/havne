@@ -8,22 +8,25 @@
 #define ECUIO_SIM_MODULE_H
 
 #include "sim_types.h"
+#include "sim_enhanced.h"
 #include <cstdint>
 #include <cstring>
 
-/* The second module's reply (modules=2, on 0x7E1, answering on 0x7E9)
- * to req into out, its length; 0 for none. Service 22 from its own DIDs,
- * 7F 22 31 for one it lacks, 7F <service> 11 for any other service; a
- * functional request's refusals unsaid, as the engine ECU's */
+/* A functional request's refusals go unsaid, as the engine ECU's */
 inline uint32_t ecuio_sim_module_answer(const uint8_t* req, uint32_t len,
-                                        bool functional, uint8_t* out)
+                                        bool functional, uint8_t* out,
+                                        ecuio_sim_ecu* enhanced = nullptr)
 {
     using namespace ecuio_sim_detail;
     if (len == 0) {
         return 0;
     }
     uint32_t n = 0;
-    if (req[0] == 0x22) {
+    if (req[0] == 0x22 && enhanced != nullptr) {
+        n = ecuio_sim_enhanced_answer(enhanced->enhanced, enhanced->car,
+                                      ECUIO_SIM_MODULE_REPLY_ID, req, len, out);
+    }
+    if (n == 0 && req[0] == 0x22) {
         n = refuse(0x22, 0x31, out);
         if (len == 3) {
             const uint16_t did = static_cast<uint16_t>((req[1] << 8) | req[2]);
@@ -38,7 +41,7 @@ inline uint32_t ecuio_sim_module_answer(const uint8_t* req, uint32_t len,
                 }
             }
         }
-    } else {
+    } else if (n == 0) {
         n = refuse(req[0], 0x11, out);
     }
     if (functional && out[0] == 0x7F) {

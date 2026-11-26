@@ -23,7 +23,7 @@ extern "C" {
  *
  * The URI, one of:
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
- *          [&sessions=0|1]
+ *          [&sessions=0|1][&enhanced=0|1]
  *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *          [&gateway=<request ID>:<reply ID>|1][&behind=<reply ID>[,...]]
  *          [&route=<class or service>:<outcome>[.<NRC>][@<reply ID>][,...]]
@@ -55,6 +55,9 @@ extern "C" {
  * session (profile.h's lifetime). sessions=1 (only with profile=): each
  * of the set's modules has the extended session too (10 03 enters it,
  * 3E 00 keeps it, S3 of silence leaves it), with no security access.
+ * enhanced=1 (no profile=, values=drive): modules=2, the engine ECU
+ * answering made-up DIDs FD00-FD06 and the module FD80-FD81 from the
+ * drive cycle.
  * mem: the engine ECU's memory, which it has while no profile's set
  * answers for it (mem= is refused where one does). The memory is made
  * up for the simulated car, no module's: in the extended session, once
@@ -270,7 +273,9 @@ ecuio_status_t ecuio_sim_get_stats(const ecuio_sim_t* sim,
  * field decodes to, rounded to the field's step. From any thread.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL sim; ECUIO_ERR_INVALID_ARGUMENT,
  * the value unchanged, for a sim with no profile, a signal that isn't
- * one of its DIDs' numeric fields, or a value its field can't hold. */
+ * one of its DIDs' numeric fields, or a value its field can't hold.
+ * With enhanced=1, an enhanced DID's bit (its id in the truth file)
+ * takes 0 or 1 and holds it. */
 ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,
                                    double value);
 

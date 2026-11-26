@@ -100,10 +100,16 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
             },
             out, ECUIO_SIM_REPLY_MAX);
     }
+    if (s->ecu.config.enhanced) {
+        const uint64_t held = s->enhanced_held.load(std::memory_order_relaxed);
+        s->ecu.enhanced.held_mask = static_cast<uint32_t>(held >> 32);
+        s->ecu.enhanced.held_on = static_cast<uint32_t>(held);
+    }
     if (n.role == sim_role::engine) {
         return ecuio_sim_answer(s->ecu, n.session, req, len, functional, out);
     }
-    return ecuio_sim_module_answer(req, len, functional, out);
+    return ecuio_sim_module_answer(req, len, functional, out,
+                                   s->ecu.config.enhanced ? &s->ecu : nullptr);
 }
 
 ecuio_sim_gateway_verdict route(ecuio_sim* s, const sim_node& n,
@@ -516,6 +522,37 @@ void ask_node(ecuio_sim* sim, sim_node& node, const uint8_t* request,
  * through it */
 constexpr int64_t kCatchUpUs = 3600LL * 1000000;
 
+ecuio_status_t hold_enhanced_bit(ecuio_sim_t* sim, size_t index, double value)
+{
+    const unsigned id = ecuio_sim_enhanced_fields()[index].def.id;
+    if (!sim->ecu.config.enhanced) {
+        ecuio_detail_set("signal %u is an enhanced DID's: the simulated ECU "
+                         "answers them only with enhanced=1",
+                         id);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const int place = ecuio_sim_enhanced_bit_place(index);
+    if (place < 0) {
+        ecuio_detail_set("signal %u follows the drive cycle: only the "
+                         "enhanced DIDs' bits take a value",
+                         id);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (value != 0.0 && value != 1.0) {
+        ecuio_detail_set("signal %u is a bit: 0 or 1", id);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const uint64_t bit = 1ull << place;
+    uint64_t held = sim->enhanced_held.load(std::memory_order_relaxed);
+    uint64_t next = 0;
+    do {
+        next = (held | (bit << 32)) & ~bit;
+        next |= value == 1.0 ? bit : 0u;
+    } while (!sim->enhanced_held.compare_exchange_weak(
+        held, next, std::memory_order_relaxed));
+    return ECUIO_OK;
+}
+
 } // namespace
 
 ecuio_status_t ecuio_sim_load_recording(const std::string& path,
@@ -814,6 +851,10 @@ ecuio_status_t ecuio_sim_set_value(ecuio_sim_t* sim, uint16_t signal_id,
     ecuio_detail_clear();
     if (sim == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const int enhanced = ecuio_sim_enhanced_index(signal_id);
+    if (enhanced >= 0) {
+        return hold_enhanced_bit(sim, static_cast<size_t>(enhanced), value);
     }
     if (sim->set == nullptr) {
         ecuio_detail_set("the simulated ECU answers no profile's DIDs "

@@ -14,6 +14,7 @@
 #include "ecuio/vin.h"
 #include "mock_drive_cycle.h"
 #include "recording_stretch.h"
+#include "sim_enhanced_model.h"
 #include "sim_faults.h"
 #include "sim_gateway.h"
 #include "sim_memory.h"
@@ -90,6 +91,7 @@ struct ecuio_sim_config {
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     bool sessions = false;      /* mock: sessions=1, the profile's modules */
+    bool enhanced = false;      /* mock: enhanced=1 */
     ecuio_sim_gateway_config gateway; /* mock: gateway= and its keys */
     ecuio_sim_memory_faults memory;   /* mock: mem=, the engine ECU's */
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
@@ -113,6 +115,7 @@ struct ecuio_sim_ecu {
     ecuio_mock::DriveCycle car; /* values=drive: stepped by the bus side */
     float engine_s = 0.0f;      /* time since the engine last started */
     bool cleared = false;       /* a 04 was obeyed */
+    ecuio_sim_enhanced_state enhanced;
 };
 
 /* One tick (kTickS of the ECU's time): its clock runs; the mock's drive
@@ -126,6 +129,9 @@ inline void ecuio_sim_tick(ecuio_sim_ecu& e)
     }
     const bool was = e.car.running;
     e.car.step();
+    if (e.config.enhanced) {
+        ecuio_sim_enhanced_step(e.enhanced, e.car);
+    }
     if (!e.car.running) {
         e.engine_s = 0.0f;
     } else {

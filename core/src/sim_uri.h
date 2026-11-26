@@ -71,7 +71,7 @@ inline bool take_source(const char* uri, ecuio_sim_config* out,
     return true;
 }
 
-/* values=, modules= and sessions= */
+/* values=, modules=, sessions= and enhanced= */
 inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
                              char* why, size_t why_cap)
 {
@@ -106,7 +106,34 @@ inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
         out->sessions = value_is(p, "1");
         return taken::ok;
     }
+    if (p.is("enhanced")) {
+        if (!value_is(p, "0") && !value_is(p, "1")) {
+            std::snprintf(why, why_cap,
+                          "enhanced: 0 or 1 (the engine ECU and the second "
+                          "module answer the enhanced DIDs)");
+            return taken::bad;
+        }
+        out->enhanced = value_is(p, "1");
+        return taken::ok;
+    }
     return taken::other;
+}
+
+inline bool judge_enhanced(ecuio_sim_config* out, char* why, size_t why_cap)
+{
+    if (out->enhanced && out->profile_len != 0) {
+        std::snprintf(why, why_cap,
+                      "enhanced=1 is the simulated car's own DIDs: a "
+                      "profile's set answers for its modules instead");
+        return false;
+    }
+    if (out->enhanced && out->values != ecuio_sim_values::drive) {
+        std::snprintf(why, why_cap,
+                      "enhanced=1 follows the drive cycle: values=drive");
+        return false;
+    }
+    out->second_module = out->second_module || out->enhanced;
+    return true;
 }
 
 /* profile= */
@@ -306,7 +333,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     static const char* const kMockKeys[] = {
         "values", "modules", "sessions", "profile",  "vin", "faults",  "delay",
         "fc",     "cf",      "seed",     "busy",     "bus", "gateway", "behind",
-        "route",  "gwopt",   "sa",       "sa_delay", "mem", nullptr};
+        "route",  "gwopt",   "sa",       "sa_delay", "mem", "enhanced",
+        nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
@@ -333,7 +361,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to"
-                             : "values, modules, sessions, profile, "
+                             : "enhanced, values, modules, sessions, profile, "
                                "gateway, behind, route, sa, sa_delay, gwopt, "
                                "mem");
         return ecuio_sim_uri_result::bad;
@@ -343,7 +371,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
             return ecuio_sim_uri_result::bad;
         }
     }
-    if (!ecuio_sim_gateway_judge(out->gateway, why, why_cap)) {
+    if (!ecuio_sim_gateway_judge(out->gateway, why, why_cap) ||
+        !ecuio_sim_uri_detail::judge_enhanced(out, why, why_cap)) {
         return ecuio_sim_uri_result::bad;
     }
     if (out->profile_len != 0 && out->second_module) {

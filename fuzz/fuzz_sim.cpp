@@ -204,6 +204,19 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         if (n > ECUIO_SIM_REPLY_MAX || reply[ECUIO_SIM_REPLY_MAX] != 0xEE) {
             abort();
         }
+        if (e.config.enhanced) {
+            uint8_t module[ECUIO_SIM_REPLY_MAX + 16];
+            memset(module, 0xEE, sizeof module);
+            const uint32_t m = ecuio_sim_module_answer(
+                data + at, static_cast<uint32_t>(len), functional, module, &e);
+            if (m > ECUIO_SIM_REPLY_MAX ||
+                module[ECUIO_SIM_REPLY_MAX] != 0xEE ||
+                (m > 0 && module[0] != 0x7F &&
+                 module[0] != (data[at] | 0x40))) {
+                abort();
+            }
+            out->append(reinterpret_cast<const char*>(module), m);
+        }
         if (rec == nullptr) {
             check_security(session, data + at, len, reply, n);
             check_memory(session, data + at, len, reply, n);
@@ -308,6 +321,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     config.faults.stalled = (data[0] >> 7) & 1;
     ++data;
     --size;
+    if (size > 0 && data[0] == 'E') {
+        config.enhanced = config.values == ecuio_sim_values::drive;
+        ++data;
+        --size;
+    }
     /* 'R' next: a recording first, then the requests. Its frames: a
      * count byte, then each a length byte (0-15), a flags byte (bit 0 an
      * ID other than the engine ECU's, the rest the frame's flags' low

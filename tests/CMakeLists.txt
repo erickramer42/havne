@@ -194,7 +194,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
     test_sim_gateway_view.cpp test_sim_memory.cpp
-    test_sim_memory_upload.cpp test_sim_memory_faults.cpp
+    test_sim_memory_upload.cpp test_sim_memory_faults.cpp test_sim_enhanced.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp test_operation_run.cpp)
 
@@ -214,6 +214,7 @@ target_compile_definitions(test_obd2 PRIVATE
     ECUIO_OBD2_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/service01.csv"
     ECUIO_OBD2_MONITORS="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obd2/monitors.csv"
     ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+    ECUIO_DISCOVERY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/discovery"
 )
 
 app_enable_warnings(test_obd2)

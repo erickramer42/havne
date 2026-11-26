@@ -65,6 +65,7 @@ struct DriveCycle {
     float phase_s() const { return static_cast<float>(phase_ticks) * kTickS; }
     float run_time_s() const { return static_cast<float>(tick) * kTickS; }
     bool shifting() const { return shift_ticks > 0; }
+    float brake_mps2() const { return brake_mps2_; }
 
     /* Driven-wheel slip over ground speed. */
     float slip() const

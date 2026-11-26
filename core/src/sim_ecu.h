@@ -59,6 +59,7 @@
 #include "sim_pids.h"
 #include "sim_session.h"
 #include "sim_engine.h"
+#include "sim_enhanced.h"
 #include "sim_module.h"
 #include "sim_gateway_route.h"
 #include "sim_uri.h"
