@@ -217,10 +217,13 @@ inline void not_entered(run& r, run_end e, uint8_t nrc = 0)
     stop(r, e, nrc);
 }
 
-/* value in n bytes, most significant first, at out; the place after */
+constexpr unsigned kNumberMax = 4;
+static_assert(kRequestMax == 3 + 2 * kNumberMax, "a 35 fits its request");
+
+/* n is bounded here so GCC can prove the request's buffer holds it */
 inline uint8_t* put_be(uint8_t* out, uint64_t value, unsigned n)
 {
-    for (unsigned i = n; i > 0; --i) {
+    for (unsigned i = n < kNumberMax ? n : kNumberMax; i > 0; --i) {
         *out++ = static_cast<uint8_t>(value >> (8 * (i - 1)));
     }
     return out;

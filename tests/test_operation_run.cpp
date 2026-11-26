@@ -136,6 +136,26 @@ TEST(OperationRunTest, EveryRequestStaysInsideItsRange)
     }
 }
 
+/* No manifest loads such a step: only put_be's bound holds here */
+TEST(OperationRunTest, ARequestNeverPassesItsBuffer)
+{
+    for (const bool upload : {false, true}) {
+        step s = upload ? upload_step(kBase, 64) : read_step(kBase, 64, 64);
+        s.address_bytes = 9;
+        s.size_bytes = 9;
+        const plan p = plan_of({s}, false);
+        ecuio_operation::run r;
+        r.p = &p;
+        r.at = upload ? ecuio_operation::run_stage::upload_open
+                      : ecuio_operation::run_stage::read;
+        ecuio_operation::run_request q;
+        ecuio_operation::write_request(r, q);
+        EXPECT_EQ(q.size, (upload ? 3u : 2u) + 4u + 4u);
+        EXPECT_LE(q.size, sizeof q.bytes);
+        EXPECT_EQ(q.session, 0u) << "written past the bytes";
+    }
+}
+
 TEST(OperationRunTest, AnUploadIsOpenedTwiceAndItsCounterWraps)
 {
     Drive d(plan_of({upload_step(kBase, 4000)}));
