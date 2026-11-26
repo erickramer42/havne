@@ -102,6 +102,9 @@ static uint32_t g_reply_twice = 0;
  * default) is off. */
 static uint32_t g_skew = 0;
 
+/* ECUIO_SUR_TEST_SPLIT_REQUEST=<n>: the first request is read n bytes, then the rest */
+static bool g_split_read = false;
+
 static void stage(const char* fmt, ...)
 {
     /* Local wall-clock time, the same stamp the client puts on its
@@ -563,6 +566,36 @@ static int handle_op_stop_filter(unsigned long channel_id, unsigned long filter_
     return static_cast<int>(rc);
 }
 
+/* A byte-mode pipe may split a request; a failed or zero-byte read is the client gone */
+static bool read_request(ecuio_sur_request_t* req)
+{
+    DWORD want = sizeof(*req);
+    char split[16] = {};
+    if (!g_split_read && GetEnvironmentVariableA("ECUIO_SUR_TEST_SPLIT_REQUEST",
+                                                 split, sizeof(split)) > 0) {
+        const DWORD n = static_cast<DWORD>(strtoul(split, nullptr, 0));
+        if (n > 0 && n < want) {
+            want = n;
+        }
+        stage("the first request is read in two pieces, %lu bytes then the "
+              "rest (ECUIO_SUR_TEST_SPLIT_REQUEST)",
+              want);
+    }
+    g_split_read = true;
+    DWORD have = 0;
+    while (have < sizeof(*req)) {
+        DWORD rd = 0;
+        if (!ReadFile(g_pipe, reinterpret_cast<char*>(req) + have, want - have,
+                      &rd, nullptr) ||
+            rd == 0) {
+            return false;
+        }
+        have += rd;
+        want = sizeof(*req);
+    }
+    return true;
+}
+
 /* Wide entry point: the client passes the DLL path as UTF-16, so a
  * non-ASCII path survives (an ANSI argv would mangle it). */
 int wmain(int argc, wchar_t* argv[])
@@ -689,9 +722,9 @@ int wmain(int argc, wchar_t* argv[])
 
     while (true) {
         ecuio_sur_request_t req = {};
-        DWORD rd = 0;
-        if (!ReadFile(g_pipe, &req, sizeof(req), &rd, nullptr) ||
-            rd != sizeof(req)) break;
+        if (!read_request(&req)) {
+            break;
+        }
 
         ecuio_sur_response_t resp = {};
         resp.request_id = req.request_id;

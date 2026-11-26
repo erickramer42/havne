@@ -347,4 +347,27 @@ TEST(J2534SurrogateTest, SecondConcurrentSessionGetsItsOwnLog)
     }
 }
 
+/* The knob splits the first request (OP_OPEN): the child must assemble it, not end */
+TEST(J2534SurrogateTest, ASplitRequestIsAssembledNotTakenForAClosedPipe)
+{
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    {
+        EnvArm arm("ECUIO_SUR_TEST_SPLIT_REQUEST", "8");
+        ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+                  ECUIO_OK);
+    }
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+    unsigned char mask[4] = {};
+    unsigned char pattern[4] = {};
+    unsigned long filter_id = 0;
+    EXPECT_EQ(ecuio_j2534_sur_start_msg_filter(
+                  h, channel, ECUIO_PT_PASS_FILTER, mask, sizeof(mask), pattern,
+                  sizeof(pattern), nullptr, 0, 0, &filter_id),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_stop_msg_filter(h, channel, filter_id), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_disconnect_channel(h, channel), ECUIO_OK);
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
 #endif // _WIN32

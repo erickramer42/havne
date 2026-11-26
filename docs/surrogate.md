@@ -226,6 +226,12 @@ names every missing export, so the log alone identifies the gap;
   opcode a frame on a reply that takes none (never `OP_OPEN` or
   `OP_SHUTDOWN`). The frames claimed are never sent. The three
   `J2534SurrogateTest` cases named for those replies use it.
+- `ECUIO_SUR_TEST_SPLIT_REQUEST=<n>`: the child reads the first
+  request (the `OP_OPEN`) in two pieces, `n` bytes then the rest, as
+  a byte-mode pipe may hand a request over; the child assembles whole
+  requests and ends only at a failed or zero-byte read.
+  `ASplitRequestIsAssembledNotTakenForAClosedPipe` uses it; `n` below
+  the request's size, 0 (the default) off.
 - `ECUIO_FAKE_CONTROL`: names the fake's control page
   (`tests/fake_control.h`), a named shared-memory page the test process
   creates. Whichever fake instance serves the session reads it on every
