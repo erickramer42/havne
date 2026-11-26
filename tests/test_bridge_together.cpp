@@ -441,6 +441,22 @@ TEST(BridgeTest, TogetherKeepsTheSetASyncConnectsHandlerRetires)
     EXPECT_TRUE(disconnectAndWait(t.bridge));
 }
 
+TEST(BridgeTest, TogetherKeysTheCacheOnThePickedOwnVariant)
+{
+    Together t;
+    const QString a = t.keep(part(QStringLiteral("Alpha"), "a", "D100"));
+    const QString b = t.keep(part(QStringLiteral("Beta"), "b", "D200"));
+    (void)t.bridge.vehicleSet({a, b}, {});
+    const QVariantMap owned = t.bridge.vehicleSet({a, b}, b);
+    QStringList own;
+    for (const QVariant& p : owned.value(QStringLiteral("parts")).toList()) {
+        if (p.toMap().value(QStringLiteral("own")).toBool()) {
+            own << p.toMap().value(QStringLiteral("profile")).toString();
+        }
+    }
+    EXPECT_EQ(own, QStringList{b});
+}
+
 TEST(BridgeTest, TogetherFileOfSetIsTheMergedFile)
 {
     Together t;

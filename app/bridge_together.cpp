@@ -230,9 +230,11 @@ QVariantMap mergedAnswer(const ecuio_signal_file_t* file, const QString& own)
 }
 
 // A plugin's new version is a new copy hash, so it merges again
-QString keyOf(const PluginStore::Parts& parts, const QString& label)
+QString keyOf(const PluginStore::Parts& parts, const QString& own,
+              const QString& label)
 {
-    QStringList key{parts.obd2 ? QStringLiteral("obd2") : QStringLiteral("-")};
+    QStringList key{parts.obd2 ? QStringLiteral("obd2") : QStringLiteral("-"),
+                    parts.profiles.contains(own) ? own : QString()};
     for (qsizetype i = 0; i < parts.profiles.size(); ++i) {
         key << parts.profiles.at(i) + QLatin1Char('@') + parts.hashes.at(i);
     }
@@ -260,7 +262,7 @@ QVariantMap SessionBridge::vehicleSet(const QStringList& picks,
                                       const QString& own, const QString& label)
 {
     const PluginStore::Parts parts = m_pluginStore.partFiles(picks, own);
-    const QString key = keyOf(parts, label);
+    const QString key = keyOf(parts, own, label);
     if (!m_together.key.isEmpty() && key == m_together.key) {
         return m_together.answer;
     }
