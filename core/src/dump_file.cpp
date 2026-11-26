@@ -153,6 +153,11 @@ ecuio_status_t hash_file(ecuio_dump& d, ecuio_cancel_t cancel, void* user,
         }
         at = end;
     }
+    /* A file longer than when the read began was written to meanwhile */
+    if (ecuio_frames_csv::file_size(d.file) != d.file_bytes) {
+        *why = "the file changed since it was opened";
+        return ECUIO_ERR_LOAD_FAILED;
+    }
     uint8_t sum[32];
     image.finish(sum);
     out->sound = std::memcmp(sum, d.h.image_sha256, 32) == 0;

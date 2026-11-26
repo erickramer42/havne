@@ -444,6 +444,31 @@ TEST(DumpFileTest, VerifyRefusesAFileChangedSinceItWasOpened)
     EXPECT_EQ(verify(d), ECUIO_OK) << ecuio_last_error_detail();
 }
 
+int grow(void* user)
+{
+    std::ofstream f(fs::u8path(*static_cast<std::string*>(user)),
+                    std::ios::binary | std::ios::app);
+    f << "x";
+    return 0;
+}
+
+/* A byte added while the file is read: every byte the read took is the
+ * opened file's, and the file is no longer it */
+TEST(DumpFileTest, VerifyRefusesAFileThatGrowsWhileItIsRead)
+{
+    Folder f;
+    const std::string bytes = file_of(record_of());
+    std::string path = f.put_copy(bytes);
+    const Dump d = open_dump(path);
+    ASSERT_NE(d, nullptr);
+    char name[ECUIO_DUMP_NAME_MAX];
+    EXPECT_EQ(ecuio_dump_verify(d.get(), grow, &path, name, sizeof name),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the file changed since it was opened");
+    EXPECT_EQ(read_bytes(path), bytes + "x");
+}
+
 /* The entry of name in the folder's list */
 ecuio_dump_entry_t entry_of(const std::vector<ecuio_dump_entry_t>& list,
                             const std::string& name)
