@@ -66,7 +66,10 @@ extern "C" {
  * fault once in the key (a later one in place of an earlier, a second
  * mem= key adding to the first): short, flip and refuse:<n> make every
  * nth data reply (a 63 or a 76) one byte short, one bit wrong or 7F
- * <service> 22; seq:<n> gives every nth 76 the wrong counter;
+ * <service> 22, the wrong bit another on each pass over the memory (a
+ * 23 at or below the one before, or a new upload), so two reads back to
+ * back never agree on a wrong byte; seq:<n> gives every nth 76 the
+ * wrong counter;
  * relock:<n> locks security again once the nth data reply is made;
  * ident:<n> has D221 answer another text from the nth data reply on (n
  * from 1 to 10000); volatile:<hex offset> makes one byte of the region

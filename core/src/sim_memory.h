@@ -82,7 +82,8 @@ constexpr uint32_t ECUIO_SIM_MEMORY_BLOCK_MAX = 0xFFF;
 struct ecuio_sim_memory_faults {
     bool given = false;  /* a mem= key named any of these */
     uint32_t cut = 0;    /* short: every nth data reply is one byte short */
-    uint32_t flip = 0;   /* every nth data reply has one bit wrong */
+    uint32_t flip = 0;   /* every nth data reply has one bit wrong, the
+                            bit another on each pass */
     uint32_t relock = 0; /* the nth data reply is the last before a lock */
     uint32_t seq = 0;    /* every nth 76 carries the wrong counter */
     uint32_t refuse = 0; /* every nth data reply is 7F <service> 22 */
@@ -110,6 +111,11 @@ struct ecuio_sim_memory {
     uint32_t replies = 0; /* data replies counted */
     uint32_t blocks = 0;  /* 76s counted */
     uint32_t moved = 0;   /* reads of the volatile byte */
+    /* The passes over the memory: a 23 at or below the one before starts
+     * another, and so does each upload */
+    uint32_t pass = 0;
+    uint32_t last = 0; /* the last 23's address, once read is set */
+    bool read = false;
 };
 
 /* The diagnostic session changed, or lapsed: an upload ends with it */
@@ -236,12 +242,14 @@ inline struck strike(ecuio_sim_memory& m)
 }
 
 /* The faults applied to a reply of head bytes and size of data in out;
- * its length */
-inline uint32_t broken(const struck& s, ecuio_sim_security& security,
-                       uint32_t head, uint32_t size, uint8_t* out)
+ * its length. A flip's bit is the pass's, so the same bytes read on two
+ * passes back to back never come out wrong alike. */
+inline uint32_t broken(const struck& s, uint32_t pass,
+                       ecuio_sim_security& security, uint32_t head,
+                       uint32_t size, uint8_t* out)
 {
     if (s.flip) {
-        out[head + s.count % size] ^= static_cast<uint8_t>(1u << (s.count % 8));
+        out[head + s.count % size] ^= static_cast<uint8_t>(1u << (pass % 8));
     }
     if (s.relock) {
         ecuio_sim_security_lock(security);
@@ -280,9 +288,15 @@ inline uint32_t read_bytes(ecuio_sim_memory& m, ecuio_sim_security& security,
         return refuse(0x23, ECUIO_SIM_NRC_CONDITIONS, out);
     }
     const uint32_t size = static_cast<uint32_t>(s.size);
+    const uint32_t address = static_cast<uint32_t>(s.address);
+    if (m.read && address <= m.last) {
+        ++m.pass;
+    }
+    m.read = true;
+    m.last = address;
     out[0] = 0x63;
-    copy_out(m, static_cast<uint32_t>(s.address), size, out + 1);
-    return broken(hit, security, 1, size, out);
+    copy_out(m, address, size, out + 1);
+    return broken(hit, m.pass, security, 1, size, out);
 }
 
 /* 35 <dataFormatIdentifier> <ALFID> <address> <size> */
@@ -313,6 +327,7 @@ inline uint32_t open_upload(ecuio_sim_memory& m,
     m.next = static_cast<uint32_t>(s.address);
     m.left = static_cast<uint32_t>(s.size);
     m.counter = 1;
+    ++m.pass;
     out[0] = 0x75;
     out[1] = 0x20; /* the block length that follows takes two bytes */
     out[2] = static_cast<uint8_t>(m.faults.block >> 8);
@@ -353,7 +368,7 @@ inline uint32_t next_block(ecuio_sim_memory& m, ecuio_sim_security& security,
     m.next += n;
     m.left -= n;
     ++m.counter; /* FF wraps to 00 */
-    return broken(hit, security, 2, n, out);
+    return broken(hit, m.pass, security, 2, n, out);
 }
 
 /* 37: the upload's end */

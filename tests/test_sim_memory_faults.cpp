@@ -187,7 +187,8 @@ TEST(SimMemoryTest, FlipChangesOneBitOfEveryNthDataReplyAtAPlaceByTheCount)
         }
         EXPECT_EQ(bits_apart(got, whole, &at), 1) << "reply " << k;
         EXPECT_EQ(at, 1u + k % 50) << "the byte is the count's";
-        EXPECT_EQ(got[at] ^ whole[at], 1 << (k % 8));
+        EXPECT_EQ(got[at] ^ whole[at], 1 << ((k - 1) % 8))
+            << "the bit is the pass's: each read of one address is a pass";
     }
     EXPECT_EQ(e.ask(read_of(kBase, 50))[0], 0x63)
         << "the service byte is never the one";
@@ -203,6 +204,77 @@ TEST(SimMemoryTest, FlipChangesOneBitOfEveryNthDataReplyAtAPlaceByTheCount)
     ASSERT_EQ(block.size(), want.size());
     EXPECT_EQ(bits_apart(block, want, &at), 1);
     EXPECT_EQ(at, 2u + 1u) << "past the counter";
+}
+
+/* Two passes over the same bytes never agree on a wrong one, whatever
+ * the chunk, the count of replies in a pass and the period: a compare
+ * of the two always tells */
+TEST(SimMemoryTest, TwoPassesWithFlipNeverAgree)
+{
+    const struct {
+        uint32_t chunk;
+        uint32_t bytes;
+        uint32_t flip;
+    } reads[] = {{1, 2048, 8},    {1, 256, 1},    {2, 2048, 8},
+                 {8, 512, 8},     {64, 4096, 4},  {256, 65536, 8},
+                 {256, 65536, 1}, {100, 3000, 3}, {4094, 65536, 2}};
+    for (const auto& r : reads) {
+        Ecu e;
+        e.m.faults.flip = r.flip;
+        Bytes truth = data_of(kBase, r.bytes, e.m.vin);
+        truth.erase(truth.begin()); /* the 63 */
+        Bytes pass[2];
+        for (Bytes& p : pass) {
+            for (uint32_t at = 0; at < r.bytes; at += r.chunk) {
+                const uint32_t n = std::min(r.chunk, r.bytes - at);
+                const Bytes got = e.ask(read_of(kBase + at, n));
+                ASSERT_EQ(got.size(), n + 1u);
+                p.insert(p.end(), got.begin() + 1, got.end());
+            }
+        }
+        const std::string what = "chunk " + std::to_string(r.chunk) + ", " +
+                                 std::to_string(r.bytes) +
+                                 " bytes, flip:" + std::to_string(r.flip);
+        EXPECT_NE(pass[0], truth) << what;
+        EXPECT_NE(pass[1], truth) << what;
+        /* Every chunk either pass got wrong differs between the two */
+        for (uint32_t at = 0; at < r.bytes; at += r.chunk) {
+            const uint32_t n = std::min(r.chunk, r.bytes - at);
+            const auto part = [at, n](const Bytes& b) {
+                return Bytes(b.begin() + at, b.begin() + at + n);
+            };
+            if (part(pass[0]) != part(truth) || part(pass[1]) != part(truth)) {
+                ASSERT_NE(part(pass[0]), part(pass[1])) << what << " at " << at;
+            }
+        }
+    }
+
+    /* An upload's two passes: 8 bytes a block, 64 blocks, every 8th wrong */
+    Ecu u;
+    u.m.faults.flip = 8;
+    u.m.faults.block = 0x0A;
+    Bytes pass[2];
+    for (Bytes& p : pass) {
+        ASSERT_EQ(u.ask(upload_of(kBase, 512))[0], 0x75);
+        for (uint32_t k = 1; k <= 64; ++k) {
+            const Bytes got = u.ask({0x36, static_cast<uint8_t>(k)});
+            ASSERT_EQ(got.size(), 10u) << k;
+            p.insert(p.end(), got.begin() + 2, got.end());
+        }
+        ASSERT_EQ(u.ask({0x37}), (Bytes{0x77}));
+    }
+    Bytes truth = data_of(kBase, 512, u.m.vin);
+    truth.erase(truth.begin());
+    EXPECT_NE(pass[0], truth);
+    EXPECT_NE(pass[1], truth);
+    for (uint32_t at = 0; at < 512; at += 8) {
+        const auto part = [at](const Bytes& b) {
+            return Bytes(b.begin() + at, b.begin() + at + 8);
+        };
+        if (part(pass[0]) != part(truth) || part(pass[1]) != part(truth)) {
+            ASSERT_NE(part(pass[0]), part(pass[1])) << "block at " << at;
+        }
+    }
 }
 
 TEST(SimMemoryTest, AVolatileByteNeverReadsTheSameTwice)
