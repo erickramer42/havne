@@ -438,6 +438,25 @@ TEST(SecurityAccessTest, ALostSessionLocksEveryLevel)
     EXPECT_EQ(a.levels[0].failed, 1u);
 }
 
+/* A seed out when the session was lost, refused 36 or 37 after: the level
+ * it asked waits its delay, nothing counted; another end changes nothing */
+TEST(SecurityAccessTest, ASeedRefusedAfterALostSessionStartsTheDelay)
+{
+    for (const uint8_t nrc : {uint8_t{0x36}, uint8_t{0x37}, uint8_t{0x22}}) {
+        module_access a = two_levels();
+        ASSERT_EQ(ask(a, kOther, kBound, 0).answer, ask_answer::go);
+        EXPECT_FALSE(session_lost(a, kS));
+        seed_after_loss(a, ecuio_talk_end::refused, nrc, 2 * kS);
+        const bool delays = nrc != 0x22;
+        EXPECT_EQ(a.levels[1].wait_until_us,
+                  delays ? 2 * kS + 2 * kDelayMs * kMs : 0)
+            << int{nrc};
+        EXPECT_EQ(a.levels[0].wait_until_us, 0) << int{nrc};
+        EXPECT_EQ(a.levels[1].failed, 0u) << int{nrc};
+        EXPECT_EQ(a.at, phase::idle) << int{nrc};
+    }
+}
+
 /* The delay across sessions, by the store's UTC second: never under 0,
  * never over one whole delay, and a second long since both seconds are
  * cut down */
