@@ -238,7 +238,6 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
     bool log_out_of_memory = false;
     h->log = ecuio_sur_log::open_session_log(
         seq, &inherit_sa, h->log_path, sizeof(h->log_path), &log_out_of_memory);
-    const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
     if (log_out_of_memory) {
         ecuio_j2534_sur_close(h);
         return ECUIO_ERR_OUT_OF_MEMORY;
@@ -365,8 +364,6 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
             exe_from_env ? sur.env8 : "", exe_from_env ? ")" : "", dll_path);
     if (h->log_path[0] != '\0') {
         SUR_LOG(h, "open: log '%s'\n", h->log_path);
-    } else {
-        SUR_LOG(h, "open: no log (err=%lu)\n", log_err);
     }
 
     h->process = pi.hProcess;
