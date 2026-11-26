@@ -16,6 +16,7 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_profiles.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recorder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recordings.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_room.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_sessioninfo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_store.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_support.cpp

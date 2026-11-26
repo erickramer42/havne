@@ -7,9 +7,17 @@ namespace signal_modules {
 
 namespace {
 
-QString moduleName(const ecuio_signal_set_t* set,
-                   const ecuio_signal_file_t* file, uint32_t index)
+QString partName(const ecuio_signal_file_t* file,
+                 const ecuio_signal_def_t& def);
+
+} // namespace
+
+QString nameOf(const ecuio_signal_set_t* set, const ecuio_signal_file_t* file,
+               uint32_t index)
 {
+    if (set == nullptr || index >= set->channel_count) {
+        return {};
+    }
     ecuio_signal_module_t m{};
     m.struct_size = sizeof m;
     if (file != nullptr &&
@@ -23,6 +31,8 @@ QString moduleName(const ecuio_signal_set_t* set,
     }
     return QString::number(set->channels[index].rx_id, 16).toUpper();
 }
+
+namespace {
 
 QString partName(const ecuio_signal_file_t* file, const ecuio_signal_def_t& def)
 {
@@ -74,7 +84,7 @@ std::vector<Row> of(const ecuio_signal_set_t* set,
         const uint32_t m = ecuio_signal_set_def_module(set, &def);
         if (m != ECUIO_SIGNAL_MODULE_NONE && m < set->channel_count) {
             row.module = static_cast<int>(m);
-            row.moduleName = moduleName(set, file, m);
+            row.moduleName = nameOf(set, file, m);
         }
         row.part = file != nullptr ? partName(file, def) : QString();
         byName[QString::fromUtf8(def.name)].push_back(static_cast<int>(i));

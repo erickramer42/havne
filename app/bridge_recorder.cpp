@@ -231,6 +231,20 @@ void SessionBridge::adoptRecorder(ecuio_recorder_t* recorder)
     emit recordingStateChanged();
 }
 
+namespace {
+
+QString noRoomLine(const QStringList& names)
+{
+    return names.isEmpty()
+               ? QString()
+               : QStringLiteral("Logging %1 the adapter has no room for: %2: "
+                                "their columns stay empty")
+                     .arg(signalCountText(static_cast<int>(names.size())),
+                          names.join(QStringLiteral(", ")));
+}
+
+} // namespace
+
 bool SessionBridge::startLog()
 {
     // The activity log's line, and the Dashboard header's notice
@@ -283,6 +297,10 @@ bool SessionBridge::startLog()
     }
     setLogNotice(QString());
     m_logActive = true;
+    const QString noRoom = noRoomLine(m_signalModel->noRoomNames());
+    if (!noRoom.isEmpty()) {
+        emit logMessage(noRoom);
+    }
     // The log owns the focus; its end sets the pick again, with its line
     m_pickLine.clear();
     m_logClock.restart();

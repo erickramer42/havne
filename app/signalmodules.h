@@ -15,6 +15,10 @@ struct Row {
     QString tag;
 };
 
+// The file's entry's name, else its id, else the reply ID; "" past the set's
+QString nameOf(const ecuio_signal_set_t* set, const ecuio_signal_file_t* file,
+               uint32_t module);
+
 // One per def of set, in its order; file may be nullptr (a built-in set)
 std::vector<Row> of(const ecuio_signal_set_t* set,
                     const ecuio_signal_file_t* file,

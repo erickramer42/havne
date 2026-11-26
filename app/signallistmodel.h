@@ -40,6 +40,7 @@ class SignalListModel : public QAbstractListModel
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
     // The rows Live shows that the focus leaves unasked (applyUnasked)
     Q_PROPERTY(int unaskedCount READ unaskedCount NOTIFY unaskedCountChanged)
+    Q_PROPERTY(int noRoomCount READ noRoomCount NOTIFY noRoomCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
@@ -144,7 +145,8 @@ public:
                         * name it by. Fixed per signal set. */
         ModuleRole,    // ecuio_signal_set_def_module's index, -1 for none
         ModuleNameRole,
-        TagRole // what tells apart the rows of one name, "" for a name one row has
+        TagRole, // what tells apart the rows of one name, "" for a name one row has
+        UnaskedWhyRole // "pick" (unasked), "room" (wanted, its module has no room) or ""
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -238,6 +240,11 @@ public:
     // (ecuio_session_get_unasked_signals): those rows say "not asked".
     // Each call judges every row afresh; a new set leaves none unasked.
     void applyUnasked(const std::vector<uint16_t>& ids);
+    // The modules whose report says ECUIO_SUPPORT_NO_ROOM
+    void applyNoRoom(const std::vector<int>& modules);
+    int noRoomCount() const { return m_noRoomCount; }
+    // "<module>'s <name>" for each shown row with no room
+    QStringList noRoomNames() const;
     // The unasked rows Live shows, for its "N signals not asked" line
     int unaskedCount() const { return m_unaskedCount; }
 
@@ -315,6 +322,7 @@ signals:
     void tickedCountChanged();
     void hiddenCountChanged();
     void unaskedCountChanged();
+    void noRoomCountChanged();
     // A tick or untick, or a vehicle's choices set: the default pick
     // follows them
     void ticksChanged();
@@ -348,6 +356,7 @@ private:
         enum class Why : unsigned char { None, Unsupported, Absent };
         Why why = Why::None;      // the reason it's hidden, unsupported first
         bool unasked = false;     // core: the focus leaves it unasked
+        bool noRoom = false;
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
@@ -411,6 +420,9 @@ private:
     int m_tickedCount = 0;
     int m_hiddenCount = 0;
     int m_unaskedCount = 0;
+    std::vector<int> m_noRoomModules;
+    int m_noRoomCount = 0;
+    void rejudgeNoRoom();
     bool m_ranked = false;      // the set ranks a def (plot_rank)
     bool m_pickOnly = false;    // the session is asked only its picks
     // The texts of the last setPlotChoices that no keyed row answered

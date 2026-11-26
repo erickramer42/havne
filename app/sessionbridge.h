@@ -442,6 +442,8 @@ public:
     // The picks the store has as a layout file names what it needs
     // (PluginStore::pickFiles): { profile, name, sha256, from }
     Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
+    // pages: [{ name, cells }], the Dashboard's, cells as setPickGauges takes them
+    Q_INVOKABLE QVariantMap roomHolders(const QVariantList& pages) const;
     Q_INVOKABLE QVariantMap vehicleSet(const QStringList& picks,
                                        const QString& own,
                                        const QString& label = QString());

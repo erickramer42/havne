@@ -139,6 +139,10 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.moduleName;
         case TagRole:
             return e.tag;
+        case UnaskedWhyRole:
+            return e.unasked  ? QStringLiteral("pick")
+                   : e.noRoom ? QStringLiteral("room")
+                              : QString();
         default: return QVariant();
     }
 }
@@ -172,7 +176,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {KeyRole, "key"},
             {ModuleRole, "module"},
             {ModuleNameRole, "moduleName"},
-            {TagRole, "tag"}};
+            {TagRole, "tag"},
+            {UnaskedWhyRole, "unaskedWhy"}};
 }
 
 const char* SignalListModel::whyWords(Entry::Why why)
@@ -260,6 +265,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         m_unaskedCount = 0;
         emit unaskedCountChanged();
     }
+    applyNoRoom({});
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -743,10 +749,51 @@ void SignalListModel::applyUnasked(const std::vector<uint16_t>& ids)
         if (e.unasked != (unasked[row] != 0)) {
             e.unasked = unasked[row] != 0;
             const QModelIndex i = index(static_cast<int>(row));
-            emit dataChanged(i, i, {UnaskedRole});
+            emit dataChanged(i, i, {UnaskedRole, UnaskedWhyRole});
         }
     }
     recountUnasked();
+    rejudgeNoRoom();
+}
+
+void SignalListModel::applyNoRoom(const std::vector<int>& modules)
+{
+    m_noRoomModules = modules;
+    rejudgeNoRoom();
+}
+
+void SignalListModel::rejudgeNoRoom()
+{
+    int count = 0;
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        const bool noRoom =
+            !e.unasked && e.module >= 0 &&
+            std::find(m_noRoomModules.begin(), m_noRoomModules.end(),
+                      e.module) != m_noRoomModules.end();
+        if (e.noRoom != noRoom) {
+            e.noRoom = noRoom;
+            const QModelIndex i = index(static_cast<int>(row));
+            emit dataChanged(i, i, {UnaskedWhyRole});
+        }
+        count += (e.noRoom && !e.hidden) ? 1 : 0;
+    }
+    if (count != m_noRoomCount) {
+        m_noRoomCount = count;
+        emit noRoomCountChanged();
+    }
+}
+
+QStringList SignalListModel::noRoomNames() const
+{
+    QStringList names;
+    for (const Entry& e : m_entries) {
+        if (e.noRoom && !e.hidden) {
+            names << QStringLiteral("%1's %2").arg(e.moduleName,
+                                                   QString::fromUtf8(e.name));
+        }
+    }
+    return names;
 }
 
 void SignalListModel::recountUnasked()
@@ -813,6 +860,7 @@ void SignalListModel::rejudgeHidden()
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
     recountUnasked();
+    rejudgeNoRoom();
     // A hidden row's default place goes to the next ranked row
     judgePlotted();
 }

@@ -203,6 +203,13 @@ void SessionBridge::pollChannelSupport()
     // Live says which signals their ECU refused, and with what (ADR-0051
     // section 3): the drops a negative reply made, by the defs they read
     if (changed) {
+        std::vector<int> noRoom;
+        for (uint32_t c = 0; c < m_channelCount; ++c) {
+            if ((m_supportReports[c].flags & ECUIO_SUPPORT_NO_ROOM) != 0) {
+                noRoom.push_back(static_cast<int>(c));
+            }
+        }
+        m_signalModel->applyNoRoom(noRoom);
         std::vector<SignalListModel::Refusal> refused;
         for (const cli::RefusedSignal& r :
              cli::refused_signals(ecuio_session_signal_set(m_session),
@@ -505,10 +512,26 @@ QString BridgeFormats::refusedUnnamedText(
     return parts.join(QStringLiteral("; "));
 }
 
+namespace {
+
+QStringList moduleStateText(const ecuio_channel_support_t& s)
+{
+    if ((s.flags & ECUIO_SUPPORT_CLOSED) != 0) {
+        return {QStringLiteral("closed: nothing read on it")};
+    }
+    if ((s.flags & ECUIO_SUPPORT_NO_ROOM) != 0) {
+        return {QStringLiteral(
+            "no room: every module the adapter listens to is in use")};
+    }
+    return {};
+}
+
+} // namespace
+
 QString BridgeFormats::channelSupportText(const ecuio_channel_support_t& s)
 {
 
-    QStringList parts;
+    QStringList parts = moduleStateText(s);
     if ((s.flags & ECUIO_SUPPORT_PROBED) != 0) {
         // core's count of the data PIDs, and the last its bitmaps cover
         if ((s.flags & ECUIO_SUPPORT_COMPLETE) != 0) {
