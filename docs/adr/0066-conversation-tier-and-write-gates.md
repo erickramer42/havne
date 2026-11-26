@@ -2296,10 +2296,11 @@ ELM327 and J2534 do.
   Judging the link before create would need a second public call for the
   link's driver, which a front end would then have to keep in step with
   core's judgment; one getter after create keeps the judgment in core.
-- **What is unpinned.** A `can` link's refusal in `havne-cli` runs only on
-  a car's link: the test seam that judges `vcan` a car's link is core's
-  (`internal.h`) and no `havne-cli` flag reaches it. Core's and the app's
-  answers on such a link are pinned through that seam on `vcan0`.
+- **The tests' car link.** `vcan0` stands in for a car's link two ways:
+  `ecuio_socketcan_test_vcan_as_can` (`internal.h`) for core's and the
+  app's cases, and `ECUIO_SOCKETCAN_TEST_VCAN_AS_CAN=1`, read at attach,
+  for a `havne-cli` child. Either can only make a `vcan` link ask consent,
+  never skip one.
 
 - **The ABI.**
 
