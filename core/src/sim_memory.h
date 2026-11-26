@@ -3,8 +3,9 @@
 // Testing: UNIT: SimMemoryTest, FakeMemoryTest (test_obd2)
 //
 // The simulated ECU's memory (ADR-0066 section 4), from the service byte
-// on: a region read by address (service 23) and two identification DIDs,
-// all the caller's state. Everything here is made up for the simulated
+// on: a region read by address (service 23) or uploaded block by block
+// (services 35, 36 and 37) and two identification DIDs, all the caller's
+// state. Everything here is made up for the simulated
 // car: the region's address, its bytes (a function of the address mixed
 // with the letters of "HAVNE") and the DIDs' texts. It is no module's
 // memory map. sim_ecu.h's engine ECU and the fakes' one ECU
@@ -51,16 +52,36 @@ static_assert(sizeof ECUIO_SIM_HARDWARE_TEXT == ECUIO_SIM_IDENT_BYTES + 1 &&
                   sizeof ECUIO_SIM_SOFTWARE_TEXT == ECUIO_SIM_IDENT_BYTES + 1,
               "each identification text is 16 bytes");
 
+/* An upload's block length, as a 75 names it: a 76's bytes with its
+ * service and counter, so 1,024 bytes of data */
+constexpr uint16_t ECUIO_SIM_MEMORY_BLOCK = 0x0402;
+
 /* The codes this header answers with, beside sim_security.h's */
 constexpr uint8_t ECUIO_SIM_NRC_TOO_LONG = 0x14;
 constexpr uint8_t ECUIO_SIM_NRC_RANGE = 0x31;
+constexpr uint8_t ECUIO_SIM_NRC_UPLOAD = 0x70;
+constexpr uint8_t ECUIO_SIM_NRC_COUNTER = 0x73;
 
 /* One ECU's memory state */
 struct ecuio_sim_memory {
     /* The VIN region A holds (17 characters, the caller's, outliving the
      * state); nullptr for a node with no memory */
     const char* vin = nullptr;
+    /* An upload open (a 35 answered, no 37 yet): where its next block
+     * starts, the bytes left and the counter its next 36 carries */
+    bool uploading = false;
+    uint32_t next = 0;
+    uint32_t left = 0;
+    uint8_t counter = 1;
+    uint16_t block = ECUIO_SIM_MEMORY_BLOCK; /* what a 75 names */
 };
+
+/* The diagnostic session changed, or lapsed: an upload ends with it */
+inline void ecuio_sim_memory_end(ecuio_sim_memory& m)
+{
+    m.uploading = false;
+    m.left = 0;
+}
 
 /* The byte a region holds at address where nothing else is written: a
  * fixed mix of the address with a letter of "HAVNE" */
@@ -140,52 +161,29 @@ inline bool in_a_region(const span& s)
     return false;
 }
 
-} // namespace ecuio_sim_memory_detail
-
-/* Whether req's service is the memory's to answer */
-inline bool ecuio_sim_memory_service(uint8_t service)
+/* 23 <ALFID> <address> <size> */
+inline uint32_t read_bytes(const ecuio_sim_memory& m,
+                           const ecuio_sim_security& security,
+                           const uint8_t* req, uint32_t len, uint8_t* out)
 {
-    return service == 0x23;
-}
-
-/* The ECU's answer to a memory request (req[0] a service of
- * ecuio_sim_memory_service, len at least 1) into out
- * (ECUIO_SIM_MEMORY_REPLY_MAX bytes); the length. extended: the node is
- * in the extended session, the only one the region answers in. A 23 is
- * 23 <ALFID> <address> <size>, answered 63 <bytes>. The refusals in the
- * order they are judged: outside the session 7F (the service is judged
- * in the active session first, as 27 is); under 3 bytes, or a length
- * that isn't the identifier's, 13; an identifier's length outside 1 to
- * 4, a zero size, or any byte outside one region, 31; locked 33; a
- * reply past ECUIO_SIM_MEMORY_REPLY_MAX 14. */
-inline uint32_t ecuio_sim_memory_answer(const ecuio_sim_memory& m,
-                                        const ecuio_sim_security& security,
-                                        bool extended, const uint8_t* req,
-                                        uint32_t len, uint8_t* out)
-{
-    using namespace ecuio_sim_memory_detail;
-    const uint8_t service = req[0];
-    if (!extended) {
-        return refuse(service, ECUIO_SIM_NRC_SESSION, out);
-    }
     if (len < 3) {
-        return refuse(service, ECUIO_SIM_NRC_LENGTH, out);
+        return refuse(0x23, ECUIO_SIM_NRC_LENGTH, out);
     }
     span s = fields(req[1]);
     if (len != 2u + s.address_bytes + s.size_bytes) {
-        return refuse(service, ECUIO_SIM_NRC_LENGTH, out);
+        return refuse(0x23, ECUIO_SIM_NRC_LENGTH, out);
     }
     if (s.address_bytes <= 4 && s.size_bytes <= 4) {
         read_span(req + 2, &s);
     }
     if (!in_a_region(s)) {
-        return refuse(service, ECUIO_SIM_NRC_RANGE, out);
+        return refuse(0x23, ECUIO_SIM_NRC_RANGE, out);
     }
     if (security.unlocked == 0) {
-        return refuse(service, ECUIO_SIM_NRC_DENIED, out);
+        return refuse(0x23, ECUIO_SIM_NRC_DENIED, out);
     }
     if (s.size > ECUIO_SIM_MEMORY_REPLY_MAX - 1) {
-        return refuse(service, ECUIO_SIM_NRC_TOO_LONG, out);
+        return refuse(0x23, ECUIO_SIM_NRC_TOO_LONG, out);
     }
     const uint32_t address = static_cast<uint32_t>(s.address);
     const uint32_t size = static_cast<uint32_t>(s.size);
@@ -194,6 +192,136 @@ inline uint32_t ecuio_sim_memory_answer(const ecuio_sim_memory& m,
         out[1 + i] = ecuio_sim_memory_byte(m, address + i);
     }
     return 1 + size;
+}
+
+/* 35 <dataFormatIdentifier> <ALFID> <address> <size> */
+inline uint32_t open_upload(ecuio_sim_memory& m,
+                            const ecuio_sim_security& security,
+                            const uint8_t* req, uint32_t len, uint8_t* out)
+{
+    if (len < 4) {
+        return refuse(0x35, ECUIO_SIM_NRC_LENGTH, out);
+    }
+    span s = fields(req[2]);
+    if (len != 3u + s.address_bytes + s.size_bytes) {
+        return refuse(0x35, ECUIO_SIM_NRC_LENGTH, out);
+    }
+    if (s.address_bytes <= 4 && s.size_bytes <= 4) {
+        read_span(req + 3, &s);
+    }
+    if (req[1] != 0x00 || !in_a_region(s)) {
+        return refuse(0x35, ECUIO_SIM_NRC_RANGE, out);
+    }
+    if (security.unlocked == 0) {
+        return refuse(0x35, ECUIO_SIM_NRC_DENIED, out);
+    }
+    if (m.uploading) {
+        return refuse(0x35, ECUIO_SIM_NRC_UPLOAD, out);
+    }
+    m.uploading = true;
+    m.next = static_cast<uint32_t>(s.address);
+    m.left = static_cast<uint32_t>(s.size);
+    m.counter = 1;
+    out[0] = 0x75;
+    out[1] = 0x20; /* the block length that follows takes two bytes */
+    out[2] = static_cast<uint8_t>(m.block >> 8);
+    out[3] = static_cast<uint8_t>(m.block & 0xFF);
+    return 4;
+}
+
+/* 36 <counter>: the upload's next block */
+inline uint32_t next_block(ecuio_sim_memory& m,
+                           const ecuio_sim_security& security,
+                           const uint8_t* req, uint32_t len, uint8_t* out)
+{
+    if (len != 2) {
+        return refuse(0x36, ECUIO_SIM_NRC_LENGTH, out);
+    }
+    if (!m.uploading || m.left == 0 || m.block < 3) {
+        return refuse(0x36, ECUIO_SIM_NRC_SEQUENCE, out);
+    }
+    if (security.unlocked == 0) {
+        return refuse(0x36, ECUIO_SIM_NRC_DENIED, out);
+    }
+    if (req[1] != m.counter) {
+        return refuse(0x36, ECUIO_SIM_NRC_COUNTER, out);
+    }
+    const uint32_t room = m.block - 2u;
+    const uint32_t n = m.left < room ? m.left : room;
+    out[0] = 0x76;
+    out[1] = m.counter;
+    for (uint32_t i = 0; i < n; ++i) {
+        out[2 + i] = ecuio_sim_memory_byte(m, m.next + i);
+    }
+    m.next += n;
+    m.left -= n;
+    ++m.counter; /* FF wraps to 00 */
+    return 2 + n;
+}
+
+/* 37: the upload's end */
+inline uint32_t end_upload(ecuio_sim_memory& m, uint32_t len, uint8_t* out)
+{
+    if (len != 1) {
+        return refuse(0x37, ECUIO_SIM_NRC_LENGTH, out);
+    }
+    if (!m.uploading || m.left != 0) {
+        return refuse(0x37, ECUIO_SIM_NRC_SEQUENCE, out);
+    }
+    m.uploading = false;
+    out[0] = 0x77;
+    return 1;
+}
+
+} // namespace ecuio_sim_memory_detail
+
+/* Whether req's service is the memory's to answer */
+inline bool ecuio_sim_memory_service(uint8_t service)
+{
+    return service == 0x23 || service == 0x35 || service == 0x36 ||
+           service == 0x37;
+}
+
+/* The ECU's answer to a memory request (req[0] a service of
+ * ecuio_sim_memory_service, len at least 1) into out
+ * (ECUIO_SIM_MEMORY_REPLY_MAX bytes); the length. extended: the node is
+ * in the extended session, the only one the region answers in: outside
+ * it every service here is 7F (judged in the active session first, as
+ * 27 is).
+ *
+ * 23 <ALFID> <address> <size> answers 63 <bytes>. Its refusals in the
+ * order they are judged: under 3 bytes, or a length that isn't the
+ * identifier's, 13; an identifier's length outside 1 to 4, a zero size,
+ * or any byte outside one region, 31; locked 33; a reply past
+ * ECUIO_SIM_MEMORY_REPLY_MAX 14.
+ *
+ * 35 00 <ALFID> <address> <size> opens an upload and answers 75 20
+ * <block length>: under 4 bytes or not the identifier's length 13; a
+ * data format but 00, or a range as 23 refuses, 31; locked 33; one open
+ * already 70. 36 <counter> answers 76 <counter> and the next bytes, the
+ * block length less 2 at most, the counter from 01 and FF wrapping to
+ * 00: not two bytes 13; none open, or all handed over, 24; locked 33;
+ * another counter 73. 37 ends it with 77: more than one byte 13; none
+ * open, or bytes still left, 24. */
+inline uint32_t ecuio_sim_memory_answer(ecuio_sim_memory& m,
+                                        const ecuio_sim_security& security,
+                                        bool extended, const uint8_t* req,
+                                        uint32_t len, uint8_t* out)
+{
+    namespace detail = ecuio_sim_memory_detail;
+    if (!extended) {
+        return detail::refuse(req[0], ECUIO_SIM_NRC_SESSION, out);
+    }
+    switch (req[0]) {
+    case 0x23:
+        return detail::read_bytes(m, security, req, len, out);
+    case 0x35:
+        return detail::open_upload(m, security, req, len, out);
+    case 0x36:
+        return detail::next_block(m, security, req, len, out);
+    default:
+        return detail::end_upload(m, len, out);
+    }
 }
 
 /* An identification DID's answer to 22 <did> into out, its length; 0

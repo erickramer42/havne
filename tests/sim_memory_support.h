@@ -43,6 +43,15 @@ inline Bytes read_of(uint64_t address, uint64_t size, int a = 4, int s = 2)
     return req;
 }
 
+/* 35 00 <ALFID> <address> <size>, four bytes each unless a case says */
+inline Bytes upload_of(uint64_t address, uint64_t size, int a = 4, int s = 4)
+{
+    Bytes req = read_of(address, size, a, s);
+    req[0] = 0x35;
+    req.insert(req.begin() + 1, 0x00);
+    return req;
+}
+
 /* What a read of size bytes at address answers with no fault: 63 and
  * the region's bytes, vin at its place */
 inline Bytes data_of(uint32_t address, uint32_t size, const char* vin)

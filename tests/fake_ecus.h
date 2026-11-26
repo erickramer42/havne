@@ -212,8 +212,8 @@ inline void reset_sessions()
  * is unlocked (7F 22 33 before it, in the session). The lockout's delay
  * runs on the steady clock, since the fakes keep none of their own.
  * Its memory is the simulated ECU's as well (sim_memory.h): the region
- * read by 23 once unlocked, holding kVin, and the two identification
- * DIDs in the session. */
+ * read by 23 or uploaded (35, 36, 37) once unlocked, holding kVin, and
+ * the two identification DIDs in the session. */
 constexpr uint16_t kGatedDid = ECUIO_SIM_GATED_DID;
 
 /* The lockout's delay in milliseconds, a knob: 0 is the simulated ECU's
@@ -304,7 +304,7 @@ inline void security_between(uint32_t rx)
 }
 
 /* The engine ECU on rx's answer to a 27 request, to 22 <kGatedDid>, to
- * a memory read or to an identification DID, into out (kReplyMax
+ * a memory read or upload or to an identification DID, into out (kReplyMax
  * bytes); the length, 0 when it is none of them (or a DID outside the
  * extended session, where answer() refuses it as any DID it lacks).
  * lock: a session request was answered, and the unlock goes with it. */
@@ -333,6 +333,7 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
     ecuio_sim_security* s = &slot->state;
     if (lock) {
         ecuio_sim_security_lock(*s);
+        ecuio_sim_memory_end(slot->memory);
         return 0;
     }
     if (gated) {
@@ -361,8 +362,8 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
  * nothing, any other value is the code. 10 and 3E (two bytes) are the
  * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
  * 27 and kGatedDid are the engine ECU's security access, strict under
- * security_strict(); a memory read and the identification DIDs are its
- * memory's; a module refuses 27 and 23 as any service it lacks.
+ * security_strict(); a memory read, an upload and the identification
+ * DIDs are its memory's; a module refuses them as any service it lacks.
  * False when nothing answers, as for every request to absent_ecu(). */
 inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
                        long unsupported_nrc, unsigned char* out,

@@ -83,6 +83,40 @@ void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
     }
 }
 
+/* What an upload's replies must hold, was the memory's state before the
+ * request: a 75 opens one only while none is open, a 76 hands over the
+ * open one's next bytes under its counter and never past what was
+ * asked, and a 77 ends one with nothing left */
+void check_upload(const ecuio_sim_session& s, const ecuio_sim_memory& was,
+                  const uint8_t* reply, uint32_t n)
+{
+    const bool open = s.extended && s.security.unlocked != 0;
+    if (n >= 1 && reply[0] == 0x75 &&
+        (!open || was.uploading || n != 4 || !s.memory.uploading ||
+         s.memory.left == 0)) {
+        abort();
+    }
+    if (n >= 1 && reply[0] == 0x76) {
+        if (!open || !was.uploading || n < 3 || n > was.block ||
+            n - 2 > was.left || reply[1] != was.counter ||
+            s.memory.left != was.left - (n - 2)) {
+            abort();
+        }
+        for (uint32_t i = 0; i + 2 < n; ++i) {
+            if (reply[2 + i] != ecuio_sim_memory_byte(s.memory, was.next + i)) {
+                abort();
+            }
+        }
+    }
+    if (n >= 1 && reply[0] == 0x77 &&
+        (!s.extended || !was.uploading || was.left != 0 || n != 1)) {
+        abort();
+    }
+    if (s.memory.uploading && !s.extended) {
+        abort();
+    }
+}
+
 /* What the node's memory must hold after a reply to req: a region's
  * bytes are answered only in the extended session while unlocked, to a
  * read inside the region, and are the region's own at that address; an
@@ -157,6 +191,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         const uint8_t unlocked = session.security.unlocked;
         const uint8_t seed_out = session.security.seed_out;
         const bool extended = session.extended;
+        const ecuio_sim_memory was = session.memory;
         if (!functional && rec == nullptr) {
             n = ecuio_sim_session_answer(session, true, true, e.time_us,
                                          data + at, static_cast<uint32_t>(len),
@@ -172,11 +207,15 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         if (rec == nullptr) {
             check_security(session, data + at, len, reply, n);
             check_memory(session, data + at, len, reply, n);
+            check_upload(session, was, reply, n);
         }
-        if (functional &&
-            (session.security.unlocked != unlocked ||
-             session.security.seed_out != seed_out ||
-             session.extended != extended || (n > 0 && reply[0] == 0x63))) {
+        if (functional && (session.security.unlocked != unlocked ||
+                           session.security.seed_out != seed_out ||
+                           session.extended != extended ||
+                           session.memory.uploading != was.uploading ||
+                           session.memory.left != was.left ||
+                           (n > 0 && (reply[0] == 0x63 || reply[0] == 0x75 ||
+                                      reply[0] == 0x76 || reply[0] == 0x77)))) {
             abort();
         }
         if (n > 0) {

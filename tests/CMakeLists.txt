@@ -188,6 +188,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_j2534_hold_order.cpp test_j2534_hold_absent.cpp test_sim_car.cpp
     test_sim_timing.cpp test_sim_gateway.cpp test_sim_gateway_lock.cpp
     test_sim_gateway_view.cpp test_sim_memory.cpp
+    test_sim_memory_upload.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp)
 

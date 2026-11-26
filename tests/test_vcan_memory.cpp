@@ -5,7 +5,7 @@
 // The simulated ECU's memory on the bus (core/src/sim_memory.h through
 // sim_bus.cpp): the case as the tester through the kernel's ISO-TP
 // socket, so a read's segmented reply crosses real frames at the pace
-// cf= sets.
+// cf= sets and an upload meets a reply the bus loses.
 
 #include "ecuio/core.h"
 #include "ecuio/sim.h"
@@ -141,6 +141,37 @@ TEST_F(SimMemoryBusTest, AMultiFrameReadArrivesWholeUnderAFramePace)
     got = ask_on(ecu, read_of(kBase, 4094), 5000);
     ASSERT_EQ(got.size(), 4095u) << "ISO-TP's longest message";
     EXPECT_EQ(Bytes(got.begin() + 1, got.end()), region(kBase, 4094));
+}
+
+// A block the bus loses ends an upload: the ECU's counter has moved on,
+// so the block's counter asked again is refused, as is the next one's
+// place in a tester that never saw the block
+TEST_F(SimMemoryBusTest, AnUploadsBlockLostOnTheBusIsNotHandedOverAgain)
+{
+    /* The third segmented reply's frames come out of order, so the
+     * kernel's receiver drops it: the two blocks before it arrive whole */
+    Sim sim("mock://sim?values=canned&faults=bad_sequence:3");
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Fd ecu = vcan_bus::open_isotp(vcan_bus::kRequest, vcan_bus::kReply);
+    ASSERT_TRUE(ecu.ok());
+    unlock(ecu);
+    Bytes open = read_of(kBase, 4096);
+    open[0] = 0x35;
+    open.insert(open.begin() + 1, 0x00);
+    ASSERT_EQ(ask_on(ecu, open), (Bytes{0x75, 0x20, 0x04, 0x02}));
+
+    Bytes got = ask_on(ecu, {0x36, 0x01}, 2000);
+    ASSERT_EQ(got.size(), 0x402u);
+    EXPECT_EQ(Bytes(got.begin() + 2, got.end()), region(kBase, 1024));
+    got = ask_on(ecu, {0x36, 0x02}, 2000);
+    ASSERT_EQ(got.size(), 0x402u);
+    EXPECT_EQ(Bytes(got.begin() + 2, got.end()), region(kBase + 1024, 1024));
+
+    EXPECT_TRUE(ask_on(ecu, {0x36, 0x03}, 1500).empty()) << "the broken one";
+    EXPECT_EQ(ask_on(ecu, {0x36, 0x03}), (Bytes{0x7F, 0x36, 0x73}))
+        << "the ECU handed that block over once";
+    EXPECT_EQ(ask_on(ecu, {0x37}), (Bytes{0x7F, 0x37, 0x24}))
+        << "and bytes are still left";
 }
 
 } // namespace

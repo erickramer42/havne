@@ -15,8 +15,8 @@
 // session it has security access too (ADR-0066 section 2.7,
 // sim_security.h): 27 unlocks a level, and DID D210 answers once one is.
 // Unlocked, it has memory to read by address (sim_memory.h): 23 answers a
-// made-up region's bytes, and two identification DIDs answer in the
-// session.
+// made-up region's bytes, 35, 36 and 37 upload them block by block, and
+// two identification DIDs answer in the session.
 // sessions=1 gives a profile's modules the extended session as well (no
 // security access), so a session can be held on many modules at once.
 // replay://: a recording's replies at the ECU's time since it started
