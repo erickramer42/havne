@@ -506,18 +506,24 @@ TEST(DumpExportTest, RemoveTakesOneFileByItsWholeName)
     const std::string partial = copy + ".partial-12-3";
     put(f.backups, partial, bytes.substr(0, 300));
     put(f.backups, "junk.havnedump", "junk");
+    put(f.backups, "my copy.havnedump", "junk with a space in its name");
     put(f.backups, "notes.txt", "mine");
+    /* A file of this name where a colon is a name's, a stream of the
+     * file "a" on Windows */
+    put(f.backups, "a:b.havnedump", "not this call's to remove");
     std::error_code ec;
     fs::create_directories(fs::u8path(f.backups + "/dir.havnedump"), ec);
     const std::vector<std::string> all = names_in(f.backups);
-    ASSERT_EQ(all.size(), 6u);
+    ASSERT_EQ(all.size(), 8u);
 
-    /* Names the list never shows, and names that reach out of the
-     * folder: refused, and nothing is touched */
+    /* Names the list never shows, and names a file system reads as more
+     * than a name in the folder: refused, and nothing is touched */
     for (const std::string& name :
          {std::string("notes.txt"), std::string(""), other.substr(0, 40),
           other.substr(0, other.size() - 1), "../backups/" + other,
-          "..\\backups\\" + other, "sub/" + other, f.backups + "/" + other}) {
+          "..\\backups\\" + other, "sub/" + other, f.backups + "/" + other,
+          std::string("a:b.havnedump"), "C:" + other, "a\n" + other,
+          "\x1F" + other, "\x7F" + other, std::string("\x01.havnedump")}) {
         EXPECT_EQ(ecuio_dump_remove(f.backups.c_str(), name.c_str()),
                   ECUIO_ERR_INVALID_ARGUMENT)
             << name;
@@ -528,26 +534,60 @@ TEST(DumpExportTest, RemoveTakesOneFileByItsWholeName)
     EXPECT_STREQ(ecuio_last_error_detail(), "there's no such file");
     EXPECT_EQ(ecuio_dump_remove(f.backups.c_str(), "dir.havnedump"),
               ECUIO_ERR_LOAD_FAILED);
-    EXPECT_STREQ(ecuio_last_error_detail(), "it isn't a file");
+    EXPECT_STREQ(ecuio_last_error_detail(), "it isn't a plain file");
     EXPECT_EQ(ecuio_dump_remove(nullptr, copy.c_str()),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_dump_remove(f.backups.c_str(), nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(names_in(f.backups), all);
 
-    /* A read-only copy, an unfinished partial and an invalid file */
+    /* A read-only copy, an unfinished partial and two invalid files */
     for (const std::string& name :
-         {copy, partial, std::string("junk.havnedump")}) {
+         {copy, partial, std::string("junk.havnedump"),
+          std::string("my copy.havnedump")}) {
         EXPECT_EQ(ecuio_dump_remove(f.backups.c_str(), name.c_str()), ECUIO_OK)
             << name << ": " << ecuio_last_error_detail();
         EXPECT_FALSE(fs::exists(fs::u8path(f.backups + "/" + name))) << name;
     }
-    EXPECT_EQ(names_in(f.backups),
-              (std::vector<std::string>{other, "dir.havnedump", "notes.txt"}));
+    std::vector<std::string> left = all;
+    for (const std::string& name :
+         {copy, partial, std::string("junk.havnedump"),
+          std::string("my copy.havnedump")}) {
+        left.erase(std::find(left.begin(), left.end(), name));
+    }
+    EXPECT_EQ(names_in(f.backups), left);
+    EXPECT_EQ(read_bytes(f.backups + "/a:b.havnedump"),
+              "not this call's to remove");
     EXPECT_EQ(read_bytes(f.backups + "/" + other), other_bytes);
     EXPECT_EQ(ecuio_dump_remove(f.backups.c_str(), copy.c_str()),
               ECUIO_ERR_LOAD_FAILED)
         << "removed once";
+}
+
+/* A link named as a copy is refused, never followed: the copy it points
+ * at keeps its read-only state and its bytes, and the link stays */
+TEST(DumpExportTest, RemoveRefusesALink)
+{
+    Folders f;
+    const std::string bytes = file_of(record_of());
+    const std::string copy = name_for(bytes);
+    ASSERT_EQ(ecuio_dump_import(put(f.away, "a.havnedump", bytes).c_str(),
+                                f.backups.c_str(), nullptr, 0),
+              ECUIO_OK);
+    const std::string target = f.backups + "/" + copy;
+    const fs::path link = fs::u8path(f.out + "/link.havnedump");
+    std::error_code ec;
+    fs::create_symlink(fs::u8path(target), link, ec);
+    if (ec) {
+        GTEST_SKIP() << "this account makes no link: " << ec.message();
+    }
+    EXPECT_EQ(ecuio_dump_remove(f.out.c_str(), "link.havnedump"),
+              ECUIO_ERR_LOAD_FAILED);
+    EXPECT_STREQ(ecuio_last_error_detail(), "it isn't a plain file");
+    EXPECT_TRUE(fs::is_symlink(link));
+    EXPECT_TRUE(read_only(target));
+    EXPECT_EQ(read_bytes(target), bytes);
+    fs::remove(link, ec);
 }
 
 #ifdef _WIN32

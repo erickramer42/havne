@@ -223,8 +223,10 @@ typedef struct ecuio_dump_calibration {
 #define ECUIO_DUMP_STATE_UNFINISHED 2u /* a partial a stopped write left */
 #define ECUIO_DUMP_STATE_INVALID    3u /* neither; words says why */
 
-/* ecuio_dump_entry_t.flags */
-#define ECUIO_DUMP_ENTRY_NAME_CUT 0x1u /* the name is longer than name holds */
+/* ecuio_dump_entry_t.flags. NAME_CUT: the file's name is longer than
+ * name holds (every name core gives a copy fits). The file is listed
+ * with its name cut, so the entry can't name it to ecuio_dump_remove. */
+#define ECUIO_DUMP_ENTRY_NAME_CUT 0x1u
 
 /* One file of a folder of copies. POD, 456 bytes. The record's fields
  * are set only for a file that reads as a copy, whatever its name. */
@@ -439,9 +441,11 @@ ecuio_status_t ecuio_dump_import(const char* path_utf8, const char* folder_utf8,
  * a copy, and it asks nothing: the front end confirms with the person
  * first. ECUIO_ERR_NULL_ARGUMENT for a NULL folder or name;
  * ECUIO_ERR_INVALID_ARGUMENT, with words, for a name that isn't one the
- * list shows (it holds a path separator, or has neither a copy's suffix
- * nor a partial's); ECUIO_ERR_LOAD_FAILED, with words, when there is no
- * such file or it can't be removed, the file left as it was.
+ * list shows (it holds a path separator, a colon or a control
+ * character, or has neither a copy's suffix nor a partial's);
+ * ECUIO_ERR_LOAD_FAILED, with words, when there is no such file, it
+ * isn't a plain file (a folder, or a link, which is never followed) or
+ * it can't be removed, the file left as it was.
  */
 ecuio_status_t ecuio_dump_remove(const char* folder_utf8, const char* name);
 

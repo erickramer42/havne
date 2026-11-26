@@ -382,16 +382,23 @@ ecuio_status_t export_locked(ecuio_dump& d, uint32_t form,
     return s;
 }
 
-/* A name ecuio_dump_list shows: a copy's suffix or a partial's, and no
- * way out of the folder */
+/* A name ecuio_dump_list shows, and nothing a file system reads as more
+ * than a name in the folder: no separator, no colon (a drive, or on
+ * Windows another file's stream) and no control character */
 bool removable_name(const std::string& name)
 {
-    return name.find_first_of("/\\") == std::string::npos &&
-           ecuio_dump_handle::listed(name);
+    for (const char c : name) {
+        const auto u = static_cast<unsigned char>(c);
+        if (c == '/' || c == '\\' || c == ':' || u < 0x20 || u == 0x7F) {
+            return false;
+        }
+    }
+    return ecuio_dump_handle::listed(name);
 }
 
 /* The file at utf8 removed, read-only or not; a failure leaves it as it
- * was. LOAD_FAILED with *why. */
+ * was. Only a plain file: a folder and a link (whose target's read-only
+ * state a remove must never touch) are refused. LOAD_FAILED with *why. */
 ecuio_status_t remove_at(const std::string& utf8, std::string* why)
 {
 #ifdef _WIN32
@@ -401,8 +408,9 @@ ecuio_status_t remove_at(const std::string& utf8, std::string* why)
     if (was == INVALID_FILE_ATTRIBUTES) {
         return refused(why, "there's no such file");
     }
-    if ((was & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-        return refused(why, "it isn't a file");
+    if ((was & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+        0) {
+        return refused(why, "it isn't a plain file");
     }
     if ((was & FILE_ATTRIBUTE_READONLY) != 0) {
         const DWORD rest = was & ~DWORD{FILE_ATTRIBUTE_READONLY};
@@ -422,8 +430,8 @@ ecuio_status_t remove_at(const std::string& utf8, std::string* why)
                                 : "the file can't be removed: " +
                                       files::os_words(errno));
     }
-    if (S_ISDIR(st.st_mode)) {
-        return refused(why, "it isn't a file");
+    if (!S_ISREG(st.st_mode)) {
+        return refused(why, "it isn't a plain file");
     }
     if (unlink(utf8.c_str()) == 0) {
         return ECUIO_OK;
