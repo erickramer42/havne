@@ -6,7 +6,7 @@
 // and record judged by dump_file.h's calls, its image read as a stream.
 // No call here opens a copy for writing. Words name no path.
 
-#include "dump_file.h"
+#include "dump_handle.h"
 
 #include "error_detail.h"
 #include "folder_files.h"
@@ -25,37 +25,9 @@ using ecuio_dump_file::header;
 using ecuio_dump_file::judged;
 using ecuio_dump_file::kHeaderBytes;
 using ecuio_dump_file::record;
-
-struct ecuio_dump {
-    FILE* file = nullptr;
-    std::string name; /* the file's own, without its folder */
-    uint64_t file_bytes = 0;
-    header h;
-    record r;
-    std::mutex m; /* the file's position is one call's at a time */
-
-    ecuio_dump() = default;
-    ~ecuio_dump()
-    {
-        if (file != nullptr) {
-            std::fclose(file);
-        }
-    }
-    ecuio_dump(const ecuio_dump&) = delete;
-    ecuio_dump& operator=(const ecuio_dump&) = delete;
-};
+using ecuio_dump_handle::kPiece;
 
 namespace {
-
-/* A verify's read: a piece's bytes, and how often cancel is asked */
-constexpr size_t kPiece = 64 * 1024;
-
-void copy_text(char* dst, size_t cap, const std::string& s)
-{
-    const size_t n = s.size() < cap - 1 ? s.size() : cap - 1;
-    std::memcpy(dst, s.data(), n);
-    dst[n] = '\0';
-}
 
 std::string leaf_of(const std::string& path)
 {
@@ -70,12 +42,20 @@ ecuio_status_t status_of(judged j)
                                         : ECUIO_ERR_LOAD_FAILED;
 }
 
-/* The file at path as a handle in *out, with no detail set: LOAD_FAILED
- * with *why, or OUT_OF_MEMORY. *file_bytes, when given, is the file's
- * size wherever it could be opened. */
+} // namespace
+
+namespace ecuio_dump_handle {
+
+void copy_text(char* dst, size_t cap, const std::string& s)
+{
+    const size_t n = s.size() < cap - 1 ? s.size() : cap - 1;
+    std::memcpy(dst, s.data(), n);
+    dst[n] = '\0';
+}
+
 ecuio_status_t open_at(const std::string& path,
                        std::unique_ptr<ecuio_dump>* out, std::string* why,
-                       uint64_t* file_bytes = nullptr)
+                       uint64_t* file_bytes)
 {
     std::unique_ptr<ecuio_dump> d(new (std::nothrow) ecuio_dump);
     if (d == nullptr) {
@@ -124,14 +104,6 @@ ecuio_status_t open_at(const std::string& path,
     return ECUIO_OK;
 }
 
-/* What a verify found; sound says the two inner checksums hold */
-struct sums {
-    bool sound = false;
-    uint8_t file[32] = {};
-};
-
-/* The whole file read again: LOAD_FAILED with *why when it no longer
- * reads or isn't the file that was opened, CANCELED, OUT_OF_MEMORY */
 ecuio_status_t hash_file(ecuio_dump& d, ecuio_cancel_t cancel, void* user,
                          sums* out, std::string* why)
 {
@@ -189,6 +161,25 @@ ecuio_status_t hash_file(ecuio_dump& d, ecuio_cancel_t cancel, void* user,
     whole.finish(out->file);
     return ECUIO_OK;
 }
+
+bool listed(const std::string& name)
+{
+    constexpr size_t suffix = sizeof ecuio_dump_file::kSuffix - 1;
+    return ecuio_dump_file::partial_name(name) ||
+           (name.size() > suffix &&
+            name.compare(name.size() - suffix, suffix,
+                         ecuio_dump_file::kSuffix) == 0);
+}
+
+} // namespace ecuio_dump_handle
+
+namespace {
+
+using ecuio_dump_handle::copy_text;
+using ecuio_dump_handle::hash_file;
+using ecuio_dump_handle::listed;
+using ecuio_dump_handle::open_at;
+using ecuio_dump_handle::sums;
 
 template <typename T> ecuio_status_t sized(const ecuio_dump* d, const T* out)
 {
@@ -306,15 +297,6 @@ ecuio_status_t entry_of(const std::string& folder, const std::string& name,
                   "it reads as a copy, but its name isn't a copy's");
     }
     return ECUIO_OK;
-}
-
-bool listed(const std::string& name)
-{
-    constexpr size_t suffix = sizeof ecuio_dump_file::kSuffix - 1;
-    return ecuio_dump_file::partial_name(name) ||
-           (name.size() > suffix &&
-            name.compare(name.size() - suffix, suffix,
-                         ecuio_dump_file::kSuffix) == 0);
 }
 
 } // namespace
@@ -475,8 +457,7 @@ ecuio_status_t ecuio_dump_verify(const ecuio_dump_t* dump,
             s = hash_file(*d, cancel, user_data, &got, &why);
         }
         if (s == ECUIO_OK && !got.sound) {
-            why = "its bytes aren't the ones its header seals: the file is "
-                  "damaged";
+            why = ecuio_dump_handle::kDamagedWords;
             s = ECUIO_ERR_LOAD_FAILED;
         }
         if (s == ECUIO_OK) {

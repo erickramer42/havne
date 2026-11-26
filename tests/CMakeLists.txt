@@ -51,7 +51,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_consent_store.cpp test_consent_lines.cpp test_consent_session.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
-    test_dump_record.cpp)
+    test_dump_record.cpp test_dump_export.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).

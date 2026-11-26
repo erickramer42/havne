@@ -1,11 +1,15 @@
 /* File/layer: core/include/ecuio/dump.h | public C ABI, strict C
- * Testing: UNIT: DumpFileTest (test_core), test_c_abi; FUZZ: fuzz_dump_file
+ * Testing: UNIT: DumpFileTest, DumpExportTest (test_core), test_c_abi;
+ *          FUZZ: fuzz_dump_file
  *
  * A copy of a module's memory as a file (ADR-0066 section 4): the bytes
  * read from the module, a record of what they are and how they were
  * read, and the checksums that seal both. Core writes a copy once and
- * never changes it; these calls read, check and list copies with no
- * session, so a front end can show them offline.
+ * never changes it; these calls read, check, list, export, bring back
+ * and remove copies with no session, so a front end can show them
+ * offline. A copy stays until ecuio_dump_remove is called for it: no
+ * other call here deletes one, and core never prunes, ages or counts
+ * them.
  *
  * The file (format 1). Every integer is little-endian.
  *
@@ -239,7 +243,23 @@ typedef struct ecuio_dump_entry {
     uint32_t reserved[6];                 /* zero; ABI growth space */
 } ecuio_dump_entry_t;
 
+/* ecuio_dump_export's forms */
+#define ECUIO_DUMP_EXPORT_RESTORE 1u /* the file itself, still a copy */
+#define ECUIO_DUMP_EXPORT_IMAGE   2u /* the raw image, a .bin for each range */
+
+/* What an export wrote. POD, 32 bytes. */
+typedef struct ecuio_dump_export_result {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* zero */
+    uint32_t files;       /* the files written */
+    uint32_t vin_runs;    /* ECUIO_DUMP_EXPORT_IMAGE: the runs of the image
+                             that read as a VIN */
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_dump_export_result_t;
+
 #if defined(__cplusplus)
+static_assert(sizeof(ecuio_dump_export_result_t) == 32,
+              "ecuio_dump_export_result_t size is ABI");
 static_assert(sizeof(ecuio_dump_info_t) == 528,
               "ecuio_dump_info_t size is ABI");
 static_assert(offsetof(ecuio_dump_info_t, image_sha256) == 32,
@@ -281,6 +301,8 @@ _Static_assert(sizeof(ecuio_dump_calibration_t) == 48,
                "ecuio_dump_calibration_t size is ABI");
 _Static_assert(sizeof(ecuio_dump_entry_t) == 456,
                "ecuio_dump_entry_t size is ABI");
+_Static_assert(sizeof(ecuio_dump_export_result_t) == 32,
+               "ecuio_dump_export_result_t size is ABI");
 #endif
 
 /*
@@ -360,6 +382,68 @@ ecuio_status_t ecuio_dump_verify(const ecuio_dump_t* dump,
  */
 ecuio_status_t ecuio_dump_list(const char* folder_utf8, ecuio_dump_entry_t* out,
                                size_t capacity, size_t* count);
+
+/*
+ * Exports an opened copy into folder (UTF-8, an existing one), never
+ * automatically and never over a file: a name that is taken refuses the
+ * export. The copy is read whole and its two checksums checked first; a
+ * damaged one is not exported.
+ *
+ *   ECUIO_DUMP_EXPORT_RESTORE  the file itself, byte for byte, under the
+ *     name core gives it (ecuio_dump_verify's), read back from the disk
+ *     and checked again before it is put in place. The one export that
+ *     is still a copy: ecuio_dump_import takes it back.
+ *   ECUIO_DUMP_EXPORT_IMAGE  the raw image as one file for each range,
+ *     named <yyyymmdd>-<tx>-<first 12 hex of the copy's checksum>-<the
+ *     range's start address, 8 hex>.bin. The bytes are the copy's,
+ *     unchanged, with no record and no identifier; all the files are
+ *     written or none. result->vin_runs counts the runs in them that
+ *     read as a VIN, by the finder a scrubbed export uses; core masks
+ *     nothing here (a changed image is no longer the module's memory),
+ *     and none found proves nothing.
+ *
+ * Each file is written under a partial name and renamed into place, and
+ * any failure or cancel leaves nothing behind. cancel, when not NULL, is
+ * asked between pieces (never call this handle's functions from it).
+ * result may be NULL; on a failure it is zeroed but for its size.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL dump or folder;
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown form or a result smaller
+ * than the struct; ECUIO_ERR_LOAD_FAILED with words (never a path);
+ * ECUIO_ERR_CANCELED; ECUIO_ERR_OUT_OF_MEMORY.
+ */
+ecuio_status_t ecuio_dump_export(const ecuio_dump_t* dump, uint32_t form,
+                                 const char* folder_utf8, ecuio_cancel_t cancel,
+                                 void* user_data,
+                                 ecuio_dump_export_result_t* result);
+
+/*
+ * Brings a copy back: the file at path, under whatever name, is opened
+ * and checked as ecuio_dump_verify checks one (its two checksums; its
+ * name isn't judged), then copied into folder under the name core gives
+ * it and set read-only, as a copy is kept. A file of that name there
+ * refuses it. name_out (name_capacity at least ECUIO_DUMP_NAME_MAX, or
+ * NULL with 0) takes that name once the file is known sound, whether or
+ * not the copy then lands. ECUIO_ERR_NULL_ARGUMENT for a NULL path or
+ * folder, or a NULL name_out with a capacity;
+ * ECUIO_ERR_INVALID_ARGUMENT for a capacity below ECUIO_DUMP_NAME_MAX
+ * that isn't 0; ECUIO_ERR_LOAD_FAILED with words;
+ * ECUIO_ERR_OUT_OF_MEMORY.
+ */
+ecuio_status_t ecuio_dump_import(const char* path_utf8, const char* folder_utf8,
+                                 char* name_out, size_t name_capacity);
+
+/*
+ * Removes one file of a folder of copies: name is the file's whole name
+ * there, as ecuio_dump_list gives it (a copy's, read-only or not, an
+ * unfinished partial's or an invalid file's). The one call that deletes
+ * a copy, and it asks nothing: the front end confirms with the person
+ * first. ECUIO_ERR_NULL_ARGUMENT for a NULL folder or name;
+ * ECUIO_ERR_INVALID_ARGUMENT, with words, for a name that isn't one the
+ * list shows (it holds a path separator, or has neither a copy's suffix
+ * nor a partial's); ECUIO_ERR_LOAD_FAILED, with words, when there is no
+ * such file or it can't be removed, the file left as it was.
+ */
+ecuio_status_t ecuio_dump_remove(const char* folder_utf8, const char* name);
 
 #if defined(__cplusplus)
 }

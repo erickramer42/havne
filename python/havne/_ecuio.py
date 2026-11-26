@@ -241,6 +241,8 @@ ECUIO_DROP_NOT_SUPPORTED = 2
 ECUIO_DROP_SERVICE = 3
 ECUIO_DUMP_ENTRY_NAME_CUT = 1
 ECUIO_DUMP_ENTRY_NAME_MAX = 0x100
+ECUIO_DUMP_EXPORT_IMAGE = 2
+ECUIO_DUMP_EXPORT_RESTORE = 1
 ECUIO_DUMP_FORMAT = 1
 ECUIO_DUMP_HAS_CALID = 1
 ECUIO_DUMP_HAS_CVN = 2
@@ -739,6 +741,9 @@ class ecuio_dump_calibration_t(Structure):
     pass
 
 class ecuio_dump_entry_t(Structure):
+    pass
+
+class ecuio_dump_export_result_t(Structure):
     pass
 
 class ecuio_dump_ident_t(Structure):
@@ -1284,6 +1289,13 @@ ecuio_dump_entry_t._fields_ = [
     ('name', (c_char * 256)),
     ('words', (c_char * 128)),
     ('reserved', (c_uint32 * 6)),
+]
+ecuio_dump_export_result_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('files', c_uint32),
+    ('vin_runs', c_uint32),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_dump_ident_t._fields_ = [
     ('struct_size', c_uint32),
@@ -2065,13 +2077,16 @@ FUNCTIONS = {
     'ecuio_dtc_title_notice': (c_char_p, []),  # core.h
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
     'ecuio_dump_close': (None, [POINTER(ecuio_dump_t)]),  # dump.h
+    'ecuio_dump_export': (c_int, [POINTER(ecuio_dump_t), c_uint32, c_char_p, ecuio_cancel_t, c_void_p, POINTER(ecuio_dump_export_result_t)]),  # dump.h
     'ecuio_dump_get_calibration': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_calibration_t)]),  # dump.h
     'ecuio_dump_get_ident': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_ident_t)]),  # dump.h
     'ecuio_dump_get_info': (c_int, [POINTER(ecuio_dump_t), POINTER(ecuio_dump_info_t)]),  # dump.h
     'ecuio_dump_get_range': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_range_t)]),  # dump.h
+    'ecuio_dump_import': (c_int, [c_char_p, c_char_p, c_char_p, c_size_t]),  # dump.h
     'ecuio_dump_list': (c_int, [c_char_p, POINTER(ecuio_dump_entry_t), c_size_t, POINTER(c_size_t)]),  # dump.h
     'ecuio_dump_open': (c_int, [c_char_p, POINTER(POINTER(ecuio_dump_t))]),  # dump.h
     'ecuio_dump_read': (c_int, [POINTER(ecuio_dump_t), c_uint64, POINTER(c_uint8), c_size_t, POINTER(c_size_t)]),  # dump.h
+    'ecuio_dump_remove': (c_int, [c_char_p, c_char_p]),  # dump.h
     'ecuio_dump_verify': (c_int, [POINTER(ecuio_dump_t), ecuio_cancel_t, c_void_p, c_char_p, c_size_t]),  # dump.h
     'ecuio_enum_label': (c_char_p, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_def_t), c_uint32]),  # signals.h
     'ecuio_export': (c_int, [POINTER(ecuio_export_options_t), POINTER(ecuio_export_report_t)]),  # recording.h

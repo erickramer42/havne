@@ -91,6 +91,7 @@ add_library(ecuio-core STATIC
     src/consent_store.cpp
     src/consent_store_api.cpp
     src/consent_lines.cpp
+    src/dump_export.cpp
     src/dump_file.cpp
     src/dump_record.cpp
     src/core_consent.cpp

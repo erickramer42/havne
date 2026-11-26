@@ -23,6 +23,7 @@ int c_abi_dump(void)
     uint8_t byte = 0;
     size_t count = 7;
     char name[ECUIO_DUMP_NAME_MAX];
+    ecuio_dump_export_result_t result;
 
     ok = ok && sizeof(ecuio_dump_info_t) == 528u &&
          offsetof(ecuio_dump_info_t, image_bytes) == 16u &&
@@ -47,6 +48,11 @@ int c_abi_dump(void)
          offsetof(ecuio_dump_entry_t, words) == 304u;
     ok = ok && ECUIO_DUMP_FORMAT == 1u && ECUIO_DUMP_NAME_MAX == 96u &&
          ECUIO_DUMP_KIND_READ == 1u && ECUIO_DUMP_STATE_INVALID == 3u;
+    ok = ok && sizeof(ecuio_dump_export_result_t) == 32u &&
+         offsetof(ecuio_dump_export_result_t, files) == 8u &&
+         offsetof(ecuio_dump_export_result_t, vin_runs) == 12u &&
+         offsetof(ecuio_dump_export_result_t, reserved) == 16u;
+    ok = ok && ECUIO_DUMP_EXPORT_RESTORE == 1u && ECUIO_DUMP_EXPORT_IMAGE == 2u;
     if (!ok) {
         fprintf(stderr, "c_abi: a dump struct's layout moved\n");
         return 1;
@@ -82,6 +88,23 @@ int c_abi_dump(void)
          ecuio_dump_list("no-such-folder", &entry, 1, &count) ==
              ECUIO_ERR_LOAD_FAILED &&
          count == 0u;
+    memset(&result, 0, sizeof result);
+    result.struct_size = sizeof result;
+    ok = ok && ecuio_dump_export(NULL, ECUIO_DUMP_EXPORT_RESTORE, ".", NULL,
+                                 NULL, &result) == ECUIO_ERR_NULL_ARGUMENT;
+    ok = ok && ecuio_dump_import(NULL, ".", name, sizeof name) ==
+                   ECUIO_ERR_NULL_ARGUMENT;
+    name[0] = 'x';
+    ok = ok &&
+         ecuio_dump_import("no-such-folder/none.havnedump", ".", name,
+                           sizeof name) == ECUIO_ERR_LOAD_FAILED &&
+         name[0] == '\0' && ecuio_last_error_detail()[0] != '\0';
+    ok = ok &&
+         ecuio_dump_remove(NULL, "none.havnedump") == ECUIO_ERR_NULL_ARGUMENT;
+    ok = ok && ecuio_dump_remove("no-such-folder", "none.txt") ==
+                   ECUIO_ERR_INVALID_ARGUMENT;
+    ok = ok && ecuio_dump_remove("no-such-folder", "none.havnedump") ==
+                   ECUIO_ERR_LOAD_FAILED;
     if (!ok) {
         fprintf(stderr, "c_abi: a dump call's refusal moved\n");
         return 1;
