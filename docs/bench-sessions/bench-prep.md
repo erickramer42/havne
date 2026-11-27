@@ -156,6 +156,12 @@ session, the recorders on a car, a second listener):
 |---|---|---|---|
 | 39 | **A session holds the host awake on its idle timer:** with a laptop's power plan set to sleep after 1 min, the app and `havne-cli log` on `elm327://` to the ELM327 emulator stay awake through 5 min untouched with no `slept` line; with the switch off, or `--allow-sleep`, the laptop sleeps and the `slept` line says how long. Windows' power request holds an S3 laptop with its display off; a Linux desktop's own idle suspend (Xfce's power manager) honors logind's `idle` lock or the session bus's inhibit; a Modern Standby laptop stays out of standby once its display is off; the phone with its screen off keeps reading with the switch on and stops with it off | STILL UNKNOWN for every platform; no Modern Standby machine is at hand | The take is pinned on every platform through core's seam (`Elm327AwakeTest`), Windows' real request is taken (`Elm327AwakeTest.WindowsTakesARealRequest`), logind lists Linux's (`Elm327AwakeTest.LogindListsTheHoldUntilTheClose`) and macOS lists its assertion (`Elm327AwakeTest.MacOsListsTheAssertion`); no runner's idle timer runs, so only these runs show the hold keeps a machine awake. Apple rests on its documentation |
 
+### The start's emissions probe ([ADR-0065](../adr/0065-car-sized-profile.md))
+
+| # | Assumption in the code | State | Evidence |
+|---|---|---|---|
+| 42 | **The start's emissions probe through the VX, 11-bit and 29-bit:** on a connect the VX takes eight (11-bit) or up to nine (29-bit, in groups) temporary FLOW_CONTROL filters, one functional `01 00`, and reads its replies for 100 ms. To measure: which modules answer within the wait (11-bit: is every emissions ECU heard, and does an undeclared one join the table); on a 29-bit car, whether a masked FLOW_CONTROL filter (one pattern passing every 18DAF1xx reply) hears every module's reply, which decides whether undeclared 29-bit responders can be heard over J2534 (Havne hears declared ones only until then); and the VX's own filter count (Havne assumes 10, `J2534_FILTERS_GUARANTEED` less one, raised only on a measured count). Reads only: the probe sends nothing but `01 00` | STILL UNKNOWN | The probe's rules and the filter budget are pinned against the fakes (`J2534ProbeTest`, `ProbeRangeTest`); no J2534 vendor's filter limits are public (the one vendor reference found gives 16 FLOW_CONTROL and 10 PASS/BLOCK filters per channel, not a guaranteed minimum) |
+
 ## Still open
 
 - **#4, 29-bit addressing:** needs a 29-bit vehicle.
