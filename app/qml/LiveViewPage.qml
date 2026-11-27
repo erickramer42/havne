@@ -297,6 +297,25 @@ Page {
         function onModelReset() { root.resume() }
     }
 
+    property var roomPages: []
+    property int ticksRev: 0
+    Connections {
+        target: Bridge.signalModel
+        function onTicksChanged() { ++root.ticksRev }
+    }
+    function noRoomText() {
+        const words = Bridge.roomHolders(roomPages).words
+        if (!Bridge.logActive)
+            return words
+        const names = Bridge.signalModel.noRoomNames()
+        if (names.length === 0)
+            return words
+        return (names.length === 1 ? qsTr("Logging 1 signal the adapter has no room for: %1: their columns stay empty.")
+                                   : qsTr("Logging %1 signals the adapter has no room for: %2: their columns stay empty.")
+                                         .arg(names.length))
+                   .arg(names.join(qsTr(", "))) + " " + words
+    }
+
     readonly property int rowHeight: Theme.rowHeight
     // The strip chart's least height; the list gives up rows before the
     // chart goes below it
@@ -409,6 +428,7 @@ Page {
                 visible: Bridge.connected && Bridge.liveSignalModel.shownCount > 0
                 filter: Bridge.liveSignalModel.filter
                 codes: Bridge.liveSignalModel.groups
+                modules: Bridge.liveSignalModel.modules
                 askedShown: true
             }
         }
@@ -484,6 +504,7 @@ Page {
             // then the chart at its minimum
             readonly property real roomAbove: column.height - y - column.spacing
                                               - (hiddenNote.visible ? hiddenNote.height + column.spacing : 0)
+                                              - (noRoomNote.visible ? noRoomNote.height + column.spacing : 0)
                                               - windowRow.height - column.spacing
                                               - root.chartMinHeight
             // The splitter's height, once dragged: within one row and
@@ -546,6 +567,17 @@ Page {
                   ? qsTr("1 signal not asked: tick its row to ask it")
                   : qsTr("%1 signals not asked: tick a row to ask it")
                         .arg(Bridge.signalModel.unaskedCount)
+        }
+        Label {
+            textFormat: Text.PlainText
+            id: noRoomNote
+            objectName: "noRoomNote"
+            visible: text !== "" && !root.chartMaximized
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: Bridge.connected && Bridge.signalModel.noRoomCount > 0 && root.ticksRev >= 0
+                  ? root.noRoomText() : ""
         }
 
         // The chart's time window: the last N seconds of every trace. The

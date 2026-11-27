@@ -21,6 +21,8 @@ Rectangle {
     required property bool subscribed
     required property bool hasValue
     required property bool unasked          // the focus leaves it unasked
+    required property string unaskedWhy
+    required property string tag
     // The model notifies AgeMsRole per batch and on every
     // coalesce tick (refreshAges), so a row that stops
     // updating still re-evaluates and dims. A delegate-side
@@ -40,7 +42,8 @@ Rectangle {
     // ignored, so a value changing at the model's rate is a name
     // change and never a node made, hidden or destroyed
     Accessible.role: Accessible.ListItem
-    Accessible.name: signalDelegate.name + ": " + valueLabel.text
+    Accessible.name: signalDelegate.name + (signalDelegate.tag !== "" ? ", " + signalDelegate.tag : "")
+                     + ": " + valueLabel.text
                      + (alertLevel === 2 ? qsTr(", danger alert")
                         : alertLevel === 1 ? qsTr(", warning alert") : "")
 
@@ -95,6 +98,18 @@ Rectangle {
                                           Math.round(signalDelegate.width / 3))
             elide: Text.ElideRight
         }
+        Label {
+            textFormat: Text.PlainText
+            id: tagLabel
+            objectName: "tagLabel"
+            Accessible.ignored: true
+            visible: signalDelegate.tag !== ""
+            text: signalDelegate.tag
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            Layout.maximumWidth: Math.round(signalDelegate.width / 5)
+            elide: Text.ElideRight
+        }
         // The refusal's words at the value's font: on a row
         // too narrow for them beside the name (a phone), the
         // value is "Refused (7F 22 31)" instead
@@ -126,6 +141,7 @@ Rectangle {
                        ? signalDelegate.refused
                        : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
                   : signalDelegate.unasked ? qsTr("Not asked")
+                  : signalDelegate.unaskedWhy === "room" ? qsTr("No room")
                   : !signalDelegate.hasValue
                     ? (Bridge.replayFinished ? qsTr("Not in this recording") : qsTr("—"))
                   : signalDelegate.isText ? signalDelegate.text
@@ -143,12 +159,13 @@ Rectangle {
                 Math.floor(signalDelegate.width - 24 - Math.ceil(plotBox.width)
                            - Math.ceil(swatch.width)
                            - Math.ceil(nameLabel.Layout.minimumWidth)
+                           - (tagLabel.visible ? Math.ceil(tagLabel.width) + rowLayout.spacing : 0)
                            - 3 * rowLayout.spacing)))
             elide: Text.ElideRight
             color: signalDelegate.alertLevel === 2 ? Theme.textOnAlertDanger
                    : signalDelegate.alertLevel === 1 ? Theme.textOnAlertWarn
                    : signalDelegate.refused !== ""
-                     || (signalDelegate.unasked && Bridge.connected)
+                     || ((signalDelegate.unasked || signalDelegate.unaskedWhy === "room") && Bridge.connected)
                    ? Theme.textDim : Theme.text
             // An alert ON fills the value's cell in its level's
             // role, the mark beside a danger; the name keeps its color

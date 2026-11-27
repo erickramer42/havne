@@ -603,6 +603,7 @@ ApplicationWindow {
                     }
                     LiveViewPage {
                         objectName: "livePage"
+                        roomPages: dashboardView.roomPages
                         onConnectRequested: root.openConnect()
                     }
                     DiagnosticsPage {

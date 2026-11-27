@@ -20,6 +20,7 @@ RowLayout {
     required property SignalFilter filter
     // The groups' codes among the list's rows
     property var codes: []
+    property var modules: []
     // False leaves the text field alone, with no Filter button and so no
     // popup (a list the groups and Plotted only don't apply to)
     property bool filterButtonShown: true
@@ -52,7 +53,7 @@ RowLayout {
         // Lit while the popup's choices narrow the list
         checkable: true
         checked: bar.filter.plottedOnly || bar.filter.askedOnly
-                 || bar.filter.groups.length > 0
+                 || bar.filter.groups.length > 0 || bar.filter.modules.length > 0
         onClicked: options.opened ? options.close() : options.open()
         Accessible.name: qsTr("Filter the signals")
 
@@ -91,6 +92,24 @@ RowLayout {
                         // filter.groups is the dependency, so a clear unticks it
                         checked: bar.filter.groups.indexOf(modelData.code) >= 0
                         onToggled: bar.filter.toggleGroup(modelData.code)
+                    }
+                }
+                Label {
+                    textFormat: Text.PlainText
+                    objectName: "modulesCaption"
+                    visible: bar.modules.length > 1
+                    text: qsTr("Modules")
+                    color: Theme.textDim
+                    font.pixelSize: Theme.fontCaption
+                }
+                Repeater {
+                    model: bar.modules.length > 1 ? bar.modules : []
+                    delegate: ThemedCheckBox {
+                        required property var modelData
+                        objectName: "module_" + modelData.index
+                        text: modelData.name
+                        checked: bar.filter.modules.indexOf(modelData.index) >= 0
+                        onToggled: bar.filter.toggleModule(modelData.index)
                     }
                 }
                 ThemedButton {

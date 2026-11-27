@@ -189,6 +189,10 @@ Page {
         }
         return all
     }
+    readonly property var roomPages: pages.map(p => ({
+        name: String(p.name),
+        cells: (Array.isArray(p.cells) ? p.cells : []).map(c => lookupRefs(c && Array.isArray(c.refs) ? c.refs : []))
+    }))
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
