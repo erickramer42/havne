@@ -79,6 +79,12 @@ void loader::read_fingerprint(const Value& root, ecuio_plugin& p) const
         entries.push_back(
             entry_of(code->find("file")->text, bytes.data(), bytes.size()));
     }
+    for (const ecuio_operation::plan& op : p.operations) {
+        if (op.has_kernel) {
+            entries.push_back(entry_of(op.helper.file, op.helper.blob.data(),
+                                       op.helper.blob.size()));
+        }
+    }
     std::sort(entries.begin(), entries.end(),
               [](const entry& a, const entry& b) { return a.path < b.path; });
 

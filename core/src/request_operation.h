@@ -385,17 +385,20 @@ inline void take_settled(session_run& o, ecuio_engine_talk_state& t)
 inline void offer(session_run& o, ecuio_request_engine* e, const run_request& q,
                   int64_t now_us)
 {
-    const bool ident = q.bytes[0] == 0x22;
+    const uint8_t* pdu = q.wide != nullptr ? q.wide : q.bytes;
+    const bool ident = !q.write && pdu[0] == 0x22;
     ecuio_talk_request t;
-    t.pdu = q.bytes;
-    t.len = q.size;
+    t.pdu = pdu;
+    t.len = q.wide != nullptr ? q.wide_size : q.size;
     t.echo = ident ? uint8_t{3} : uint8_t{1};
-    t.kind = ident ? ecuio_talk_kind::plain : ecuio_talk_kind::read;
+    t.kind = q.write ? ecuio_talk_kind::write
+             : ident ? ecuio_talk_kind::plain
+                     : ecuio_talk_kind::read;
     if (ecuio_engine_offer_talk(e, o.channel, t, now_us) ==
         ecuio_talk_offer::taken) {
         o.out = true;
         o.talk_at = o.channel;
-        o.sid = q.bytes[0];
+        o.sid = pdu[0];
     } else {
         stop(o.r, run_end::link_lost); /* the start judged every request */
     }
@@ -425,7 +428,8 @@ inline void battery_step(ecuio_session_t* s, session_run& o, int64_t now_us)
         if (!v.first) {
             v.first = true;
             o.k.want_volts = !(served && b.got);
-            v.refused_low = v.refused_low || (v.write && !(served && b.got));
+            v.refused_low =
+                v.refused_low || (v.write && !v.ram_only && !(served && b.got));
         }
         o.volts_asked = 0;
     }
@@ -540,6 +544,37 @@ inline void finish(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     }
 }
 
+/* A functional request handed to the worker: to 0x18DB33F1 from a 29-bit
+ * module, else 0x7DF */
+inline void aside(const ecuio_session_t* s, const session_run& o,
+                  ecuio_request_engine* e, uint8_t sid, uint8_t sub)
+{
+    e->aside[0] = sid;
+    e->aside[1] = sub;
+    e->aside_tx = s->module_tx[o.channel] > 0x7FFu ? 0x18DB33F1u : 0x7DFu;
+    e->aside_due = true;
+}
+
+/* The quieter written settles the machine and starts the keep-alive,
+ * which goes every keepalive_ms until the run's end */
+inline void functional_step(const ecuio_session_t* s, session_run& o,
+                            ecuio_request_engine* e, int64_t now_us)
+{
+    const kernel& k = o.p->helper;
+    const int64_t every_us = int64_t{k.keepalive_ms} * 1000;
+    if (o.quiet_out && !e->aside_due) {
+        o.quiet_out = false;
+        silence(o.r);
+        o.keep_at_us = k.quiet_keepalive != 0 ? now_us + every_us : 0;
+    }
+    if (o.r.at == run_stage::done) {
+        o.keep_at_us = 0;
+    } else if (o.keep_at_us != 0 && now_us >= o.keep_at_us && !e->aside_due) {
+        aside(s, o, e, 0x3E, k.quiet_keepalive);
+        o.keep_at_us = (std::max)(o.keep_at_us + every_us, now_us + 1);
+    }
+}
+
 /* One pass of a run that is the worker's */
 inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
                   int64_t now_us)
@@ -569,11 +604,15 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     if (o.checking && o.v.first && r.at != run_stage::done) {
         check_step(o, e, now_us);
     }
-    while (!o.checking && r.at != run_stage::done && !o.out && !t.offered &&
-           !t.out && t.result.end == ecuio_talk_end::none) {
+    functional_step(s, o, e, now_us);
+    while (!o.checking && r.at != run_stage::done && !o.out && !o.quiet_out &&
+           !t.offered && !t.out && t.result.end == ecuio_talk_end::none) {
         run_request q;
         const run_action a = next(r, q, *o.sink);
-        if (a == run_action::send) {
+        if (a == run_action::send && q.functional) {
+            aside(s, o, e, q.bytes[0], q.bytes[1]);
+            o.quiet_out = true;
+        } else if (a == run_action::send) {
             offer(o, e, q, now_us);
         } else if (a == run_action::enter) {
             enter(s, o, e, now_us);
@@ -643,15 +682,18 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
     }
     uint8_t stage = o->stage.load(std::memory_order_acquire);
     if (stage == kStageArmed) {
-        begin(o->r, *o->p);
+        begin(o->r, *o->p, e->write_max);
         check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);
         o->checking = true;
         o->talk_at = o->channel;
         o->v = volts{};
         o->v.write = o->write;
+        o->v.ram_only = o->p->has_kernel;
         o->volts_asked = 0;
         o->volts_at_us = 0;
         o->volts_step = 0;
+        o->quiet_out = false;
+        o->keep_at_us = 0;
         o->began_us = now_us;
         e->operation_hold = true;
         record_line(s, *o, ECUIO_OPERATION_END_NONE);
@@ -670,7 +712,8 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
 /* The wait until a run next has a step to take, from now (INT64_MAX for
  * none): now for an armed run and a settled talk, never while its talk
  * is out, else the poll */
-inline int64_t wait_us(ecuio_session_t* s, const ecuio_request_engine* e)
+inline int64_t wait_us(ecuio_session_t* s, const ecuio_request_engine* e,
+                       int64_t now_us)
 {
     const session_run* o = s->operation_live.load(std::memory_order_acquire);
     if (o == nullptr) {
@@ -683,12 +726,15 @@ inline int64_t wait_us(ecuio_session_t* s, const ecuio_request_engine* e)
     if (stage != kStageRunning) {
         return INT64_MAX;
     }
+    const int64_t keep = o->keep_at_us == 0       ? INT64_MAX
+                         : o->keep_at_us > now_us ? o->keep_at_us - now_us
+                                                  : 0;
     if (o->out) {
         return e->chans[o->talk_at].talk.result.end != ecuio_talk_end::none
                    ? 0
-                   : INT64_MAX;
+                   : keep;
     }
-    return kPollUs;
+    return (std::min)(kPollUs, keep);
 }
 
 /* At the worker's close: a word owed and never given, an armed run's

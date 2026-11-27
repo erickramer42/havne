@@ -462,6 +462,11 @@ struct ecuio_request_engine {
      * entry, a talk and its keep-alive, and nothing else; a module that
      * isn't open, or is visiting, sends nothing until the hold ends */
     bool operation_hold = false;
+    /* An operation's functional 10 82 or 3E 80: the worker writes it as
+     * one Single Frame to aside_tx and clears aside_due; never answered */
+    uint8_t aside[2] = {};
+    uint32_t aside_tx = 0;
+    bool aside_due = false;
     /* The set derives more requests than a rotation holds: a row takes
      * its pool row when a focus first keeps it, and with no focus every
      * row is parked (ecuio_engine_pick_only) */
@@ -511,6 +516,10 @@ struct ecuio_request_engine {
     /* The longest request the transport sends, a talk's bound: attach
      * sets ECUIO_ENGINE_PDU_MAX where a request goes out as ISO-TP */
     uint32_t pdu_max = ECUIO_ENGINE_PDU_SINGLE;
+    /* A write-class talk's bound, 0 for a transport that sends none, and
+     * its bytes: one channel's at a time */
+    uint32_t write_max = 0;
+    uint8_t write_pdu[ECUIO_ENGINE_WRITE_MAX] = {};
     /* Frames the transport said were lost before one it handed over
      * (ecuio_engine_overflowed), and writes the kernel refused for want
      * of buffers (SocketCAN's ENOBUFS); saturating, internal */

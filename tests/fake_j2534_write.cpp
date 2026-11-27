@@ -50,7 +50,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     }
 
     unsigned long n = pMsg->DataSize;
-    if (n > ECUIO_PT_WRITE_MAX) {
+    if (n > ECUIO_PT_WRITE_LONG_MAX) {
         return STATUS_FAILED;   /* beyond the transport's write limit */
     }
 

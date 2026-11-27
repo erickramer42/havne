@@ -204,9 +204,9 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
 {
     const j2534_channel& ch = t->chans[r.channel];
     uint32_t len = 0; /* a talk's whole request: the adapter segments it */
-    const uint8_t* pdu = ecuio_engine_pdu_of(t->engine.chans[r.channel].talk,
-                                             once, r.bytes, r.len, &len);
-    uint8_t msg[J2534_ADDR_LEN + ECUIO_ENGINE_PDU_MAX];
+    const uint8_t* pdu =
+        ecuio_engine_wire(&t->engine, r.channel, once, r.bytes, r.len, &len);
+    uint8_t msg[ECUIO_PT_WRITE_LONG_MAX];
     pack_be32(msg, ch.tx_id);
     memcpy(msg + J2534_ADDR_LEN, pdu, len);
     uint32_t written = 0;
@@ -218,6 +218,22 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
     const bool sent = (wst == ECUIO_OK && written >= 1);
     link_on_write(h, sent);
     return sent;
+}
+
+/* An operation's functional request, one frame; its answers go unread */
+void send_aside(ecuio_j2534_transport* t, ecuio_request_engine& e)
+{
+    if (!e.aside_due) {
+        return;
+    }
+    e.aside_due = false;
+    uint8_t msg[J2534_ADDR_LEN + sizeof e.aside];
+    pack_be32(msg, e.aside_tx);
+    memcpy(msg + J2534_ADDR_LEN, e.aside, sizeof e.aside);
+    uint32_t written = 0;
+    (void)ecuio_j2534_write_frame(
+        t->handle, t->channel, msg, sizeof msg,
+        t->chans[0].addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD, 0, &written);
 }
 
 /* Backoff-aware sleep, abortable within 20 ms of a stop request:
@@ -585,6 +601,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
                                  engine_now_us(t));
         (void)j2534_filters_follow(t, false);
         ecuio_step_conversations(t->session, &e, engine_now_us(t));
+        send_aside(t, e);
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,

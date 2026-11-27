@@ -333,12 +333,61 @@ void loader::read_conversation(const Value& root, ecuio_plugin& p)
                   *c);
         p.conversation = std::move(c);
     }
+}
+
+void loader::check_binaries() const
+{
     for (const binary_file& b : binaries_) {
         if (!b.read) {
             refuse(*b.root, "file " + q(b.path) +
                                 " is a binary file nothing in the manifest "
                                 "names");
         }
+    }
+}
+
+constexpr const char* kBinaryKinds[] = {"wasm", "bin"};
+
+/* A packed package's binary file of kind at path, its base64 decoded */
+void loader::packed_binary(const Value& file, const std::string& path,
+                           const char* kind, std::vector<uint8_t>* out)
+{
+    const std::string name = "file " + q(path);
+    binary_file* found = nullptr;
+    for (binary_file& b : binaries_) {
+        if (b.path == path) {
+            found = &b;
+        }
+    }
+    if (found == nullptr) {
+        refuse(file, name + " isn't a binary file in \"files\"");
+    }
+    found->read = true;
+    const Value& entry = *found->root;
+    only_keys(entry, {"kind", "base64"}, "a binary file");
+    const Value& k = *entry.find("kind");
+    expect(k, Type::string, "a binary file's kind");
+    bool known = false;
+    for (const char* word : kBinaryKinds) {
+        known = known || k.text == word;
+    }
+    if (!known) {
+        refuse(k, "a binary file's kind " + q(k.text) +
+                      " isn't one this Havne reads: \"wasm\" and \"bin\"");
+    }
+    if (k.text != kind) {
+        refuse(k, name + "'s kind is " + q(k.text) + ": its step reads \"" +
+                      kind + "\"");
+    }
+    const Value& text =
+        needed(entry, "base64", "a binary file needs \"base64\": its bytes");
+    expect(text, Type::string, "a binary file's base64");
+    if (text.text.size() > kBase64Max) {
+        refuse(text, name + " is over 1 MiB");
+    }
+    if (!ecuio_base64_decode(text.text.data(), text.text.size(), out)) {
+        refuse(text, name + "'s base64 isn't RFC 4648's: A-Z, a-z, 0-9, "
+                            "+ and /, padded with =, nothing else");
     }
 }
 

@@ -25,6 +25,7 @@ constexpr int64_t kVoltsLateUs = 5000000;
 /* The battery's readings at the adapter, or the engine module's 01 42 */
 struct volts {
     bool write = false; /* the write's rule: judged once, at the start */
+    bool ram_only = false; /* a kernel read: the dump's numbers */
     bool first = false; /* the start's reading is settled, got or not */
     bool has = false;
     bool from_ecu = false;
@@ -44,7 +45,8 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
     v.min_mv = v.has ? (std::min)(v.min_mv, mv) : mv;
     v.has = true;
     v.high_warn = v.high_warn || mv > kVoltsWarnHighMv;
-    if (!running && v.write) {
+    const bool flash = v.write && !v.ram_only;
+    if (!running && flash) {
         v.low_warn = mv < kWriteWarnMv;
         v.refused_low = mv < kWriteStartFloorMv;
         v.refused_high = mv > kWriteRefuseHighMv;

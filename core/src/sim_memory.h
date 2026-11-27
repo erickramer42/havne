@@ -401,6 +401,24 @@ inline uint32_t end_upload(ecuio_sim_memory& m, uint32_t len, uint8_t* out)
 
 } // namespace ecuio_sim_memory_detail
 
+/* Whether a well-formed 23 or 35 asks for bytes of region B, the code */
+inline bool ecuio_sim_memory_asks_code(const uint8_t* req, uint32_t len)
+{
+    namespace detail = ecuio_sim_memory_detail;
+    const uint32_t head = len > 0 && req[0] == 0x35 ? 3u : 2u;
+    if (len < head || (req[0] != 0x23 && req[0] != 0x35)) {
+        return false;
+    }
+    detail::span s = detail::fields(req[head - 1]);
+    if (s.address_bytes < 1 || s.address_bytes > 4 || s.size_bytes < 1 ||
+        s.size_bytes > 4 || len != head + s.address_bytes + s.size_bytes) {
+        return false;
+    }
+    detail::read_span(req + head, &s);
+    return s.size != 0 && detail::in_region(s, {ECUIO_SIM_MEMORY_CODE_ADDRESS,
+                                                ECUIO_SIM_MEMORY_CODE_BYTES});
+}
+
 /* Whether req's service is the memory's to answer */
 inline bool ecuio_sim_memory_service(uint8_t service)
 {

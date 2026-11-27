@@ -63,11 +63,18 @@ CALLS = {
     ("plugin_conversation.cpp", '"a security level"', 1):
         ("plugin-manifest", "/$defs/securityLevel"),
     ("plugin_conversation.cpp", '"a binary file"', 1): ("plugin-manifest", "/$defs/binaryFile"),
+    ("plugin_conversation.cpp", '"a binary file"', 2): ("plugin-manifest", "/$defs/binaryFile"),
     ("plugin_publisher.cpp", '"\\"publisher\\""', 1): ("plugin-manifest", "/$defs/publisher"),
     ("plugin_operations.cpp", '"an operation"', 1): ("plugin-manifest", "/$defs/operation"),
     ("plugin_operations.cpp", '"an identification"', 1):
         ("plugin-manifest", "/$defs/operationIdent"),
     ("plugin_operations.cpp", '"a step"', 1): ("plugin-manifest", "/$defs/operationStep"),
+    ("plugin_operations.cpp", '"the kernel"', 1): ("plugin-manifest", "/$defs/operationKernel"),
+    ("plugin_operations.cpp", '"the kernel\'s ram"', 1): ("plugin-manifest", "/$defs/operationRam"),
+    ("plugin_operations.cpp", '"a functional request"', 1):
+        ("plugin-manifest", "/$defs/operationFunctional"),
+    ("plugin_operations.cpp", '"a download"', 1): ("plugin-manifest", "/$defs/operationDownload"),
+    ("plugin_operations.cpp", '"a routine"', 1): ("plugin-manifest", "/$defs/operationRoutine"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
@@ -101,8 +108,6 @@ WORDS = [
      ("signal-file", "/$defs/extends/enum")),
     ("core/src/plugin_manifest.cpp", r't\.text != "([a-z]+)"',
      ("plugin-manifest", "/properties/tiers/items/enum")),
-    ("core/src/plugin_conversation.cpp", r'kind\.text != "([a-z]+)"',
-     ("plugin-manifest", "/$defs/binaryFile/properties/kind/const")),
 ]
 
 # (source, a pattern whose group 1 is a list's whole body, its words the
@@ -118,6 +123,8 @@ LISTS = [
      ("plugin-manifest", "/$defs/operationStep/properties/step/enum")),
     ("core/src/plugin_operations.cpp", r'required\(v, "session", what\),\s*\{(.*?)\}',
      ("plugin-manifest", "/$defs/operationStep/properties/session/enum")),
+    ("core/src/plugin_conversation.cpp", r"kBinaryKinds\[\] = \{(.*?)\};",
+     ("plugin-manifest", "/$defs/binaryFile/properties/kind/enum")),
     ("core/src/plugin_operations.cpp", r'required\(op, "kind", what\),\s*\{(.*?)\}',
      ("plugin-manifest", "/$defs/operation/properties/kind/enum")),
     ("core/src/plugin_operations.cpp",

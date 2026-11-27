@@ -23,6 +23,9 @@
  * this is room to spare; reads take whole messages. */
 #define ECUIO_PT_WRITE_MAX 64
 
+/* The CAN ID and ISO-TP's longest message */
+#define ECUIO_PT_WRITE_LONG_MAX (4 + 4095)
+
 /* ---- Status codes (J2534-1 v04.04, VERIFIED) ----
  * The subset the core uses. TIMEOUT and BUFFER_EMPTY are not errors on
  * a read (quiet bus / empty queue); every other nonzero status is a

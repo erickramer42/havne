@@ -77,6 +77,8 @@ struct session_run {
     uint32_t unlocks = 0;     /* attempts that opened the level */
     int64_t began_us = 0;
     int64_t entering_us = 0; /* when the entry was first asked; 0 not yet */
+    bool quiet_out = false;  /* the machine's functional request is due */
+    int64_t keep_at_us = 0;  /* the next functional 3E 80; 0 none */
 
     /* What the getter reads, under the session's support mutex */
     ecuio_operation_state_t view{};

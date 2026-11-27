@@ -775,6 +775,56 @@ OPERATIONS = [
     ("a step key it doesn't take", PACKED4, RD + ["erase"], True, False),
 ]
 
+# A kernel read: a made-up helper downloaded to a made-up RAM window and
+# started, then the range it reads. The rules only the loader holds (the
+# download inside the window, the window apart from the ranges, the
+# routine among the start list, the helper's SHA-256 and its file's kind)
+# are PluginOperationTest's.
+HELPER = bytes((i * 7 + 3) % 256 for i in range(300))
+DOWNLOAD = {"step": "download", "name": "helper", "session": "programming",
+            "address": "00F00000", "address_bytes": 4, "size_bytes": 4,
+            "file": "kernel.bin", "sha256": hashlib.sha256(HELPER).hexdigest()}
+ROUTINE = {"step": "routine", "name": "start", "session": "programming", "routine": "0201"}
+PACKED5 = changed(PACKED4, ["files", "kernel.bin"],
+                  {"kind": "bin", "base64": base64.b64encode(HELPER).decode()})
+PACKED5["operations"] = [{
+    "id": "kernel-read", "kind": "kernel_read", "title": "Through the helper",
+    "ecu": "pcm", "level": "01",
+    "kernel": {"ram": {"address": "00F00000", "bytes": 16384}, "start": ["0201"],
+               "stays": True,
+               "functional": [{"request": "10 82"}, {"request": "3E 80", "every_ms": 2000}]},
+    "steps": [DOWNLOAD, ROUTINE, dict(UPLOAD, name="code", address="00080000")],
+}]
+KR = OPS + [0]
+KN = KR + ["kernel"]
+FN = KN + ["functional"]
+KERNELS = [
+    ("a kernel read", PACKED5, [], None, True),
+    ("a kernel read with no kernel", PACKED5, KN, DELETE, False),
+    ("a dump with a kernel", PACKED5, KR + ["kind"], "dump", False),
+    ("a kernel key it doesn't take", PACKED5, KN + ["flash"], [], False),
+    ("a kernel with no ram", PACKED5, KN + ["ram"], DELETE, False),
+    ("a kernel with no start", PACKED5, KN + ["start"], DELETE, False),
+    ("a kernel's start of no routines", PACKED5, KN + ["start"], [], False),
+    ("a kernel's start in lower case", PACKED5, KN + ["start"], ["020a"], False),
+    ("a kernel with no stays", PACKED5, KN + ["stays"], DELETE, False),
+    ("a kernel's stays that is a word", PACKED5, KN + ["stays"], "yes", False),
+    ("a kernel with no functional requests", PACKED5, FN, DELETE, True),
+    ("a functional reset", PACKED5, FN + [0, "request"], "11 81", False),
+    ("a functional request answered", PACKED5, FN + [0, "request"], "10 02", False),
+    ("a 3E 80 with no every_ms", PACKED5, FN + [1, "every_ms"], DELETE, False),
+    ("a 10 82 with an every_ms", PACKED5, FN + [0, "every_ms"], 2000, False),
+    ("a 3E 80 every 4500 ms", PACKED5, FN + [1, "every_ms"], 4500, True),
+    ("a 3E 80 every 4501 ms", PACKED5, FN + [1, "every_ms"], 4501, False),
+    ("a functional request to an address", PACKED5, FN + [0, "to"], "physical", False),
+    ("a kernel read with no routine", PACKED5, KR + ["steps", 1], dict(UPLOAD), False),
+    ("a download in the extended session", PACKED5, KR + ["steps", 0, "session"],
+     "extended", False),
+    ("a download with no sha256", PACKED5, KR + ["steps", 0, "sha256"], DELETE, False),
+    ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "dfi"], "00", False),
+    ("a routine of three digits", PACKED5, KR + ["steps", 1, "routine"], "201", False),
+]
+
 
 class Cli:
     def __init__(self, exe, scratch):
@@ -907,7 +957,7 @@ def main():
 
         # Edge cases: one verdict from both
         cases = (list(CASES) + FORMAT2 + FORMAT3 + MERGED_SET + CONDITION_CASES +
-                 CONVERSATION + PAGES + PUBLISHER + OPERATIONS)
+                 CONVERSATION + PAGES + PUBLISHER + OPERATIONS + KERNELS)
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

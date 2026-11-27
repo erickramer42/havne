@@ -135,7 +135,12 @@ int c_abi_plugin(void)
             ecuio_plugin_operation_t plan;
             ecuio_plugin_operation_step_t step;
             ecuio_plugin_operation_ident_t ident;
+            ecuio_plugin_operation_kernel_t kernel;
+            const uint8_t* blob = NULL;
+            uint64_t blob_bytes = 0;
             uint32_t plans = 7u;
+            memset(&kernel, 0, sizeof kernel);
+            kernel.struct_size = sizeof kernel;
             memset(&plan, 0, sizeof plan);
             plan.struct_size = sizeof plan;
             memset(&step, 0, sizeof step);
@@ -146,7 +151,10 @@ int c_abi_plugin(void)
                  ECUIO_OPERATION_KIND_DUMP == 1u &&
                  ECUIO_OPERATION_CLASS_READ == 1u &&
                  ECUIO_OPERATION_CLASS_WRITE == 2u && ECUIO_STEP_READ == 1u &&
-                 ECUIO_STEP_UPLOAD == 2u &&
+                 ECUIO_STEP_UPLOAD == 2u && ECUIO_STEP_DOWNLOAD == 3u &&
+                 ECUIO_STEP_ROUTINE == 4u &&
+                 ECUIO_OPERATION_KIND_KERNEL_READ == 2u &&
+                 ECUIO_PLUGIN_MAX_STARTS == 8u &&
                  ECUIO_STEP_SESSION_PROGRAMMING == 2u &&
                  ECUIO_STEP_SESSION_EXTENDED == 3u &&
                  ECUIO_PLUGIN_MAX_OPERATIONS == 8u &&
@@ -162,6 +170,12 @@ int c_abi_plugin(void)
                      ECUIO_ERR_INVALID_ARGUMENT &&
                  ecuio_plugin_operation_ident(plugin, 0, 0, &ident) ==
                      ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_kernel(plugin, 0, &kernel) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_blob(plugin, 0, &blob, &blob_bytes) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_kernel(NULL, 0, &kernel) ==
+                     ECUIO_ERR_NULL_ARGUMENT &&
                  ecuio_plugin_operation(plugin, 0, NULL) ==
                      ECUIO_ERR_NULL_ARGUMENT;
         }

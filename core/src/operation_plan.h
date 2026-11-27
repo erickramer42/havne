@@ -60,6 +60,26 @@ struct ident {
     uint32_t role = ECUIO_DUMP_ROLE_HARDWARE;
 };
 
+/* A kernel read's helper and how it is downloaded and started */
+struct kernel {
+    uint64_t ram_address = 0;
+    uint64_t ram_bytes = 0;
+    std::vector<uint16_t> starts;
+    bool stays = true;
+    uint8_t quiet_session = 0;   /* 0x82 or 0 */
+    uint8_t quiet_keepalive = 0; /* 0x80 or 0 */
+    uint32_t keepalive_ms = 0;
+    std::string download_name;
+    std::string routine_name;
+    std::string file;
+    uint64_t address = 0;
+    uint8_t address_bytes = 4;
+    uint8_t size_bytes = 4;
+    uint16_t routine = 0;
+    std::vector<uint8_t> blob;
+    uint8_t sha256[32] = {};
+};
+
 struct plan {
     std::string id;
     std::string title;
@@ -70,6 +90,8 @@ struct plan {
     uint8_t level = 0; /* the security level its reads need */
     std::vector<ident> idents;
     std::vector<step> steps;
+    bool has_kernel = false;
+    kernel helper;
 };
 
 /* The most an unsigned value of n bytes (1 to 4) holds */
@@ -128,6 +150,9 @@ inline bool overlap(const step& a, const step& b)
  * of reads and uploads alone is read-class */
 inline uint32_t class_of(const plan& p)
 {
+    if (p.has_kernel) {
+        return ECUIO_OPERATION_CLASS_WRITE;
+    }
     for (const step& s : p.steps) {
         if (s.kind != ECUIO_STEP_READ && s.kind != ECUIO_STEP_UPLOAD) {
             return ECUIO_OPERATION_CLASS_WRITE;
@@ -156,6 +181,44 @@ inline uint64_t image_bytes(const plan& p)
         n += s.bytes;
     }
     return n;
+}
+
+/* Why a kernel read's helper can't run as declared, or nullptr: core
+ * can't tell RAM from flash on the wire, so the plan's word is held to
+ * what core can check */
+inline const char* kernel_fault(const plan& p)
+{
+    const kernel& k = p.helper;
+    if (k.ram_bytes == 0 || k.ram_address + k.ram_bytes - 1 > most_of(4)) {
+        return "its RAM window is 1 byte or more inside 4 address bytes";
+    }
+    const uint64_t n = k.blob.size();
+    if (n == 0 || k.address < k.ram_address || n > k.ram_bytes ||
+        k.address - k.ram_address > k.ram_bytes - n) {
+        return "its download's address and length fall outside its RAM "
+               "window";
+    }
+    if (k.address + n - 1 > most_of(k.address_bytes) ||
+        n > most_of(k.size_bytes)) {
+        return "its download doesn't fit its address_bytes and size_bytes";
+    }
+    for (const step& s : p.steps) {
+        if (s.address < k.ram_address + k.ram_bytes &&
+            k.ram_address < s.address + s.bytes) {
+            return "its RAM window shares an address with a range it reads";
+        }
+    }
+    bool listed = false;
+    for (const uint16_t id : k.starts) {
+        listed = listed || id == k.routine;
+    }
+    if (!listed) {
+        return "its routine isn't one its start lists";
+    }
+    if ((k.keepalive_ms != 0) != (k.quiet_keepalive != 0)) {
+        return "a keep-alive's every_ms goes with a functional 3E 80";
+    }
+    return nullptr;
 }
 
 /* Whether every request of the step fits one CAN frame's 7 bytes, which

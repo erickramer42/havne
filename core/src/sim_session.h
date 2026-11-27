@@ -10,6 +10,7 @@
 #define ECUIO_SIM_SESSION_H
 
 #include "sim_types.h"
+#include "sim_kernel.h"
 #include "sim_memory.h"
 #include "sim_security.h"
 #include "ecuio/plugin.h"
@@ -26,6 +27,7 @@ struct ecuio_sim_session {
     int64_t heard_us = 0; /* the ECU's time of the last request heard */
     ecuio_sim_security security;
     ecuio_sim_memory memory; /* answers where its vin is set */
+    ecuio_sim_kernel kernel; /* kernel=: region B through a helper alone */
 };
 
 static_assert(ECUIO_SIM_MEMORY_REPLY_MAX == ECUIO_SIM_REPLY_MAX,
@@ -57,6 +59,7 @@ inline void ecuio_sim_session_enter(ecuio_sim_session& s, uint8_t session)
     s.programming = session == ECUIO_STEP_SESSION_PROGRAMMING;
     ecuio_sim_security_lock(s.security);
     ecuio_sim_memory_end(s.memory);
+    ecuio_sim_kernel_end(s.kernel);
 }
 
 /* S3 of silence at the ECU's time now_us leaves the extended session,
@@ -67,6 +70,36 @@ inline void ecuio_sim_session_lapse(ecuio_sim_session& s, int64_t now_us)
         now_us - s.heard_us >= ECUIO_SIM_S3_US) {
         ecuio_sim_session_enter(s, 0x01);
     }
+}
+
+/* A functional request a node with memory (programs) takes, unanswered:
+ * 10 82 into the programming session, 3E 80 keeping a session; true when
+ * it was one of the two */
+inline bool ecuio_sim_session_functional(ecuio_sim_session& s, bool programs,
+                                         int64_t now_us, const uint8_t* req,
+                                         uint32_t len)
+{
+    if (!programs || len != 2 ||
+        !((req[0] == 0x10 && req[1] == 0x82) ||
+          (req[0] == 0x3E && req[1] == 0x80))) {
+        return false;
+    }
+    ecuio_sim_session_lapse(s, now_us);
+    if (req[0] == 0x10 && !s.programming) {
+        ecuio_sim_session_enter(s, ECUIO_STEP_SESSION_PROGRAMMING);
+    }
+    if (s.extended || s.programming) {
+        s.heard_us = now_us;
+    }
+    return true;
+}
+
+/* A bare 23 or 35 to region B while a helper is wanted and not running */
+inline bool ecuio_sim_kernel_withholds(const ecuio_sim_session& s,
+                                       const uint8_t* req, uint32_t len)
+{
+    return s.kernel.on && !s.kernel.running && s.programming &&
+           s.security.unlocked != 0 && ecuio_sim_memory_asks_code(req, len);
 }
 
 /* A physical request at the ECU's time now_us: S3 lapses the session
@@ -102,12 +135,29 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
             now_us, req, len, out);
     }
     ecuio_sim_security_between(s.security);
+    if (s.kernel.running && s.kernel.faults.silent) {
+        *handled = true;
+        return 0;
+    }
+    if (s.memory.vin != nullptr && len > 0 &&
+        ecuio_sim_kernel_service(s.kernel, req)) {
+        *handled = true;
+        return ecuio_sim_kernel_answer(s.kernel, s.security, s.programming, req,
+                                       len, out);
+    }
     if (s.memory.vin != nullptr && len > 0 &&
         ecuio_sim_memory_service(req[0])) {
         *handled = true;
-        return ecuio_sim_memory_answer(s.memory, s.security,
-                                       s.extended || s.programming, req, len,
-                                       out, ecuio_sim_memory_code_readable(s));
+        if (ecuio_sim_kernel_withholds(s, req, len)) {
+            return refuse(req[0], ECUIO_SIM_NRC_SESSION, out);
+        }
+        const uint32_t n = ecuio_sim_memory_answer(
+            s.memory, s.security, s.extended || s.programming, req, len, out,
+            ecuio_sim_memory_code_readable(s));
+        if (req[0] == 0x37 && n == 1 && out[0] == 0x77) {
+            ecuio_sim_kernel_upload_done(s.kernel);
+        }
+        return n;
     }
     const bool programs = has_extended && s.memory.vin != nullptr;
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E ||

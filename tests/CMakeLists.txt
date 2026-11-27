@@ -52,10 +52,12 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_conversation_session.cpp test_core_conversation.cpp
     test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
     test_dump_record.cpp test_dump_export.cpp test_plugin_operations.cpp
+    test_plugin_kernel.cpp
     test_operation_plan.cpp test_dump_writer.cpp test_session_operation.cpp
     test_session_operation_ends.cpp
     test_session_operation_record.cpp test_session_operation_checks.cpp
-    test_session_operation_battery.cpp test_session_operation_write.cpp)
+    test_session_operation_battery.cpp test_session_operation_write.cpp
+    test_session_operation_kernel.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -183,8 +185,9 @@ add_executable(test_obd2 test_obd2.cpp
     test_session_control.cpp test_session_control_late.cpp
     test_session_enter.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_tier3_ceiling.cpp
-    test_sim_security.cpp
-    test_engine_talk.cpp test_engine_hold.cpp test_key_window.cpp
+    test_sim_security.cpp test_sim_kernel.cpp
+    test_engine_talk.cpp test_engine_talk_write.cpp test_engine_hold.cpp
+    test_key_window.cpp
     test_request_turns.cpp
     test_request_turns_key.cpp test_request_turns_session.cpp
     test_request_pack.cpp test_reply_segmented.cpp test_request_quiet.cpp
@@ -198,7 +201,8 @@ add_executable(test_obd2 test_obd2.cpp
     test_sim_memory_upload.cpp test_sim_memory_faults.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp test_operation_run.cpp
-    test_operation_checks.cpp test_sim_programming.cpp)
+    test_operation_checks.cpp test_sim_programming.cpp
+    test_sim_kernel_session.cpp test_operation_kernel_run.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

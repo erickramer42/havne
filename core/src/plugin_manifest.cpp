@@ -203,6 +203,8 @@ void loader::read_manifest(ecuio_plugin& p)
     /* After the variants: the manifest's "ecus" are judged by then */
     read_conversation(root, p);
     read_operations(root, p);
+    read_blobs(root, p);
+    check_binaries();
     read_fingerprint(root, p);
 }
 
