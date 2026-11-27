@@ -28,7 +28,7 @@ using session_operation::kHighBytes;
 using session_operation::kLowAt;
 using session_operation::kLowBytes;
 
-/* The simulated ECU's VIN with values=canned */
+/* The simulated ECU's VIN with values=parked */
 constexpr char kSimVin[] = "ZZZFAKE11M0000001";
 
 class SocketCanOperationTest : public ::testing::Test
@@ -52,7 +52,7 @@ protected:
 TEST_F(SocketCanOperationTest, ARunCopiesTheSimulatedEcusMemory)
 {
     ecuio_sim_t* sim = nullptr;
-    ASSERT_EQ(ecuio_sim_create_with("mock://sim?values=canned",
+    ASSERT_EQ(ecuio_sim_create_with("mock://sim?values=parked",
                                     vcan_bus::interface_name(), 0, &sim),
               ECUIO_OK)
         << ecuio_last_error_detail();

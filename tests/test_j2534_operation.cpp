@@ -67,6 +67,7 @@ protected:
         if (IsSkipped() || HasFatalFailure()) {
             return;
         }
+        knob("ECUIO_FAKE_ENGINE_OFF", "1");
         plugin_ =
             conversation_test::load_packed(session_operation::made().json());
         ASSERT_NE(plugin_, nullptr) << ecuio_last_error_detail();

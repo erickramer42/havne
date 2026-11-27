@@ -151,7 +151,8 @@ ecuio_status_t judge_request(const ecuio_operation_request_t& q)
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "the request's struct_size is smaller than the struct");
     }
-    if ((q.flags & ~ECUIO_OPERATION_MAY_UNLOCK) != 0) {
+    if ((q.flags & ~(ECUIO_OPERATION_MAY_UNLOCK | ECUIO_OPERATION_PARKED)) !=
+        0) {
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "the request sets a flag this Havne doesn't know");
     }
@@ -203,10 +204,8 @@ ecuio_status_t find_plan(const ecuio_session_t* s,
                   "the operation's module isn't one this session talks to");
 }
 
-/* The gates between a plan and a run: the bind, the consent, the checks
- * no Havne has yet, one run at a time */
 ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
-                           const ecuio_bound_channel* b)
+                           const ecuio_bound_channel* b, uint32_t flags)
 {
     if (b == nullptr && ecuio_session_channel_wants_consent(s, channel)) {
         return refuse(ECUIO_ERR_CONSENT_REQUIRED,
@@ -221,6 +220,12 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
     if (!ecuio_plugin_code_may_run(s)) {
         return refuse(ECUIO_ERR_CONSENT_REQUIRED,
                       "no consent was given to the plugin whose plan this is");
+    }
+    if ((flags & ECUIO_OPERATION_PARKED) == 0) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "confirm the vehicle is parked first: ignition on, not "
+                      "Ready; engine off by the key, not by start-stop; in P "
+                      "or neutral with the parking brake on");
     }
     /* Every run waits for the write flow's envelope (the engine off, the
      * battery's floor): until core has it, only the tests' door starts one */
@@ -252,6 +257,8 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
     o.cancel.store(false);
     o.r = ecuio_operation::run{};
     o.out = o.fed = o.orphan = o.word_given = o.closed_sink = false;
+    o.checking = false;
+    o.talk_at = channel;
     o.sid = 0;
     o.ends_at = 0;
     o.unlocks = 0;
@@ -280,7 +287,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return st;
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
-    st = judge_gates(s, channel, b);
+    st = judge_gates(s, channel, b, q.flags);
     if (st != ECUIO_OK) {
         return st;
     }

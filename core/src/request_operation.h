@@ -45,6 +45,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
@@ -74,6 +75,10 @@ inline uint32_t end_code(run_end e)
         return ECUIO_OPERATION_END_UNLOCK_REFUSED;
     case run_end::link_lost:
         return ECUIO_OPERATION_END_LINK_LOST;
+    case run_end::engine_running:
+        return ECUIO_OPERATION_END_ENGINE_RUNNING;
+    case run_end::moving:
+        return ECUIO_OPERATION_END_MOVING;
     default:
         return ECUIO_OPERATION_END_FILE;
     }
@@ -110,9 +115,40 @@ inline const char* end_words(uint32_t end)
     }
 }
 
+/* An end's words with what the checks read */
+inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
+{
+    if (end == ECUIO_OPERATION_END_ENGINE_RUNNING) {
+        std::snprintf(out, cap,
+                      "the engine is running (%u rpm): switch it off by the "
+                      "key; nothing was read",
+                      static_cast<unsigned>(o.k.rpm));
+    } else if (end == ECUIO_OPERATION_END_MOVING) {
+        std::snprintf(out, cap,
+                      "the vehicle is moving (%u km/h): nothing was read",
+                      static_cast<unsigned>(o.k.kmh));
+    } else {
+        std::snprintf(out, cap, "%s", end_words(end));
+    }
+}
+
+/* The checks' engine module: another channel that hears, never a
+ * functional one; UINT32_MAX for none */
+inline uint32_t check_engine_of(const ecuio_request_engine* e, uint32_t target)
+{
+    const uint32_t m = ecuio_engine_rpm_module_of(e);
+    return m < e->chan_count && m != target && !e->chans[m].functional &&
+                   ecuio_engine_module_hears(e->chans[m])
+               ? m
+               : UINT32_MAX;
+}
+
 /* The phase the machine's place reads as */
 inline uint32_t phase_of(const session_run& o)
 {
+    if (o.checking) {
+        return ECUIO_OPERATION_PHASE_PRECONDITIONS;
+    }
     switch (o.r.at) {
     case run_stage::enter:
         return ECUIO_OPERATION_PHASE_UNLOCKING;
@@ -276,7 +312,9 @@ inline void take_settled(session_run& o, ecuio_engine_talk_state& t)
     if (told || o.r.at == run_stage::done) {
         return;
     }
-    if (res.end == ecuio_talk_end::unsent) {
+    if (o.checking) {
+        check_silence(o.k);
+    } else if (res.end == ecuio_talk_end::unsent) {
         stop(o.r, run_end::link_lost);
     } else {
         silence(o.r);
@@ -296,9 +334,71 @@ inline void offer(session_run& o, ecuio_request_engine* e, const run_request& q,
     if (ecuio_engine_offer_talk(e, o.channel, t, now_us) ==
         ecuio_talk_offer::taken) {
         o.out = true;
+        o.talk_at = o.channel;
         o.sid = q.bytes[0];
     } else {
         stop(o.r, run_end::link_lost); /* the start judged every request */
+    }
+}
+
+/* The checks' readings into the view */
+inline void publish_checks(ecuio_session_t* s, session_run& o)
+{
+    const std::lock_guard<std::mutex> lock(s->support_mutex);
+    ecuio_operation_state_t& v = o.view;
+    v.checks = (o.k.has_rpm ? ECUIO_OPERATION_CHECK_RPM : 0u) |
+               (o.k.has_kmh ? ECUIO_OPERATION_CHECK_KMH : 0u);
+    v.rpm = static_cast<uint16_t>(o.k.rpm);
+    v.kmh = static_cast<uint16_t>(o.k.kmh);
+}
+
+/* A check's talk still waiting for its turn when the run has ended or the
+ * checks' bound has passed is withdrawn, and what is left goes unread */
+inline void drop_check(session_run& o, ecuio_request_engine* e, int64_t now_us)
+{
+    const bool late = now_us - o.began_us > kEnterMostUs;
+    if (o.checking && o.out && (late || o.r.at == run_stage::done) &&
+        ecuio_talk_withdraw(e->chans[o.talk_at].talk)) {
+        o.out = false;
+        check_give_up(o.k);
+    }
+}
+
+/* The checks before the run, each a talk of its own on its module's
+ * channel: one at a time, a busy channel asked again at the next pass */
+inline void check_step(ecuio_session_t* s, session_run& o,
+                       ecuio_request_engine* e, int64_t now_us)
+{
+    checks& k = o.k;
+    check_request q;
+    while (!o.out && k.result == check_end::none && check_next(k, q)) {
+        ecuio_talk_request t;
+        t.pdu = q.bytes;
+        t.len = 2;
+        t.echo = 2;
+        t.kind = ecuio_talk_kind::check;
+        const ecuio_talk_offer a =
+            ecuio_engine_offer_talk(e, q.module, t, now_us);
+        if (a == ecuio_talk_offer::taken) {
+            o.out = true;
+            o.talk_at = q.module;
+            o.sid = q.bytes[0];
+            return;
+        }
+        if (a == ecuio_talk_offer::busy) {
+            return;
+        }
+        check_silence(k);
+    }
+    if (o.out) {
+        return;
+    }
+    o.checking = false;
+    publish_checks(s, o);
+    if (k.result == check_end::engine_running) {
+        stop(o.r, run_end::engine_running);
+    } else if (k.result == check_end::moving) {
+        stop(o.r, run_end::moving);
     }
 }
 
@@ -323,11 +423,13 @@ inline void finish(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
             return; /* the end is told once the unfinished file is gone */
         }
         const uint32_t end = end_code(o.r.result);
+        char words[sizeof o.view.words];
+        words_of(o, end, words, sizeof words);
         end_run(s, o, end,
                 end == ECUIO_OPERATION_END_FILE &&
                         o.sink->state() == sink_state::failed
                     ? o.sink->words()
-                    : end_words(end));
+                    : words);
         return;
     }
     if (!o.closed_sink) {
@@ -358,7 +460,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     if (o.cancel.load(std::memory_order_relaxed)) {
         cancel(r);
     }
-    take_settled(o, t);
+    take_settled(o, e->chans[o.talk_at].talk);
     /* The writer's word, over the machine's complete too: a difference
      * or a file's failure ends the run before its next request */
     const sink_state w = o.sink->state();
@@ -367,8 +469,12 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
         o.orphan = o.out && !o.fed;
         stop(r, w == sink_state::differ ? run_end::differ : run_end::file);
     }
-    while (r.at != run_stage::done && !o.out && !t.offered && !t.out &&
-           t.result.end == ecuio_talk_end::none) {
+    drop_check(o, e, now_us);
+    if (o.checking && r.at != run_stage::done) {
+        check_step(s, o, e, now_us);
+    }
+    while (!o.checking && r.at != run_stage::done && !o.out && !t.offered &&
+           !t.out && t.result.end == ecuio_talk_end::none) {
         run_request q;
         const run_action a = next(r, q, *o.sink);
         if (a == run_action::send) {
@@ -392,13 +498,20 @@ inline void on_frame(ecuio_session_t* s, const ecuio_request_engine* e,
                      uint32_t c, const uint8_t* bytes, uint32_t len)
 {
     session_run* o = s->operation_live.load(std::memory_order_acquire);
-    if (o == nullptr || c != o->channel || len == 0 ||
+    if (o == nullptr || c != o->talk_at || len == 0 ||
         o->stage.load(std::memory_order_acquire) != kStageRunning || !o->out ||
         o->fed || o->orphan) {
         return;
     }
     const ecuio_engine_channel& ch = e->chans[c];
     const ecuio_talk_end end = ch.talk.result.end;
+    if (o->checking) {
+        if (end == ecuio_talk_end::answered || end == ecuio_talk_end::refused) {
+            o->fed = true;
+            check_reply(o->k, bytes, len);
+        }
+        return;
+    }
     if (end == ecuio_talk_end::answered || end == ecuio_talk_end::refused) {
         o->fed = true;
         const bool left =
@@ -435,6 +548,9 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
     uint8_t stage = o->stage.load(std::memory_order_acquire);
     if (stage == kStageArmed) {
         begin(o->r, *o->p);
+        check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);
+        o->checking = true;
+        o->talk_at = o->channel;
         o->began_us = now_us;
         e->operation_hold = true;
         record_line(s, *o, ECUIO_OPERATION_END_NONE);
@@ -467,7 +583,7 @@ inline int64_t wait_us(ecuio_session_t* s, const ecuio_request_engine* e)
         return INT64_MAX;
     }
     if (o->out) {
-        return e->chans[o->channel].talk.result.end != ecuio_talk_end::none
+        return e->chans[o->talk_at].talk.result.end != ecuio_talk_end::none
                    ? 0
                    : INT64_MAX;
     }

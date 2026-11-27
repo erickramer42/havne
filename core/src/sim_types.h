@@ -23,7 +23,8 @@
 #include <cstring>
 
 enum class ecuio_sim_source : uint8_t { mock, replay };
-enum class ecuio_sim_values : uint8_t { drive, canned };
+/* parked: canned, the engine off by the key and the vehicle standing */
+enum class ecuio_sim_values : uint8_t { drive, canned, parked };
 
 /* A VIN of the VIN alphabet that decodes (model year 2021, its check
  * digit right) under a manufacturer code NHTSA doesn't list, so the

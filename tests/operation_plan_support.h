@@ -88,11 +88,11 @@ inline conversation_test::Made made(const GuestShape& guest = {},
     return m;
 }
 
-inline ecuio_operation_request_t request(uint32_t flags = 0)
+inline ecuio_operation_request_t request(uint32_t flags = 0, bool parked = true)
 {
     ecuio_operation_request_t q{};
     q.struct_size = sizeof q;
-    q.flags = flags;
+    q.flags = flags | (parked ? ECUIO_OPERATION_PARKED : 0u);
     return q;
 }
 

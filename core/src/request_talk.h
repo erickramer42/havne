@@ -37,6 +37,7 @@
 #include "ecuio/j2534_ptypes.h" /* ECUIO_PT_WRITE_MAX; plain C */
 #include "tier2_ceiling.h"
 #include "tier3_ceiling.h"
+#include "operation_checks.h"
 
 #include <cstdint>
 
@@ -96,6 +97,7 @@ enum class ecuio_talk_kind : uint8_t {
               ceiling (tier3_ceiling.h): its turn as plain. Only an
               operation's run offers one (request_operation.h); a plugin's
               request is always plain */
+    check, /* an operation's reading before its run (ecuio_check_allowed) */
 };
 
 struct ecuio_talk_result {
@@ -168,6 +170,9 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
          * Its ceiling holds no 27 (tier3_ceiling.h asserts it). */
         return q.echo == 1;
     }
+    if (q.kind == ecuio_talk_kind::check) {
+        return q.len == 2 && q.echo == 2;
+    }
     if (!access || q.len < 2) {
         return false;
     }
@@ -190,6 +195,9 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
     const uint8_t sub = q.len < 2 ? uint8_t{0} : q.pdu[1];
     if (q.kind == ecuio_talk_kind::read) {
         return ecuio_tier3_read_allowed(q.pdu[0], sub);
+    }
+    if (q.kind == ecuio_talk_kind::check) {
+        return ecuio_check_allowed(q.pdu[0], sub);
     }
     return q.kind == ecuio_talk_kind::plain
                ? ecuio_tier2_guest_may_send(q.pdu[0], sub)

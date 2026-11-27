@@ -83,6 +83,7 @@ struct Bench {
         ASSERT_NO_FATAL_FAILURE(engine_talk_test::engine(e.get()));
         e->pdu_max = pdu_max;
         node.s.security.strict = true;
+        node.ecu.config.values = ecuio_sim_values::parked;
         if (!worker) {
             return;
         }

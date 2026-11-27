@@ -53,7 +53,7 @@ inline bool has_data_pid(const ecuio_sim_ecu& e, uint8_t pid)
     if (listed(kDiagPids, sizeof kDiagPids, pid)) {
         return true;
     }
-    if (e.config.values == ecuio_sim_values::canned) {
+    if (e.config.values != ecuio_sim_values::drive) {
         return ecuio_sim_canned_pid(pid) != nullptr;
     }
     return listed(kDrivePids, sizeof kDrivePids, pid);
@@ -152,7 +152,21 @@ inline uint32_t pid_data(const ecuio_sim_ecu& e, uint8_t pid, uint8_t* out)
     default:
         break;
     }
-    if (e.config.values == ecuio_sim_values::canned) {
+    if (e.config.values == ecuio_sim_values::parked) {
+        if (pid == 0x0C) {
+            put16(out, 0);
+            return 2;
+        }
+        if (pid == 0x0D) {
+            out[0] = 0;
+            return 1;
+        }
+        if (pid == 0x42) {
+            put16(out, 12600);
+            return 2;
+        }
+    }
+    if (e.config.values != ecuio_sim_values::drive) {
         const ecuio_sim_canned* c = ecuio_sim_canned_pid(pid);
         std::memcpy(out, c->data, c->len);
         return c->len;

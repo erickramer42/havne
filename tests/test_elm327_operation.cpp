@@ -41,6 +41,7 @@ protected:
         fake_ecu::reset_sessions();
         fake_ecu::reset_security();
         fake_ecu::security_strict() = true;
+        fake_ecu::diagnostics().engine_off = true;
     }
 
     void TearDown() override
@@ -51,6 +52,7 @@ protected:
         fake_ecu::reset_sessions();
         fake_ecu::reset_security();
         fake_ecu::security_strict() = false;
+        fake_ecu::reset_diagnostics();
     }
 
     /* A started session over a plugin with plan */

@@ -69,6 +69,8 @@ enum class run_end : uint8_t {
     unlock_refused, /* the caller's, through not_entered */
     link_lost,      /* the caller's, through stop */
     file,           /* the sink's, through stop */
+    engine_running, /* the caller's checks, through stop */
+    moving,
 };
 
 enum class run_action : uint8_t {

@@ -21,6 +21,7 @@
 #define ECUIO_OPERATION_SESSION_H
 
 #include "ecuio/operation.h"
+#include "operation_checks.h"
 #include "operation_plan.h"
 #include "operation_run.h"
 #include "operation_sink.h"
@@ -56,7 +57,10 @@ struct session_run {
 
     /* The worker's */
     run r;
-    bool out = false;        /* the channel's talk is the run's */
+    checks k;
+    bool checking = false;
+    uint32_t talk_at = 0;    /* the channel the run's talk is offered on */
+    bool out = false;        /* that channel's talk is the run's */
     bool fed = false;        /* its answer reached the machine with its frame */
     bool orphan = false;     /* the machine gave it up: its settle is dropped */
     bool word_given = false; /* the owed word went to the conversation */
