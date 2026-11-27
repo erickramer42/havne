@@ -80,7 +80,8 @@ extern "C" {
  *   BAD_REPLY         a reply of the wrong shape
  *   ENGINE_RUNNING    rpm says how fast; nothing past the checks was sent
  *   MOVING            kmh says how fast; nothing past the checks was sent
- *   VOLTAGE_LOW       the battery fell under the run's floor (volts_min_mv)
+ *   VOLTAGE_LOW       a write's battery under 11.5 V at its start, or no
+ *                     reading
  *   VOLTAGE_HIGH      a write's battery above 16.0 V at its start */
 #define ECUIO_OPERATION_END_NONE             0u
 #define ECUIO_OPERATION_END_SAVED            1u
@@ -108,6 +109,9 @@ extern "C" {
 #define ECUIO_OPERATION_CHECK_VOLTS_HIGH     0x20u /* a warning */
 #define ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE 0x40u /* the host may sleep */
 #define ECUIO_OPERATION_CHECK_ON_BATTERY     0x80u /* the host is off mains */
+#define ECUIO_OPERATION_CHECK_VOLTS_SAG                                        \
+    0x100u /* a dump's warning: under
+                                                       11.0 V during it */
 
 typedef struct ecuio_operation_request {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */

@@ -22,7 +22,7 @@ constexpr bool ecuio_operation_session_allowed(uint8_t sid, uint8_t sub)
 namespace ecuio_operation {
 
 constexpr uint32_t kDumpWarnLowMv = 11800;
-constexpr uint32_t kDumpStopMv = 11000;
+constexpr uint32_t kDumpSagMv = 11000;
 constexpr uint32_t kVoltsWarnHighMv = 15000;
 constexpr uint32_t kWriteStartFloorMv = 11500;
 constexpr uint32_t kWriteWarnMv = 12000;
@@ -38,7 +38,7 @@ struct volts {
     bool from_ecu = false;
     bool low_warn = false;
     bool high_warn = false;
-    bool dropped = false;
+    bool sagged = false;
     bool refused_low = false;
     bool refused_high = false;
     uint32_t mv = 0;
@@ -58,8 +58,8 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
         v.refused_high = mv > kWriteRefuseHighMv;
     } else if (!running) {
         v.low_warn = mv < kDumpWarnLowMv;
-    } else if (!v.write && mv < kDumpStopMv) {
-        v.dropped = true;
+    } else if (!v.write && mv < kDumpSagMv) {
+        v.sagged = true;
     }
 }
 

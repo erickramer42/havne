@@ -211,14 +211,15 @@ TEST_F(J2534OperationTest, ALowBatteryAtTheStartWarns)
 
 /* A reading under the floor through the run ends it with nothing kept:
  * the connect's reading is the first, the run's start the second */
-TEST_F(J2534OperationTest, ASagThroughTheRunEndsIt)
+TEST_F(J2534OperationTest, ASagThroughTheRunWarns)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_SAG", "10900:3"));
     conversation_session::Session s;
     ASSERT_NO_FATAL_FAILURE(open(&s));
     ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
     const ecuio_operation_state_t v = session_operation::ended(s.get());
-    EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u);
     EXPECT_EQ(v.volts_min_mv, 10900u);
-    EXPECT_TRUE(files().empty());
+    EXPECT_EQ(files().size(), 1u);
 }

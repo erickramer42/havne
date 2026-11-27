@@ -156,12 +156,6 @@ inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
                       "supported); nothing was read",
                       static_cast<unsigned>(o.v.mv / 1000),
                       static_cast<unsigned>(o.v.mv % 1000 / 100));
-    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW) {
-        std::snprintf(out, cap,
-                      "the battery fell to %u.%u V at the adapter: the copy "
-                      "was incomplete, nothing was kept",
-                      static_cast<unsigned>(o.v.min_mv / 1000),
-                      static_cast<unsigned>(o.v.min_mv % 1000 / 100));
     } else {
         std::snprintf(out, cap, "%s", end_words(end));
     }
@@ -208,7 +202,8 @@ inline uint32_t checks_of(const session_run& o)
            (v.has ? ECUIO_OPERATION_CHECK_VOLTS : 0u) |
            (v.from_ecu ? ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU : 0u) |
            (v.low_warn ? ECUIO_OPERATION_CHECK_VOLTS_LOW : 0u) |
-           (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u);
+           (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u) |
+           (v.sagged ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u);
 }
 
 /* The view follows the machine: taken under the lock only when it moved.
@@ -657,8 +652,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     }
     drop_check(o, e, now_us);
     battery_step(s, o, now_us);
-    if ((o.v.dropped || o.v.refused_low || o.v.refused_high) &&
-        r.at != run_stage::done) {
+    if ((o.v.refused_low || o.v.refused_high) && r.at != run_stage::done) {
         o.orphan = o.out && !o.fed;
         stop(r, o.v.refused_high && !o.v.refused_low ? run_end::voltage_high
                                                      : run_end::voltage_low);
