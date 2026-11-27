@@ -189,6 +189,28 @@ TEST(RecorderModulesTest, AFullRingCarriesARunsStartBeforeItsEnd)
                                         "dump,third,0x7E8,6144,started"}));
 }
 
+TEST(RecorderModulesTest, EachEndAndAnEnvelopeHaveTheirWords)
+{
+    ModulesRecorded m(0, 4096);
+    ASSERT_NE(m.recorder, nullptr);
+    ecuio_record_envelope(m.session.s->record_link.get(), 0x7E8, 12600, 0, 0,
+                          0x47);
+    ecuio_record_envelope(m.session.s->record_link.get(), 0x7E8, 0, -1, 3, 0x8);
+    run_line(m, "copy", ECUIO_OPERATION_END_ENGINE_RUNNING);
+    run_line(m, "copy", ECUIO_OPERATION_END_MOVING);
+    run_line(m, "copy", ECUIO_OPERATION_END_VOLTAGE_LOW);
+    run_line(m, "copy", ECUIO_OPERATION_END_VOLTAGE_HIGH);
+    m.close();
+    EXPECT_EQ(
+        kind_lines(m.folder, "envelope"),
+        (std::vector<std::string>{"0x7E8,12600,0,0,0x47", "0x7E8,-,-,3,0x8"}));
+    EXPECT_EQ(kind_lines(m.folder, "operation"),
+              (std::vector<std::string>{"dump,copy,0x7E8,6144,engine-running",
+                                        "dump,copy,0x7E8,6144,moving",
+                                        "dump,copy,0x7E8,6144,voltage-low",
+                                        "dump,copy,0x7E8,6144,voltage-high"}));
+}
+
 TEST(RecorderModulesTest, ACloseWritesTheRunLinesStillCarried)
 {
     ModulesRecorded m(0, 4096);

@@ -158,9 +158,12 @@ TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
         EXPECT_EQ(log.find(first_sum), std::string::npos) << first_sum;
         ours = ours || (log.find(cut_read) != std::string::npos &&
                         log.find(first_chunk) != std::string::npos &&
-                        log.find("07 E8 76 01 00 00 00") != std::string::npos);
+                        log.find("07 E8 76 01 00 00 00") != std::string::npos &&
+                        log.find("run envelope  7E8  battery 13800 mV  rpm 0  "
+                                 "km/h 0  checks ") != std::string::npos);
     }
-    EXPECT_TRUE(ours) << "no session log holds the cut answers";
+    EXPECT_TRUE(ours)
+        << "no session log holds the cut answers and the envelope";
 }
 
 /* The fake's memory answers every third data reply with one bit wrong:
@@ -211,14 +214,15 @@ TEST_F(J2534OperationTest, ALowBatteryAtTheStartWarns)
 
 /* A reading under the floor through the run ends it with nothing kept:
  * the connect's reading is the first, the run's start the second */
-TEST_F(J2534OperationTest, ASagThroughTheRunEndsIt)
+TEST_F(J2534OperationTest, ASagThroughTheRunWarns)
 {
     ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_SAG", "10900:3"));
     conversation_session::Session s;
     ASSERT_NO_FATAL_FAILURE(open(&s));
     ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
     const ecuio_operation_state_t v = session_operation::ended(s.get());
-    EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u);
     EXPECT_EQ(v.volts_min_mv, 10900u);
-    EXPECT_TRUE(files().empty());
+    EXPECT_EQ(files().size(), 1u);
 }

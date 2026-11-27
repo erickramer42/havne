@@ -74,6 +74,47 @@ TEST(OperationChecksTest, OnlyTheFourReadingsPassTheDoor)
         << "service 01 isn't the guest's";
 }
 
+TEST(OperationChecksTest, ARunsOwnSessionTalkIsItsThreeRequestsAlone)
+{
+    for (unsigned sid = 0; sid < 256; ++sid) {
+        for (unsigned sub = 0; sub < 256; ++sub) {
+            const bool want = (sid == 0x10 && (sub == 0x02 || sub == 0x01)) ||
+                              (sid == 0x11 && sub == 0x01);
+            EXPECT_EQ(ecuio_operation_session_allowed(
+                          static_cast<uint8_t>(sid), static_cast<uint8_t>(sub)),
+                      want)
+                << sid << " " << sub;
+        }
+    }
+    ecuio_key_window w;
+    ecuio_talk_request q;
+    q.kind = ecuio_talk_kind::session;
+    q.len = 2;
+    q.echo = 2;
+    const uint8_t extended[] = {0x10, 0x03};
+    q.pdu = extended;
+    ecuio_engine_talk_state t;
+    EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::refused)
+        << "10 03 is the engine's own";
+    const uint8_t longer[] = {0x10, 0x02, 0x00};
+    q.pdu = longer;
+    q.len = 3;
+    EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::refused);
+    const uint8_t programming[] = {0x10, 0x02};
+    q.pdu = programming;
+    q.len = 2;
+    EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::taken);
+    const uint8_t reset[] = {0x11, 0x01};
+    q.pdu = reset;
+    ecuio_engine_talk_state second;
+    EXPECT_EQ(ecuio_engine_talk(second, w, 60, q, 0), ecuio_talk_offer::taken);
+    q.pdu = programming;
+    q.kind = ecuio_talk_kind::plain;
+    ecuio_engine_talk_state plain;
+    EXPECT_EQ(ecuio_engine_talk(plain, w, 60, q, 0), ecuio_talk_offer::refused)
+        << "a session request is never the guest's";
+}
+
 TEST(OperationChecksTest, TheEngineModuleIsAskedBeforeTheTarget)
 {
     checks k;
@@ -194,7 +235,7 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
         EXPECT_FALSE(v.refused_high) << "a supply's fault is warned";
     }
     volts_take(v, 10999, true);
-    EXPECT_FALSE(v.dropped) << "a sag never ends it";
+    EXPECT_TRUE(v.sagged) << "a sag warns as a dump's";
 
     volts write;
     write.write = true;
@@ -204,4 +245,6 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
     EXPECT_TRUE(write.refused_low) << "a write's start under 11.5 V";
     volts_take(write, 16100, false);
     EXPECT_TRUE(write.refused_high) << "a write's start over 16 V";
+    volts_take(write, 10999, true);
+    EXPECT_FALSE(write.sagged) << "a write is judged once, at its start";
 }

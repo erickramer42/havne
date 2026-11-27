@@ -331,6 +331,12 @@ void ecuio_recorder::take_operation(const uint8_t* body, size_t size)
     operation_body ob;
     std::memcpy(&ob, body, sizeof ob);
     ob.id[sizeof ob.id - 1] = '\0';
+    if (ob.envelope != 0) {
+        event_line(
+            ob.host_us, "envelope",
+            envelope_text(ob.rx, ob.volts_mv, ob.rpm, ob.kmh, ob.checks));
+        return;
+    }
     event_line(ob.host_us, "operation",
                operation_text(ob.id, ob.rx, ob.bytes, ob.end));
 }

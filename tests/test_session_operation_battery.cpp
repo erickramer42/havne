@@ -58,26 +58,37 @@ TEST(SessionOperationTest, ALowOrHighBatteryAtTheStartWarnsAndTheRunGoesOn)
     }
 }
 
-/* Under 11.0 V through the run the copy can't be trusted: the run ends
- * and nothing is kept; 11.0 V itself goes on */
-TEST(SessionOperationTest, ADropUnderTheFloorEndsTheRunWithNothingKept)
+/* Under 11.0 V through a dump warns and the read goes on; 11.0 V itself
+ * warns nothing */
+TEST(SessionOperationTest, ADropUnderElevenVoltsWarnsAndTheReadGoesOn)
 {
     for (const uint32_t low : {10999u, 11000u}) {
         Bench b;
         ASSERT_NO_FATAL_FAILURE(b.start());
-        b.battery = [low](uint32_t nth) { return nth < 3 ? 12600u : low; };
+        b.battery = [low](uint32_t nth) { return nth < 2 ? 12600u : low; };
         ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
         const ecuio_operation_state_t v = b.until_ended();
-        if (low == 11000u) {
-            EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
-            continue;
+        EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << low << ": " << v.words;
+        EXPECT_EQ(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG,
+                  low < 11000u ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u)
+            << low;
+        EXPECT_EQ(v.checks & ECUIO_OPERATION_CHECK_VOLTS_LOW, 0u)
+            << "the start's warning is its own";
+        EXPECT_EQ(v.volts_min_mv, low);
+        EXPECT_EQ(b.files().size(), 1u);
+        const ecuio_run_lines& l = b.s->run_lines;
+        ASSERT_GE(l.count, 1u);
+        EXPECT_EQ(std::string(l.text[0]),
+                  "run envelope  7E8  battery 12600 mV  rpm 0  km/h 0  "
+                  "checks " +
+                      std::string(v.checks & 0x40u ? "47" : "7"));
+        if (low < 11000u) {
+            ASSERT_EQ(l.count, 2u) << "the sag's line once";
+            EXPECT_STREQ(l.text[1], "run battery  10999 mV, under 11000 mV: "
+                                    "the read goes on");
+        } else {
+            EXPECT_EQ(l.count, 1u);
         }
-        EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
-        EXPECT_STREQ(v.words, "the battery fell to 10.9 V at the adapter: "
-                              "the copy was incomplete, nothing was kept");
-        EXPECT_EQ(v.volts_min_mv, 10999u);
-        EXPECT_EQ(v.volts_mv, 10999u);
-        EXPECT_TRUE(b.files().empty());
     }
 }
 

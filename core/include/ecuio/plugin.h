@@ -758,6 +758,11 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 #define ECUIO_STEP_SESSION_PROGRAMMING 2u
 #define ECUIO_STEP_SESSION_EXTENDED    3u
 
+/* ecuio_plugin_operation_t.leave: how a programming plan's run leaves its
+ * session, append-only; 0 for an extended one's, which stays */
+#define ECUIO_OPERATION_LEAVE_DEFAULT 1u /* 10 01 */
+#define ECUIO_OPERATION_LEAVE_RESET   2u /* 11 01 */
+
 /* One plan. POD, 160 bytes. */
 typedef struct ecuio_plugin_operation {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
@@ -773,7 +778,8 @@ typedef struct ecuio_plugin_operation {
     uint64_t image_bytes;     /* the steps' bytes, added */
     char id[32];
     char title[64];
-    uint32_t reserved[4]; /* zero; ABI growth space */
+    uint32_t leave;       /* ECUIO_OPERATION_LEAVE_* */
+    uint32_t reserved[3]; /* zero; ABI growth space */
 } ecuio_plugin_operation_t;
 
 /* One step of a plan: a range of the module's memory. POD, 88 bytes. */
@@ -829,6 +835,8 @@ static_assert(offsetof(ecuio_plugin_operation_t, image_bytes) == 40,
               "plugin operation image_bytes offset is ABI");
 static_assert(offsetof(ecuio_plugin_operation_t, title) == 80,
               "plugin operation title offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_t, leave) == 144,
+              "plugin operation leave offset is ABI");
 static_assert(sizeof(ecuio_plugin_operation_step_t) == 88,
               "ecuio_plugin_operation_step_t size is ABI");
 static_assert(offsetof(ecuio_plugin_operation_step_t, chunk) == 32,

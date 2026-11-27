@@ -15,9 +15,11 @@ using Bytes = std::vector<uint8_t>;
 constexpr int64_t kMs = 1000;
 
 /* An ECU with an extended session: 10 03 and 10 01 answered, 3E 00 too,
- * a 22 of the channel's DID; refuse: 10 03 refused 7F 10 22 */
+ * a 22 of the channel's DID; refuse: 10 03 refused 7F 10 22; quiet: 3E 00
+ * unanswered */
 struct Ecu {
     bool refuse = false;
+    bool quiet = false;
     std::vector<Bytes> heard;
 
     Bytes operator()(const Bytes& q)
@@ -30,7 +32,7 @@ struct Ecu {
             return {0x50, q[1], 0x00, 0x32, 0x01, 0xF4};
         }
         if (q == Bytes{0x3E, 0x00}) {
-            return {0x7E, 0x00};
+            return quiet ? Bytes{} : Bytes{0x7E, 0x00};
         }
         if (q.size() == 3 && q[0] == 0x22) {
             return {0x62, q[1], q[2], 0x12};
@@ -51,6 +53,12 @@ void step(ecuio_request_engine* e, uint32_t c, int64_t* now, Ecu* ecu)
     const Bytes sent(q.bytes, q.bytes + q.len);
     ecuio_engine_sent(e, c, r, true, *now);
     const Bytes reply = (*ecu)(sent);
+    if (reply.empty()) {
+        *now = e->chans[c].deadline_us;
+        (void)ecuio_engine_expire(e, c, *now);
+        *now += ECUIO_ENGINE_GAP_US;
+        return;
+    }
     *now += 4 * kMs;
     (void)ecuio_engine_on_frame(
         e, c, reply.data(), static_cast<uint16_t>(reply.size()), *now, nullptr);
@@ -133,6 +141,102 @@ TEST(SessionControlTest, OneChannelEntersTheSessionAlone)
     EXPECT_EQ(Bytes(leave.bytes, leave.bytes + leave.len), (Bytes{0x10, 0x01}));
     ecuio_engine_support(&e, 1, &s);
     EXPECT_EQ(s.session_asked, 0x03); /* the close leaves it asked */
+}
+
+/* A run's own session: kept by 3E 00, never entered again however long
+ * the channel is quiet, left by the close's 10 01, and back in default
+ * once returned */
+TEST(SessionControlTest, ARunsOwnSessionIsKeptAndNeverEnteredAgain)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, 1));
+    for (uint32_t r = 0; r < e.count; ++r) {
+        e.requests[r].parked = 1;
+    }
+    ecuio_engine_recount(&e);
+    int64_t now = kMs;
+    const uint16_t handed = e.chans[0].session_handed;
+    ecuio_engine_session_handed(&e, 0, now);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_NE(e.chans[0].session_handed, handed);
+    Ecu ecu;
+    const int64_t until = now + 3 * ECUIO_ENGINE_KEEPALIVE_US;
+    while (now < until) {
+        step(&e, 0, &now, &ecu);
+    }
+    EXPECT_GE(count_of(ecu.heard, {0x3E, 0x00}), 2u);
+    now += ECUIO_ENGINE_S3_US;
+    for (int i = 0; i < 20; ++i) {
+        step(&e, 0, &now, &ecu);
+    }
+    EXPECT_EQ(count_of(ecu.heard, {0x10, 0x03}), 0u)
+        << "a quiet past S3 enters nothing of the engine's";
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    e.requests[0].parked = 0;
+    ecuio_engine_recount(&e);
+    const int32_t r = ecuio_engine_due(&e, 0, now);
+    ASSERT_NE(r, ECUIO_ENGINE_NONE);
+    ecuio_engine_sent(&e, 0, r, true, now);
+    e.chans[0].session_fresh = false;
+    EXPECT_FALSE(ecuio_engine_session_reenter(&e, 0, r, 0x7F, now))
+        << "a 7F in a run's session is the run's to judge";
+
+    ecuio_request leave;
+    ASSERT_TRUE(ecuio_engine_session_leave(&e, 0, &leave));
+    EXPECT_EQ(Bytes(leave.bytes, leave.bytes + leave.len), (Bytes{0x10, 0x01}));
+    ecuio_engine_session_returned(&e, 0);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_NOT_ASKED);
+    EXPECT_FALSE(e.chans[0].handed);
+}
+
+/* A run's session whose keep-alive goes unanswered may be gone: it reads
+ * unanswered, and the engine enters nothing in its place */
+TEST(SessionControlTest, ARunsSessionUnansweredIsNotEnteredAgain)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, 1));
+    for (uint32_t r = 0; r < e.count; ++r) {
+        e.requests[r].parked = 1;
+    }
+    ecuio_engine_recount(&e);
+    int64_t now = kMs;
+    ecuio_engine_session_handed(&e, 0, now);
+    Ecu ecu;
+    ecu.quiet = true;
+    const int64_t until = now + 3 * ECUIO_ENGINE_KEEPALIVE_US;
+    while (now < until) {
+        step(&e, 0, &now, &ecu);
+    }
+    EXPECT_GE(count_of(ecu.heard, {0x3E, 0x00}), 1u);
+    EXPECT_EQ(count_of(ecu.heard, {0x10, 0x03}), 0u);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_UNANSWERED);
+}
+
+/* A run's session returned on a channel the engine had entered: entered
+ * again, the conversation's levels locked by the count */
+TEST(SessionControlTest, AReturnedSessionGoesBackToTheEnginesOwn)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, 1));
+    ASSERT_TRUE(ecuio_engine_session_enter(&e, 0));
+    Ecu ecu;
+    int64_t now = 0;
+    for (int i = 0; i < 4; ++i) {
+        step(&e, 0, &now, &ecu);
+    }
+    ASSERT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    ecuio_engine_session_handed(&e, 0, now);
+    const uint16_t handed = e.chans[0].session_handed;
+    ecuio_engine_session_returned(&e, 0);
+    EXPECT_NE(e.chans[0].session_handed, handed);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERING);
+    ecu.heard.clear();
+    step(&e, 0, &now, &ecu);
+    ASSERT_FALSE(ecu.heard.empty());
+    EXPECT_EQ(ecu.heard.front(), (Bytes{0x10, 0x03}));
+    ecuio_engine_session_returned(&e, 0);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED)
+        << "a return with nothing handed changes nothing";
 }
 
 /* A channel ?session=03 asked already keeps its step and its keep-alive:

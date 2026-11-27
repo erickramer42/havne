@@ -93,15 +93,16 @@ enum class ecuio_talk_end : uint8_t {
 
 /* What a talk is to the key's window */
 enum class ecuio_talk_kind : uint8_t {
-    plain, /* on the guest's own list: its turn with the scan */
-    seed,  /* its turn as plain; sent, it opens the channel's window */
-    key,   /* only inside a window, ahead of everything; sent, it ends it */
-    read,  /* core's own read of a module's memory, inside tier 3's read
+    plain,   /* on the guest's own list: its turn with the scan */
+    seed,    /* its turn as plain; sent, it opens the channel's window */
+    key,     /* only inside a window, ahead of everything; sent, it ends it */
+    read,    /* core's own read of a module's memory, inside tier 3's read
               ceiling (tier3_ceiling.h): its turn as plain. Only an
               operation's run offers one (request_operation.h); a plugin's
               request is always plain */
-    check, /* an operation's reading before its run (ecuio_check_allowed) */
-    write, /* an operation's write-class request (ecuio_tier3_write_allowed) */
+    check,   /* an operation's reading before its run (ecuio_check_allowed) */
+    write,   /* an operation's write-class request (ecuio_tier3_write_allowed) */
+    session, /* a run's own session (ecuio_operation_session_allowed) */
 };
 
 struct ecuio_talk_result {
@@ -175,7 +176,8 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
          * Its ceiling holds no 27 (tier3_ceiling.h asserts it). */
         return q.echo == 1;
     }
-    if (q.kind == ecuio_talk_kind::check) {
+    if (q.kind == ecuio_talk_kind::check ||
+        q.kind == ecuio_talk_kind::session) {
         return q.len == 2;
     }
     if (q.kind == ecuio_talk_kind::write) {
@@ -209,6 +211,9 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
     }
     if (q.kind == ecuio_talk_kind::write) {
         return ecuio_tier3_write_allowed(q.pdu[0], sub);
+    }
+    if (q.kind == ecuio_talk_kind::session) {
+        return ecuio_operation_session_allowed(q.pdu[0], sub);
     }
     return q.kind == ecuio_talk_kind::plain
                ? ecuio_tier2_guest_may_send(q.pdu[0], sub)

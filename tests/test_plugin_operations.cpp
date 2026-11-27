@@ -178,6 +178,7 @@ void expect_the_default(const ecuio_plugin_t* p)
     EXPECT_EQ(o.image_bytes, 65536u + 4096u);
     EXPECT_STREQ(o.id, "dump-calibration");
     EXPECT_STREQ(o.title, "Calibration");
+    EXPECT_EQ(o.leave, 0u) << "an extended plan's session stays";
     for (const uint32_t r : o.reserved) {
         EXPECT_EQ(r, 0u);
     }
@@ -458,9 +459,9 @@ TEST(PluginOperationTest, EachStepRuleRefusesInItsWords)
                   "step 'calibration': a kernel read's download and its "
                   "routine are its first two steps, and only a kernel read's");
     }
-    EXPECT_EQ(step_why(read_with("session", "\"programming\"")),
-              "step 'calibration''s session 'programming' isn't one this "
-              "Havne reads in: \"extended\"");
+    EXPECT_EQ(step_why(read_with("session", "\"safety\"")),
+              "step 'calibration''s session 'safety' isn't one this Havne "
+              "reads in: \"extended\" and \"programming\"");
     EXPECT_EQ(step_why(read_with("name", "\"Cal\"")),
               "a step's name 'Cal' takes a-z, 0-9 and -, a letter or digit "
               "at each end");
@@ -532,6 +533,45 @@ TEST(PluginOperationTest, EachStepRuleRefusesInItsWords)
 }
 
 /* The steps' bytes add to at most what a copy holds */
+TEST(PluginOperationTest, AProgrammingPlanNamesHowItsSessionIsLeft)
+{
+    const auto programming = [](std::string step) {
+        const std::string from = "\"session\": \"extended\"";
+        step.replace(step.find(from), from.size(),
+                     "\"session\": \"programming\"");
+        return step;
+    };
+    Op op;
+    op.steps = "[" + programming(kRead) + ", " + programming(kUpload) + "]";
+    const auto loaded = [](const Op& o) {
+        ecuio_status_t s = ECUIO_ERR_NULL_ARGUMENT;
+        const Plugin p = load_packed(made(o).json(), &s);
+        EXPECT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+        return p.get() == nullptr ? ecuio_plugin_operation_t{}
+                                  : operation_of(p.get(), 0);
+    };
+    ecuio_plugin_operation_t o = loaded(op);
+    EXPECT_EQ(o.leave, ECUIO_OPERATION_LEAVE_DEFAULT) << "10 01 when unnamed";
+    EXPECT_EQ(o.unlock_sessions, 1u);
+    op.extra = R"(, "leave": "reset")";
+    o = loaded(op);
+    EXPECT_EQ(o.leave, ECUIO_OPERATION_LEAVE_RESET);
+
+    op.extra = R"(, "leave": "exit")";
+    EXPECT_EQ(why(op), "operation 'dump-calibration''s leave 'exit' isn't one "
+                       "of \"default\" (10 01) and \"reset\" (11 01)");
+
+    op.steps = "[" + programming(kRead) + ", " + kUpload + "]";
+    op.extra.clear();
+    EXPECT_EQ(why(op), "steps 'calibration' and 'boot' are in two sessions: "
+                       "this Havne reads a plan's steps in one");
+    Op extended;
+    extended.extra = R"(, "leave": "default")";
+    EXPECT_EQ(why(extended), "operation 'dump-calibration''s steps are in the "
+                             "extended session, which stays after the run: "
+                             "it takes no 'leave'");
+}
+
 TEST(PluginOperationTest, APlansImageFitsACopy)
 {
     const auto step = [](const char* name, const char* address,

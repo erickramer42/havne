@@ -92,6 +92,7 @@ struct plan {
     std::vector<step> steps;
     bool has_kernel = false;
     kernel helper;
+    uint32_t leave = 0; /* a programming plan's ECUIO_OPERATION_LEAVE_* */
 };
 
 /* The most an unsigned value of n bytes (1 to 4) holds */
@@ -107,7 +108,8 @@ inline const char* step_fault(const step& s)
     if (s.kind != ECUIO_STEP_READ && s.kind != ECUIO_STEP_UPLOAD) {
         return "its kind isn't one this Havne runs";
     }
-    if (s.session != ECUIO_STEP_SESSION_EXTENDED) {
+    if (s.session != ECUIO_STEP_SESSION_EXTENDED &&
+        s.session != ECUIO_STEP_SESSION_PROGRAMMING) {
         return "its session isn't one this Havne reads in";
     }
     if (s.address_bytes < 1 || s.address_bytes > 4) {
@@ -171,6 +173,14 @@ inline uint32_t unlock_sessions(const plan& p)
         n += i == 0 || p.steps[i].session != p.steps[i - 1].session ? 1u : 0u;
     }
     return n;
+}
+
+/* Whether the plan's steps are read in the programming session, which
+ * the run enters and leaves itself: a plan's steps share one session */
+inline bool programming_of(const plan& p)
+{
+    return !p.steps.empty() &&
+           p.steps.front().session == ECUIO_STEP_SESSION_PROGRAMMING;
 }
 
 /* The image's bytes: the steps' added, each range once */

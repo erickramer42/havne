@@ -283,13 +283,6 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                       "this adapter reads no battery voltage: a write needs "
                       "one");
     }
-    /* Every run waits for the write flow's envelope (the engine off, the
-     * battery's floor): until core has it, only the tests' door starts one */
-    if (!g_ecuio_conversation_door.load(std::memory_order_relaxed)) {
-        return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
-                      "a run needs the write flow's checks before it, which "
-                      "this Havne has not got");
-    }
     const session_run* o = s->operation.get();
     const uint8_t stage =
         o == nullptr ? ecuio_operation::kStageIdle : o->stage.load();
@@ -381,6 +374,34 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
     o.stage.store(ecuio_operation::kStageArmed, std::memory_order_release);
 }
 
+/* Whether the plan's level is open, as the start sees it, and a run
+ * that would need the unlock without it allowed refused. The worker
+ * judges the level again once the session is entered: a level it finds
+ * open costs no attempt, marked or not. Entering the programming session
+ * locks every level. */
+ecuio_status_t judge_level(const plan& p,
+                           const ecuio_conversation_report& report,
+                           uint32_t flags, bool* open)
+{
+    const bool programming = ecuio_operation::programming_of(p);
+    *open = !programming && report.level == p.level &&
+            (report.unlock == ecuio_unlock_state::unlocked ||
+             report.unlock == ecuio_unlock_state::already_unlocked);
+    if ((flags & ECUIO_OPERATION_MAY_UNLOCK) != 0 || *open) {
+        return ECUIO_OK;
+    }
+    if (programming) {
+        ecuio_detail_set("level %02X is unlocked in the programming session "
+                         "the run enters: start it with the unlock allowed",
+                         p.level);
+    } else {
+        ecuio_detail_set("unlock level %02X first, or start the run with "
+                         "the unlock allowed",
+                         p.level);
+    }
+    return ECUIO_ERR_INVALID_ARGUMENT;
+}
+
 ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
                      const char* folder)
 {
@@ -412,16 +433,10 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     if (st != ECUIO_OK) {
         return st;
     }
-    /* The worker judges the level again once the session is entered: a
-     * level it finds open costs no attempt, marked or not */
-    const bool open = report.level == p->level &&
-                      (report.unlock == ecuio_unlock_state::unlocked ||
-                       report.unlock == ecuio_unlock_state::already_unlocked);
-    if (!open && (q.flags & ECUIO_OPERATION_MAY_UNLOCK) == 0) {
-        ecuio_detail_set("unlock level %02X first, or start the run with "
-                         "the unlock allowed",
-                         p->level);
-        return ECUIO_ERR_INVALID_ARGUMENT;
+    bool open = false;
+    st = judge_level(*p, report, q.flags, &open);
+    if (st != ECUIO_OK) {
+        return st;
     }
     uint32_t checks = 0;
     bool held = false;

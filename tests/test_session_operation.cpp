@@ -230,11 +230,11 @@ TEST(SessionOperationTest, TheStartRefusesInWords)
             "confirm the vehicle is parked first: ignition on, not Ready; "
             "engine off by the key, not by start-stop; in P or neutral with "
             "the parking brake on");
+    /* With a consent and no door, a start goes past the gates */
+    q = request(0);
+    refused(ECUIO_ERR_INVALID_ARGUMENT, "unlock level 01 first, or start the "
+                                        "run with the unlock allowed");
     q = request(ECUIO_OPERATION_MAY_UNLOCK);
-    /* With a consent, every start still waits for the write flow's checks */
-    refused(ECUIO_ERR_NOT_IMPLEMENTED, "a run needs the write flow's checks "
-                                       "before it, which this Havne has not "
-                                       "got");
     s->consent_applied = false;
     ecuio_test_conversation_binding(1);
     q.flags = ECUIO_OPERATION_PARKED;

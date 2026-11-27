@@ -613,12 +613,13 @@ TEST(FolderExportTest, AScrubbedCopyKeepsTheModuleLines)
 }
 
 /* A scrubbed copy keeps a run's lines (ADR-0066 section 4): they name a
- * plan, a module and a size, nothing of the car's */
+ * plan, a module, a size and the checks' readings, nothing of the car's */
 TEST(FolderExportTest, AScrubbedCopyKeepsTheOperationLines)
 {
     Folder f;
     conditions_recording(
         f, "22:13:24.360  +4.110  operation  dump,copy,0x7E8,6144,started\n"
+           "22:13:24.460  +4.210  envelope  0x7E8,12600,0,0,0x7\n"
            "22:13:24.960  +4.710  operation  dump,copy,0x7E8,6144,saved\n");
     FolderExported e(f);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
@@ -627,6 +628,9 @@ TEST(FolderExportTest, AScrubbedCopyKeepsTheOperationLines)
               std::string::npos)
         << out;
     EXPECT_NE(out.find("  +4.710  operation  dump,copy,0x7E8,6144,saved\n"),
+              std::string::npos)
+        << out;
+    EXPECT_NE(out.find("  +4.210  envelope  0x7E8,12600,0,0,0x7\n"),
               std::string::npos)
         << out;
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 0u);

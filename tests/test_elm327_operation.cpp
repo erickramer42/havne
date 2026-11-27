@@ -130,6 +130,8 @@ TEST_F(Elm327OperationTest, APlanThatFitsAFrameIsCopiedWhole)
     EXPECT_GT(cut_lines, 0u) << log;
     EXPECT_NE(log.find("< (a security access's line, cut: "),
               std::string::npos);
+    EXPECT_NE(log.find("run envelope  7E8  battery "), std::string::npos)
+        << log;
     std::string spaced;
     std::string bare;
     for (size_t i = 5; i < 12; ++i) {
@@ -157,8 +159,8 @@ TEST_F(Elm327OperationTest, APlanAskedInMoreThanAFrameIsRefusedAtTheStart)
     EXPECT_EQ(v.generation, 0u) << "no run began";
 }
 
-/* AT RV between the run's commands: a reading under the floor ends the
- * run; an adapter that reads none leaves it to the engine module's 01 42 */
+/* AT RV between the run's commands: a reading under 11.0 V warns; an
+ * adapter that reads none leaves it to the engine module's 01 42 */
 TEST_F(Elm327OperationTest, TheBatteryIsReadThroughTheRun)
 {
     {
@@ -170,9 +172,9 @@ TEST_F(Elm327OperationTest, TheBatteryIsReadThroughTheRun)
         ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
         ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
         const ecuio_operation_state_t v = session_operation::ended(s.get());
-        EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
+        EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+        EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u);
         EXPECT_EQ(v.volts_min_mv, 10900u);
-        EXPECT_TRUE(files().empty());
     }
     fake_elm327::with([](fake_elm327::adapter& a) {
         a.k.vbatt_sag = nullptr;

@@ -77,6 +77,8 @@ std::string module_text(uint32_t rx, bool closed, bool no_room,
                         uint8_t reasons);
 std::string operation_text(const char* id, uint32_t rx, uint64_t bytes,
                            uint32_t end);
+std::string envelope_text(uint32_t rx, uint32_t volts_mv, int32_t rpm,
+                          int32_t kmh, uint32_t checks);
 std::string header_link(int32_t state, uint32_t episodes);
 std::string started_lines(std::chrono::system_clock::time_point wall);
 bool make_recording_folder(const std::string& root, std::time_t at,

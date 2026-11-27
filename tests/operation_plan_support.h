@@ -42,6 +42,9 @@ struct PlanShape {
     bool upload = true;
     bool ident = true;
     std::string level = "01";
+    std::string session = "extended";
+    std::string address = "00010000"; /* the read's */
+    std::string extra; /* more of the operation's keys, each with a comma */
 };
 
 /* A plan whose every request fits one frame: the read alone, asked in 7
@@ -66,14 +69,15 @@ inline conversation_test::Made made(const GuestShape& guest = {},
     m.tiers = R"(["data", "conversation", "operation"])";
     m.publisher = R"({"name": "Made-up Tools", "contact": "c", )"
                   R"("license": "MIT", "terms": "Use at your own risk."})";
-    std::string steps =
-        R"([{"step": "read", "name": "low", "session": "extended", )"
-        R"("address": "00010000", "bytes": 2048, "address_bytes": )" +
-        plan.address_bytes + R"(, "size_bytes": )" + plan.size_bytes +
-        R"(, "chunk": )" + plan.chunk + "}";
+    std::string steps = R"([{"step": "read", "name": "low", "session": ")" +
+                        plan.session + R"(", "address": ")" + plan.address +
+                        R"(", "bytes": 2048, "address_bytes": )" +
+                        plan.address_bytes + R"(, "size_bytes": )" +
+                        plan.size_bytes + R"(, "chunk": )" + plan.chunk + "}";
     if (plan.upload) {
-        steps += R"(, {"step": "upload", "name": "high", "session": )"
-                 R"("extended", "address": "00011000", "bytes": 4096, )"
+        steps += R"(, {"step": "upload", "name": "high", "session": ")" +
+                 plan.session +
+                 R"(", "address": "00011000", "bytes": 4096, )"
                  R"("address_bytes": 4, "size_bytes": 4, "dfi": "00"})";
     }
     m.operations =
@@ -84,7 +88,7 @@ inline conversation_test::Made made(const GuestShape& guest = {},
                                  R"("hardware"}, {"did": "D221", "role": )"
                                  R"("software"}], )"
                                : "") +
-        R"("steps": )" + steps + "]}]";
+        plan.extra + R"("steps": )" + steps + "]}]";
     return m;
 }
 
