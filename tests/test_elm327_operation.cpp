@@ -76,10 +76,7 @@ protected:
         ASSERT_NO_FATAL_FAILURE(session_operation::talking(raw));
     }
 
-    ecuio_status_t begin(ecuio_session_t* s)
-    {
-        return begin(s, folder_);
-    }
+    ecuio_status_t begin(ecuio_session_t* s) { return begin(s, folder_); }
 
     static ecuio_status_t begin(ecuio_session_t* s,
                                 const dump_file_test::Folder& f)
