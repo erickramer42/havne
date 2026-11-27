@@ -24,6 +24,8 @@ constexpr float kTftLoadCPerS = 0.01f;
 constexpr float kTftShiftC = 0.2f;
 constexpr uint32_t kGearLagTicks = 6;
 constexpr float kLockSlipRpm = 50.0f;
+constexpr float kLoadTauS = 1.5f;
+constexpr float kAirFuel = 14.7f;
 
 struct prompt {
     float from_s;
@@ -76,6 +78,21 @@ inline float input_shaft_rpm(const ecuio_mock::DriveCycle& c, int gear)
     return output_shaft_rpm(c) * ecuio_mock::kGearRatio[gear];
 }
 
+inline float maf_sensor_v(const ecuio_mock::DriveCycle& c)
+{
+    return 0.5f + 4.2f * (1.0f - std::exp(-c.maf_gs / 80.0f));
+}
+
+inline float injected_mg(const ecuio_mock::DriveCycle& c)
+{
+    if (!c.running || c.rpm < 100.0f || c.lambda <= 0.0f) {
+        return 0.0f;
+    }
+    const float air_g =
+        c.maf_gs / (c.rpm / 120.0f) / static_cast<float>(kCylinders);
+    return clampf(air_g / (kAirFuel * c.lambda) * 1000.0f, 0.0f, 60.0f);
+}
+
 } // namespace ecuio_sim_enhanced_detail
 
 struct ecuio_sim_enhanced_state {
@@ -93,6 +110,10 @@ struct ecuio_sim_enhanced_state {
     uint32_t noise = 0x2545F491u;
     uint32_t held_mask = 0; /* a bit's place in the table's bits, set_value's */
     uint32_t held_on = 0;
+    float engine_s = 0.0f;
+    bool was_running = false;
+    float load_filtered_pct = 0.0f;
+    uint32_t ticks = 0;
 };
 
 inline int ecuio_sim_enhanced_gear_actual(const ecuio_sim_enhanced_state& s)
@@ -166,6 +187,18 @@ inline void ecuio_sim_enhanced_step(ecuio_sim_enhanced_state& s,
         s.gears[i] = s.gears[i + 1];
     }
     s.gears[kGearLagTicks] = c.gear;
+    s.engine_s = c.running && s.was_running ? s.engine_s + dt : 0.0f;
+    s.was_running = c.running;
+    s.load_filtered_pct += (c.load_pct - s.load_filtered_pct) * dt / kLoadTauS;
+    ++s.ticks;
+}
+
+inline float
+ecuio_sim_enhanced_coolant_sensor(const ecuio_sim_enhanced_state& s,
+                                  const ecuio_mock::DriveCycle& c, int which)
+{
+    const float ripple = 0.15f * std::sin(static_cast<float>(s.ticks) * 0.37f);
+    return which == 0 ? c.coolant_c + 0.3f : c.coolant_c - 0.4f + ripple;
 }
 
 #endif /* ECUIO_SIM_ENHANCED_MODEL_H */

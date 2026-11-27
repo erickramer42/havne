@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -132,6 +133,16 @@ double model_value(const Car& c, const ecuio_sim_enhanced_field& f)
         return s.cam_actual_deg;
     if (k == "adaptation")
         return s.adaptation_pct;
+    if (k == "run_time")
+        return c.e.engine_s;
+    if (k == "load_filtered")
+        return s.load_filtered_pct;
+    if (k == "maf_voltage")
+        return 0.5 + 4.2 * (1.0 - std::exp(-d.maf_gs / 80.0));
+    if (k == "coolant_1")
+        return d.coolant_c + 0.3;
+    if (k == "ambient")
+        return ecuio_mock::kColdStartC;
     return NAN;
 }
 
@@ -482,6 +493,111 @@ TEST(SimEnhancedTest, EachFieldIsAValidDefAndFieldsNeverOverlap)
                 << t[i].key << " and " << t[k].key;
         }
     }
+}
+
+bool vendor_did(const ecuio_sim_enhanced_field& f)
+{
+    const uint32_t did = f.def.mux_key & 0xFFFFu;
+    return did >= 0xFD07u && did <= 0xFD0Au;
+}
+
+TEST(SimEnhancedTest, TheVendorDidsAreBigEndianAndOnePacksEveryKind)
+{
+    uint32_t packed_bits = 0, packed_fixed = 0, packed_signals = 0, vendor = 0;
+    for (const ecuio_sim_enhanced_field& f : ecuio_sim_enhanced_fields()) {
+        if (!vendor_did(f)) {
+            continue;
+        }
+        ++vendor;
+        EXPECT_EQ(f.def.byte_order, ECUIO_BYTE_ORDER_BE) << f.key;
+        if ((f.def.mux_key & 0xFFFFu) == 0xFD07u) {
+            packed_bits = std::max<uint32_t>(packed_bits, f.def.bit_length);
+            packed_fixed += f.role == ecuio_sim_enh_role::fixed ? 1u : 0u;
+            packed_signals += f.role == ecuio_sim_enh_role::signal ? 1u : 0u;
+        }
+    }
+    EXPECT_GT(vendor, 15u);
+    EXPECT_EQ(packed_bits, 24u);
+    EXPECT_EQ(packed_fixed, 1u);
+    EXPECT_GE(packed_signals, 4u);
+    const ecuio_sim_enhanced_field& run = Car::by_key("run_time");
+    EXPECT_EQ(run.def.bit_length, 24u);
+    EXPECT_DOUBLE_EQ(Car::by_key("coolant_1").def.offset, -40.0);
+    EXPECT_DOUBLE_EQ(Car::by_key("load_filtered").def.offset, -10.0);
+}
+
+TEST(SimEnhancedTest, TheRunTimeIsTheEnginesOwnAndTheLoadLagsTheModels)
+{
+    Car car;
+    uint32_t lagging = 0, checked = 0;
+    drive(car, 1, [&] {
+        EXPECT_FLOAT_EQ(car.e.enhanced.engine_s, car.e.engine_s);
+        if (car.e.car.tick % 10 == 0) {
+            lagging +=
+                std::fabs(car.field("load_filtered") - car.e.car.load_pct) > 5.0
+                    ? 1u
+                    : 0u;
+            ++checked;
+        }
+    });
+    EXPECT_GT(lagging, checked / 50u);
+    EXPECT_LT(lagging, checked / 2u);
+}
+
+TEST(SimEnhancedTest, TheCoolantSensorsTrackCoolantApart)
+{
+    Car car;
+    double lo = 1e9, hi = -1e9;
+    drive(car, 1, [&] {
+        if (car.e.car.tick % 20 != 0) {
+            return;
+        }
+        const double one = car.field("coolant_1");
+        const double two = car.field("coolant_2");
+        EXPECT_NEAR(one, car.e.car.coolant_c, 1.0);
+        EXPECT_NEAR(two, car.e.car.coolant_c, 1.0);
+        lo = std::fmin(lo, one - two);
+        hi = std::fmax(hi, one - two);
+    });
+    EXPECT_GT(lo, 0.3);
+    EXPECT_GT(hi - lo, 0.1);
+}
+
+TEST(SimEnhancedTest, TheInjectedQuantityIsTheFuelForEachStroke)
+{
+    Car car;
+    uint32_t running = 0;
+    drive(car, 1, [&] {
+        const ecuio_mock::DriveCycle& d = car.e.car;
+        if (d.tick % 20 != 0) {
+            return;
+        }
+        if (!d.running) {
+            EXPECT_EQ(car.field("injected"), 0.0);
+            return;
+        }
+        const double want =
+            d.maf_gs / (d.rpm / 120.0) / 4.0 / (14.7 * d.lambda) * 1000.0;
+        EXPECT_NEAR(car.field("injected"), std::fmin(want, 60.0), 0.01);
+        ++running;
+    });
+    EXPECT_GT(running, 100u);
+}
+
+TEST(SimEnhancedTest, TheMostlyStaticDidsHoldStill)
+{
+    Car car;
+    car.tick();
+    const Bytes config = car.ask(kEcm, 0xFD09);
+    const Bytes ident = car.ask(kEcm, 0xFD0A);
+    ASSERT_EQ(config.size(), 3u + 8u);
+    ASSERT_EQ(ident.size(), 3u + 6u);
+    drive(car, 1, [&] {
+        if (car.e.car.tick % 100 == 0) {
+            EXPECT_EQ(car.ask(kEcm, 0xFD09), config);
+            EXPECT_EQ(car.ask(kEcm, 0xFD0A), ident);
+        }
+    });
 }
 
 TEST(SimEnhancedTest, TheTruthFileIsTheTable)

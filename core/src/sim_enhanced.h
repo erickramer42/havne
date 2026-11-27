@@ -66,7 +66,14 @@ enum class ecuio_sim_enh_source : uint8_t {
     lock,
     line_pressure,
     tcm_counter,
-    xor_sum
+    xor_sum,
+    run_time,
+    load_filtered,
+    maf_voltage,
+    injected,
+    coolant_1,
+    coolant_2,
+    ambient
 };
 
 enum class ecuio_sim_enh_role : uint8_t {
@@ -183,6 +190,27 @@ constexpr row kRows[] = {
     r(kTcm, 0xFD81, 1, 0, 8, U, LE, 1, 0, "Static A", "", src::constant, role::fixed, "tcm_static_a", nullptr, 0x00, -1),
     r(kTcm, 0xFD81, 2, 0, 8, U, LE, 1, 0, "Static B", "", src::constant, role::fixed, "tcm_static_b", nullptr, 0x7F, -1),
     r(kTcm, 0xFD81, 3, 0, 8, U, LE, 1, 0, "Checksum", "", src::xor_sum, role::checksum, "tcm_checksum", nullptr, 0, -1),
+    r(kEcm, 0xFD07, 0, 0, 24, U, BE, 1.0 / 4096.0, 0, "Engine run time", "s", src::run_time, role::signal, "run_time", "engine_run_time", 0, -1),
+    r(kEcm, 0xFD07, 3, 0, 16, U, BE, 100.0 / 32768.0, -10, "Load (filtered)", "%", src::load_filtered, role::signal, "load_filtered", "engine_load", 0, -1),
+    r(kEcm, 0xFD07, 5, 0, 8, U, BE, 1, 0, "Static", "", src::constant, role::fixed, "packed_static", nullptr, 0x11, -1),
+    r(kEcm, 0xFD07, 6, 0, 16, U, BE, 1.0 / 4096.0, 0, "MAF sensor voltage", "V", src::maf_voltage, role::signal, "maf_voltage", "maf_voltage", 0, -1),
+    r(kEcm, 0xFD07, 8, 0, 16, U, BE, 1.0 / 1024.0, 0, "Injected quantity", "mg", src::injected, role::signal, "injected", "injected_quantity", 0, -1),
+    r(kEcm, 0xFD08, 0, 0, 16, U, BE, 1.0 / 64.0, -40, "Coolant sensor 1", kDegC, src::coolant_1, role::signal, "coolant_1", "coolant_temp", 0, -1),
+    r(kEcm, 0xFD08, 2, 0, 16, U, BE, 1.0 / 64.0, -40, "Coolant sensor 2", kDegC, src::coolant_2, role::signal, "coolant_2", "coolant_temp", 0, -1),
+    r(kEcm, 0xFD09, 0, 0, 8, U, BE, 1, 0, "Static A", "", src::constant, role::fixed, "config_a", nullptr, 0x03, -1),
+    r(kEcm, 0xFD09, 1, 0, 8, U, BE, 1, 0, "Static B", "", src::constant, role::fixed, "config_b", nullptr, 0x20, -1),
+    r(kEcm, 0xFD09, 2, 0, 8, U, BE, 1, 0, "Static C", "", src::constant, role::fixed, "config_c", nullptr, 0x00, -1),
+    r(kEcm, 0xFD09, 3, 0, 8, U, BE, 1, -40, "Ambient air", kDegC, src::ambient, role::signal, "ambient", "ambient_air_temp", 0, -1),
+    r(kEcm, 0xFD09, 4, 0, 8, U, BE, 1, 0, "Static D", "", src::constant, role::fixed, "config_d", nullptr, 0x0F, -1),
+    r(kEcm, 0xFD09, 5, 0, 8, U, BE, 1, 0, "Static E", "", src::constant, role::fixed, "config_e", nullptr, 0xA0, -1),
+    r(kEcm, 0xFD09, 6, 0, 8, U, BE, 1, 0, "Static F", "", src::constant, role::fixed, "config_f", nullptr, 0x55, -1),
+    r(kEcm, 0xFD09, 7, 0, 8, U, BE, 1, 0, "Static G", "", src::constant, role::fixed, "config_g", nullptr, 0x00, -1),
+    r(kEcm, 0xFD0A, 0, 0, 8, U, BE, 1, 0, "Static A", "", src::constant, role::fixed, "ident_a", nullptr, 0x4D, -1),
+    r(kEcm, 0xFD0A, 1, 0, 8, U, BE, 1, 0, "Static B", "", src::constant, role::fixed, "ident_b", nullptr, 0x31, -1),
+    r(kEcm, 0xFD0A, 2, 0, 8, U, BE, 1, 0, "Static C", "", src::constant, role::fixed, "ident_c", nullptr, 0x07, -1),
+    r(kEcm, 0xFD0A, 3, 0, 8, U, BE, 1, 0, "Static D", "", src::constant, role::fixed, "ident_d", nullptr, 0xE2, -1),
+    r(kEcm, 0xFD0A, 4, 0, 8, U, BE, 1, 0, "Static E", "", src::constant, role::fixed, "ident_e", nullptr, 0x00, -1),
+    r(kEcm, 0xFD0A, 5, 0, 8, U, BE, 1, 0, "Static F", "", src::constant, role::fixed, "ident_f", nullptr, 0x9C, -1),
 };
 // clang-format on
 
@@ -340,6 +368,20 @@ inline double engine_value(const ecuio_sim_enhanced_state& s,
         return boost_target_kpa(c);
     case src::boost:
         return c.boost_kpa;
+    case src::run_time:
+        return s.engine_s;
+    case src::load_filtered:
+        return s.load_filtered_pct;
+    case src::maf_voltage:
+        return maf_sensor_v(c);
+    case src::injected:
+        return injected_mg(c);
+    case src::coolant_1:
+        return ecuio_sim_enhanced_coolant_sensor(s, c, 0);
+    case src::coolant_2:
+        return ecuio_sim_enhanced_coolant_sensor(s, c, 1);
+    case src::ambient:
+        return ecuio_mock::kColdStartC;
     default:
         return 0.0;
     }

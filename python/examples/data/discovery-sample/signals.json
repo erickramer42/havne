@@ -119,6 +119,62 @@
       "group": "diagnostics"
     },
     {
+      "key": "did_fd07",
+      "name": "DID FD07",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD07"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd08",
+      "name": "DID FD08",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD08"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd09",
+      "name": "DID FD09",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD09"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd0a",
+      "name": "DID FD0A",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD0A"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
       "key": "did_fd80",
       "name": "DID FD80",
       "ecu": "tcm",

@@ -68,6 +68,35 @@
         {"id": 19045, "key": "tcm_static_a", "name": "Static A", "kind": "static", "byte": 1, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 0},
         {"id": 19046, "key": "tcm_static_b", "name": "Static B", "kind": "static", "byte": 2, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 127},
         {"id": 19047, "key": "tcm_checksum", "name": "Checksum", "kind": "checksum", "byte": 3, "bit": 0, "bits": 8, "order": "le", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD07", "fields": [
+        {"id": 19048, "key": "run_time", "name": "Engine run time", "kind": "signal", "byte": 0, "bit": 0, "bits": 24, "order": "be", "signed": false, "scale": 0.000244140625, "offset": 0, "unit": "s", "wanted": "engine_run_time"},
+        {"id": 19049, "key": "load_filtered", "name": "Load (filtered)", "kind": "signal", "byte": 3, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.0030517578125, "offset": -10, "unit": "%", "wanted": "engine_load"},
+        {"id": 19050, "key": "packed_static", "name": "Static", "kind": "static", "byte": 5, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 17},
+        {"id": 19051, "key": "maf_voltage", "name": "MAF sensor voltage", "kind": "signal", "byte": 6, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.000244140625, "offset": 0, "unit": "V", "wanted": "maf_voltage"},
+        {"id": 19052, "key": "injected", "name": "Injected quantity", "kind": "signal", "byte": 8, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.0009765625, "offset": 0, "unit": "mg", "wanted": "injected_quantity"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD08", "fields": [
+        {"id": 19053, "key": "coolant_1", "name": "Coolant sensor 1", "kind": "signal", "byte": 0, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.015625, "offset": -40, "unit": "°C", "wanted": "coolant_temp"},
+        {"id": 19054, "key": "coolant_2", "name": "Coolant sensor 2", "kind": "signal", "byte": 2, "bit": 0, "bits": 16, "order": "be", "signed": false, "scale": 0.015625, "offset": -40, "unit": "°C", "wanted": "coolant_temp"}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD09", "fields": [
+        {"id": 19055, "key": "config_a", "name": "Static A", "kind": "static", "byte": 0, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 3},
+        {"id": 19056, "key": "config_b", "name": "Static B", "kind": "static", "byte": 1, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 32},
+        {"id": 19057, "key": "config_c", "name": "Static C", "kind": "static", "byte": 2, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 0},
+        {"id": 19058, "key": "ambient", "name": "Ambient air", "kind": "signal", "byte": 3, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": -40, "unit": "°C", "wanted": "ambient_air_temp"},
+        {"id": 19059, "key": "config_d", "name": "Static D", "kind": "static", "byte": 4, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 15},
+        {"id": 19060, "key": "config_e", "name": "Static E", "kind": "static", "byte": 5, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 160},
+        {"id": 19061, "key": "config_f", "name": "Static F", "kind": "static", "byte": 6, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 85},
+        {"id": 19062, "key": "config_g", "name": "Static G", "kind": "static", "byte": 7, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 0}
+    ]},
+    {"module": "7E8", "request": "7E0", "did": "FD0A", "fields": [
+        {"id": 19063, "key": "ident_a", "name": "Static A", "kind": "static", "byte": 0, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 77},
+        {"id": 19064, "key": "ident_b", "name": "Static B", "kind": "static", "byte": 1, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 49},
+        {"id": 19065, "key": "ident_c", "name": "Static C", "kind": "static", "byte": 2, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 7},
+        {"id": 19066, "key": "ident_d", "name": "Static D", "kind": "static", "byte": 3, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 226},
+        {"id": 19067, "key": "ident_e", "name": "Static E", "kind": "static", "byte": 4, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 0},
+        {"id": 19068, "key": "ident_f", "name": "Static F", "kind": "static", "byte": 5, "bit": 0, "bits": 8, "order": "be", "signed": false, "scale": 1, "offset": 0, "unit": "", "wanted": null, "value": 156}
     ]}
   ]
 }

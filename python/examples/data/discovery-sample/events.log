@@ -4,7 +4,7 @@ utc  2026-01-01T00:00:00.000Z
 core  0.9.0
 uri  elm327://127.0.0.1:35000?identify=0&diagnose=0&profile=user.discovery-sample
 profile  user.discovery-sample
-signal file  signals.json,0e4443a99e8a7fccc0a50fb4db7198fd87e33d3c3f3a895e1bfd60903a007468
+signal file  signals.json,0164c7be6a314331130d85a26613152aad1512b6ee2b335f1591073ff542d01b
 frame flags  complete
 signal  7E8:4104:2.0:8,Engine Load,number,%,1,7,1
 signal  7E8:4105:2.0:8,Coolant Temp,number,°C,0,2,1
@@ -144,11 +144,15 @@ signal  7E8:62FD03:3:t0,DID FD03,text,,0,0,8
 signal  7E8:62FD04:3:t0,DID FD04,text,,0,0,8
 signal  7E8:62FD05:3:t0,DID FD05,text,,0,0,8
 signal  7E8:62FD06:3:t0,DID FD06,text,,0,0,8
+signal  7E8:62FD07:3:t0,DID FD07,text,,0,0,8
+signal  7E8:62FD08:3:t0,DID FD08,text,,0,0,8
+signal  7E8:62FD09:3:t0,DID FD09,text,,0,0,8
+signal  7E8:62FD0A:3:t0,DID FD0A,text,,0,0,8
 signal  7E9:62FD80:3:t0,DID FD80,text,,0,0,8
 signal  7E9:62FD81:3:t0,DID FD81,text,,0,0,8
 caller  havne-cli 0.9.0
 columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
 
-00:02:50.077  +170.077  note  {"type":"end","reason":"seconds","seconds":170,"bytes":441942,"values":6079}
+00:02:50.179  +170.179  note  {"type":"end","reason":"seconds","frames":2365,"dropped_frames":0,"dropped_values":0,"isotp":{"first_frames":1794,"completed":2366,"dropped":10,"malformed":0}}
 
-00:02:50.077  +170.077  end  havne-cli: seconds: 2489 frames, 6079 values, 0 records dropped, 0 notes dropped
+00:02:50.179  +170.179  end  havne-cli: seconds: 2365 frames, 4967 values, 0 records dropped, 0 notes dropped
