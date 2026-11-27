@@ -19,7 +19,7 @@ from ._version import __version__
 from ._lib import path as library_path, version as core_version
 from .errors import (CheckFailed, Error, ExprRefused, LibraryNotFound, LibraryVersionError,
                      TooSoon, status_name)
-from .session import Frame, Recorder, RecorderState, Session, Stream, Value
+from .session import Frame, ModuleState, Recorder, RecorderState, Session, Stream, Value
 from ._conversation import Conversation
 from .consent import (ConsentLine, ConsentRecord, ConsentStore, consent_lines,
                       default_path as consent_path)
@@ -32,7 +32,8 @@ from .health import HealthReport, health_report
 from .lookup import DtcTitle, VinInfo, decode_vin, dtc_title
 from .sim import Reply, Sim
 from .signals import (Evaluation, ExprCheck, Gauge, Plugin, Publisher, PutVariant, SignalFile,
-                      Source)
+                      Source, expr_names)
+from ._merge import Module, Note, Part
 from .conditions import (Alert, Binding, Checks, Condition, ConditionEvent, ConditionSet,
                          ConditionState, Record, Resolved, Term)
 from . import _ecuio as c
@@ -41,7 +42,7 @@ __all__ = [
     "__version__", "library_path", "core_version", "c",
     "Error", "CheckFailed", "ExprRefused", "LibraryNotFound", "LibraryVersionError",
     "status_name", "TooSoon",
-    "Session", "Stream", "Frame", "Value", "Recorder", "RecorderState",
+    "Session", "Stream", "Frame", "Value", "Recorder", "RecorderState", "ModuleState",
     "Recording", "Signal", "Marker", "Column", "Stats", "Stretch",
     "RecordedConditions", "RecordedConditionEvent",
     "import_csv", "import_candump", "Imported", "read_frames", "RecordedFrame",
@@ -50,7 +51,7 @@ __all__ = [
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
     "decode_vin", "VinInfo", "dtc_title", "DtcTitle",
     "Sim", "Reply", "SignalFile", "Plugin", "Gauge", "Source", "PutVariant",
-    "ExprCheck", "Evaluation", "Publisher",
+    "ExprCheck", "Evaluation", "Publisher", "expr_names", "Part", "Module", "Note",
     "ConsentStore", "ConsentRecord", "ConsentLine", "consent_lines", "consent_path",
     "Conversation",
     "ConditionSet", "Condition", "Term", "Alert", "Record", "Checks", "Binding", "Resolved",

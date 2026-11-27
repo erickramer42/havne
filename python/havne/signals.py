@@ -30,6 +30,7 @@ import os
 import threading
 
 from . import _ecuio as e
+from . import _merge
 from ._core import check, lib, text, utf8
 from .errors import ExprRefused
 
@@ -185,13 +186,17 @@ def _evaluate(file, expr, values, key):
                       out.bound_us if out.why == e.ECUIO_EVAL_WHY_STALE else None)
 
 
+def _source_of(s):
+    return Source(text(s.name), text(s.url), text(s.commit), text(s.license),
+                  text(s.modified), bool(s.flags & e.ECUIO_SOURCE_SHARE_ALIKE))
+
+
 def _source(file):
     """The Source of a loaded signal file, or a plugin variant's file"""
     s = e.ecuio_signal_source_t()
     s.struct_size = ctypes.sizeof(s)
     check(lib.ecuio_signal_file_source(file, ctypes.byref(s)), "ecuio_signal_file_source")
-    return Source(text(s.name), text(s.url), text(s.commit), text(s.license),
-                  text(s.modified), bool(s.flags & e.ECUIO_SOURCE_SHARE_ALIKE))
+    return _source_of(s)
 
 
 def _made(call, status_of):
@@ -264,19 +269,93 @@ class SignalFile:
                 data = f.read()
         else:
             data = utf8(text_or_bytes)
-        self._handle = ctypes.POINTER(e.ecuio_signal_file_t)()
+        handle = ctypes.POINTER(e.ecuio_signal_file_t)()
         check(lib.ecuio_signal_file_load_with(
                   data, len(data),
                   e.ECUIO_SIGNAL_FILE_LOAD_SET if recorded else 0,
-                  ctypes.byref(self._handle)),
+                  ctypes.byref(handle)),
               "ecuio_signal_file_load_with")
+        self._take(handle, True)
+
+    def _take(self, handle, register):
+        self._handle = handle
         self.name = text(lib.ecuio_signal_file_name(self._handle))
         self.profile = text(lib.ecuio_signal_file_profile(self._handle))
         self.extends = text(lib.ecuio_signal_file_extends(self._handle))
         self.format = lib.ecuio_signal_file_format(self._handle)
-        check(lib.ecuio_profile_register(utf8(self.profile),
-                                         lib.ecuio_signal_file_set(self._handle), None),
-              "ecuio_profile_register")
+        if register:
+            check(lib.ecuio_profile_register(utf8(self.profile),
+                                             lib.ecuio_signal_file_set(self._handle), None),
+                  "ecuio_profile_register")
+
+    @classmethod
+    def _of(cls, handle, register, owner=None):
+        file = cls.__new__(cls)
+        file._owner = owner
+        file._take(handle, register)
+        return file
+
+    @staticmethod
+    def merge(parts, base=None):
+        """parts read together as one set (ecuio_signal_file_merge), in
+        the order given: each a SignalFile or a (Plugin, variant) pair.
+        base "obd2" reads obd2's signals beside them, "modules" obd2's
+        modules alone (so the emissions codes are still read), None
+        neither unless a part extends obd2. The new SignalFile is
+        registered as its "merged.<16 hex>" profile and outlives the
+        parts. An Error with core's words for a merge core refuses."""
+        handles = []
+        for part in parts:
+            if isinstance(part, SignalFile):
+                handles.append(part._handle)
+            else:
+                plugin, variant = part
+                handles.append(lib.ecuio_plugin_variant_file(
+                    plugin._handle, plugin.variant_index(variant)))
+        return SignalFile._of(_merge.merge(handles, base), True)
+
+    def parts(self):
+        """The files the set was merged from, in merge order, each a Part;
+        [] for a file that isn't a merged set"""
+        return _merge.parts(self._handle, _source_of)
+
+    def part_of(self, key):
+        """The Part the signal with key came from; None for a base signal
+        or a file that isn't a merged set. LookupError for no such key."""
+        return _merge.part_of(self._handle, key, _source_of)
+
+    def modules(self):
+        """The set's modules in its channels' order, each a Module"""
+        return _merge.modules(self._handle)
+
+    def notes(self):
+        """What the load, or the merge that made the file, did that its
+        files didn't say outright, each a Note; [] for a merged set read
+        back from its text"""
+        return _merge.notes(self._handle, _keys(self._handle))
+
+    def needs(self):
+        """The keys the file's "needs" lists, as written"""
+        return _merge.needs(self._handle)
+
+    def replaced_keys(self, key):
+        """The keys the signal with key stands for besides its own: those
+        of the signals it took the place of. LookupError for no such key."""
+        return _merge.replaced_keys(self._handle, key)
+
+    def def_module(self, key):
+        """The index among modules() the signal with key is read on; None
+        for none (a computed signal over two modules). LookupError for no
+        such key."""
+        return _merge.def_module(self._handle, key)
+
+    @property
+    def text(self):
+        """The file as signal-file text: for a merged set, what a recording
+        copies and havne-cli plugins together --out writes"""
+        length = ctypes.c_size_t()
+        raw = lib.ecuio_signal_file_text(self._handle, ctypes.byref(length))
+        return (raw or b"")[:length.value].decode("utf-8")
 
     def gauge(self, key):
         """The Gauge of the signal named key; None for no such signal, or
@@ -562,6 +641,14 @@ class Plugin:
         as a Source"""
         return _source(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)))
 
+    def variant_file(self, variant=None):
+        """A variant (the first when None) as a SignalFile, borrowed from
+        the plugin and not registered: what SignalFile.merge takes, and
+        whose parts(), modules() and notes() read the variant's set"""
+        return SignalFile._of(
+            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)), False,
+            self)
+
     def variant_text(self, variant=None):
         """A variant (the first when None) as one signal file's text: its
         files merged, which a recording copies and SignalFile reads back
@@ -641,3 +728,12 @@ class Plugin:
 
     def __repr__(self):
         return f"Plugin({self.id!r} {self.version}, variants {self.variants})"
+
+
+def expr_names(expr):
+    """The names expr reads (ecuio_expr_names), as written, each once in
+    the order first read, by the grammar alone with no file: what a
+    signal file's "needs" lists once the file's own keys and obd2's are
+    left out. An Error with the loader's words for what every file's
+    loader refuses."""
+    return _merge.expr_names(expr)
