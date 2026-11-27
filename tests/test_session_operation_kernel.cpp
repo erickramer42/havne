@@ -178,3 +178,37 @@ TEST(SessionOperationTest, TheKeepAliveGoesEveryKeepaliveMsUntilTheEnd)
         EXPECT_FALSE(b.e->aside_due) << "none once the run has ended";
     }
 }
+
+TEST(SessionOperationTest, AKernelReadDownloadsStartsCopiesAndLeaves)
+{
+    Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    Bench b;
+    b.node.s.kernel.on = true;
+    ASSERT_NO_FATAL_FAILURE(b.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    ASSERT_FALSE(b.functional.empty());
+    EXPECT_EQ(b.functional[0].second, (Bytes{0x10, 0x82}));
+    EXPECT_EQ(b.node.s.kernel.downloads, 1u);
+    EXPECT_EQ(b.node.s.kernel.starts, 1u);
+    EXPECT_EQ(b.count(0x34), 1u);
+    EXPECT_EQ(b.count(0x36, 0), 2u + 2u * 4u)
+        << "two blocks down, four up twice";
+    EXPECT_EQ(b.count(0x11), 0u) << "no reset of any kind";
+    size_t exit = 0;
+    for (size_t i = 0; i < b.sent.size(); ++i) {
+        exit = b.sent[i] == Bytes{0x37} ? i : exit;
+    }
+    ASSERT_LT(exit + 1, b.sent.size());
+    EXPECT_EQ(b.sent[exit + 1], (Bytes{0x10, 0x01}))
+        << "the run's last request is its leave";
+    const std::vector<std::string> names = b.files();
+    ASSERT_EQ(names.size(), 1u);
+    const std::vector<uint8_t> image =
+        image_at((b.folder.path / names[0]).generic_u8string());
+    EXPECT_EQ(image, memory_of(ECUIO_SIM_DEFAULT_VIN, 0x00080000, 4096))
+        << "the code region, read through the helper";
+}
