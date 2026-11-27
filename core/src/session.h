@@ -60,6 +60,13 @@ struct ecuio_battery_slot {
     bool got = false;
 };
 
+/* The worker's alone: a run adds, the transport writes between requests */
+struct ecuio_run_lines {
+    static constexpr uint32_t kMost = 4;
+    uint32_t count = 0;
+    char text[kMost][127] = {};
+};
+
 struct ecuio_session_talk; /* conversation_bind.h */
 void ecuio_session_talk_free(ecuio_session_talk* t) noexcept;
 
@@ -230,6 +237,7 @@ struct ecuio_session {
     uint32_t clear_requests = 0;
     uint32_t clear_ended = 0;
     ecuio_battery_slot battery;
+    ecuio_run_lines run_lines;
     /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
      * caller's order and one byte per def (1 picked), under the mutex;
      * focus_generation moves with each call and a requesting worker takes

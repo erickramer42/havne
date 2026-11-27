@@ -418,12 +418,28 @@ std::string operation_text(const char* id, uint32_t rx, uint64_t bytes,
         "started",          "saved",          "canceled",
         "refused",          "no-answer",      "differ",
         "identity-changed", "unlock-refused", "session-lost",
-        "link-lost",        "file",           "bad-reply"};
+        "link-lost",        "file",           "bad-reply",
+        "engine-running",   "moving",         "voltage-low",
+        "voltage-high"};
     char text[64];
     std::snprintf(text, sizeof text, ",0x%X,%llu,", rx,
                   static_cast<unsigned long long>(bytes));
     return "dump," + one_line(id) + text +
            (end < sizeof kEnds / sizeof kEnds[0] ? kEnds[end] : "ended");
+}
+
+std::string envelope_text(uint32_t rx, uint32_t volts_mv, int32_t rpm,
+                          int32_t kmh, uint32_t checks)
+{
+    const auto value = [](long long v) {
+        return v < 0 ? std::string("-") : std::to_string(v);
+    };
+    char head[16];
+    char tail[16];
+    std::snprintf(head, sizeof head, "0x%X,", rx);
+    std::snprintf(tail, sizeof tail, ",0x%X", checks);
+    return head + value(volts_mv == 0 ? -1LL : volts_mv) + "," + value(rpm) +
+           "," + value(kmh) + tail;
 }
 
 /* A module's state in a module line's words: "0x7E9,closed", "0x7E9,no-room",

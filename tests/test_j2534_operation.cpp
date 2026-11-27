@@ -158,9 +158,12 @@ TEST_F(J2534OperationTest, ARunCopiesTheModulesMemoryThroughTheSurrogate)
         EXPECT_EQ(log.find(first_sum), std::string::npos) << first_sum;
         ours = ours || (log.find(cut_read) != std::string::npos &&
                         log.find(first_chunk) != std::string::npos &&
-                        log.find("07 E8 76 01 00 00 00") != std::string::npos);
+                        log.find("07 E8 76 01 00 00 00") != std::string::npos &&
+                        log.find("run envelope  7E8  battery 13800 mV  rpm 0  "
+                                 "km/h 0  checks ") != std::string::npos);
     }
-    EXPECT_TRUE(ours) << "no session log holds the cut answers";
+    EXPECT_TRUE(ours)
+        << "no session log holds the cut answers and the envelope";
 }
 
 /* The fake's memory answers every third data reply with one bit wrong:

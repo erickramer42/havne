@@ -60,7 +60,7 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
         v.refused_high = mv > kWriteRefuseHighMv;
     } else if (!running) {
         v.low_warn = mv < kDumpWarnLowMv;
-    } else if (!v.write && mv < kDumpSagMv) {
+    } else if ((!v.write || v.ram_only) && mv < kDumpSagMv) {
         v.sagged = true;
     }
 }

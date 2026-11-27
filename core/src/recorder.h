@@ -145,6 +145,11 @@ void ecuio_record_modules(ecuio_record_link* link, uint32_t closed,
 void ecuio_record_operation(ecuio_record_link* link, const char* id,
                             uint32_t rx, uint64_t bytes, uint32_t end);
 
+/* A run's checks as they ended: 0 volts, a negative rpm or kmh for none */
+void ecuio_record_envelope(ecuio_record_link* link, uint32_t rx,
+                           uint32_t volts_mv, int32_t rpm, int32_t kmh,
+                           uint32_t checks);
+
 /* On a requesting worker, as it publishes reply timing: the rows every
  * 10 s of session time and when final, pinned here; link may be NULL.
  * The final one, the worker's last record, waits up to 1 s for room and

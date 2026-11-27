@@ -188,7 +188,7 @@ void recording_export::activity_line(const std::string& line)
         return;
     }
     if (raw_ || kind == "link" || kind == "drop" || kind == "asleep" ||
-        kind == "module" || kind == "operation") {
+        kind == "module" || kind == "operation" || kind == "envelope") {
         range_starts();
         events_body_.push_back(line);
         return;

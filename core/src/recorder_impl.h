@@ -77,16 +77,22 @@ struct modules_body {
 };
 
 /* A run's start or end (ecuio/operation.h): its plan's id, its module's
- * reply ID, the image's bytes and how it ended (NONE: it started) */
+ * reply ID, the image's bytes and how it ended (NONE: it started); or,
+ * envelope set, what its checks read */
 struct operation_body {
     uint64_t host_us;
     uint64_t bytes;
     uint32_t rx;
     uint32_t end; /* ECUIO_OPERATION_END_* */
     char id[32];  /* terminated */
+    uint32_t envelope;
+    uint32_t volts_mv; /* 0: none */
+    uint32_t checks;   /* ECUIO_OPERATION_CHECK_* */
+    int32_t rpm;       /* -1: none */
+    int32_t kmh;       /* -1: none */
 };
 
-/* Two runs' lines: an end, the next run's start and end carried at once */
+/* An end, then the next run's start, envelope and end carried at once */
 constexpr uint32_t kCarryOperations = 4;
 
 struct timing_body {

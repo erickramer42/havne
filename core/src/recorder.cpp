@@ -248,8 +248,10 @@ bool put_pending(ecuio_recorder_t* r)
 
 } // namespace
 
-void ecuio_record_operation(ecuio_record_link* link, const char* id,
-                            uint32_t rx, uint64_t bytes, uint32_t end)
+namespace {
+
+/* Carried in order, so a start still waiting goes in before its end */
+void carry_operation(ecuio_record_link* link, const operation_body& body)
 {
     if (link == nullptr) {
         return;
@@ -258,14 +260,39 @@ void ecuio_record_operation(ecuio_record_link* link, const char* id,
     if (r == nullptr) {
         return;
     }
-    /* Carried in order, so a start still waiting goes in before its end */
     const uint32_t at = (std::min)(r->operations_pending, kCarryOperations - 1);
-    operation_body& ob = r->pending_operations[at];
-    ob = operation_body{host_us_now(*link), bytes, rx, end, {}};
-    std::snprintf(ob.id, sizeof ob.id, "%s", id);
+    r->pending_operations[at] = body;
+    r->pending_operations[at].host_us = host_us_now(*link);
     r->operations_pending = at + 1;
     (void)put_pending(r);
     ecuio_record_unpin(*link);
+}
+
+} // namespace
+
+void ecuio_record_operation(ecuio_record_link* link, const char* id,
+                            uint32_t rx, uint64_t bytes, uint32_t end)
+{
+    operation_body ob{};
+    ob.bytes = bytes;
+    ob.rx = rx;
+    ob.end = end;
+    std::snprintf(ob.id, sizeof ob.id, "%s", id);
+    carry_operation(link, ob);
+}
+
+void ecuio_record_envelope(ecuio_record_link* link, uint32_t rx,
+                           uint32_t volts_mv, int32_t rpm, int32_t kmh,
+                           uint32_t checks)
+{
+    operation_body ob{};
+    ob.rx = rx;
+    ob.envelope = 1;
+    ob.volts_mv = volts_mv;
+    ob.rpm = rpm;
+    ob.kmh = kmh;
+    ob.checks = checks;
+    carry_operation(link, ob);
 }
 
 void ecuio_record_modules(ecuio_record_link* link, uint32_t closed,

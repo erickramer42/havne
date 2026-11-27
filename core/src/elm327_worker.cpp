@@ -703,11 +703,21 @@ void serve_battery(transport* t)
     b.served = b.want;
 }
 
+void serve_run_lines(transport* t)
+{
+    ecuio_run_lines& l = t->session->run_lines;
+    for (uint32_t i = 0; i < l.count; ++i) {
+        elm327_log_write(t->log, "%s", l.text[i]);
+    }
+    l.count = 0;
+}
+
 /* What the session asked for since the last pass, and what it's told */
 void serve_session(transport* t, worker_state& w)
 {
     ecuio_request_engine& e = t->engine;
     serve_battery(t);
+    serve_run_lines(t);
     if (w.h.recovered) {
         w.h.recovered = false;
         if (t->probe) {

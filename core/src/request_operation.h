@@ -489,6 +489,56 @@ inline void offer(session_run& o, ecuio_request_engine* e, const run_request& q,
     }
 }
 
+/* A line for the transport's own log; one past the slot's room is lost */
+inline char* log_slot(ecuio_session_t* s)
+{
+    ecuio_run_lines& l = s->run_lines;
+    return l.count < ecuio_run_lines::kMost ? l.text[l.count++] : nullptr;
+}
+
+inline const char* reading(char (&out)[12], int64_t n)
+{
+    if (n < 0) {
+        std::snprintf(out, sizeof out, "-");
+    } else {
+        std::snprintf(out, sizeof out, "%u", static_cast<unsigned>(n));
+    }
+    return out;
+}
+
+inline void log_envelope(ecuio_session_t* s, const session_run& o)
+{
+    const uint32_t checks = checks_of(o);
+    const int32_t rpm = o.k.has_rpm ? static_cast<int32_t>(o.k.rpm) : -1;
+    const int32_t kmh = o.k.has_kmh ? static_cast<int32_t>(o.k.kmh) : -1;
+    const int64_t mv = o.v.has ? int64_t{o.v.mv} : -1;
+    ecuio_record_envelope(s->record_link.get(), o.p->rx_id,
+                          mv < 0 ? 0u : o.v.mv, rpm, kmh, checks);
+    char* line = log_slot(s);
+    if (line == nullptr) {
+        return;
+    }
+    char a[12];
+    char b[12];
+    char c[12];
+    std::snprintf(line, sizeof s->run_lines.text[0],
+                  "run envelope  %X  battery %s mV  rpm %s  km/h %s  "
+                  "checks %X",
+                  static_cast<unsigned>(o.p->rx_id), reading(a, mv),
+                  reading(b, rpm), reading(c, kmh),
+                  static_cast<unsigned>(checks));
+}
+
+inline void log_sag(ecuio_session_t* s, const session_run& o)
+{
+    if (char* line = log_slot(s)) {
+        std::snprintf(line, sizeof s->run_lines.text[0],
+                      "run battery  %u mV, under %u mV: the read goes on",
+                      static_cast<unsigned>(o.v.mv),
+                      static_cast<unsigned>(kDumpSagMv));
+    }
+}
+
 /* The battery asked of the transport at the start, at each step's start
  * and every kVoltsEveryUs; an ask not served in kVoltsLateUs is no
  * reading. With no reading at the start the checks ask the engine
@@ -508,7 +558,11 @@ inline void battery_step(ecuio_session_t* s, session_run& o, int64_t now_us)
     if (served ||
         (o.volts_asked != 0 && now_us - o.volts_at_us > kVoltsLateUs)) {
         if (served && b.got) {
+            const bool sagged = v.sagged;
             volts_take(v, b.mv, v.first);
+            if (v.sagged && !sagged) {
+                log_sag(s, o);
+            }
         }
         if (!v.first) {
             v.first = true;
@@ -542,7 +596,8 @@ inline void drop_check(session_run& o, ecuio_request_engine* e, int64_t now_us)
 
 /* The checks before the run, each a talk of its own on its module's
  * channel: one at a time, a busy channel asked again at the next pass */
-inline void check_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
+inline void check_step(ecuio_session_t* s, session_run& o,
+                       ecuio_request_engine* e, int64_t now_us)
 {
     checks& k = o.k;
     check_request q;
@@ -573,6 +628,7 @@ inline void check_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
         volts_take(o.v, k.volts_mv, false);
         o.v.from_ecu = true;
     }
+    log_envelope(s, o);
     if (k.result == check_end::engine_running) {
         stop(o.r, run_end::engine_running);
     } else if (k.result == check_end::moving) {
@@ -693,7 +749,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
                                                      : run_end::voltage_low);
     }
     if (o.checking && o.v.first && r.at != run_stage::done) {
-        check_step(o, e, now_us);
+        check_step(s, o, e, now_us);
     }
     functional_step(s, o, e, now_us);
     while (!o.checking && r.at != run_stage::done && !o.out && !o.quiet_out &&

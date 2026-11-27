@@ -65,7 +65,7 @@ TEST(SessionOperationTest, ADropUnderElevenVoltsWarnsAndTheReadGoesOn)
     for (const uint32_t low : {10999u, 11000u}) {
         Bench b;
         ASSERT_NO_FATAL_FAILURE(b.start());
-        b.battery = [low](uint32_t nth) { return nth < 3 ? 12600u : low; };
+        b.battery = [low](uint32_t nth) { return nth < 2 ? 12600u : low; };
         ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
         const ecuio_operation_state_t v = b.until_ended();
         EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << low << ": " << v.words;
@@ -76,6 +76,19 @@ TEST(SessionOperationTest, ADropUnderElevenVoltsWarnsAndTheReadGoesOn)
             << "the start's warning is its own";
         EXPECT_EQ(v.volts_min_mv, low);
         EXPECT_EQ(b.files().size(), 1u);
+        const ecuio_run_lines& l = b.s->run_lines;
+        ASSERT_GE(l.count, 1u);
+        EXPECT_EQ(std::string(l.text[0]),
+                  "run envelope  7E8  battery 12600 mV  rpm 0  km/h 0  "
+                  "checks " +
+                      std::string(v.checks & 0x40u ? "47" : "7"));
+        if (low < 11000u) {
+            ASSERT_EQ(l.count, 2u) << "the sag's line once";
+            EXPECT_STREQ(l.text[1], "run battery  10999 mV, under 11000 mV: "
+                                    "the read goes on");
+        } else {
+            EXPECT_EQ(l.count, 1u);
+        }
     }
 }
 
