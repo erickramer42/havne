@@ -7,7 +7,7 @@
 // says their length and SHA-256. A module's memory is kept out the same
 // way (ADR-0066 section 4), or a capture running beside a dump would be a
 // second copy of it: a read's answer 63 keeps its service, a transfer's
-// answer 76 its service and block counter. The recorder's frames, the
+// answer 76 and a download's block 36 their service and block counter. The recorder's frames, the
 // ELM327 wire log and the J2534 surrogate's session log share it; nothing
 // here allocates, so a worker and the surrogate's child may call it.
 
@@ -32,7 +32,7 @@ inline bool ecuio_access_cut(const uint8_t* pdu, size_t len)
 }
 
 /* Whether sid asks for a module's memory: read memory by address, and a
- * transfer's block (an upload's here: tier3_ceiling.h has no download) */
+ * transfer's block */
 constexpr bool ecuio_memory_request(uint8_t sid)
 {
     return sid == 0x23 || sid == 0x36;
@@ -49,7 +49,8 @@ inline size_t ecuio_capture_kept(const uint8_t* pdu, size_t len)
     size_t kept = 0;
     if (pdu[0] == 0x63) {
         kept = 1;
-    } else if (pdu[0] == 0x76 || pdu[0] == 0x27 || pdu[0] == 0x67) {
+    } else if (pdu[0] == 0x76 || pdu[0] == 0x36 || pdu[0] == 0x27 ||
+               pdu[0] == 0x67) {
         kept = ECUIO_ACCESS_KEPT;
     }
     return len > kept ? kept : 0;

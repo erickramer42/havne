@@ -28,9 +28,10 @@ TEST(AccessCutTest, ItCutsAServiceOf27Or67PastItsSubFunction)
     EXPECT_FALSE(ecuio_access_cut(did, sizeof did));
 }
 
-/* A memory read's answer keeps its service, a transfer's its service and
- * block counter, a security access's its two; nothing else is cut, and
- * nothing with no byte after what it keeps */
+/* A memory read's answer keeps its service, a transfer's answer and a
+ * download's block their service and block counter, a security access's
+ * its two; nothing else is cut, and nothing with no byte after what it
+ * keeps */
 TEST(AccessCutTest, ACaptureKeepsEachCutAnswersFirstBytes)
 {
     const auto kept = [](std::initializer_list<uint8_t> pdu) {
@@ -41,13 +42,15 @@ TEST(AccessCutTest, ACaptureKeepsEachCutAnswersFirstBytes)
     EXPECT_EQ(kept({0x63}), 0u);
     EXPECT_EQ(kept({0x76, 0x01, 0xAA}), 2u);
     EXPECT_EQ(kept({0x76, 0x01}), 0u) << "a counter alone";
+    EXPECT_EQ(kept({0x36, 0x01, 0xAA}), 2u)
+        << "a download's block: a kernel's or an image's bytes";
+    EXPECT_EQ(kept({0x36, 0x01}), 0u) << "an upload's ask is whole";
     EXPECT_EQ(kept({0x67, 0x01, 0xAA}), 2u);
     EXPECT_EQ(kept({0x27, 0x02, 0xAA}), 2u);
     EXPECT_EQ(kept({0x27, 0x01}), 0u);
     EXPECT_EQ(ecuio_capture_kept(nullptr, 0), 0u);
-    /* requests, refusals and every other answer are whole */
+    /* other requests, refusals and every other answer are whole */
     EXPECT_EQ(kept({0x23, 0x24, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00}), 0u);
-    EXPECT_EQ(kept({0x36, 0x01, 0xAA}), 0u);
     EXPECT_EQ(kept({0x75, 0x20, 0x01, 0x02}), 0u);
     EXPECT_EQ(kept({0x77, 0xAA}), 0u);
     EXPECT_EQ(kept({0x7F, 0x23, 0x31}), 0u);
@@ -60,7 +63,7 @@ TEST(AccessCutTest, ACaptureKeepsEachCutAnswersFirstBytes)
                   sid == 0x23 || sid == 0x36)
             << sid;
     }
-    EXPECT_EQ(cut, 4u);
+    EXPECT_EQ(cut, 5u);
     /* never hashed: a chunk of a byte or two is found from its SHA-256 */
     const uint8_t read[] = {0x63, 0x11, 0x22, 0x33, 0x44};
     char text[ECUIO_ACCESS_CUT_TEXT];
@@ -69,6 +72,13 @@ TEST(AccessCutTest, ACaptureKeepsEachCutAnswersFirstBytes)
     const uint8_t block[] = {0x76, 0x01, 0x11};
     ecuio_capture_cut_text(block, sizeof block, 2, text, sizeof text);
     EXPECT_STREQ(text, "1 bytes cut");
+    uint8_t download[2 + 1024] = {0x36, 0x01};
+    for (size_t k = 2; k < sizeof download; ++k) {
+        download[k] = static_cast<uint8_t>(k);
+    }
+    ASSERT_EQ(ecuio_capture_kept(download, sizeof download), 2u);
+    ecuio_capture_cut_text(download, sizeof download, 2, text, sizeof text);
+    EXPECT_STREQ(text, "1024 bytes cut") << "its length, no hash";
     for (unsigned sid = 0; sid < 256; ++sid) {
         EXPECT_EQ(ecuio_capture_hashed(static_cast<uint8_t>(sid)),
                   sid == 0x27 || sid == 0x67)
