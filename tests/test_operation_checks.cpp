@@ -174,36 +174,30 @@ TEST(OperationChecksTest, NoVoltageIsAskedWhenTheAdapterReadsOne)
 
 } // namespace
 
-TEST(OperationChecksTest, ASagEndsADumpAndAKernelReadButNeverAWrite)
+TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
 {
     using ecuio_operation::volts;
     using ecuio_operation::volts_take;
-    struct Kind {
-        bool write;
-        bool sags;
-    };
-    for (const Kind kind : {Kind{false, true}, Kind{true, true}}) {
-        volts v;
-        v.write = kind.write;
-        v.sags = kind.sags;
-        volts_take(v, 12500, false);
-        EXPECT_FALSE(v.refused_low);
-        volts_take(v, 11000, true);
-        EXPECT_FALSE(v.dropped) << "11.0 V is still the floor";
-        volts_take(v, 10999, true);
-        EXPECT_TRUE(v.dropped) << kind.write;
-        EXPECT_FALSE(v.refused_low) << "the start's rule is judged once";
-    }
+    volts v;
+    v.write = true;
+    v.ram_only = true;
+    volts_take(v, 11790, false);
+    EXPECT_TRUE(v.low_warn) << "the dump's warn under 11.8 V";
+    volts_take(v, 11400, false);
+    EXPECT_TRUE(v.low_warn);
+    EXPECT_FALSE(v.refused_low) << "no write's floor";
+    volts_take(v, 11800, false);
+    EXPECT_FALSE(v.low_warn) << "nor the write's warn under 12.0 V";
+    volts_take(v, 16100, false);
+    EXPECT_TRUE(v.refused_high) << "a 24 V system refused, as for a write";
+    v.refused_high = false;
+    volts_take(v, 10999, true);
+    EXPECT_FALSE(v.dropped) << "a sag never ends it";
+
     volts write;
     write.write = true;
+    volts_take(write, 11900, false);
+    EXPECT_TRUE(write.low_warn) << "a write's warn under 12.0 V";
     volts_take(write, 11400, false);
-    EXPECT_TRUE(write.refused_low) << "a write-class start under 11.5 V";
-    volts_take(write, 9000, true);
-    EXPECT_FALSE(write.dropped) << "a write goes on through a sag";
-    volts kernel;
-    kernel.write = true;
-    kernel.sags = true;
-    volts_take(kernel, 11900, false);
-    EXPECT_TRUE(kernel.low_warn) << "the write's warn under 12.0 V";
-    EXPECT_FALSE(kernel.refused_low);
+    EXPECT_TRUE(write.refused_low) << "a write's start under 11.5 V";
 }
