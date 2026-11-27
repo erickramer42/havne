@@ -14,6 +14,7 @@
 #define ECUIO_TESTS_FAKE_ECUS_H
 
 #include "fake_ecu.h"
+#include "sim_kernel.h"   /* core/src: the simulated ECU's, shared */
 #include "sim_memory.h"   /* core/src: the simulated ECU's, shared */
 #include "sim_security.h" /* core/src: the simulated ECU's, shared */
 
@@ -272,12 +273,15 @@ struct SecuritySlot {
     uint32_t rx = 0;
     ecuio_sim_security state;
     ecuio_sim_memory memory;
+    ecuio_sim_kernel kernel;
 };
 
 struct SecurityTable {
     std::mutex m;
     SecuritySlot slots[kSessionSlots];
     ecuio_sim_memory_faults memory; /* set_memory_faults()'s */
+    bool kernel = false;            /* set_kernel()'s */
+    ecuio_sim_kernel_faults kernel_faults;
 };
 
 inline SecurityTable& security_table()
@@ -341,6 +345,25 @@ inline bool set_memory_faults(const char* spec)
     return true;
 }
 
+/* The helper the engine ECU wants for region B, in the simulated ECU's
+ * kernel= words ("1", "once,refuse"); NULL or "" for none. False, the
+ * knob unchanged, for words the grammar refuses. The fake DLL sets it
+ * from ECUIO_FAKE_KERNEL on each write. silent isn't the fakes'. */
+inline bool set_kernel(const char* spec)
+{
+    bool on = false;
+    ecuio_sim_kernel_faults f;
+    if (spec != nullptr && spec[0] != '\0' &&
+        !ecuio_sim_parse_kernel(spec, strlen(spec), &on, &f)) {
+        return false;
+    }
+    SecurityTable& t = security_table();
+    const std::lock_guard<std::mutex> lock(t.m);
+    t.kernel = on;
+    t.kernel_faults = f;
+    return true;
+}
+
 /* A request that is no 27 reached the engine ECU on rx: it comes
  * between a strict ECU's seed and its key */
 inline void security_between(uint32_t rx)
@@ -375,7 +398,8 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
     const bool gated = did == kGatedDid;
     const bool ident =
         did == ECUIO_SIM_HARDWARE_DID || did == ECUIO_SIM_SOFTWARE_DID;
-    if (!lock && !access && !gated && !memory && !ident) {
+    const bool helper = req_len >= 1 && (req[0] == 0x34 || req[0] == 0x31);
+    if (!lock && !access && !gated && !memory && !ident && !helper) {
         return 0;
     }
     SecurityTable& t = security_table();
@@ -388,6 +412,17 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
     if (lock) {
         ecuio_sim_security_lock(*s);
         ecuio_sim_memory_end(slot->memory);
+        ecuio_sim_kernel_end(slot->kernel);
+        return 0;
+    }
+    slot->kernel.on = t.kernel;
+    slot->kernel.faults = t.kernel_faults;
+    if (req_len >= 1 && ecuio_sim_kernel_service(slot->kernel, req)) {
+        return ecuio_sim_kernel_answer(slot->kernel, *s, in_programming(rx),
+                                       req, static_cast<uint32_t>(req_len),
+                                       out);
+    }
+    if (helper) {
         return 0;
     }
     if (gated) {
@@ -397,10 +432,22 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
     if (ident) {
         return ecuio_sim_memory_did(slot->memory, in_session(rx), did, out);
     }
+    if (memory && slot->kernel.on && !slot->kernel.running &&
+        in_programming(rx) && s->unlocked != 0 &&
+        ecuio_sim_memory_asks_code(req, static_cast<uint32_t>(req_len))) {
+        out[0] = 0x7F;
+        out[1] = req[0];
+        out[2] = 0x7F;
+        return 3;
+    }
     if (memory) {
-        return ecuio_sim_memory_answer(slot->memory, *s, in_session(rx), req,
-                                       static_cast<uint32_t>(req_len), out,
-                                       in_programming(rx));
+        const uint32_t n = ecuio_sim_memory_answer(
+            slot->memory, *s, in_session(rx), req,
+            static_cast<uint32_t>(req_len), out, in_programming(rx));
+        if (req[0] == 0x37 && n == 1 && out[0] == 0x77) {
+            ecuio_sim_kernel_upload_done(slot->kernel);
+        }
+        return n;
     }
     const unsigned ms = security_delay_ms().load();
     const int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -468,6 +515,11 @@ inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
         out[1] = 0x01;
         *out_len = 2;
         return true;
+    }
+    if (req_len == 2 && req[0] == 0x10 && req[1] == 0x82 && !module) {
+        set_session(rx, 0x02);
+        (void)security_answer(rx, req, req_len, true, out);
+        return false; /* suppressed: ISO 14229 sends no 12 for it either */
     }
     if (req_len == 2 && req[0] == 0x10) {
         if (req[1] == 0x01 || ((req[1] == 0x03 || req[1] == 0x02) && !module)) {
