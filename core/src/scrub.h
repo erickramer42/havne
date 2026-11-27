@@ -208,6 +208,9 @@ private:
     uint8_t pending_[5] = {};
     size_t pending_n_ = 0;
     uint32_t code_ = 0;
+    uint64_t escape_at_ = 0;
+    bool escaped_ = false;
+    bool run_escaped_ = false;
 };
 
 /* One message, whole: the class plus one of its first match, or 0 */
