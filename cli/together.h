@@ -24,6 +24,7 @@ bool take_together(int& argc, char** argv, int first, Together* t);
 struct TogetherSet {
     ecuio_signal_file_t* merged = nullptr;
     std::string profile;
+    uint32_t flags = 0;
 };
 
 int merge_together(Output& out, const Together& t, TogetherSet* set);

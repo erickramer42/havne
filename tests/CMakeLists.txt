@@ -686,6 +686,9 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli> ${_cli_merge})
         set_tests_properties(CliTogetherTest.TheRankedPickLeavesOutAnObd2SignalReadBeside
             PROPERTIES TIMEOUT 120)
+        add_test(NAME CliTogetherTest.PluginsTogetherWritesTheMergedSet
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} out
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
         add_test(NAME CliTogetherTest.ViewFramesDecodesThroughTheMergedSet
             COMMAND ${Python3_EXECUTABLE} ${_cli_together} view
                     $<TARGET_FILE:havne-cli> ${_cli_merge})
@@ -1185,6 +1188,18 @@ if(TARGET havne-cli)
         # manifest lets its module cause to be sent, after the plugin line;
         # then the same plugin as a folder with its module a file, a
         # changed module, a put and a drop refused, and every bound at once
+        app_cli_golden(PluginsTogetherSaysWhatTheMergeMade
+            plugins-together.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins together
+               --together obd2,user.engine-part,plugin.example-sim.base,user.trans-part
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/engine-part.json
+               --plugin ${CMAKE_SOURCE_DIR}/plugins/example-sim
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/trans-part.json)
+        app_cli_golden(PluginsTogetherRefusesAPartGivenTwice
+            plugins-together-twice.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> plugins together
+               --together user.trans-part,user.trans-part
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/trans-part.json)
         app_cli_golden(PluginsCheckSaysWhatAConversationDeclares
             plugins-check-conversation.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/conversation.json)
@@ -1622,6 +1637,17 @@ if(TARGET havne-cli)
     app_cli_usage_says(ViewTogetherWithoutFramesIsUsage
         "view|somewhere|--together|obd2"
         "--together goes with --frames")
+    app_cli_usage_says(PluginsTogetherWithoutTogetherIsUsage "plugins|together"
+        "plugins together needs --together <profiles>")
+    app_cli_usage_says(PluginsTogetherAnUnknownOptionIsUsage
+        "plugins|together|--together|obd2-modules|--fast"
+        "unexpected '--fast'")
+    app_cli_usage_says(PluginsTogetherOutTwiceIsUsage
+        "plugins|together|--together|obd2-modules|--out|a|--out|b"
+        "unexpected '--out'")
+    app_cli_usage_says(PluginsTogetherObd2AloneIsUsage
+        "plugins|together|--together|obd2"
+        "obd2 alone is the built-in set")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")

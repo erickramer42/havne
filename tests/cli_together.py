@@ -138,6 +138,29 @@ def ranked(cli, fx):
     return 0
 
 
+def out(cli, fx):
+    args = ["plugins", "together", "--together", "obd2-modules,user.trans-part",
+            "--signals", str(fx / "trans-part.json")]
+    with tempfile.TemporaryDirectory(prefix="havne-cli-together-") as root:
+        written = Path(root) / "merged.json"
+        code, rows, err = run(cli, args + ["--out", str(written)])
+        totals = (of_type(rows, "totals") or [{}])[0]
+        ended = (of_type(rows, "end") or [{}])[0]
+        if code != 0 or ended.get("out") != str(written) or \
+                totals.get("base") != "modules" or \
+                totals.get("profile") != merged_name("obd2 modules", ["user.trans-part"]):
+            return fail(f"the run: exit {code}, {rows}\n{err}")
+        code, rows, err = run(cli, ["signals", "check", str(written)])
+        read = (of_type(rows, "signal_file") or [{}])[0]
+        if code != 0 or read.get("profile") != totals["profile"]:
+            return fail(f"the written set reads back as {read}, exit {code}\n{err}")
+        code, rows, err = run(cli, args + ["--out", str(Path(root) / "no" / "x.json")])
+        if code != 1 or not of_type(rows, "error") or of_type(rows, "end"):
+            return fail(f"a write that fails: exit {code}, {rows}")
+    print("ok    plugins together writes the merged set's text")
+    return 0
+
+
 def view(cli, fx):
     together = ["--together", "user.trans-part",
                 "--signals", str(fx / "trans-part.json")]
@@ -201,7 +224,7 @@ def main():
     if case == "noroom":
         return noroom(cli, fx, sys.argv[4])
     return {"modules": modules, "notes": notes, "shared": shared,
-            "ranked": ranked, "view": view}[case](cli, fx)
+            "ranked": ranked, "view": view, "out": out}[case](cli, fx)
 
 
 if __name__ == "__main__":

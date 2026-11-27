@@ -214,6 +214,7 @@ int merge_together(Output& out, const Together& t, TogetherSet* set)
     }
     set->merged = merged;
     set->profile = ecuio_signal_file_profile(merged);
+    set->flags = flags;
     return -1;
 }
 

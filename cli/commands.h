@@ -178,6 +178,7 @@ int cmd_plugins(int argc, char** argv);
 
 // cmd_consent.cpp
 int plugins_terms(int argc, char** argv);
+int plugins_together(int argc, char** argv);
 int plugins_consent(int argc, char** argv);
 // The consent a run's plugin needs, before create (stream, log): -1 to go
 // on (a record found, or none needed), else the exit code, the refusal's

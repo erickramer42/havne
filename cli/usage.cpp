@@ -159,7 +159,10 @@ void usage_plugins_synopsis(FILE* to)
         "                      [--consent-store <path>]\n"
         "       havne-cli plugins consent --list [--consent-store <path>]\n"
         "       havne-cli plugins consent --withdraw <id> [<fingerprint>]\n"
-        "                      [--consent-store <path>]\n");
+        "                      [--consent-store <path>]\n"
+        "       havne-cli plugins together --together <profiles> "
+        "[--plugin <pkg>]...\n"
+        "                      [--signals <file>]... [--out <file>]\n");
 }
 
 // plugins' help
@@ -187,7 +190,12 @@ void usage_plugins(FILE* to)
         "         read and change the record. The store is the app's\n"
         "         consent.json unless --consent-store names one. Havne\n"
         "         checks no signature: check a publisher's with your own\n"
-        "         tool before you allow it.\n");
+        "         tool before you allow it.\n"
+        "         together merges the profiles --together names, as\n"
+        "         stream's --together reads them, and says what came of\n"
+        "         it: a part line for each file, a module line for each\n"
+        "         module, a totals line and a note line for each thing the\n"
+        "         merge did; --out writes the merged set's text.\n");
 }
 
 } // namespace
