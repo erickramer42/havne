@@ -222,6 +222,8 @@ inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
     if (learns) {
         ecuio_engine_row_frames(e->requests[out],
                                 ecuio_engine_reply_frames(len));
+    } else if (out >= 0) {
+        e->requests[out].ran_out = 0;
     }
     if (learns && pid) {
         ecuio_engine_learn_pid_len(ch, r, len);
