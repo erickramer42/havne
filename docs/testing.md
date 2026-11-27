@@ -49,6 +49,8 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 
 **Test seams and code**
 - The surrogate pipe's protections are tested on the pipe alone: nothing connects as another user or looks for a handle leaked to the child.
+- A requesting SocketCAN socket's reopen after a link loss is run by no case: taking vcan0 down needs root, which CI's sudo step gives to one named case only.
+- A clear's second ask when one module's report moved and the others' didn't (the moved one left out, the rest asked again) has no case: no fake moves one ECU's report alone.
 - The fake is simpler than J2534: its default read model, no segmented replies, no filter gating.
 - The scrub can't see a VIN sent raw in frames that aren't ISO-TP, and can refuse a folder copy whose marker label looks like a VIN.
 - The Python declarations' signedness isn't checked: the generated types are held to the headers' sizes and offsets only.

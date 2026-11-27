@@ -1923,3 +1923,20 @@ Three limits of the masking in the note of 2026-11-22, kept as they are:
   signal names both become `*****************`, so a long CSV's rows or a
   wide CSV's columns under them read as one name. In signals.json the
   duplicate names fail the loader's check, and the copy is refused.
+
+## Note of 2026-11-27: an escaped letter or digit in a JSON file
+
+The note of 2026-11-22 reads the JSON files with an escape separating runs
+unless it stands for a letter or a digit. An escaped letter or digit
+counts as its character: `5` is a `5` in its run, at the
+backslash, so a VIN with one escaped character (a hand-edited or
+third-party signals.json or conditions.json; Havne's writer never escapes
+a letter or digit) is seen by the shape and window rules as the VIN a JSON
+reader decodes. A mask's span counts one byte for each character and an
+escape is six, so a run holding one refuses the copy (VIN-shaped) wherever
+a mask would have covered it; an escaped letter or digit outside a VIN
+changes nothing.
+
+Python's `LeftOut` has a field for each of `left_out`'s six classes
+(`ECUIO_EXPORT_LEFT_OUT_VIN_MASKED` is the sixth, in `vin_masked`), so a
+caller unpacks six names.

@@ -499,3 +499,62 @@ identification texts are no module's.
 `SimMemoryTest` and `FakeMemoryTest` pin the header, the session and the
 fakes; `SimMemoryBusTest` (on `vcan`) reads it through the kernel's
 ISO-TP.
+
+## Appendix: the simulated gateway's security access, as built (2026-11-27)
+
+A gateway node stands in front of modules, judges each request for one by
+its service, and can hold the routes it withholds behind its own security
+access. This covers the routing, the gate, the view and the faults on the
+unbound ask, on a bus and on the ELM327 emulator; the part that lets a
+session unlock through the gateway (a re-ask after a 67) is not built, and
+neither is a fuzzer for the keys. Every value is made up, like the rest of
+the simulated car.
+
+- **The node:** `gateway=<request ID>:<reply ID>` (11-bit hex, neither 0),
+  or `1` for 6F0:6F8, is a node of its own (`sim_role::gateway`, built
+  last), answering 10 01, 10 03, 3E 00 and 3E 80 on its own request ID
+  and every other service `7F <service> 11`. It hears no functional
+  request. `behind=` names the modules it fronts by reply ID (never the
+  engine ECU); the gateway judges a request after the profile's own
+  routing, beside the aims.
+- **Routes:** `route=<class or service>[@<reply ID>]:<outcome>[.<NRC>]`
+  with the outcomes forward (the default for anything not named), refuse,
+  silent, gated and gated-silent. The most specific entry wins: a
+  module's service, its class, the gateway's service, its class. `.NRC`
+  is allowed on refuse and gated, 10-FE but never 78.
+- **Judged first:** the verdict falls before the module's busy check,
+  answer, draw and fate, in the ask and on the bus, so a withheld request
+  moves none of the module's counts. A refusal is the gateway's reply on
+  the module's reply ID, flagged `ECUIO_SIM_REPLY_GATEWAY`. A functional
+  request it withholds is silent unless `gwopt=aloud`, and even then the
+  codes ISO 14229-1 section 7.5 keeps silent (11, 12, 31, 7E, 7F) stay
+  silent unless `unsuppressed` is set too.
+- **The gate:** `sa=` keys the gateway's own service 27 with the same
+  keying as the engine's (`sim_security.h`): `key:<seed>:<key>` pairs
+  handed out in turn for each level, `xor:` or `add:` over the seed, or
+  `never`. `sa_delay=<ms>` (1-600000) replaces the 10 s lockout, and a
+  repeated `sa=` starts from that default again. Without `sa=` the
+  gateway answers 27 with `7F 27 11`. Every gated class opens and closes
+  together; 10 01, 10 03 or S3 locks the gateway again, and only requests
+  on its own ID keep its session unless `gwopt=keep-any`.
+- **`relock:<n>`** is a fault of the gateway alone: it locks again after
+  the nth request it lets through.
+- **The view:** `ecuio_sim_get_gateway` and `ecuio_sim_get_gateway_override`
+  (Python reads them as `Sim.gateway`) report the routes, the
+  lock and the counts, copied under `gateway_mutex` after each request the
+  gateway routes or answers; `too_early` counts `7F 27 37`.
+- **Where it differs from a module:** `ecuio_sim_session_answer` takes
+  `has_security` beside `has_extended`: a module (`modules=2`, a
+  profile's DID nodes) still answers 27 with `7F 27 11`, and the gateway
+  answers it only with `sa=`. The gateway's reply ID yields on a bus as
+  0x7E8 does. The query holds at most 32 pairs.
+- **What the sim's lines show:** `havne-cli sim` and `sim --elm327` write
+  the URI with each `sa=` value shown as its form alone (`key:*`,
+  `xor:*`, `add:*`; `key`, `never` and `never:<ms>` as given), so a seed
+  or a key never reaches a log. A shared export already drops `sa`,
+  since the scrub keeps query keys from an allow list.
+
+`SimGatewayTest` pins the judges, the gate, the view and the faults;
+`SimGatewayBusTest` (on `vcan`) routes and unlocks through the kernel's
+ISO-TP; the ELM327 emulator's gateway (`cli_elm327.py gateway`) holds a
+module behind `route=reads:gated` until the host unlocks the gateway.
