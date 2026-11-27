@@ -344,6 +344,19 @@ QtObject {
         return change(doc, v => v.picks = picks.map(p => String(p)))
     }
 
+    // obd2 and the own variant are placed by the merge itself
+    function movePick(doc, profile, by) {
+        const v = picked(doc)
+        if (v === null || profile === "obd2" || profile === v.own)
+            return doc
+        const plugins = v.picks.filter(p => p !== "obd2" && p !== v.own)
+        const at = plugins.indexOf(profile)
+        if (at < 0 || at + by < 0 || at + by >= plugins.length)
+            return doc
+        const other = plugins[at + by]
+        return setPicks(doc, v.picks.map(p => p === profile ? other : p === other ? profile : p))
+    }
+
     // The profile of the variant the picked vehicle's form writes ("" for
     // none)
     function setOwn(doc, profile) {

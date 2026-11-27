@@ -141,4 +141,122 @@ SettingsKit {
         verify(dash.layoutFilePart.exportLayoutTo(url), dash.layoutFilePart.layoutNote)
         verify(!dash.layoutFilePart.layoutNote.includes("aren't in the store"), dash.layoutFilePart.layoutNote)
     }
+
+    function partOf(page, i) {
+        return find(page, "togetherPart_" + i)
+    }
+
+    function test_obd2sRowAlwaysShowsAndUnpicksToModules() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(find(page, "settingsTogether").visible)
+        compare(page.picksPart.together.reads, "obd2")
+        compare(find(page, "togetherHeading").text, "Read together for Vehicle 1")
+        compare(find(page, "togetherObd2Words").text, "the base: obd2's standard signals, read beside every plugin's")
+        const pick = find(page, "togetherObd2Pick")
+        compare(pick.text, "Unpick")
+        verify(pick.enabled)
+        pick.clicked()
+        compare(page.picksPart.picks, [])
+        compare(page.picksPart.together.base, "modules")
+        verify(find(page, "togetherObd2").visible, "the row stays")
+        compare(find(page, "togetherObd2Words").text, "Unpicked: its signals aren't read; the emissions codes still are")
+        verify(find(page, "togetherNothing").visible)
+        compare(pick.text, "Pick")
+        pick.clicked()
+        compare(page.picksPart.picks, ["obd2"])
+        verify(!find(page, "togetherNothing").visible)
+    }
+
+    function test_obd2sUnpickIsDisabledWhileAPartExtendsIt() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100", true))
+        const pick = find(page, "togetherObd2Pick")
+        verify(!pick.enabled)
+        compare(find(page, "togetherObd2Why").text, "read under Plus, which extends it")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.plus.base"]))
+        compare(page.picksPart.together.base, "obd2", "the part brings obd2 in")
+        compare(find(page, "togetherObd2Words").text, "the base: obd2's standard signals, read beside every plugin's")
+        compare(pick.text, "Pick")
+        verify(pick.enabled, "it can always be picked back")
+    }
+
+    function test_aMoveReordersThePicksAndKeepsTheFocus() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100"))
+        verify(importFile(page, "more.json", "More", "D101"))
+        compare(page.picksPart.picks, ["obd2", "plugin.plus.base", "plugin.more.base"])
+        compare(find(partOf(page, 0), "togetherPartTitle").text, "Plus 1.0.0")
+        verify(!find(partOf(page, 0), "togetherUp").enabled)
+        verify(!find(partOf(page, 1), "togetherDown").enabled)
+        const down = find(partOf(page, 0), "togetherDown")
+        down.forceActiveFocus()
+        down.clicked()
+        compare(page.picksPart.picks, ["obd2", "plugin.more.base", "plugin.plus.base"])
+        compare(find(partOf(page, 0), "togetherPartTitle").text, "More 1.0.0")
+        compare(find(partOf(page, 1), "togetherPartTitle").text, "Plus 1.0.0")
+        verify(find(partOf(page, 1), "togetherUp").activeFocus, "the focus goes with the moved row")
+        find(partOf(page, 1), "togetherUp").clicked()
+        compare(page.picksPart.picks, ["obd2", "plugin.plus.base", "plugin.more.base"])
+        verify(find(partOf(page, 0), "togetherDown").activeFocus)
+    }
+
+    function test_theOwnVariantSitsLastWithNoMove() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(page.ownPart.saveOwn(JSON.parse(signalFileText("Mine", "D200")), ""))
+        const own = page.pickedVehicle.own
+        verify(own !== "")
+        verify(importFile(page, "plus.json", "Plus", "D100"))
+        compare(page.picksPart.picks, ["obd2", own, "plugin.plus.base"])
+        const parts = page.picksPart.together.parts
+        compare(parts.map(p => p.profile), ["plugin.plus.base", own], "the own variant is merged last")
+        const mine = partOf(page, 1)
+        verify(find(mine, "togetherPartWords").text.endsWith(
+            " · yours: your signals replace a plugin's of the same name; obd2's standard signals are read beside yours"))
+        verify(!find(mine, "togetherUp").visible && !find(mine, "togetherDown").visible)
+        verify(!find(partOf(page, 0), "togetherDown").enabled, "the last plugin before the own one")
+        compare(VehicleBook.movePick(page.vehicles, own, -1), page.vehicles)
+    }
+
+    function test_notesFoldByKindAndOpen() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100"))
+        verify(importFile(page, "same.json", "Same", "D100"))
+        const set = page.picksPart.together
+        verify(set.folded.length > 0, JSON.stringify(set.notes))
+        const kind = set.folded[0].kind
+        const fold = find(page, "togetherFold_" + kind)
+        compare(findChild(fold, "togetherNote"), null, "folded")
+        find(fold, "togetherFoldButton").clicked()
+        tryVerify(() => findChild(fold, "togetherNote") !== null)
+        compare(find(fold, "togetherNote").text, set.notes.find(n => n.kind === kind).text)
+        find(fold, "togetherFoldButton").clicked()
+        tryVerify(() => findChild(fold, "togetherNote") === null, 1000, "closed again")
+        verify(find(page, "togetherTotals").text.startsWith("2 plugins, "))
+    }
+
+    function test_theRowsFitAt384And320() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100"))
+        verify(importFile(page, "more.json", "A plugin with a rather long name to wrap", "D101"))
+        const part = find(page, "settingsTogether")
+        for (const w of [384, 320]) {
+            page.width = w
+            tryVerify(() => part.width > 0 && part.width <= w)
+            waitForPolish(part)
+            compare(pastTheEdge(part, part, []), [], "at " + w)
+            verify(!part.oneRow)
+        }
+    }
 }

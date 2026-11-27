@@ -666,4 +666,16 @@ TestCase {
         compare(VehicleBook.withVehicleSet(uri, "refused", ""), uri)
         compare(VehicleBook.withVehicleSet(uri, "", ""), uri)
     }
+
+    function test_movePickReturnsANewDocument() {
+        const d = book()
+        d.list[0].picks = ["obd2", extras, sim2019, own]
+        const moved = VehicleBook.movePick(d, sim2019, -1)
+        compare(VehicleBook.picked(moved).picks, ["obd2", sim2019, extras, own])
+        compare(d.list[0].picks, ["obd2", extras, sim2019, own], "the argument is unchanged")
+        compare(VehicleBook.movePick(d, extras, -1), d, "past obd2 nothing moves")
+        compare(VehicleBook.movePick(d, sim2019, 1), d, "the own variant isn't passed")
+        compare(VehicleBook.movePick(d, own, -1), d)
+        compare(VehicleBook.movePick(d, "plugin.none.base", 1), d)
+    }
 }

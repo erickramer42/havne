@@ -313,6 +313,11 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
+    SettingsTogether {
+        host: root.host
+        canChange: root.canChange
+    }
+
     // A pick no plugin here has, so it can be seen and undone
     Repeater {
         model: root.host.picksPart.missingPicks
