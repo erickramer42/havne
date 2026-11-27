@@ -465,6 +465,7 @@ ecuio_status_t hand_over(ecuio_session_t* session,
     wrap->ops = &kElm327Ops;
     t->session = session;
     describe_session(t.get(), version, &session->info);
+    session->battery.source = true;
     const ecuio_status_t st =
         ecuio_session_set_modules(session, t->rx_ids, t->tx_ids, t->chan_count);
     if (st != ECUIO_OK) {

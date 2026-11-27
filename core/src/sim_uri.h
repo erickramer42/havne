@@ -80,8 +80,10 @@ inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
             out->values = ecuio_sim_values::drive;
         } else if (value_is(p, "canned")) {
             out->values = ecuio_sim_values::canned;
+        } else if (value_is(p, "parked")) {
+            out->values = ecuio_sim_values::parked;
         } else {
-            std::snprintf(why, why_cap, "values: drive or canned");
+            std::snprintf(why, why_cap, "values: drive, canned or parked");
             return taken::bad;
         }
         return taken::ok;

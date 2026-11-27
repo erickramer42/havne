@@ -113,6 +113,7 @@ struct ecuio_elm327_transport {
      * reset; the transmit ID AT SH last set. */
     bool configured = false;
     bool set_up_passive = false; /* that setup's flow control was off */
+    bool stn = false;            /* STI answered: STVR reads the battery */
     bool header_set = false;
     uint32_t header_tx = 0;
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
@@ -397,6 +398,7 @@ ecuio_status_t hearing_filter(transport* t);
 ecuio_status_t run_probe(transport* t, ecuio_probe* p);
 void describe_session(transport* t, const char* reset_version,
                       ecuio_session_info_t* info);
+bool read_battery(transport* t, uint32_t* mv);
 
 /* elm327_worker.cpp */
 setup_answer set_header(transport* t, uint32_t tx, char* failed_cmd);

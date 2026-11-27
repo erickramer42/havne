@@ -47,13 +47,45 @@ inline bool listed(const uint8_t* list, size_t n, uint8_t pid)
     return false;
 }
 
+/* values=parked's own answers, the engine off by the key: 0 rpm, 0 km/h
+ * and a rested battery; 0 for a PID it answers as canned */
+inline uint32_t parked_pid(uint8_t pid, uint8_t* out)
+{
+    if (pid == 0x0C) {
+        put16(out, 0);
+        return 2;
+    }
+    if (pid == 0x0D) {
+        out[0] = 0;
+        return 1;
+    }
+    if (pid == 0x42) {
+        put16(out, 12600);
+        return 2;
+    }
+    return 0;
+}
+
+/* A canned PID's answer, values=parked's own first */
+inline uint32_t canned_pid(const ecuio_sim_ecu& e, uint8_t pid, uint8_t* out)
+{
+    if (e.config.values == ecuio_sim_values::parked) {
+        if (const uint32_t n = parked_pid(pid, out)) {
+            return n;
+        }
+    }
+    const ecuio_sim_canned* c = ecuio_sim_canned_pid(pid);
+    std::memcpy(out, c->data, c->len);
+    return c->len;
+}
+
 /* A data PID the ECU answers (not a bitmap) */
 inline bool has_data_pid(const ecuio_sim_ecu& e, uint8_t pid)
 {
     if (listed(kDiagPids, sizeof kDiagPids, pid)) {
         return true;
     }
-    if (e.config.values == ecuio_sim_values::canned) {
+    if (e.config.values != ecuio_sim_values::drive) {
         return ecuio_sim_canned_pid(pid) != nullptr;
     }
     return listed(kDrivePids, sizeof kDrivePids, pid);
@@ -152,10 +184,8 @@ inline uint32_t pid_data(const ecuio_sim_ecu& e, uint8_t pid, uint8_t* out)
     default:
         break;
     }
-    if (e.config.values == ecuio_sim_values::canned) {
-        const ecuio_sim_canned* c = ecuio_sim_canned_pid(pid);
-        std::memcpy(out, c->data, c->len);
-        return c->len;
+    if (e.config.values != ecuio_sim_values::drive) {
+        return canned_pid(e, pid, out);
     }
     const ecuio_mock::DriveCycle& car = e.car;
     switch (pid) {

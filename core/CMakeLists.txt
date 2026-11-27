@@ -18,6 +18,7 @@ add_library(ecuio-core STATIC
     src/health_build.cpp
     src/health_write.cpp
     src/host_awake.cpp
+    src/host_power.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp

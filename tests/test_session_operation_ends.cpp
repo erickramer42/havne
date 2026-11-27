@@ -387,9 +387,21 @@ TEST(SessionOperationTest, ASessionNeverEnteredEndsTheRunAtItsBound)
 {
     Bench b;
     ASSERT_NO_FATAL_FAILURE(b.start());
+    bool lost = false;
+    b.while_out = [&lost](Bench& bench) {
+        if (!lost && bench.sent.back() == Bytes{0x01, 0x0D}) {
+            /* the session lost as a keep-alive's silence loses it, once
+             * the checks are read */
+            lost = true;
+            ecuio_engine_session_step(bench.e->chans[0],
+                                      ECUIO_SESSION_STATE_ENTERING);
+        }
+    };
     ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
-    /* the session lost as a keep-alive's silence loses it */
-    ecuio_engine_session_step(b.e->chans[0], ECUIO_SESSION_STATE_ENTERING);
+    for (int i = 0; i < 20 && !lost; ++i) {
+        b.pass();
+    }
+    ASSERT_TRUE(lost);
     const size_t from = b.sent.size();
     for (int second = 0; second < 12; ++second) {
         ecuio_step_conversations(b.s, b.e.get(), b.now);
@@ -596,7 +608,7 @@ TEST(SessionOperationTest, TheStateIsCopiedWhole)
     EXPECT_EQ(v.struct_size, sizeof v);
     EXPECT_EQ(v.generation, 0u);
     EXPECT_EQ(v.phase, ECUIO_OPERATION_PHASE_NONE);
-    EXPECT_EQ(v.reserved[5], 0u);
+    EXPECT_EQ(v.reserved[0], 0u);
 }
 
 /* The worker makes no allocation for a chunk: a reading's passes, the

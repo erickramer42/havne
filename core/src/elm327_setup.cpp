@@ -305,6 +305,15 @@ bool reading(transport* t, const char* cmd, char* out, size_t cap,
 
 } // namespace
 
+bool read_battery(transport* t, uint32_t* mv)
+{
+    char volts[ELM327_LINE_MAX + 1] = {};
+    return reading(t, t->stn ? "STVR\r" : "ATRV\r", volts, sizeof(volts),
+                   [&](const elm327_reader& r) {
+                       return elm327_parse_millivolts(r.line, r.len, mv);
+                   });
+}
+
 /* The session info (ADR-0019, ADR-0026 section 7): what the session runs on,
  * then the readings. A reading the adapter refuses leaves its flag
  * clear. */
@@ -341,12 +350,9 @@ void describe_session(transport* t, const char* reset_version,
         info->flags |= ECUIO_SESSION_INFO_VERSIONS;
     }
 
-    char volts[ELM327_LINE_MAX + 1] = {};
+    t->stn = is_stn;
     uint32_t mv = 0;
-    if (reading(t, is_stn ? "STVR\r" : "ATRV\r", volts, sizeof(volts),
-                [&](const elm327_reader& r) {
-                    return elm327_parse_millivolts(r.line, r.len, &mv);
-                })) {
+    if (read_battery(t, &mv)) {
         info->vbatt_mv = mv;
         info->flags |= ECUIO_SESSION_INFO_VBATT;
     }

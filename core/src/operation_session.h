@@ -21,6 +21,7 @@
 #define ECUIO_OPERATION_SESSION_H
 
 #include "ecuio/operation.h"
+#include "operation_checks.h"
 #include "operation_plan.h"
 #include "operation_run.h"
 #include "operation_sink.h"
@@ -50,13 +51,23 @@ struct session_run {
     uint32_t channel = 0;   /* the plan's module among the session's */
     uint32_t operation = 0; /* its index, for the view */
     bool marked = false;    /* an attempt's mark was saved: its word is owed */
+    bool write = false;     /* the write class's envelope */
+    bool held_awake = false; /* core's keep-awake claim, released at the end */
+    uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
 
     std::atomic<uint8_t> stage{kStageIdle};
     std::atomic<bool> cancel{false};
 
     /* The worker's */
     run r;
-    bool out = false;        /* the channel's talk is the run's */
+    checks k;
+    volts v;
+    uint32_t volts_asked = 0; /* the battery's want this run waits on */
+    int64_t volts_at_us = 0;
+    uint32_t volts_step = 0;
+    bool checking = false;
+    uint32_t talk_at = 0;    /* the channel the run's talk is offered on */
+    bool out = false;        /* that channel's talk is the run's */
     bool fed = false;        /* its answer reached the machine with its frame */
     bool orphan = false;     /* the machine gave it up: its settle is dropped */
     bool word_given = false; /* the owed word went to the conversation */

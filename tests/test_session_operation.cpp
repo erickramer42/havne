@@ -35,11 +35,13 @@ using sim_memory_test::nrc;
 
 const std::vector<std::string> kNoFiles;
 
-/* The run's own services: the unlock's, an identifier's, the memory's */
+/* The run's own services: the checks', the unlock's, an identifier's,
+ * the memory's */
 bool of_the_run(const Bytes& q)
 {
-    return q != kRow && (q[0] == 0x27 || q[0] == 0x22 || q[0] == 0x23 ||
-                         q[0] == 0x35 || q[0] == 0x36 || q[0] == 0x37);
+    return q != kRow &&
+           (q[0] == 0x01 || q[0] == 0x27 || q[0] == 0x22 || q[0] == 0x23 ||
+            q[0] == 0x35 || q[0] == 0x36 || q[0] == 0x37);
 }
 
 TEST(SessionOperationTest, ARunKeepsTheCopyItsRecordDescribes)
@@ -141,21 +143,23 @@ TEST(SessionOperationTest, ARunHoldsEverythingElseOffTheWire)
         const Bytes& q = b.sent[i];
         EXPECT_TRUE(of_the_run(q) || q == kKeep) << "request " << i;
     }
-    /* The order: one unlock, the identifiers, each range twice, the
-     * identifiers again */
+    /* The order: the engine's and the vehicle's speed, one unlock, the
+     * identifiers, each range twice, the identifiers again */
     std::vector<Bytes> run;
     for (size_t i = from; i < to; ++i) {
         if (of_the_run(b.sent[i])) {
             run.push_back(b.sent[i]);
         }
     }
-    ASSERT_GT(run.size(), 6u);
-    EXPECT_EQ(run[0], (Bytes{0x27, 0x01}));
-    EXPECT_EQ(run[1][0], 0x27);
-    EXPECT_EQ(run[1][1], 0x02);
-    EXPECT_EQ(run[2], sim_memory_test::kHardware);
-    EXPECT_EQ(run[3], sim_memory_test::kSoftware);
-    EXPECT_EQ(run[4], sim_memory_test::read_of(kLowAt, 256));
+    ASSERT_GT(run.size(), 8u);
+    EXPECT_EQ(run[0], (Bytes{0x01, 0x0C}));
+    EXPECT_EQ(run[1], (Bytes{0x01, 0x0D}));
+    EXPECT_EQ(run[2], (Bytes{0x27, 0x01}));
+    EXPECT_EQ(run[3][0], 0x27);
+    EXPECT_EQ(run[3][1], 0x02);
+    EXPECT_EQ(run[4], sim_memory_test::kHardware);
+    EXPECT_EQ(run[5], sim_memory_test::kSoftware);
+    EXPECT_EQ(run[6], sim_memory_test::read_of(kLowAt, 256));
     EXPECT_EQ(run[run.size() - 2], sim_memory_test::kHardware);
     EXPECT_EQ(run.back(), sim_memory_test::kSoftware);
     EXPECT_EQ(b.count(0x27, from), 2u) << "one seed and its key";
@@ -192,7 +196,7 @@ TEST(SessionOperationTest, TheStartRefusesInWords)
     q.struct_size = sizeof q - 1;
     refused(ECUIO_ERR_INVALID_ARGUMENT,
             "the request's struct_size is smaller than the struct");
-    q = request(0x2);
+    q = request(0x80000000u);
     refused(ECUIO_ERR_INVALID_ARGUMENT,
             "the request sets a flag this Havne doesn't know");
     q = request();
@@ -220,17 +224,23 @@ TEST(SessionOperationTest, TheStartRefusesInWords)
     ecuio_test_conversation_binding(0);
     refused(ECUIO_ERR_CONSENT_REQUIRED,
             "no consent was given to the plugin whose plan this is");
-    /* With a consent, every start still waits for the write flow's checks */
     s->consent_applied = true;
+    q = request(ECUIO_OPERATION_MAY_UNLOCK, false);
+    refused(ECUIO_ERR_INVALID_ARGUMENT,
+            "confirm the vehicle is parked first: ignition on, not Ready; "
+            "engine off by the key, not by start-stop; in P or neutral with "
+            "the parking brake on");
+    q = request(ECUIO_OPERATION_MAY_UNLOCK);
+    /* With a consent, every start still waits for the write flow's checks */
     refused(ECUIO_ERR_NOT_IMPLEMENTED, "a run needs the write flow's checks "
                                        "before it, which this Havne has not "
                                        "got");
     s->consent_applied = false;
     ecuio_test_conversation_binding(1);
-    q.flags = 0;
+    q.flags = ECUIO_OPERATION_PARKED;
     refused(ECUIO_ERR_INVALID_ARGUMENT, "unlock level 01 first, or start the "
                                         "run with the unlock allowed");
-    q.flags = ECUIO_OPERATION_MAY_UNLOCK;
+    q.flags = ECUIO_OPERATION_MAY_UNLOCK | ECUIO_OPERATION_PARKED;
     /* A folder that isn't there: no path in the words */
     EXPECT_EQ(ecuio_session_operation_start(s, &q, b.folder.at("none").c_str()),
               ECUIO_ERR_LOAD_FAILED);

@@ -37,6 +37,12 @@ constexpr ecuio_sim_memory_region ECUIO_SIM_MEMORY_REGIONS[] = {
     {ECUIO_SIM_MEMORY_ADDRESS, ECUIO_SIM_MEMORY_BYTES},
 };
 
+/* Region B, "code": 64 KiB, read only where the caller says so (the
+ * programming session, ecuio_sim_memory_code_readable); a range 31
+ * elsewhere */
+constexpr uint32_t ECUIO_SIM_MEMORY_CODE_ADDRESS = 0x00080000u;
+constexpr uint32_t ECUIO_SIM_MEMORY_CODE_BYTES = 0x00010000u;
+
 /* Where region A holds the node's VIN, 17 bytes: an image can carry one
  * that no scrub of a recording reaches */
 constexpr uint32_t ECUIO_SIM_MEMORY_VIN_ADDRESS = 0x00018000u;
@@ -188,19 +194,25 @@ inline void read_span(const uint8_t* p, span* s)
 
 /* Whether the identifier's lengths are ones the ECU takes (1 to 4 bytes
  * each) and every byte asked for lies in one region */
-inline bool in_a_region(const span& s)
+inline bool in_region(const span& s, const ecuio_sim_memory_region& r)
+{
+    return s.address >= r.address && s.size <= r.bytes &&
+           s.address - r.address <= r.bytes - s.size;
+}
+
+inline bool in_a_region(const span& s, bool code)
 {
     if (s.address_bytes < 1 || s.address_bytes > 4 || s.size_bytes < 1 ||
         s.size_bytes > 4 || s.size == 0) {
         return false;
     }
     for (const ecuio_sim_memory_region& r : ECUIO_SIM_MEMORY_REGIONS) {
-        if (s.address >= r.address && s.size <= r.bytes &&
-            s.address - r.address <= r.bytes - s.size) {
+        if (in_region(s, r)) {
             return true;
         }
     }
-    return false;
+    return code && in_region(s, {ECUIO_SIM_MEMORY_CODE_ADDRESS,
+                                 ECUIO_SIM_MEMORY_CODE_BYTES});
 }
 
 /* size bytes from address into out: the region's, the volatile byte
@@ -259,7 +271,8 @@ inline uint32_t broken(const struck& s, uint32_t pass,
 
 /* 23 <ALFID> <address> <size> */
 inline uint32_t read_bytes(ecuio_sim_memory& m, ecuio_sim_security& security,
-                           const uint8_t* req, uint32_t len, uint8_t* out)
+                           const uint8_t* req, uint32_t len, bool code,
+                           uint8_t* out)
 {
     if (len < 3) {
         return refuse(0x23, ECUIO_SIM_NRC_LENGTH, out);
@@ -271,7 +284,7 @@ inline uint32_t read_bytes(ecuio_sim_memory& m, ecuio_sim_security& security,
     if (s.address_bytes <= 4 && s.size_bytes <= 4) {
         read_span(req + 2, &s);
     }
-    if (!in_a_region(s)) {
+    if (!in_a_region(s, code)) {
         return refuse(0x23, ECUIO_SIM_NRC_RANGE, out);
     }
     if (security.unlocked == 0) {
@@ -302,7 +315,8 @@ inline uint32_t read_bytes(ecuio_sim_memory& m, ecuio_sim_security& security,
 /* 35 <dataFormatIdentifier> <ALFID> <address> <size> */
 inline uint32_t open_upload(ecuio_sim_memory& m,
                             const ecuio_sim_security& security,
-                            const uint8_t* req, uint32_t len, uint8_t* out)
+                            const uint8_t* req, uint32_t len, bool code,
+                            uint8_t* out)
 {
     if (len < 4) {
         return refuse(0x35, ECUIO_SIM_NRC_LENGTH, out);
@@ -314,7 +328,7 @@ inline uint32_t open_upload(ecuio_sim_memory& m,
     if (s.address_bytes <= 4 && s.size_bytes <= 4) {
         read_span(req + 3, &s);
     }
-    if (req[1] != 0x00 || !in_a_region(s)) {
+    if (req[1] != 0x00 || !in_a_region(s, code)) {
         return refuse(0x35, ECUIO_SIM_NRC_RANGE, out);
     }
     if (security.unlocked == 0) {
@@ -397,9 +411,9 @@ inline bool ecuio_sim_memory_service(uint8_t service)
 /* The ECU's answer to a memory request (req[0] a service of
  * ecuio_sim_memory_service, len at least 1) into out
  * (ECUIO_SIM_MEMORY_REPLY_MAX bytes); the length. extended: the node is
- * in the extended session, the only one the region answers in: outside
- * it every service here is 7F (judged in the active session first, as
- * 27 is).
+ * in the extended or the programming session, the only ones region A
+ * answers in: outside them every service here is 7F (judged in the active
+ * session first, as 27 is). code: region B answers too.
  *
  * 23 <ALFID> <address> <size> answers 63 <bytes>. Its refusals in the
  * order they are judged: under 3 bytes, or a length that isn't the
@@ -421,7 +435,8 @@ inline bool ecuio_sim_memory_service(uint8_t service)
 inline uint32_t ecuio_sim_memory_answer(ecuio_sim_memory& m,
                                         ecuio_sim_security& security,
                                         bool extended, const uint8_t* req,
-                                        uint32_t len, uint8_t* out)
+                                        uint32_t len, uint8_t* out,
+                                        bool code = false)
 {
     namespace detail = ecuio_sim_memory_detail;
     if (!extended) {
@@ -429,9 +444,9 @@ inline uint32_t ecuio_sim_memory_answer(ecuio_sim_memory& m,
     }
     switch (req[0]) {
     case 0x23:
-        return detail::read_bytes(m, security, req, len, out);
+        return detail::read_bytes(m, security, req, len, code, out);
     case 0x35:
-        return detail::open_upload(m, security, req, len, out);
+        return detail::open_upload(m, security, req, len, code, out);
     case 0x36:
         return detail::next_block(m, security, req, len, out);
     default:

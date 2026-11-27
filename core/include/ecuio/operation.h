@@ -46,6 +46,12 @@ extern "C" {
  * risk (the plan's unlock_sessions): core may ask the module for a seed.
  * Without it a locked level refuses the start. */
 #define ECUIO_OPERATION_MAY_UNLOCK 0x1u
+/* The person confirmed the vehicle parked: ignition on, engine off by the
+ * key, in P or neutral with the parking brake on. Every run needs it. */
+#define ECUIO_OPERATION_PARKED 0x2u
+/* The person confirmed battery support: a charger in its power-supply
+ * mode. A write-class run needs it. */
+#define ECUIO_OPERATION_BATTERY_SUPPORT 0x4u
 
 /* A run's phase: closed, append-only */
 #define ECUIO_OPERATION_PHASE_NONE          0u /* no run was started */
@@ -71,7 +77,11 @@ extern "C" {
  *   SESSION_LOST      the module left its session
  *   LINK_LOST         a request could not be sent
  *   FILE              the copy could not be written
- *   BAD_REPLY         a reply of the wrong shape */
+ *   BAD_REPLY         a reply of the wrong shape
+ *   ENGINE_RUNNING    rpm says how fast; nothing past the checks was sent
+ *   MOVING            kmh says how fast; nothing past the checks was sent
+ *   VOLTAGE_LOW       the battery fell under the run's floor (volts_min_mv)
+ *   VOLTAGE_HIGH      a write's battery above 16.0 V at its start */
 #define ECUIO_OPERATION_END_NONE             0u
 #define ECUIO_OPERATION_END_SAVED            1u
 #define ECUIO_OPERATION_END_CANCELED         2u
@@ -84,12 +94,26 @@ extern "C" {
 #define ECUIO_OPERATION_END_LINK_LOST        9u
 #define ECUIO_OPERATION_END_FILE             10u
 #define ECUIO_OPERATION_END_BAD_REPLY        11u
+#define ECUIO_OPERATION_END_ENGINE_RUNNING   12u
+#define ECUIO_OPERATION_END_MOVING           13u
+#define ECUIO_OPERATION_END_VOLTAGE_LOW      14u
+#define ECUIO_OPERATION_END_VOLTAGE_HIGH     15u
+
+/* A state's checks: what the run has read */
+#define ECUIO_OPERATION_CHECK_RPM 0x1u /* rpm holds the engine's answer */
+#define ECUIO_OPERATION_CHECK_KMH 0x2u /* kmh holds the vehicle's answer */
+#define ECUIO_OPERATION_CHECK_VOLTS 0x4u /* volts_mv and volts_min_mv hold */
+#define ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU 0x8u  /* the engine module's */
+#define ECUIO_OPERATION_CHECK_VOLTS_LOW      0x10u /* a warning at the start */
+#define ECUIO_OPERATION_CHECK_VOLTS_HIGH     0x20u /* a warning */
+#define ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE 0x40u /* the host may sleep */
+#define ECUIO_OPERATION_CHECK_ON_BATTERY     0x80u /* the host is off mains */
 
 typedef struct ecuio_operation_request {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
     uint32_t operation;   /* its index among the session's plugin's
                              (ecuio_plugin_operation) */
-    uint32_t flags;       /* ECUIO_OPERATION_MAY_UNLOCK or zero */
+    uint32_t flags;       /* ECUIO_OPERATION_* */
     uint32_t reserved[5]; /* zero; ABI growth space */
 } ecuio_operation_request_t;
 
@@ -112,7 +136,13 @@ typedef struct ecuio_operation_state {
                                        request's folder; else "" */
     char words[160];      /* why it ended, for a person; "" while it runs
                              and for END_SAVED. No path. */
-    uint32_t reserved[6]; /* zero; ABI growth space */
+    uint32_t volts_mv;
+    uint32_t volts_min_mv;
+    uint32_t checks; /* ECUIO_OPERATION_CHECK_* */
+    uint32_t waiting_ms;
+    uint16_t rpm;
+    uint16_t kmh;
+    uint32_t reserved[1]; /* zero; ABI growth space */
 } ecuio_operation_state_t;
 
 #if defined(__cplusplus)
@@ -130,7 +160,13 @@ static_assert(offsetof(ecuio_operation_state_t, name) == 56,
               "operation state name offset is ABI");
 static_assert(offsetof(ecuio_operation_state_t, words) == 152,
               "operation state words offset is ABI");
-static_assert(offsetof(ecuio_operation_state_t, reserved) == 312,
+static_assert(offsetof(ecuio_operation_state_t, volts_mv) == 312,
+              "operation state volts_mv offset is ABI");
+static_assert(offsetof(ecuio_operation_state_t, waiting_ms) == 324,
+              "operation state waiting_ms offset is ABI");
+static_assert(offsetof(ecuio_operation_state_t, rpm) == 328,
+              "operation state rpm offset is ABI");
+static_assert(offsetof(ecuio_operation_state_t, reserved) == 332,
               "operation state reserved offset is ABI");
 #endif
 
@@ -144,7 +180,10 @@ static_assert(offsetof(ecuio_operation_state_t, reserved) == 312,
  *   ECUIO_ERR_NULL_ARGUMENT: a NULL session, request or folder.
  *   ECUIO_ERR_SESSION_CLOSED: the session was closed.
  *   ECUIO_ERR_INVALID_ARGUMENT, with words: a struct_size smaller than
- *     the struct, an unknown flag, a reserved word not zero; a session not
+ *     the struct, an unknown flag, a reserved word not zero, no
+ *     ECUIO_OPERATION_PARKED; a write-class plan without
+ *     ECUIO_OPERATION_BATTERY_SUPPORT, or with the host off mains under
+ *     10%; a session not
  *     started; no such operation, or a session whose plugin declares
  *     none; a transport that asks nothing (mock://, replay://, a
  *     listening session); the plan's module not one this session talks
@@ -153,6 +192,9 @@ static_assert(offsetof(ecuio_operation_state_t, reserved) == 312,
  *     plan's level locked and no ECUIO_OPERATION_MAY_UNLOCK ("unlock
  *     level NN first"); an unlock under way.
  *   ECUIO_ERR_CONSENT_REQUIRED: no consent was given to the plugin.
+ *   A write-class plan also: ECUIO_ERR_NOT_IMPLEMENTED on an adapter that
+ *     reads no battery voltage, and the keep-awake hold's own refusal
+ *     (a read-class run warns of it in the state's checks).
  *   ECUIO_ERR_NOT_IMPLEMENTED, with words: a run needs the write flow's
  *     checks before it (the engine off, the battery's floor), which this
  *     Havne has not got: no call here starts a run on a car yet.
