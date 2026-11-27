@@ -6,10 +6,10 @@
   (the layout and constants, tables from the set, keys and recording
   format 4), the simulated car of step 6 and the hold of the appendix
   below. Built for v0.9.1: step 4 (the merged set, `needs` and
-  signal-file format 3; the appendix "step 4 as built"). Not built,
-  v0.9.1's: step 5 (the pick opens modules), step 7 (a
-  vehicle's plugins read together) and step 8 (faster), and the
-  simulated car's `vcan` cases.
+  signal-file format 3; the appendix "step 4 as built") and step 7 (a
+  vehicle's plugins read together; the appendix "step 7 as built"). Not
+  built, v0.9.1's: step 5 (the pick opens modules) and step 8 (faster),
+  and the simulated car's `vcan` cases.
 - **Date:** 2026-11-15.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI); [ADR-0015](0015-request-engine.md) (requests derived
@@ -1419,3 +1419,109 @@ Step 4 is `ecuio_signal_file_merge`, its readers and signal-file format 3
   modules from a recording (step 5); the own variant's place, the
   vehicle's picks merged on a change, `--together`, `plugins together`
   and `SignalFile.merge` (step 7).
+
+## Appendix: step 7 as built (2026-11-27)
+
+Step 7 is the bridge, the store and the front ends reading a vehicle's
+picks as one merged set (section 9), on step 4's merge. Core gains the
+base-modules flag and two calls; nothing else in the ABI moves.
+
+- **The vehicle's set.** `obd2` is a pick word in the book's `picks`,
+  never a part: `PluginStore::pick` takes it with no plugin, `pickRow`
+  gives it a built-in row that is never missing, and the 16 picks of
+  `MaxPicks` count plugin variants only. A one-time step puts `obd2`
+  first in each vehicle's picks, recorded by a book-level key,
+  `migrated: ["obd2-picked"]`, never by the format (it stays 2, so an
+  older version still reads the book) and never by `obd2` being absent,
+  so a deliberate unpick stays unpicked. A new book carries the key and
+  a new vehicle starts with `obd2` picked. An older version reading such
+  a book lists `obd2` as a missing pick and passes it by.
+- **The four cases.** `vehicleSet` answers one of:
+  - `obd2` alone: the built-in `obd2`, no merge (a merge of the full
+    base refuses zero parts);
+  - one or more plugin variants: `merged.<16 hex>`, the own variant last
+    when it is picked, with the full base when `obd2` is picked or a part
+    extends it, else the base's modules alone;
+  - nothing picked: the merge of no part with the base's modules alone,
+    so the emissions codes are still read and the set has no signal;
+  - a pick no installed plugin holds: refused, with no set, naming the
+    pick and saying to install it or unpick it.
+- **The base's modules.** `ECUIO_MERGE_BASE_MODULES` (0x2) gives the set
+  obd2's channels first and none of its signals, so unpicking `obd2`
+  drops its signals and never its modules, and Live, Add, Alerts, a
+  recording's `signals.json` and the CLI all read one set. It is refused
+  with `ECUIO_MERGE_BASE_OBD2`; a part that extends `obd2` makes the
+  merge the full base, because that part's `obd2.<key>` readers need the
+  signals. With it a merge takes no part and keeps no signal. The text
+  records it as `base_modules`, a key the loader reads back (never beside
+  `extends`; `parts` and `signals` may be empty beside it), and the
+  profile name hashes "obd2 modules" in place of "obd2", so the two
+  bases are two names. A merged set is known by its source, not by its
+  part count: the no-part set is refused as a part and on import.
+- **The cache key.** A vehicle's answer is kept while its parts stay: the
+  key is each part's profile with its plugin copy's SHA-256, the base
+  flag in use and the picked own variant. The label is in the key only
+  for the refused case, whose words name the vehicle. A new answer
+  retires the current merged file, which stays registered while a
+  session or a connect decodes with it and is freed after; a plugin a
+  held set reads can't be replaced or removed until the teardown ends.
+- **The kept address.** A kept live address (`j2534://`, `elm327://`,
+  `socketcan://`) keeps a `profile=merged.*`, and at each connect
+  `VehicleBook.withVehicleSet` swaps it for the picked vehicle's set now:
+  another `merged.<hex>`, or `obd2`. A name with no set to swap in is
+  left as written. The swap never touches `replay://`, which keeps its
+  header's profile because a replay reads a recording's own
+  `signals.json` only on an equal profile, and never `mock://`, which
+  reads as typed. A name nothing registers (an older version, the CLI,
+  Python) says it is a merged set's, made from parts the program hasn't
+  merged (`ecuio_profile_set_unknown_detail`, for a session's create and
+  `ecuio_profile_lookup` alike). **The edge left:** a listening
+  interface's address kept while the vehicle read `obd2` alone names
+  `profile=obd2`, which is typed, not swapped, so it doesn't follow a
+  later pick.
+- **The carry-over.** When a part's signal is read beside an obd2 signal
+  (a `_BESIDE_BASE` note, whose `base_def` names the obd2 def), a gauge
+  or alert that showed the obd2 one keeps showing the part's. It runs
+  once for each vehicle, at its first merged set, and is recorded on the
+  entry (`migrated`: `beside-obd2`, then `beside-obd2-said` at Dismiss),
+  so a user who later puts obd2's signal on a gauge on purpose keeps it.
+  A list of references whose first resolving reference is the obd2 def
+  gets `key:<standing key>` in front (the last goes at the cap); a list
+  already on the standing signal is left alone; a tick kept on that def
+  moves to it. Dashboards are app-wide, so another vehicle whose set
+  lacks the key falls through to the obd2 reference as before. One Log
+  line and one dismissable line on Settings, Signals say it. An enabled
+  alert none of whose references the set has is marked as unable to fire,
+  and a Log line at connect counts them.
+- **"No room".** A held row (ticked, or read by a gauge or an enabled
+  alert) on a module whose report has `ECUIO_SUPPORT_NO_ROOM`, which
+  core doesn't list as unasked, reads "No room", stays ticked, and is
+  counted in `noRoomCount` apart from "Not asked". The line under Live's
+  list names each module by its name, else its id, else its reply ID
+  (never a request ID), says the adapter listens to as many modules as
+  are open now and all are in use, and names what frees one: a module
+  open for reads alone, with no ranked signal of the pick on it, under a
+  focus and no running log, holding a tick, a gauge (by Dashboard page)
+  or an enabled alert. With none to free it says why, from the reasons
+  present; under a log it says the log keeps reading what it started
+  with. Start log names the logged signals with no room, whose columns
+  stay empty, and `havne-cli log` writes that line on standard error.
+  The recording header does not note them.
+- **A computed def's module.** `ecuio_signal_set_def_module` gives a
+  computed def the module every input leaf is read on when the leaves
+  share one, else none, following the chain as
+  `ecuio_computed_mark_leaves` does, so obd2's Boost (MAP less baro,
+  both on 7E8) passes an Engine filter. Live's filter, tag and holders
+  read that one answer.
+- **The two calls.** `ecuio_expr_names` lists the names an expression
+  reads, as written and each once in read order, by the loader's own
+  compiler, so the signal form works out a file's `needs`.
+  `ecuio_signal_set_def_module`, above, gives a def's module. The form
+  also checks against the vehicle's set, so an expression may read
+  another part's key.
+- **The default pick.** `cli::default_pick` takes a list of ids its rank
+  passes by, and the bridge and `havne-cli --together` pass the obd2 defs
+  a beside-obd2 note names, so a vehicle's set asks the part's signal and
+  not obd2's every sweep unless a tick, a gauge, an alert, a computed
+  signal or a log reads it. It changes the sweep only for an obd2 signal
+  at another address than the part's.

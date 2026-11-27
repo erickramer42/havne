@@ -616,3 +616,27 @@ recordings by the rule in ADR-0065's appendix "step 3 as built" (its key,
 else a name each recording has once), in the same unit, its case aside; a
 recording made before format 4 still compares by name with one made after.
 This replaces the "Not changed" bullet above.
+
+## Note: reading plugins together (2026-11-27)
+
+ADR-0065's step 7 adds to `stream`, `log`, `sim` and `view --frames` the
+option `--together <profiles>`: `obd2` (the full base) or `obd2-modules`
+(the base's modules alone), and the profiles of each `--plugin`'s
+variants and `--signals` files, merged in that order and registered as
+`merged.<16 hex>`, so the CLI reads a vehicle's set as the app does.
+`--plugin` and `--signals` repeat. `--together obd2` alone reads the
+built-in `obd2` with no merge. A name nothing given has, an empty item,
+a second `--together` and both bases together are usage errors; a part
+given twice is core's refusal (exit 3). The session line adds `together`
+and `merged` only when the option is given, and a `note` line follows
+for each note the merge made.
+
+`plugins together --together <profiles>` merges the same way and writes
+a `part` line for each file, a `module` line for each module, a `totals`
+line and a `note` line for each thing the merge did, then `end`; `--out`
+writes the merged set's text whole. A refused file or merge is an `error`
+line in core's words, exit 3, and a failed `--out` write is an error
+line, exit 1.
+
+`log` writes one line on standard error whenever the signals it asks on a
+module the adapter has no room for change, in the app's Start log words.

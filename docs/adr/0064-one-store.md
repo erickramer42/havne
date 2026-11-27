@@ -1116,3 +1116,15 @@ store's OBDb keep (`keepObdbPlugin`) takes a set either preview holds.
   built"). Nothing else writes there or deletes from it, so a copy a
   `"kept": false` record names stays where Save finds it
   (`BridgeTest.OneStoreRemovalAloneDeletesFromTheOldFolder`).
+
+*Amended 2026-11-27 (a vehicle's picks are read together):* the stand-in
+of Q5 is gone. A vehicle's picks are the parts of one merged set
+(ADR-0065 section 9, appendix "step 7 as built"), so the profile row
+offers the vehicle's set by the vehicle's label, in place of a button for
+the first pick that extends `obd2` and one for each pick after it, and
+`Bridge.pickRow`'s stand-in flag, `pickEntry` and `pickProfiles` are
+removed. `obd2` is a pick word of its own. Q8's gap, an extension that
+follows its base, is closed by the same section: a plugin's variant is
+read beside the others, `obd2` among them, with no format that names
+another plugin's variant. This replaces Q5's recommendation above and Q8's
+"goes to v0.9.0" sentence.
