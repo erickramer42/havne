@@ -56,6 +56,14 @@ def test_each_name_it_uses_is_declared_and_each_key_is_once():
             assert s["pair_of"] in keys and s["pair_of"] != s["key"], s["key"]
 
 
+def test_a_signal_that_needs_an_oracle_names_one():
+    needing = [s for s in signals(catalog()) if s.get("needs_oracle")]
+    assert {"knock_retard", "intake_cam", "lambda", "rail_pressure", "boost_target", "fan_duty",
+            "injected_quantity"} <= {s["key"] for s in needing}
+    for s in needing:
+        assert f"oracle.{s['key']}" in s["references"], s["key"]
+
+
 def test_each_range_is_ordered_and_each_encoding_reaches_it():
     for s in signals(catalog()):
         lo, hi = s["range"]
