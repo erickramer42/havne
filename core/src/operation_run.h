@@ -32,6 +32,7 @@
 #ifndef ECUIO_OPERATION_RUN_H
 #define ECUIO_OPERATION_RUN_H
 
+#include "operation_kernel_read.h"
 #include "operation_plan.h"
 
 #include "ecuio/dump.h"
@@ -89,6 +90,8 @@ enum class run_stage : uint8_t {
     upload_open,
     upload_block,
     upload_exit,
+    quiet,  /* the functional 10 82, its answers not judged */
+    helper, /* a kernel read's download and start, helper_run's stage */
     ident_after,
     closing, /* the one 37 after a cancel or a fault in an upload */
     done,
@@ -98,6 +101,10 @@ struct run_request {
     uint8_t bytes[kRequestMax] = {};
     uint32_t size = 0;
     uint32_t session = 0; /* run_action::enter: ECUIO_STEP_SESSION_* */
+    const uint8_t* wide = nullptr; /* in bytes' place: a download's 36 */
+    uint32_t wide_size = 0;
+    bool write = false;
+    bool functional = false;
 };
 
 struct run {
@@ -121,13 +128,20 @@ struct run {
     uint64_t handed = 0;  /* data bytes handed to the sink, both passes */
     uint8_t ident_size[ECUIO_PLUGIN_MAX_IDENTS] = {};
     uint8_t ident_value[ECUIO_PLUGIN_MAX_IDENTS][ECUIO_DUMP_IDENT_MAX] = {};
+    helper_run h;
+    uint32_t wire_max = 0; /* the most bytes one request may carry */
+    uint8_t wire[kWireMost] = {};
 };
 
 /* A run of p, which outlives it, at its start */
-inline void begin(run& r, const plan& p)
+inline void begin(run& r, const plan& p, uint32_t wire_max = 0)
 {
     r = run{};
     r.p = &p;
+    r.wire_max = wire_max;
+    if (p.has_kernel && p.helper.quiet_session != 0) {
+        r.at = run_stage::quiet;
+    }
 }
 
 /* The data bytes a whole run hands over: each range twice */
@@ -151,7 +165,10 @@ inline void stop(run& r, run_end e, uint8_t nrc = 0)
  * that failed was that one */
 inline void close(run& r, run_end e, uint8_t nrc = 0)
 {
-    if (!r.open || r.at == run_stage::upload_exit) {
+    const bool exit =
+        r.at == run_stage::upload_exit ||
+        (r.at == run_stage::helper && r.h.at == helper_stage::exit);
+    if (!r.open || exit) {
         stop(r, e, nrc);
         return;
     }
@@ -188,6 +205,11 @@ inline void settle(run& r)
         r.before = true;
         r.ident = 0;
     }
+    if (p.has_kernel && !r.h.running) {
+        r.h.at = helper_stage::open;
+        r.at = run_stage::helper;
+        return;
+    }
     r.at = s.kind == ECUIO_STEP_READ ? run_stage::read : run_stage::upload_open;
 }
 
@@ -211,6 +233,7 @@ inline void entered(run& r)
 {
     if (r.at == run_stage::enter) {
         r.session = r.p->steps[r.step].session;
+        r.h.running = false;
         settle(r);
     }
 }
@@ -242,10 +265,25 @@ inline uint32_t next_bytes(const run& r)
 }
 
 /* The request of the run's stage into out */
-inline void write_request(const run& r, run_request& out)
+inline void write_request(run& r, run_request& out)
 {
     uint8_t* at = out.bytes;
-    if (r.at == run_stage::ident_before || r.at == run_stage::ident_after) {
+    if (r.at == run_stage::quiet) {
+        *at++ = 0x10;
+        *at++ = r.p->helper.quiet_session;
+        out.functional = true;
+    } else if (r.at == run_stage::helper) {
+        const uint32_t n = helper_request(r.p->helper, r.h, r.wire);
+        out.write = true;
+        if (n > kRequestMax) {
+            out.wide = r.wire;
+            out.wide_size = n;
+        } else {
+            std::memcpy(at, r.wire, n);
+            at += n;
+        }
+    } else if (r.at == run_stage::ident_before ||
+               r.at == run_stage::ident_after) {
         *at++ = 0x22;
         at = put_be(at, r.p->idents[r.ident].did, 2);
     } else if (r.at == run_stage::upload_block) {
@@ -285,6 +323,9 @@ template <typename Sink> run_action next(run& r, run_request& out, Sink& sink)
         return run_action::hold;
     }
     write_request(r, out);
+    if (r.at == run_stage::helper && r.h.at == helper_stage::open) {
+        ++r.h.downloads;
+    }
     r.asked = true;
     ++r.asks;
     return run_action::send;
@@ -303,8 +344,31 @@ inline uint8_t asked_service(const run& r)
         return 0x35;
     case run_stage::upload_block:
         return 0x36;
+    case run_stage::quiet:
+        return 0x10;
+    case run_stage::helper:
+        return helper_service(r.h);
     default:
         return 0x37;
+    }
+}
+
+/* An answer to the helper's download or start, positive or not */
+inline void take_helper(run& r, const uint8_t* d, size_t n)
+{
+    const bool opening = r.h.at == helper_stage::open;
+    const bool closing = r.h.at == helper_stage::exit;
+    const helper_took t = helper_take(r.p->helper, r.h, r.wire_max, d, n);
+    r.open = r.open || opening;
+    if (t == helper_took::bad) {
+        close(r, run_end::bad_reply);
+        return;
+    }
+    r.asks = 0;
+    if (closing) {
+        r.open = false;
+    } else if (t == helper_took::started) {
+        settle(r);
     }
 }
 
@@ -395,13 +459,36 @@ void take_positive(run& r, const uint8_t* d, size_t n, Sink& sink)
         r.at = run_stage::upload_block;
         return;
     }
+    case run_stage::helper:
+        take_helper(r, d, n);
+        return;
     default: /* upload_exit */
         if (d[0] != 0x77) {
             close(r, run_end::bad_reply);
             return;
         }
+        r.h.running = r.h.running && r.p->helper.stays;
         pass_done(r);
         return;
+    }
+}
+
+/* Whether the request that is out opens a transfer: a 35, or the
+ * helper's 34 */
+inline bool opens(const run& r)
+{
+    return r.at == run_stage::upload_open ||
+           (r.at == run_stage::helper && r.h.at == helper_stage::open);
+}
+
+/* The quieter settled: its answers, or none, are not judged */
+inline void quiet_done(run& r)
+{
+    r.asked = false;
+    if (r.canceled) {
+        stop(r, run_end::canceled);
+    } else {
+        settle(r);
     }
 }
 
@@ -422,20 +509,24 @@ run_wait reply(run& r, const uint8_t* d, size_t n, uint32_t waited_ms,
         stop(r, r.closing_as, r.nrc); /* the 37's answer isn't judged */
         return run_wait::go_on;
     }
+    if (r.at == run_stage::quiet) {
+        quiet_done(r);
+        return run_wait::go_on;
+    }
     const uint8_t sid = asked_service(r);
     const bool negative = n == 3 && d[0] == 0x7F && d[1] == sid;
     if (negative && d[2] == 0x78) {
         if (waited_ms < kPendingMostMs && !r.canceled) {
             return run_wait::keep_waiting;
         }
-        r.open = r.open || r.at == run_stage::upload_open;
+        r.open = r.open || opens(r);
         close(r, r.canceled ? run_end::canceled : run_end::no_answer);
         return run_wait::go_on;
     }
     r.asked = false;
     if (r.canceled) {
-        r.open =
-            r.open || (r.at == run_stage::upload_open && n > 0 && d[0] == 0x75);
+        const uint8_t opened = r.at == run_stage::helper ? 0x74 : 0x75;
+        r.open = r.open || (opens(r) && n > 0 && d[0] == opened);
         close(r, run_end::canceled);
     } else if (n == 0) {
         close(r, run_end::bad_reply);
@@ -462,8 +553,12 @@ inline void silence(run& r)
         stop(r, r.closing_as, r.nrc);
         return;
     }
+    if (r.at == run_stage::quiet) {
+        quiet_done(r);
+        return;
+    }
     /* An unanswered 35 may have opened an upload all the same */
-    r.open = r.open || r.at == run_stage::upload_open;
+    r.open = r.open || opens(r);
     if (r.canceled) {
         close(r, run_end::canceled);
     } else if (!may_ask_again(r)) {
