@@ -250,18 +250,23 @@ inline void ecuio_engine_late_frames(ecuio_request_engine* e, uint32_t c,
                                      const uint8_t* data, uint16_t len)
 {
     const bool did = len >= 3 && data[0] == 0x62;
-    const bool pid = len >= 2 && data[0] == 0x41 &&
-                     ECUIO_OBD2_PID_BYTES[data[1]] != 0 &&
+    const bool pid_reply = len >= 2 && data[0] == 0x41;
+    const bool pid = pid_reply && ECUIO_OBD2_PID_BYTES[data[1]] != 0 &&
                      len == 2u + ECUIO_OBD2_PID_BYTES[data[1]];
-    if (!did && !pid) {
+    if (!did && !pid_reply) {
         return;
     }
     const uint8_t req[3] = {static_cast<uint8_t>(data[0] - 0x40), data[1],
                             did ? data[2] : uint8_t{0}};
     const int32_t row = ecuio_engine_find(e, c, req, did ? 3 : 2);
-    if (row >= 0) {
+    if (row < 0) {
+        return;
+    }
+    if (did || pid) {
         ecuio_engine_row_frames(e->requests[row],
                                 ecuio_engine_reply_frames(len));
+    } else {
+        e->requests[row].ran_out = 0;
     }
 }
 
