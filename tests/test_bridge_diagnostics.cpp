@@ -322,7 +322,8 @@ TEST(BridgeTest, DiagnosticsEntryIsWhatThePageShows)
                      .toBool());
     EXPECT_FALSE(o.value("notOpened").toBool());
     ecuio_channel_diagnostics_t closed{};
-    closed.flags = ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_NOT_OPENED;
+    closed.flags =
+        ECUIO_DIAG_ASKED | ECUIO_DIAG_COMPLETE | ECUIO_DIAG_NOT_OPENED;
     EXPECT_TRUE(SessionBridge::diagnosticsEntry(closed, ECUIO_UNITS_METRIC)
                     .value("notOpened")
                     .toBool());
