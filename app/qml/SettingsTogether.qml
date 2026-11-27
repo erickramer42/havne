@@ -200,6 +200,8 @@ ColumnLayout {
                 text: root.foldText(fold.entry.kind, fold.entry.count)
                 checkable: true
                 checked: fold.open
+                Layout.fillWidth: true
+                Layout.maximumWidth: Math.ceil(implicitWidth)
                 onClicked: root.toggleKind(fold.entry.kind)
             }
             Repeater {
