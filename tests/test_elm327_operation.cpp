@@ -78,9 +78,15 @@ protected:
 
     ecuio_status_t begin(ecuio_session_t* s)
     {
+        return begin(s, folder_);
+    }
+
+    static ecuio_status_t begin(ecuio_session_t* s,
+                                const dump_file_test::Folder& f)
+    {
         const ecuio_operation_request_t q =
             session_operation::request(ECUIO_OPERATION_MAY_UNLOCK);
-        return ecuio_session_operation_start(s, &q, folder_.str().c_str());
+        return ecuio_session_operation_start(s, &q, f.str().c_str());
     }
 
     std::vector<std::string> files() const
@@ -180,9 +186,11 @@ TEST_F(Elm327OperationTest, TheBatteryIsReadThroughTheRun)
         a.k.vbatt_sag = nullptr;
         a.k.vbatt = "?";
     });
+    /* the same copy within the same second has the same name */
+    const dump_file_test::Folder again;
     conversation_session::Session s;
     ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
-    ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(begin(s.get(), again), ECUIO_OK) << ecuio_last_error_detail();
     const ecuio_operation_state_t v = session_operation::ended(s.get());
     ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
     EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU, 0u);
