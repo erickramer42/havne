@@ -59,7 +59,8 @@ void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...);
 /* One request and its reply (the definition says how) */
 bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
               ecuio_sur_response_t* out_resp, DWORD timeout_ms,
-              ecuio_pt_rx_t* frames = nullptr);
+              ecuio_pt_rx_t* frames = nullptr, const uint8_t* tail = nullptr,
+              uint32_t tail_len = 0);
 
 /* The vendor's text for its last failed call, "" when there is none */
 void fetch_vendor_text(ecuio_j2534_sur_handle_t* h, char* out);

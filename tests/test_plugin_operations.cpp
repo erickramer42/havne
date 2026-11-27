@@ -395,7 +395,7 @@ TEST(PluginOperationTest, EachOperationRuleRefusesInItsWords)
     op = Op();
     op.kind = "\"flash\"";
     EXPECT_EQ(why(op), "operation 'dump-calibration''s kind 'flash' isn't "
-                       "one this Havne runs: \"dump\"");
+                       "one this Havne runs: \"dump\" and \"kernel_read\"");
     op = Op();
     op.title = "\"\"";
     EXPECT_NE(why(op).find("title"), std::string::npos);
@@ -449,10 +449,15 @@ TEST(PluginOperationTest, EachOperationRuleRefusesInItsWords)
 TEST(PluginOperationTest, EachStepRuleRefusesInItsWords)
 {
     /* A kind a later Havne runs is refused by its name */
-    for (const char* kind : {"download", "routine", "reset", "write"}) {
+    for (const char* kind : {"reset", "write"}) {
         EXPECT_EQ(step_why(read_with("step", std::string("\"") + kind + "\"")),
                   std::string("step '") + kind +
                       "' isn't one this Havne runs: \"read\" and \"upload\"");
+    }
+    for (const char* kind : {"download", "routine"}) {
+        EXPECT_EQ(step_why(read_with("step", std::string("\"") + kind + "\"")),
+                  "step 'calibration': a kernel read's download and its "
+                  "routine are its first two steps, and only a kernel read's");
     }
     EXPECT_EQ(step_why(read_with("session", "\"safety\"")),
               "step 'calibration''s session 'safety' isn't one this Havne "

@@ -204,7 +204,7 @@ SettingsKit {
         find(asking, "rowRemove").clicked()
         find(asking, "signalsConfirmRemove").clicked()
         compare(page.picksPart.pluginList.length, 0)
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
 
         // As it comes to another device: someone else's until Mine
         verify(page.importPart.importFile(first))
@@ -237,7 +237,7 @@ SettingsKit {
         compare(find(page, "signalNote").text, "Trip extras updated from 1.1.0 to 1.2.0")
         compare(page.picksPart.variantRows.map(r => r.variant), ["base", "two", "three"])
         verify(page.picksPart.variantRows.every(r => r.mine), "still the user's")
-        compare(page.picksPart.picks, ["plugin.trip-extras.two"], "the pick stays")
+        compare(page.picksPart.picks, ["obd2", "plugin.trip-extras.two"], "the pick stays")
         compare(Harness.storedPlugins().length, 1)
     }
 
@@ -292,7 +292,7 @@ SettingsKit {
                 + " (The copy won't follow Example: the simulated car's updates to my2019)")
         verify(!page.rowActionsPart.copyShown, "the choice closes")
         compare(page.picksPart.pluginList.length, 2, "the original stays")
-        compare(page.picksPart.picks, [], "a copy is no pick")
+        compare(page.picksPart.picks, ["obd2"], "a copy is no pick")
         verify(rowData(page, copy.profiles[0]).mine)
 
         page.rowActionsPart.openRow = "plugin.example-sim.base"
@@ -389,107 +389,57 @@ SettingsKit {
         compare(find(page, "signalProblem").text, "The store has no such plugin")
     }
 
-    // The profile row with one and two picks that read all of obd2: on an
-    // adapter, where Default is obd2, the first such pick takes Default's
-    // place and says "obd2 + <name>"; a pick made while the field reads
-    // Default is read at once, one made under a chosen profile leaves the
-    // field alone; on mock:// Default isn't obd2, so nothing stands in
-    function test_theFirstPickThatReadsObd2StandsInForDefaultOnAnAdapter() {
+    // A pick made under a chosen profile leaves the field alone; the
+    // vehicle's set is offered beside Default on any address
+    function test_aPickUnderAChosenProfileLeavesTheFieldAlone() {
         const page = createPage()
         press(page, "vehicleNew")
         const field = find(page, "uriField")
-        field.text = "elm327://COM9"
-        compare(page.uriPart.profileChoice, "default")
-        verify(importFile(page, "plus.json", "Plus", "D100", true))
-        compare(find(page, "signalNote").text,
-                "Plus 1.0.0 added: picked for Vehicle 1, now reading obd2 + Plus")
-        compare(field.text, "elm327://COM9?profile=plugin.plus.base")
-        compare(page.picksPart.rowReads(rowData(page, "plugin.plus.base")), "obd2 + 1 signal · yours")
-        const plus = find(page, "profile_plugin.plus.base")
-        compare(plus.text, "obd2 + Plus")
-        verify(plus.checked)
-        compare(page.uriPart.profiles.filter(p => p.name === "plugin.plus.base").length, 1,
-                "one button for the pick: the stand-in")
-        tryVerify(() => findChild(page, "profile_default") === null, 1000,
-                  "the pick reads all of obd2: Default goes")
-        compare(find(page, "profileHint").text,
-                "obd2's signals and those of Plus 1.0.0, picked for this vehicle")
-
-        // Typed back to Default, both show, so the row is the URI's; the
-        // pick stands in for Default, so Default's words stay the ordinary ones
-        field.text = "elm327://COM9"
-        verify(find(page, "profile_default").checked)
-        verify(!find(page, "profile_plugin.plus.base").checked)
-        verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"))
-        verify(!page.picksPart.signalsSummary().includes("Default reads"))
-
-        // A second such pick is read too, but the first still stands in
-        verify(importFile(page, "more.json", "More", "D101", true))
-        compare(page.picksPart.picks, ["plugin.plus.base", "plugin.more.base"])
-        compare(field.text, "elm327://COM9?profile=plugin.more.base")
-        field.text = "elm327://COM9"
-        compare(page.uriPart.standIn.profile, "plugin.plus.base", "the first pick, not the last")
-        compare(page.uriPart.profiles.map(p => p.name),
-                ["default", "plugin.plus.base", "raw", "uds-generic", "plugin.more.base"])
-        compare(find(page, "profile_plugin.more.base").text, "obd2 + More")
-
-        // The first unpicked, the next stands in
-        pressRow(page, "plugin.plus.base")
-        compare(page.uriPart.standIn.profile, "plugin.more.base")
-        pressRow(page, "plugin.more.base")
-        compare(page.uriPart.standIn, null)
-        compare(page.uriPart.profiles.map(p => p.name), ["default", "raw", "uds-generic"])
-
-        // A profile the user chose stays when a pick is made
-        press(page, "vehicleNew")
         field.text = "elm327://COM9?profile=raw"
         verify(importFile(page, "third.json", "Third", "D102", true))
         compare(field.text, "elm327://COM9?profile=raw")
         compare(page.uriPart.profileChoice, "raw")
-        compare(find(page, "signalNote").text, "Third 1.0.0 added: picked for Vehicle 2")
-        compare(find(page, "profile_plugin.third.base").text, "obd2 + Third")
-        tryVerify(() => findChild(page, "profile_default") === null, 1000)
-
-        // On mock://, Default isn't obd2: the pick is a choice of its own
+        compare(find(page, "signalNote").text, "Third 1.0.0 added: picked for Vehicle 1")
+        const set = page.picksPart.together.profile
+        compare(find(page, "profile_" + set).text, "Vehicle 1")
+        verify(find(page, "profile_default"), "Default stays")
         field.text = "mock://demo"
-        compare(page.uriPart.standIn, null)
-        compare(find(page, "profile_plugin.third.base").text, "Third")
-        verify(find(page, "profile_default"))
+        compare(find(page, "profile_" + set).text, "Vehicle 1", "on the demo too")
+        compare(page.uriPart.profiles.filter(p => p.name.startsWith("plugin.")).length, 0,
+                "no pick has a button of its own")
     }
 
-    // A pick that doesn't read all of obd2 has no stand-in, so on an
-    // adapter Default is plain obd2: its hint and the list's Signals
-    // summary say so, and only there
+    // On an adapter Default is plain obd2, without the vehicle's set: its
+    // hint and the list's Signals summary say so, and only there
     function test_defaultOnAnAdapterSaysItReadsPlainObd2WhenAPickIsLeftOut() {
         const page = createPage()
         press(page, "vehicleNew")
         const field = find(page, "uriField")
         verify(importFile(page, "extras.json", "Extras"))
-        compare(page.picksPart.picks, ["plugin.extras.base"])
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base"])
         field.text = "elm327://COM9"
-        compare(page.uriPart.standIn, null)
         verify(find(page, "profile_default").checked)
         compare(find(page, "profileHint").text,
-                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
+                "Plain OBD-II, without the signals picked for Vehicle 1; choose Vehicle 1 to read them")
         verify(page.picksPart.signalsSummary().endsWith("(Default reads plain OBD-II)"),
                page.picksPart.signalsSummary())
 
-        // An adapter's address of either kind says it; a pick the store
-        // lacks is nothing for Default to leave out
+        // An adapter's address of either kind says it; a refused set is
+        // nothing for Default to leave out
         field.text = "j2534://C:/fake.dll"
         verify(find(page, "profile_default").checked)
         compare(find(page, "profileHint").text,
-                "Plain OBD-II, without the signals of Vehicle 1; choose Extras to read them")
-        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+                "Plain OBD-II, without the signals picked for Vehicle 1; choose Vehicle 1 to read them")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["obd2", "plugin.gone.base"]))
         verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values"),
                find(page, "profileHint").text)
         verify(!page.picksPart.signalsSummary().includes("Default reads"))
-        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.extras.base"]))
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["obd2", "plugin.extras.base"]))
         field.text = "elm327://COM9"
 
         // Another profile chosen, or an address that isn't an adapter's: the
         // ordinary words
-        page.uriPart.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile(page.picksPart.together.profile)
         verify(!page.picksPart.signalsSummary().includes("Default reads"))
         field.text = "mock://demo"
         verify(find(page, "profileHint").text.startsWith("Default reads OBD-II values on an adapter"))
@@ -521,11 +471,10 @@ SettingsKit {
         verify(signalsRow(page).warn !== true)
         tryVerify(() => findChild(page, "pickMissing_0") === null, 1000)
 
-        // A missing first pick stands in for nothing: the next one does
+        // A missing pick refuses the vehicle's set
         verify(importFile(page, "plus.json", "Plus", "D101", true))
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.plus.base"]))
-        find(page, "uriField").text = "elm327://COM9"
-        compare(page.uriPart.standIn.profile, "plugin.plus.base")
+        compare(page.picksPart.together.reads, "refused")
     }
 
     // A record with no name (a copy no vehicle lists) reads as "A signal

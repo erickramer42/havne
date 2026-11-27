@@ -603,6 +603,7 @@ ApplicationWindow {
                     }
                     LiveViewPage {
                         objectName: "livePage"
+                        roomPages: dashboardView.roomPages
                         onConnectRequested: root.openConnect()
                     }
                     DiagnosticsPage {
@@ -629,6 +630,7 @@ ApplicationWindow {
                     SettingsPage {
                         id: settingsView
                         objectName: "settingsPage"
+                        carryGauges: (beside, has) => dashboardView.carryOver(beside, has)
                         onLogRequested: root.openLog()
                         onLeaveRequested: root.leaveSettings()
                         onReviewRequested: sha => root.reviewConsent(sha)

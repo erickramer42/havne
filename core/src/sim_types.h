@@ -16,6 +16,7 @@
 #include "recording_stretch.h"
 #include "sim_faults.h"
 #include "sim_gateway.h"
+#include "sim_kernel.h"
 #include "sim_memory.h"
 #include "sim_recording.h"
 #include "sim_timing.h"
@@ -93,6 +94,8 @@ struct ecuio_sim_config {
     bool sessions = false;      /* mock: sessions=1, the profile's modules */
     ecuio_sim_gateway_config gateway; /* mock: gateway= and its keys */
     ecuio_sim_memory_faults memory;   /* mock: mem=, the engine ECU's */
+    bool kernel = false;              /* mock: kernel=, the engine ECU's */
+    ecuio_sim_kernel_faults kernel_faults;
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
      * is); empty for none */

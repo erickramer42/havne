@@ -349,8 +349,8 @@
       "properties": {
         "kind": {
           "title": "Kind",
-          "description": "What the bytes are: \"wasm\", a WebAssembly module.",
-          "const": "wasm"
+          "description": "What the bytes are: \"wasm\", a WebAssembly module, or \"bin\", a kernel read's helper.",
+          "enum": ["wasm", "bin"]
         },
         "base64": {
           "title": "Bytes",
@@ -372,7 +372,7 @@
     },
     "operation": {
       "title": "Operation",
-      "description": "A plan Havne runs against one module (format 3, ADR-0066): its steps in order. A plan is data: Havne derives its class (a read, when every step is a \"read\" or an \"upload\"), how many sessions it unlocks in and its image's size from the steps, and refuses by name a kind or a step it doesn't run.",
+      "description": "A plan Havne runs against one module (format 3, ADR-0066): its steps in order. A plan is data: Havne derives its class (a read, when every step is a \"read\" or an \"upload\" and there is no helper), how many sessions it unlocks in and its image's size from the steps, and refuses by name a kind or a step it doesn't run.",
       "type": "object",
       "required": ["id", "kind", "title", "ecu", "level", "steps"],
       "properties": {
@@ -384,8 +384,8 @@
         },
         "kind": {
           "title": "Kind",
-          "description": "What the plan does: \"dump\" copies a module's memory to a file.",
-          "enum": ["dump"]
+          "description": "What the plan does: \"dump\" copies a module's memory to a file; \"kernel_read\" does so through a helper it first downloads to the module's RAM and starts.",
+          "enum": ["dump", "kernel_read"]
         },
         "title": {
           "title": "Title",
@@ -412,13 +412,13 @@
           "maxItems": 8,
           "items": { "$ref": "#/$defs/operationIdent" }
         },
+        "kernel": { "$ref": "#/$defs/operationKernel" },
         "steps": {
           "title": "Steps",
-          "description": "The plan's steps in order, 1 to 64, each name once, no two sharing an address, 64 MiB of memory in all.",
+          "description": "The plan's steps in order, 1 to 64, each name once, no two sharing an address, 64 MiB of memory in all; a kernel read's first two are its helper's download and routine.",
           "type": "array",
           "minItems": 1,
-          "maxItems": 64,
-          "items": { "$ref": "#/$defs/operationStep" }
+          "maxItems": 64
         },
         "leave": {
           "title": "Leave",
@@ -428,7 +428,34 @@
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "kernel_read" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["kernel"],
+            "properties": {
+              "steps": {
+                "minItems": 3,
+                "prefixItems": [
+                  { "$ref": "#/$defs/operationDownload" },
+                  { "$ref": "#/$defs/operationRoutine" }
+                ],
+                "items": { "$ref": "#/$defs/operationStep" }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "kernel": false,
+              "steps": { "items": { "$ref": "#/$defs/operationStep" } }
+            }
+          }
+        }
+      ]
     },
     "operationIdent": {
       "title": "Identification",
@@ -686,6 +713,188 @@
           "type": "integer",
           "minimum": 50,
           "maximum": 4000
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationKernel": {
+      "title": "Kernel",
+      "description": "A kernel read's helper: the RAM it goes to, the routines that may start it, whether it serves a second upload, and the functional requests that quiet the bus around the read. Havne refuses a download past the window and a window that shares an address with a range.",
+      "type": "object",
+      "required": ["ram", "start", "stays"],
+      "properties": {
+        "ram": { "$ref": "#/$defs/operationRam" },
+        "start": {
+          "title": "Start routines",
+          "description": "The routines that may start the helper, 1 to 8; the plan's routine is one of them.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9A-F]{4}$"
+          }
+        },
+        "stays": {
+          "title": "Stays",
+          "description": "Whether the helper serves a second upload; if not, Havne downloads and starts it again.",
+          "type": "boolean"
+        },
+        "functional": {
+          "title": "Functional requests",
+          "description": "Requests to every module, each with its reply suppressed: \"10 82\" before the target's session, \"3E 80\" at its cadence through the read; nothing else.",
+          "type": "array",
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/operationFunctional" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationRam": {
+      "title": "RAM window",
+      "description": "Where the helper may be downloaded.",
+      "type": "object",
+      "required": ["address", "bytes"],
+      "properties": {
+        "address": {
+          "title": "Address",
+          "description": "The window's first address, 2 to 8 hex digits in pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "description": "The window's size in bytes, at least 1.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationFunctional": {
+      "title": "Functional request",
+      "description": "A request to every module with its reply suppressed: \"10 82\" once, or \"3E 80\" once with its every_ms.",
+      "type": "object",
+      "required": ["request"],
+      "properties": {
+        "request": {
+          "title": "Request",
+          "description": "The request's bytes.",
+          "enum": ["10 82", "3E 80"]
+        },
+        "every_ms": {
+          "title": "Every",
+          "description": "A 3E 80's cadence in milliseconds, 500 to 4500.",
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 4500
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "request": { "const": "3E 80" } } },
+          "then": { "required": ["every_ms"] },
+          "else": { "properties": { "every_ms": false } }
+        }
+      ]
+    },
+    "operationDownload": {
+      "title": "Download",
+      "description": "A kernel read's helper downloaded to RAM (services 34, 36 and 37): its bytes a binary file of the package, pinned by their SHA-256.",
+      "type": "object",
+      "required": ["step", "name", "session", "address", "address_bytes", "size_bytes", "file", "sha256"],
+      "properties": {
+        "step": {
+          "title": "Step",
+          "description": "The step's kind.",
+          "const": "download"
+        },
+        "name": {
+          "title": "Name",
+          "description": "The step's name, 1 to 31 of a-z, 0-9 and -, a letter or digit at each end; once among the steps.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "session": {
+          "title": "Session",
+          "description": "The diagnostic session the helper's steps run in.",
+          "enum": ["programming"]
+        },
+        "address": {
+          "title": "Address",
+          "description": "Where the helper goes, inside the RAM window, 2 to 8 hex digits in pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "address_bytes": {
+          "title": "Address bytes",
+          "description": "How many bytes the request's address takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "size_bytes": {
+          "title": "Size bytes",
+          "description": "How many bytes the request's size takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "file": {
+          "title": "File",
+          "description": "The helper's path in the package.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 127
+        },
+        "sha256": {
+          "title": "SHA-256",
+          "description": "The helper's SHA-256, 64 lower-case hex digits.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationRoutine": {
+      "title": "Routine",
+      "description": "The routine that starts the helper (service 31 01): one of the kernel's start routines.",
+      "type": "object",
+      "required": ["step", "name", "session", "routine"],
+      "properties": {
+        "step": {
+          "title": "Step",
+          "description": "The step's kind.",
+          "const": "routine"
+        },
+        "name": {
+          "title": "Name",
+          "description": "The step's name, 1 to 31 of a-z, 0-9 and -, a letter or digit at each end; once among the steps.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "session": {
+          "title": "Session",
+          "description": "The diagnostic session the helper's steps run in.",
+          "enum": ["programming"]
+        },
+        "routine": {
+          "title": "Routine",
+          "description": "The routine's id, four hex digits.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{4}$"
         },
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },

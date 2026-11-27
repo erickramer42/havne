@@ -218,4 +218,75 @@ TestCase {
         const added = SignalForm.withComputed(file, { key: "user.c", name: "C", kind: "computed", expr: "3" }, "")
         compare(added.signals.map(s => s.key).join(), "user.a,user.b,user.c")
     }
+
+    function ownWith(signals, format) {
+        return { havne_signals: format || 2, name: "Mine", source: { name: "t" },
+                 ecus: [{ id: "pcm", rx: "7E8", name: "Engine" }], signals: signals }
+    }
+    function did(key, name, number, byte) {
+        return { key: key, name: name, ecu: "pcm", read: { service: "22", number: number }, field: { byte: byte || 0 } }
+    }
+    function computed(key, name, expr) {
+        return { key: key, name: name, kind: "computed", expr: expr }
+    }
+    readonly property var reads: ({ "boost - obd2.baro + gear": ["boost", "obd2.baro", "gear"],
+                                    "gear * 2": ["gear"], "a + b": ["a", "b"], "a * 2": ["a"] })
+    function names(e) {
+        return reads[e] || []
+    }
+
+    function test_needsAreTheNamesNoOwnKeyNorObd2Has() {
+        compare(SignalForm.needsOf(["boost", "obd2.baro", "gear", "boost", "gear"], ["boost"]), ["gear"])
+        const r = SignalForm.withSaveNeeds(ownWith([did("boost", "Boost", "D100"),
+                                                    computed("c", "C", "boost - obd2.baro + gear")]),
+                                           names, [])
+        compare(r.refused, "")
+        compare(r.doc.needs, ["gear"])
+    }
+
+    function test_theLastReaderTakesItsNeedAway() {
+        const file = ownWith([did("a", "A", "D100"), computed("c", "C", "a * 2")], 3)
+        file.needs = ["gear"]
+        const r = SignalForm.withSaveNeeds(file, names, [])
+        compare(r.doc.needs, undefined, "no reader, no need")
+        compare(file.needs, ["gear"], "the argument is unchanged")
+        compare(SignalForm.withNeeds(file, []).needs, undefined)
+        compare(SignalForm.withNeeds(file, ["x"]).needs, ["x"])
+    }
+
+    // Lowering would turn "beside" back into "replaces" for the file read alone
+    function test_needsRaiseToFormat3AndAFileStaysThere() {
+        const two = ownWith([did("a", "A", "D100"), computed("c", "C", "gear * 2")])
+        const raised = SignalForm.withSaveNeeds(two, names, [])
+        compare(raised.doc.havne_signals, 3)
+        compare(SignalForm.withSaveNeeds(ownWith([did("a", "A", "D100"), computed("c", "C", "a * 2")]), names, [])
+                    .doc.havne_signals, 2, "no need, no raise")
+        const without = SignalForm.withoutSignal(raised.doc, "c")
+        const after = SignalForm.withSaveNeeds(without, names, [])
+        compare(after.doc.havne_signals, 3, "a file with no needs left stays at 3")
+        compare(after.doc.needs, undefined)
+        compare(SignalForm.withFormat(raised.doc, 2).havne_signals, 3)
+    }
+
+    function test_aSaveWithTwoSignalsAtOneAddressIsRefusedBeforeTheRaise() {
+        const file = ownWith([did("a", "A", "F40C"), did("b", "B", "f40c"), computed("c", "C", "gear * 2")])
+        const r = SignalForm.withSaveNeeds(file, names, [])
+        compare(r.refused, "'A' and 'B' read the same value (Engine, 22 f40c, byte 0): a file that reads "
+                           + "another plugin's signals gives one address to one signal. Change or remove one first.")
+        compare(r.doc, file, "nothing raised")
+        compare(SignalForm.sharedAddress(ownWith([did("a", "A", "F40C"), did("b", "B", "F40C", 1)])), null,
+                "another byte is another address")
+        verify(SignalForm.withSaveNeeds(ownWith([did("a", "A", "F40C"), did("b", "B", "F40C")]), names, [])
+                   .refused === "", "no need, no format 3, no refusal")
+    }
+
+    function test_theSaveSaysWhatTheRaiseMadeBeside() {
+        const file = ownWith([did("boost", "Boost", "D100"), computed("c", "C", "gear * 2")])
+        compare(SignalForm.withSaveNeeds(file, names, ["Boost", "Engine RPM"]).beside, ["Boost"])
+        compare(SignalForm.withSaveNeeds(file, names, ["Engine RPM"]).beside, [], "nothing beside")
+        const three = ownWith(file.signals, 3)
+        compare(SignalForm.withSaveNeeds(three, names, ["Boost"]).beside, [], "already format 3: no change to say")
+        compare(SignalForm.withSaveNeeds(ownWith([did("boost", "Boost", "D100")]), names, ["Boost"]).beside, [],
+                "no raise")
+    }
 }

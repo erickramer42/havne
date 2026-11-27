@@ -144,7 +144,7 @@ TestCase {
         verify(page, "Settings loads")
         page.open("signals")
         compare(page.pickedVehicle.label, "Weekend car")
-        compare(page.picksPart.picks, [shared])
+        compare(page.picksPart.picks, ["obd2", shared])
         compare(page.rowActionsPart.unmigratedRows, [], "every file moved")
         compare(page.picksPart.pluginList.filter(p => p.mine).map(p => p.id).sort(),
                 ["daily-driver-obdb", "daily-driver-own", "shared-pids"])
@@ -153,17 +153,15 @@ TestCase {
         compare(page.ownSignals, [], "this vehicle wrote none")
 
         page.ownPart.pickVehicle("v1")
-        compare(page.picksPart.picks, [shared, obdb, own, example])
+        compare(page.picksPart.picks, ["obd2", shared, obdb, own, example])
         compare(page.pickedVehicle.own, own)
         compare(page.ownSignals.map(s => s.key), ["own_pressure"], "the form edits its file's variant")
         compare(find(find(page, "ownSignal_0"), "ownSignalText").text, "Own pressure: 22 D110 on 7E8")
         compare(page.connectPart.uriField.text, "elm327://COM5?profile=" + shared, "the vehicle's saved address")
         compare(page.uriPart.profileChoice, shared)
-        // On the adapter the first pick that reads obd2 stands where
-        // Default does, the rest in their order after the built-ins
-        compare(page.uriPart.standIn.profile, shared)
-        compare(page.uriPart.profiles.map(p => p.name), [shared, "raw", "uds-generic", obdb, own, example])
-        compare(find(page, "profile_" + shared).text, "obd2 + Shared PIDs")
+        // The picks read together: one button for the vehicle's set
+        compare(page.uriPart.profiles.map(p => p.name),
+                ["default", page.picksPart.together.profile, "raw", "uds-generic"])
         const row = page.picksPart.variantRows.find(r => r.profile === own)
         compare(page.picksPart.rowTitle(row), "Daily driver own 1.0.0")
         compare(page.picksPart.rowReads(row), "obd2 + 1 signal · yours")

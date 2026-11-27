@@ -593,6 +593,55 @@ static bool read_request(ecuio_sur_request_t* req)
     return true;
 }
 
+static uint8_t g_long[ECUIO_SUR_LONG_MSG_MAX];
+
+/* A length past the wire leaves the pipe unreadable: a broken pipe */
+static bool read_long_data(const ecuio_sur_request_t& req)
+{
+    const uint32_t n = req.u.write_long.data_len;
+    if (n == 0 || n > ECUIO_SUR_LONG_MSG_MAX) {
+        stage("OP_WRITE_LONG: data_len %lu past the wire: the pipe is lost",
+              static_cast<unsigned long>(n));
+        return false;
+    }
+    DWORD have = 0;
+    while (have < n) {
+        DWORD rd = 0;
+        if (!ReadFile(g_pipe, g_long + have, n - have, &rd, nullptr) ||
+            rd == 0) {
+            return false;
+        }
+        have += rd;
+    }
+    return true;
+}
+
+/* A request and, for OP_WRITE_LONG, the bytes after it */
+static bool read_whole_request(ecuio_sur_request_t* req)
+{
+    return read_request(req) && (req->opcode != ECUIO_SUR_OP_WRITE_LONG ||
+                                 read_long_data(*req));
+}
+
+/* OP_WRITE's length is judged before handle_op_write's copy */
+static int op_write(const ecuio_sur_request_t& req, uint32_t* aux)
+{
+    const bool wide = req.opcode == ECUIO_SUR_OP_WRITE_LONG;
+    if ((!wide && req.u.write.data_len > ECUIO_SUR_MSG_MAX) ||
+        refuse_before_open(wide ? "OP_WRITE_LONG" : "OP_WRITE", true)) {
+        return ECUIO_PT_STATUS_FAILED;
+    }
+    if (wide) {
+        return handle_op_write(req.u.write_long.channel_id, g_long,
+                               req.u.write_long.data_len,
+                               req.u.write_long.tx_flags,
+                               req.u.write_long.timeout_ms, aux);
+    }
+    return handle_op_write(req.u.write.channel_id, req.u.write.data,
+                           req.u.write.data_len, req.u.write.tx_flags,
+                           req.u.write.timeout_ms, aux);
+}
+
 /* Wide entry point: the client passes the DLL path as UTF-16, so a
  * non-ASCII path survives (an ANSI argv would mangle it). */
 int wmain(int argc, wchar_t* argv[])
@@ -719,7 +768,7 @@ int wmain(int argc, wchar_t* argv[])
 
     while (true) {
         ecuio_sur_request_t req = {};
-        if (!read_request(&req)) {
+        if (!read_whole_request(&req)) {
             break;
         }
 
@@ -762,18 +811,8 @@ int wmain(int argc, wchar_t* argv[])
                                          &resp);
             break;
         case ECUIO_SUR_OP_WRITE:
-            /* Trust boundary: validate length before memcpy */
-            if (req.u.write.data_len > ECUIO_SUR_MSG_MAX ||
-                refuse_before_open("OP_WRITE", true)) {
-                resp.status = ECUIO_PT_STATUS_FAILED;
-                break;
-            }
-            resp.status = handle_op_write(req.u.write.channel_id,
-                                          req.u.write.data,
-                                          req.u.write.data_len,
-                                          req.u.write.tx_flags,
-                                          req.u.write.timeout_ms,
-                                          &resp.aux);
+        case ECUIO_SUR_OP_WRITE_LONG:
+            resp.status = op_write(req, &resp.aux);
             break;
         case ECUIO_SUR_OP_IOCTL:
             /* Trust boundary: validate input length. READ_VBATT is

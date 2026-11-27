@@ -79,8 +79,13 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
     }
     if (functional) {
         /* every module hears 0x7DF: it comes between a strict one's seed
-         * and its key, and is no node's session's otherwise */
+         * and its key, and is no node's session's but a quieter's */
         ecuio_sim_security_between(n.session.security);
+        if (ecuio_sim_session_functional(
+                n.session, has_extended && n.session.memory.vin != nullptr,
+                s->ecu.time_us, req, len)) {
+            return 0;
+        }
     } else if (s->ecu.recording == nullptr) {
         bool handled = false;
         const uint32_t m =
@@ -231,6 +236,12 @@ ecuio_status_t plan_sim(const char* uri, bool unbound, sim_plan* p)
         ecuio_detail_set("%s", why);
         return ECUIO_ERR_BAD_URI;
     }
+    if (p->config.kernel && p->set != nullptr && p->modules.engine) {
+        ecuio_detail_set("kernel: the engine ECU has no memory to read "
+                         "through a helper while a profile's set answers "
+                         "for it");
+        return ECUIO_ERR_BAD_URI;
+    }
     if (p->config.memory.given && p->set != nullptr && p->modules.engine) {
         ecuio_detail_set("mem: the engine ECU has no memory to break while a "
                          "profile's set answers for it");
@@ -302,6 +313,8 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
         /* the engine ECU with security access has memory to read */
         s->nodes[0].session.memory.vin = s->ecu.config.vin;
         s->nodes[0].session.memory.faults = config.memory;
+        s->nodes[0].session.kernel.on = config.kernel;
+        s->nodes[0].session.kernel.faults = config.kernel_faults;
     }
     if (config.gateway.given) {
         build_gateway(s, s->ecu.config.gateway); /* the sim's, kept */

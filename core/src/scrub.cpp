@@ -294,6 +294,9 @@ void check::feed_vin(const uint8_t* p, size_t n)
 
 void check::end_vin()
 {
+    if (escape_ != 0) {
+        vin_end(escape_at_);
+    }
     if (escape_ == 2) {
         replay(at_ - pending_n_);
     }
@@ -301,29 +304,34 @@ void check::end_vin()
     vin_end(at_);
 }
 
-/* Byte at_'s part in a JSON escape: true when it's taken here. The escaped
- * character is a separator, as the backslash; a \u's four digits are one
- * too, or the bytes as they are when it stands for a letter or a digit. */
+/* A \u of a letter or digit is that character in its run, at its
+ * backslash; any other escape separates runs */
 bool check::json_byte(uint8_t c)
 {
     if (escape_ == 0) {
         if (c != '\\') {
             return false;
         }
-        vin_end(at_);
+        escape_at_ = at_;
         escape_ = 1;
         return true;
     }
     if (escape_ == 1) {
-        escape_ = c == 'u' ? 2 : 0;
+        if (c != 'u') {
+            escape_ = 0;
+            vin_end(escape_at_);
+            return true;
+        }
+        escape_ = 2;
         pending_[0] = c;
-        pending_n_ = c == 'u' ? 1 : 0;
+        pending_n_ = 1;
         code_ = 0;
         return true;
     }
     const int d = hex_value(c);
     if (d < 0) {
         escape_ = 0;
+        vin_end(escape_at_);
         replay(at_ - pending_n_);
         return json_byte(c);
     }
@@ -333,10 +341,14 @@ bool check::json_byte(uint8_t c)
         return true;
     }
     escape_ = 0;
-    if (code_ < 0x80 && alnum(static_cast<uint8_t>(code_))) {
-        replay(at_ + 1 - pending_n_);
-    }
     pending_n_ = 0;
+    if (code_ < 0x80 && alnum(static_cast<uint8_t>(code_))) {
+        escaped_ = true;
+        vin_byte(static_cast<uint8_t>(code_), escape_at_);
+        escaped_ = false;
+    } else {
+        vin_end(escape_at_);
+    }
     return true;
 }
 
@@ -357,6 +369,7 @@ void check::reset_run()
     run_letter_ = false;
     run_digit_ = false;
     run_hex_ = true;
+    run_escaped_ = false;
 }
 
 uint8_t* check::byte_at(uint64_t at) const
@@ -415,6 +428,10 @@ void check::vin_byte(uint8_t c, uint64_t at)
     }
     if (ahead_ > 0) {
         if (vin_char(c)) {
+            if (escaped_) {
+                found_ = kVinShaped;
+                return;
+            }
             mask(at, at + 1);
             --ahead_;
             return;
@@ -425,6 +442,7 @@ void check::vin_byte(uint8_t c, uint64_t at)
         run_at_ = at;
     }
     ++run_;
+    run_escaped_ = run_escaped_ || escaped_;
     run_vin_ = run_vin_ && vin_char(c);
     run_letter_ = run_letter_ || (c >= 'A' && c <= 'Z');
     run_digit_ = run_digit_ || (c >= '0' && c <= '9');
@@ -452,8 +470,8 @@ void check::window_hit(uint64_t at)
         whole_run_ = true; /* a window only if the run goes on */
         return;
     }
-    if ((mode_ & kMask) == 0) {
-        found_ = kVinShaped;
+    if ((mode_ & kMask) == 0 || run_escaped_) {
+        found_ = kVinShaped; /* a span counts one byte for each character */
         return;
     }
     const uint64_t back = 2 * (kVinLength - 1);
@@ -507,7 +525,7 @@ void check::vin_end(uint64_t at)
 {
     if (!window_only_ && run_ == kVinLength && run_vin_ && run_letter_ &&
         run_digit_ && !run_hex_) {
-        if ((mode_ & kMask) != 0) {
+        if ((mode_ & kMask) != 0 && !run_escaped_) {
             ++masked_;
             mask(run_at_, at);
         } else {

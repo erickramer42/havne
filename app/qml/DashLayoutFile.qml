@@ -55,7 +55,7 @@ Item {
         const files = vehicleFiles()
         const needed = DashboardBook.neededFiles(part.host.doc, files)
         const v = VehicleBook.picked(part.host.vehicles)
-        const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
+        const unloaded = (v ? v.picks : []).filter(p => p !== "obd2" && !files.some(f => f.profile === p))
         const unbound = DashboardBook.unboundKeyCells(part.host.doc, files)
         const text = DashboardBook.exportText(part.host.doc, part.host.form, needed)
         if (text === "") {

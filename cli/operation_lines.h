@@ -28,7 +28,9 @@ constexpr size_t kOperationLineBytes = 32768;
 // added
 inline const char* operation_kind_word(uint32_t kind)
 {
-    return kind == ECUIO_OPERATION_KIND_DUMP ? "dump" : "unknown";
+    return kind == ECUIO_OPERATION_KIND_DUMP          ? "dump"
+           : kind == ECUIO_OPERATION_KIND_KERNEL_READ ? "kernel_read"
+                                                      : "unknown";
 }
 
 inline const char* operation_class_word(uint32_t op_class)
@@ -40,9 +42,11 @@ inline const char* operation_class_word(uint32_t op_class)
 
 inline const char* step_kind_word(uint32_t kind)
 {
-    return kind == ECUIO_STEP_READ     ? "read"
-           : kind == ECUIO_STEP_UPLOAD ? "upload"
-                                       : "unknown";
+    return kind == ECUIO_STEP_READ       ? "read"
+           : kind == ECUIO_STEP_UPLOAD   ? "upload"
+           : kind == ECUIO_STEP_DOWNLOAD ? "download"
+           : kind == ECUIO_STEP_ROUTINE  ? "routine"
+                                         : "unknown";
 }
 
 inline const char* step_session_word(uint32_t session)
@@ -67,23 +71,44 @@ inline void operation_services(Line& l, const ecuio_plugin_t* p,
 {
     bool reads = false;
     bool uploads = false;
+    bool downloads = false;
+    bool routines = false;
     for (uint32_t i = 0; i < steps; ++i) {
         ecuio_plugin_operation_step_t s{};
         s.struct_size = sizeof s;
         if (ecuio_plugin_operation_step(p, operation, i, &s) == ECUIO_OK) {
             reads = reads || s.kind == ECUIO_STEP_READ;
             uploads = uploads || s.kind == ECUIO_STEP_UPLOAD;
+            downloads = downloads || s.kind == ECUIO_STEP_DOWNLOAD;
+            routines = routines || s.kind == ECUIO_STEP_ROUTINE;
         }
     }
+    const bool transfers = uploads || downloads;
+    bool first = true;
+    const auto service = [&](const char* sid, const char* name) {
+        l.raw(first ? "{\"sid\":\"" : ",{\"sid\":\"");
+        l.raw(sid);
+        l.raw("\",\"name\":\"");
+        l.raw(name);
+        l.raw("\"}");
+        first = false;
+    };
     l.ch('[');
     if (reads) {
-        l.raw("{\"sid\":\"23\",\"name\":\"read memory by address\"}");
+        service("23", "read memory by address");
+    }
+    if (routines) {
+        service("31", "routine control");
+    }
+    if (downloads) {
+        service("34", "request download");
     }
     if (uploads) {
-        l.raw(reads ? "," : "");
-        l.raw("{\"sid\":\"35\",\"name\":\"request upload\"},"
-              "{\"sid\":\"36\",\"name\":\"transfer data\"},"
-              "{\"sid\":\"37\",\"name\":\"request transfer exit\"}");
+        service("35", "request upload");
+    }
+    if (transfers) {
+        service("36", "transfer data");
+        service("37", "request transfer exit");
     }
     l.ch(']');
 }

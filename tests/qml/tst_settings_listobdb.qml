@@ -65,10 +65,10 @@ SettingsKit {
     // ---- A connect from a list reads the vehicle's plugin (ADR-0064 Q5) ----
 
     // The rule: an address that names no profile takes the picked
-    // vehicle's first pick that loads and reads all of obd2, where obd2
-    // is asked: a J2534 or ELM327 adapter, or a CAN interface that sends.
-    // Any other address passes as it is, and each row has its word
-    function test_aListsAddressTakesTheStandInOnlyWhereObd2IsAsked() {
+    // vehicle's set where it is asked: a J2534 or ELM327 adapter (obd2
+    // alone is Default there), or a CAN interface that sends. Any other
+    // address passes as it is, and each row has its word
+    function test_aListsAddressTakesTheVehiclesSetOnlyWhereItIsAsked() {
         const page = createPage()
         page.j2534Devices = []
         page.serialPorts = [{ name: "COM5", device: "" }]
@@ -78,20 +78,18 @@ SettingsKit {
                               { name: "can1", kind: "can", up: true, modes: ["listen-only"] },
                               { name: "can2", kind: "can", up: false, modes: ["one-shot"] }]
         press(page, "vehicleNew")
-        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "obd2 alone is Default")
+        compare(page.connectFromPart.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=obd2")
         verify(importFile(page, "plain.json", "Plain"))
-        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
-        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], undefined)
         verify(importFile(page, "plus.json", "Plus", "D101", true))
-        verify(importFile(page, "more.json", "More", "D102", true))
         const plus = "plugin.plus.base"
-        compare(page.picksPart.picks, ["plugin.plain.base", plus, "plugin.more.base"])
+        compare(page.picksPart.picks, ["obd2", "plugin.plain.base", plus])
+        const set = page.picksPart.together.profile
 
-        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
-                "the first pick that reads obd2, not the last")
-        compare(page.connectFromPart.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + set)
+        compare(page.connectFromPart.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + set)
         compare(page.connectFromPart.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
-                "elm327://192.168.0.10:35000?poll=0C&profile=" + plus,
+                "elm327://192.168.0.10:35000?poll=0C&profile=" + set,
                 "appended last, the other keys where they were")
         compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
                 "an address that names a profile wins")
@@ -100,42 +98,43 @@ SettingsKit {
         compare(page.connectFromPart.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
         compare(page.connectFromPart.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
 
-        compare(page.connectFromPart.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + set,
                 "a virtual bus sends")
-        compare(page.connectFromPart.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + set,
                 "a controller up in one-shot mode sends")
         compare(page.connectFromPart.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
         compare(page.connectFromPart.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
         compare(page.connectFromPart.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
 
-        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], "obd2 + Plus")
-        compare(page.connectFromPart.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
+        compare(page.connectFromPart.connectProfileWords["elm327://COM5"], "Vehicle 1")
+        compare(page.connectFromPart.connectProfileWords["socketcan://vcan0"], "Vehicle 1")
         compare(page.connectFromPart.connectProfileWords["socketcan://can1"], undefined,
                 "no word on a row that isn't composed")
-        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=" + plus), "Plus",
                 "a plugin's profile by its name")
-        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base"),
-                "elm327://COM5?profile=plugin.more.base", "a pick's profile, named, is read")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=" + plus),
+                "elm327://COM5?profile=" + plus, "a pick's profile, named, is read")
         compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=raw"), "")
         compare(page.connectFromPart.listProfileWord("mock://demo"), "")
 
-        // A pick the store lacks stands in for nothing: the next does
-        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.more.base"]))
-        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
-        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
-        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+        // A pick the store lacks refuses the set: nothing is composed
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["obd2", "plugin.gone.base", plus]))
+        compare(page.picksPart.together.reads, "refused")
         compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5")
+        verify(page.connectFromPart.setRefusal("elm327://COM5") !== "")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
 
         // A plugin's or a signal file's profile the vehicle doesn't pick is
         // dropped, as the field drops it; a built-in profile stays
-        page.saveVehicles(VehicleBook.setPicks(page.vehicles, [plus]))
-        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
-                "elm327://COM5?poll=0C&profile=" + plus, "the vehicle's own pick is read in its place")
-        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
-        compare(page.connectFromPart.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
-        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["obd2", plus]))
+        const now = page.picksPart.together.profile
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.plain.base&poll=0C"),
+                "elm327://COM5?poll=0C&profile=" + now, "the vehicle's set is read in its place")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.plain.base"), "Vehicle 1")
+        compare(page.connectFromPart.listConnectUri("mock://demo?profile=plugin.plain.base"), "mock://demo")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + now)
         press(page, "vehicle_none")
-        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no set")
         compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
                 "nor a plugin's profile")
         compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
@@ -152,10 +151,11 @@ SettingsKit {
         const field = find(page, "uriField")
         field.text = "mock://other"
         const closed = "elm327://127.0.0.1:1"
+        const set = page.picksPart.together.profile
         page.connectFromPart.connectFromList(closed)
-        compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
-        compare(page.uriPart.profileChoice, "plugin.plus.base", "the row follows the field")
-        verify(find(page, "profile_plugin.plus.base").checked)
+        compare(field.text, closed + "?profile=" + set, "before the connect answers")
+        compare(page.uriPart.profileChoice, set, "the row follows the field")
+        verify(find(page, "profile_" + set).checked)
         tryVerify(() => !Bridge.connecting, 10000, "the connect ends")
         verify(!Bridge.connected, "nothing listens there")
         verify(find(page, "errorLabel").text !== "")
@@ -180,16 +180,15 @@ SettingsKit {
     }
 
     // On an adapter (havne-cli's ELM327 emulator, on every platform) the
-    // connect runs under the pick's profile, and what is kept is the
-    // row's address without it: the vehicle's address and
-    // the recent list name no profile, so each connect adds the pick of
-    // the vehicle picked then, and another vehicle reads its own
-    function test_aListConnectOnAnAdapterReadsThePluginAndKeepsTheRowsAddress() {
+    // connect reads the vehicle's set, and what is kept is the row's
+    // address without it, so each connect adds the set of the vehicle
+    // picked then, and another vehicle reads its own
+    function test_aListConnectOnAnAdapterReadsTheVehiclesSetAndKeepsTheRowsAddress() {
         const page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
         const uri = emulatorUri()
-        const composed = uri + "?profile=plugin.plus.base"
+        const composed = uri + "?profile=" + page.picksPart.together.profile
         const field = find(page, "uriField")
         field.text = ""
         page.connectFromPart.connectFromList(uri)
@@ -203,11 +202,11 @@ SettingsKit {
         tryVerify(() => page.pickedVehicle.uri === uri, 10000, "the vehicle keeps the row's address")
         endSession()
         sameList(page.connectFromPart.connectUris, [uri])
-        compare(page.connectFromPart.connectProfileWords[uri], "obd2 + Plus", "the row says what it reads")
+        compare(page.connectFromPart.connectProfileWords[uri], "Vehicle 1", "the row says what it reads")
 
-        // Another vehicle, which picks nothing, reads the row as it is
+        // Another vehicle, which picks obd2 alone, reads the row as it is
         press(page, "vehicleNew")
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(page.connectFromPart.connectProfileWords[uri], undefined)
         page.connectFromPart.connectFromList(uri)
         compare(field.text, uri)
@@ -231,7 +230,7 @@ SettingsKit {
         find(page, "uriField").text = ""
         page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
-        compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
+        compare(Bridge.currentUri, uri + "?profile=" + page.picksPart.together.profile)
         sameList(page.connectFromPart.recentUris, [uri])
         endSession()
         const raw = uri + "?profile=raw"
@@ -274,30 +273,32 @@ SettingsKit {
         endSession()
     }
 
-    // A kept row follows the vehicle's picks: with the first undone the
-    // next that reads obd2 is read, at a start as at a connect, and with
-    // the plugin removed the row connects as it is
+    // A kept row follows the vehicle's picks: with one undone the set of
+    // now is read, at a start as at a connect, and with the last plugin
+    // removed the row connects as it is
     function test_aKeptRowFollowsTheVehiclesPicks() {
         let page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
         verify(importFile(page, "more.json", "More", "D102", true))
         const uri = emulatorUri()
-        const plus = uri + "?profile=plugin.plus.base"
-        const more = uri + "?profile=plugin.more.base"
+        const both = uri + "?profile=" + page.picksPart.together.profile
         find(page, "uriField").text = ""
         page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
-        compare(Bridge.currentUri, plus)
+        compare(Bridge.currentUri, both)
         tryVerify(() => page.pickedVehicle.uri === uri, 10000)
         endSession()
 
         page.open("signals")
         pressRow(page, "plugin.plus.base")
-        compare(page.picksPart.picks, ["plugin.more.base"])
+        compare(page.picksPart.picks, ["obd2", "plugin.more.base"])
+        const more = uri + "?profile=" + page.picksPart.together.profile
+        verify(more !== both)
         sameList(page.connectFromPart.connectUris, [uri])
-        compare(page.connectFromPart.connectProfileWords[uri], "obd2 + More")
-        compare(page.connectFromPart.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
+        compare(page.connectFromPart.connectProfileWords[uri], "Vehicle 1")
+        compare(page.connectFromPart.listConnectUri(uri + "?profile=plugin.plus.base"), more,
+                "a row that names the pick undone reads the set of now")
         page.connectFromPart.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, more)
@@ -309,10 +310,10 @@ SettingsKit {
         stored.sync()
         compare(stored.value("uri"), uri, "the last address is the row's")
         page = createPage()
-        compare(find(page, "uriField").text, more, "and the field reads the pick of now")
+        compare(find(page, "uriField").text, more, "and the field reads the set of now")
 
         verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(page.connectFromPart.listConnectUri(uri), uri)
         compare(page.connectFromPart.connectProfileWords[uri], undefined)
     }
@@ -358,7 +359,7 @@ SettingsKit {
 
         press(page, "obdbKeep")
         verify(!find(page, "importPanel").visible)
-        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2021"], "a typed year names the variant")
+        compare(page.picksPart.picks, ["obd2", "plugin.daily-driver-obdb.my2021"], "a typed year names the variant")
         compare(find(page, "signalNote").text, "Daily driver OBDb 1.0.0 added: picked for Daily driver")
         const row = rowOf(page, "plugin.daily-driver-obdb.my2021")
         compare(find(row, "rowCaption").text, "For this car:")
@@ -399,7 +400,7 @@ SettingsKit {
         verify(obdbRead(page, "2019"))
         press(page, "obdbKeep")
         const earlier = page.picksPart.pluginList[0].sha256
-        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2019"])
+        compare(page.picksPart.picks, ["obd2", "plugin.daily-driver-obdb.my2019"])
 
         verify(obdbRead(page, "2021"))
         verify(find(page, "obdbSummary").text.endsWith(
@@ -418,7 +419,7 @@ SettingsKit {
         press(page, "obdbKeep")
         compare(page.picksPart.pluginList.length, 1)
         verify(page.picksPart.pluginList[0].sha256 !== earlier)
-        compare(page.picksPart.picks, ["plugin.daily-driver-obdb.my2021"], "the pick follows the import")
+        compare(page.picksPart.picks, ["obd2", "plugin.daily-driver-obdb.my2021"], "the pick follows the import")
         compare(find(page, "signalNote").text,
                 "Daily driver OBDb replaced the vehicle's earlier OBDb import")
         compare(Harness.storedPlugins().length, 1, "the earlier copy went")
@@ -490,7 +491,7 @@ SettingsKit {
         verify(page.importPart.obdbYearFromVin)
         compare(page.importPart.obdbReport.year, 2000)
         press(page, "obdbKeep")
-        compare(page.picksPart.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
+        compare(page.picksPart.picks, ["obd2", "plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
     }
 
     // A model year typed digit by digit refuses nothing until its fourth

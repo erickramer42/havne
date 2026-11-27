@@ -93,3 +93,19 @@ TEST(Tier3CeilingTest, APluginsOwnRequestReadsNoMemory)
 }
 
 } // namespace
+
+TEST(Tier3CeilingTest, AWriteIsADownloadOrARoutineStartedAndNothingElse)
+{
+    unsigned allowed = 0;
+    for (unsigned sid = 0; sid <= 0xFF; ++sid) {
+        for (unsigned sub = 0; sub <= 0xFF; ++sub) {
+            const bool want = sid == 0x34 || sid == 0x36 || sid == 0x37 ||
+                              (sid == 0x31 && sub == 0x01);
+            const bool got = ecuio_tier3_write_allowed(
+                static_cast<uint8_t>(sid), static_cast<uint8_t>(sub));
+            allowed += got ? 1u : 0u;
+            ASSERT_EQ(got, want) << std::hex << sid << " " << sub;
+        }
+    }
+    EXPECT_EQ(allowed, 3u * 256u + 1u);
+}

@@ -200,14 +200,17 @@ private:
     size_t vin_run_ = 0;
     uint64_t vin_at_ = 0;
     char ring_[kVinLength] = {};
-    /* VIN characters still masked after a window's: its span's 16 after */
-    size_t ahead_ = 0;
     /* A JSON escape under way: 1 after its backslash, 2 in a \u's digits,
      * held in pending_ */
-    int escape_ = 0;
     uint8_t pending_[5] = {};
-    size_t pending_n_ = 0;
+    bool escaped_ = false;
+    bool run_escaped_ = false;
+    int escape_ = 0;
     uint32_t code_ = 0;
+    uint64_t escape_at_ = 0;
+    size_t pending_n_ = 0;
+    /* VIN characters still masked after a window's: its span's 16 after */
+    size_t ahead_ = 0;
 };
 
 /* One message, whole: the class plus one of its first match, or 0 */

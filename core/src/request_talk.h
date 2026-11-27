@@ -46,6 +46,9 @@
 constexpr uint32_t ECUIO_ENGINE_PDU_MAX = 60;
 static_assert(ECUIO_ENGINE_PDU_MAX == ECUIO_PT_WRITE_MAX - 4,
               "a talk's request fits one PassThruWriteMsgs message");
+constexpr uint32_t ECUIO_ENGINE_WRITE_MAX = 4095;
+static_assert(ECUIO_ENGINE_WRITE_MAX == ECUIO_PT_WRITE_LONG_MAX - 4,
+              "a write-class talk is ISO-TP's longest, one J2534 message");
 /* The longest on a transport that sends single frames only (ELM327), and
  * to a functional address on any */
 constexpr uint32_t ECUIO_ENGINE_PDU_SINGLE = 7;
@@ -98,6 +101,7 @@ enum class ecuio_talk_kind : uint8_t {
               operation's run offers one (request_operation.h); a plugin's
               request is always plain */
     check,   /* an operation's reading before its run (ecuio_check_allowed) */
+    write,   /* an operation's write-class request (ecuio_tier3_write_allowed) */
     session, /* a run's own session (ecuio_operation_session_allowed) */
 };
 
@@ -115,6 +119,7 @@ struct ecuio_engine_talk_state {
     bool offered = false;    /* waiting for its turn */
     bool out = false;        /* the channel's one-shot is this talk */
     bool after_scan = false; /* the scan's next entry goes before it */
+    uint16_t wide_len = 0;   /* a write's length; its bytes are the engine's */
     ecuio_talk_result result;
 };
 
@@ -175,6 +180,9 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
         q.kind == ecuio_talk_kind::session) {
         return q.len == 2;
     }
+    if (q.kind == ecuio_talk_kind::write) {
+        return !access;
+    }
     if (!access || q.len < 2) {
         return false;
     }
@@ -201,6 +209,9 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
     if (q.kind == ecuio_talk_kind::check) {
         return ecuio_check_allowed(q.pdu[0], sub);
     }
+    if (q.kind == ecuio_talk_kind::write) {
+        return ecuio_tier3_write_allowed(q.pdu[0], sub);
+    }
     if (q.kind == ecuio_talk_kind::session) {
         return ecuio_operation_session_allowed(q.pdu[0], sub);
     }
@@ -214,6 +225,7 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
 inline bool ecuio_talk_echo_fits(const ecuio_talk_request& q)
 {
     return q.kind == ecuio_talk_kind::read ||
+           q.kind == ecuio_talk_kind::write ||
            q.echo >= ecuio_talk_echo_min(q.pdu[0]);
 }
 
@@ -229,10 +241,10 @@ inline bool ecuio_talk_echo_fits(const ecuio_talk_request& q)
  * transport. A taken request is copied: q.pdu is not read after the call
  * returns. A taken seed ends the window of the seed before it and keeps
  * its own window_us and sub-function in w. */
-inline ecuio_talk_offer ecuio_engine_talk(ecuio_engine_talk_state& t,
-                                          ecuio_key_window& w, uint32_t pdu_max,
-                                          const ecuio_talk_request& q,
-                                          int64_t now_us)
+inline ecuio_talk_offer
+ecuio_engine_talk(ecuio_engine_talk_state& t, ecuio_key_window& w,
+                  uint32_t pdu_max, const ecuio_talk_request& q, int64_t now_us,
+                  uint8_t* wide = nullptr, uint32_t wide_max = 0)
 {
     if (q.pdu == nullptr || q.len == 0 || q.echo < 1 || q.echo > 3 ||
         q.echo > q.len || (q.len < 2 && ecuio_tier2_splits(q.pdu[0])) ||
@@ -240,16 +252,27 @@ inline ecuio_talk_offer ecuio_engine_talk(ecuio_engine_talk_state& t,
         !ecuio_talk_kind_fits(q, w, now_us)) {
         return ecuio_talk_offer::refused;
     }
-    if (q.len > pdu_max || q.len > ECUIO_ENGINE_PDU_MAX) {
+    const bool write = q.kind == ecuio_talk_kind::write;
+    if (write ? wide == nullptr || q.len > wide_max ||
+                    q.len > ECUIO_ENGINE_WRITE_MAX
+              : q.len > pdu_max || q.len > ECUIO_ENGINE_PDU_MAX) {
         return ecuio_talk_offer::too_long;
     }
     if (t.offered || t.out || t.result.end != ecuio_talk_end::none) {
         return ecuio_talk_offer::busy;
     }
-    for (uint32_t k = 0; k < q.len; ++k) {
+    const uint32_t kept =
+        q.len < ECUIO_ENGINE_PDU_MAX ? q.len : ECUIO_ENGINE_PDU_MAX;
+    for (uint32_t k = 0; k < kept; ++k) {
         t.pdu[k] = q.pdu[k];
     }
-    t.len = static_cast<uint8_t>(q.len);
+    if (write) {
+        for (uint32_t k = 0; k < q.len; ++k) {
+            wide[k] = q.pdu[k];
+        }
+        t.wide_len = static_cast<uint16_t>(q.len);
+    }
+    t.len = static_cast<uint8_t>(kept);
     t.echo = q.echo;
     t.kind = q.kind;
     t.offered = true;
@@ -327,6 +350,19 @@ inline const uint8_t* ecuio_engine_pdu_of(const ecuio_engine_talk_state& t,
     const bool talk = once && t.out;
     *len = talk ? t.len : count;
     return talk ? t.pdu : bytes;
+}
+
+/* ecuio_engine_pdu_of, with a write's bytes in wide */
+inline const uint8_t* ecuio_engine_wire_of(const ecuio_engine_talk_state& t,
+                                           const uint8_t* wide, bool once,
+                                           const uint8_t* bytes, uint8_t count,
+                                           uint32_t* len)
+{
+    if (once && t.out && t.wide_len != 0) {
+        *len = t.wide_len;
+        return wide;
+    }
+    return ecuio_engine_pdu_of(t, once, bytes, count, len);
 }
 
 /* The talk out has ended at now_us: the one-shot is free, the result

@@ -390,6 +390,7 @@ ECUIO_OPERATION_END_UNLOCK_REFUSED = 7
 ECUIO_OPERATION_END_VOLTAGE_HIGH = 15
 ECUIO_OPERATION_END_VOLTAGE_LOW = 14
 ECUIO_OPERATION_KIND_DUMP = 1
+ECUIO_OPERATION_KIND_KERNEL_READ = 2
 ECUIO_OPERATION_LEAVE_DEFAULT = 1
 ECUIO_OPERATION_LEAVE_RESET = 2
 ECUIO_OPERATION_MAY_UNLOCK = 1
@@ -419,6 +420,7 @@ ECUIO_PLUGIN_MAX_LEVELS = 32
 ECUIO_PLUGIN_MAX_OPERATIONS = 8
 ECUIO_PLUGIN_MAX_PAGES = 16
 ECUIO_PLUGIN_MAX_SERVICES = 16
+ECUIO_PLUGIN_MAX_STARTS = 8
 ECUIO_PLUGIN_MAX_STEPS = 64
 ECUIO_PLUGIN_MAX_SUBS = 14
 ECUIO_PLUGIN_MAX_VALUES = 0x1000
@@ -569,7 +571,9 @@ ECUIO_SOURCE_MERGED = 2
 ECUIO_SOURCE_SHARE_ALIKE = 1
 ECUIO_SOURCE_TEXT_LEN = 0x208
 ECUIO_SOURCE_TEXT_MAX = 0x200
+ECUIO_STEP_DOWNLOAD = 3
 ECUIO_STEP_READ = 1
+ECUIO_STEP_ROUTINE = 4
 ECUIO_STEP_SESSION_EXTENDED = 3
 ECUIO_STEP_SESSION_PROGRAMMING = 2
 ECUIO_STEP_UPLOAD = 2
@@ -901,6 +905,9 @@ class ecuio_plugin_info_t(Structure):
     pass
 
 class ecuio_plugin_operation_ident_t(Structure):
+    pass
+
+class ecuio_plugin_operation_kernel_t(Structure):
     pass
 
 class ecuio_plugin_operation_step_t(Structure):
@@ -1676,6 +1683,20 @@ ecuio_plugin_operation_ident_t._fields_ = [
     ('role', c_uint32),
     ('reserved', (c_uint32 * 4)),
 ]
+ecuio_plugin_operation_kernel_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('ram_address', c_uint64),
+    ('ram_bytes', c_uint64),
+    ('start_count', c_uint32),
+    ('start', (c_uint16 * 8)),
+    ('quiet_session', c_uint8),
+    ('quiet_keepalive', c_uint8),
+    ('reserved0', c_uint16),
+    ('keepalive_ms', c_uint32),
+    ('stays', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
 ecuio_plugin_operation_step_t._fields_ = [
     ('struct_size', c_uint32),
     ('flags', c_uint32),
@@ -1689,7 +1710,8 @@ ecuio_plugin_operation_step_t._fields_ = [
     ('dfi', c_uint8),
     ('reserved0', c_uint8),
     ('name', (c_char * 32)),
-    ('reserved', (c_uint32 * 4)),
+    ('routine_id', c_uint32),
+    ('reserved', (c_uint32 * 3)),
 ]
 ecuio_plugin_operation_t._fields_ = [
     ('struct_size', c_uint32),
@@ -2265,8 +2287,10 @@ FUNCTIONS = {
     'ecuio_plugin_load': (c_int, [c_char_p, c_size_t, ecuio_plugin_read_t, c_void_p, POINTER(POINTER(ecuio_plugin_t))]),  # plugin.h
     'ecuio_plugin_match': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_vin_info_t), POINTER(c_uint32), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_operation': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_t)]),  # plugin.h
+    'ecuio_plugin_operation_blob': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(POINTER(c_uint8)), POINTER(c_uint64)]),  # plugin.h
     'ecuio_plugin_operation_count': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_operation_ident': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_ident_t)]),  # plugin.h
+    'ecuio_plugin_operation_kernel': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_kernel_t)]),  # plugin.h
     'ecuio_plugin_operation_step': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_step_t)]),  # plugin.h
     'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
     'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h

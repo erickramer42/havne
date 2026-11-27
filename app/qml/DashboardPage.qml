@@ -189,6 +189,10 @@ Page {
         }
         return all
     }
+    readonly property var roomPages: pages.map(p => ({
+        name: String(p.name),
+        cells: (Array.isArray(p.cells) ? p.cells : []).map(c => lookupRefs(c && Array.isArray(c.refs) ? c.refs : []))
+    }))
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
@@ -363,6 +367,24 @@ Page {
         store[formKey] = texts.text
         doc = next
         return true
+    }
+
+    // The built-in layout has no stored text to carry
+    function carryOver(beside, has) {
+        let count = 0
+        for (const key of ["phone", "desktop"]) {
+            const read = DashboardBook.parse(store[key], key)
+            if (store[key] === "" || read.problem !== "")
+                continue
+            const r = DashboardBook.carryOver(read.doc, beside, has)
+            if (r.count === 0)
+                continue
+            store[key] = DashboardBook.serialize(r.doc)
+            if (key === formKey)
+                doc = r.doc
+            count += r.count
+        }
+        return count
     }
 
     DashLayoutFile {

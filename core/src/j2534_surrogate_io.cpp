@@ -282,7 +282,7 @@ void sur_log(const ecuio_j2534_sur_handle_t* h, const char* fmt, ...)
  * out is drained by the next transaction. */
 bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
               ecuio_sur_response_t* out_resp, DWORD timeout_ms,
-              ecuio_pt_rx_t* frames)
+              ecuio_pt_rx_t* frames, const uint8_t* tail, uint32_t tail_len)
 {
     if (h->unresponsive) {
         return false;
@@ -293,7 +293,9 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
         }
         h->pending_response_id = 0;
     }
-    if (!ov_write(h->pipe, h->io_event, &req, sizeof(req), timeout_ms)) {
+    if (!ov_write(h->pipe, h->io_event, &req, sizeof(req), timeout_ms) ||
+        (tail_len > 0 &&
+         !ov_write(h->pipe, h->io_event, tail, tail_len, timeout_ms))) {
         SUR_LOG(h, "transact: ov_write failed (req_id=%u op=%u err=%lu)\n",
                 req.request_id, req.opcode, GetLastError());
         /* A canceled write can leave part of the request in the pipe */

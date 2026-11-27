@@ -210,10 +210,49 @@ ecuio_status_t find_plan(const ecuio_session_t* s,
                   "the operation's module isn't one this session talks to");
 }
 
+/* Whether a kernel read's download and start fit the adapter's writes */
+ecuio_status_t helper_fits(const plan& p, uint32_t write_bound)
+{
+    const ecuio_operation::kernel& k = p.helper;
+    const uint32_t opening = 3u + k.address_bytes + k.size_bytes;
+    const uint32_t need = opening > 4u ? opening : 4u;
+    if (p.has_kernel && write_bound < need) {
+        ecuio_detail_set("the helper's download is asked in %u bytes: this "
+                         "adapter carries no write that long",
+                         need);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return ECUIO_OK;
+}
+
+/* A write-class run's link: J2534, or SocketCAN on no car's bus */
+ecuio_status_t judge_link(const ecuio_session_t* s)
+{
+    const std::string scheme = scheme_of(s->uri);
+    if (scheme == "elm327") {
+        return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
+                      "this plan writes to the module, which needs a J2534 "
+                      "adapter: an ELM327 sends no request longer than a "
+                      "frame");
+    }
+    if (scheme == "socketcan" && !s->no_car_bus) {
+        return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
+                      "this plan writes to the module, which Havne does over "
+                      "J2534 only: SocketCAN runs it on vcan alone");
+    }
+    return ECUIO_OK;
+}
+
 ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                            const ecuio_bound_channel* b, uint32_t flags,
-                           bool write)
+                           const plan& p, bool write)
 {
+    const ecuio_status_t link = write ? judge_link(s) : ECUIO_OK;
+    if (link != ECUIO_OK) {
+        return link;
+    }
+    /* A kernel read writes only to RAM: the flash's gates aren't its */
+    const bool flash = write && !p.has_kernel;
     if (b == nullptr && ecuio_session_channel_wants_consent(s, channel)) {
         return refuse(ECUIO_ERR_CONSENT_REQUIRED,
                       "no consent was given to the plugin whose code talks "
@@ -234,12 +273,12 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                       "Ready; engine off by the key, not by start-stop; in P "
                       "or neutral with the parking brake on");
     }
-    if (write && (flags & ECUIO_OPERATION_BATTERY_SUPPORT) == 0) {
+    if (flash && (flags & ECUIO_OPERATION_BATTERY_SUPPORT) == 0) {
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "connect battery support (a charger in its "
                       "power-supply mode) and confirm it first");
     }
-    if (write && !s->battery.source) {
+    if (flash && !s->battery.source) {
         return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
                       "this adapter reads no battery voltage: a write needs "
                       "one");
@@ -376,7 +415,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
     const bool write = g_write_class.load() || ecuio_operation::class_of(*p) ==
                                                    ECUIO_OPERATION_CLASS_WRITE;
-    st = judge_gates(s, channel, b, q.flags, write);
+    st = judge_gates(s, channel, b, q.flags, *p, write);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -390,6 +429,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
                       "the module's code isn't talking on this channel");
     }
     st = fits(*p, b->talk_bound.load());
+    st = st == ECUIO_OK ? helper_fits(*p, b->write_bound.load()) : st;
     if (st != ECUIO_OK) {
         return st;
     }
@@ -400,7 +440,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     }
     uint32_t checks = 0;
     bool held = false;
-    st = take_envelope(s, write, &checks, &held);
+    st = take_envelope(s, write && !p->has_kernel, &checks, &held);
     if (st != ECUIO_OK) {
         return st;
     }

@@ -70,6 +70,8 @@ inline void ecuio_conversations_start(ecuio_session_t* s,
         const uint32_t c = t->bound[k].conversation.channel;
         if (c < e->chan_count) {
             t->bound[k].talk_bound.store(ecuio_engine_talk_bound(e, c));
+            t->bound[k].write_bound.store(
+                e->chans[c].functional ? 0u : e->write_max);
         }
         if (c < e->chan_count && e->chans[c].session_entries == 0 &&
             e->chans[c].session_step == ECUIO_SESSION_STATE_ENTERING) {
@@ -225,7 +227,7 @@ inline int64_t ecuio_conversations_next_us(ecuio_session_t* s,
                                            const ecuio_request_engine* e,
                                            int64_t now_us)
 {
-    int64_t next = ecuio_operation::wait_us(s, e);
+    int64_t next = ecuio_operation::wait_us(s, e, now_us);
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         const ecuio_bound_channel& b = t->bound[k];

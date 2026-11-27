@@ -59,8 +59,10 @@ ColumnLayout {
                 required property var modelData
                 objectName: "alertPick_" + modelData.ref
                 width: Math.min(implicitWidth, picker.room)
+                readonly property string named: modelData.tag ? qsTr("%1, %2").arg(modelData.name, modelData.tag)
+                                                              : modelData.name
                 text: modelData.unit !== "" && modelData.unit !== modelData.name
-                      ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit) : modelData.name
+                      ? qsTr("%1 (%2)").arg(named).arg(modelData.unit) : named
                 onClicked: picker.picked(modelData)
             }
         }

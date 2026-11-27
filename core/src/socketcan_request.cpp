@@ -219,8 +219,8 @@ void send_due(ecuio_socketcan_transport* t, link_health& h,
     }
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
     uint32_t len = 0;
-    const uint8_t* pdu = ecuio_engine_pdu_of(
-        e.chans[c].talk, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
+    const uint8_t* pdu =
+        ecuio_engine_wire(&e, c, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
     isotp_can f;
     if (socketcan_send_start(send, *t->sender, c, r, t->tx_ids[c], pdu, len,
                              now, &f) == socketcan_send_step::failed ||
@@ -757,6 +757,15 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
     (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
     follow_modules(t, w);
     ecuio_step_conversations(s, &e, now_us(t));
+    if (e.aside_due) {
+        e.aside_due = false;
+        isotp_can f;
+        f.id = e.aside_tx;
+        f.data[0] = sizeof e.aside;
+        std::memcpy(f.data + 1, e.aside, sizeof e.aside);
+        isotp_pad(&f, 1 + sizeof e.aside);
+        (void)write_frame(t->fd, f, e.aside_tx > 0x7FFu);
+    }
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(s, e, c, t->rx_ids[c], w.published[c]);
         ecuio_publish_identity(s, e, c, t->rx_ids[c], w.published_identity[c]);

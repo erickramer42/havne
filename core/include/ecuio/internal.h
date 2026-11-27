@@ -369,8 +369,8 @@ ecuio_status_t ecuio_j2534_read_msg(ecuio_j2534_handle_t* handle,
  * mapping into link health (read_msg, above).
  */
 
-/* Single-message PassThruWriteMsgs relay. data_len <= ECUIO_PT_WRITE_MAX
- * (a write's own cap, the CAN ID included). tx_flags carries J2534 TxFlags verbatim (bit 8 =
+/* Single-message PassThruWriteMsgs relay. data_len <= ECUIO_PT_WRITE_LONG_MAX
+ * (the CAN ID included). tx_flags carries J2534 TxFlags verbatim (bit 8 =
  * CAN_29BIT_ID for 29-bit targets). timeout_ms passes through to the
  * vendor unchanged; 0 = non-blocking. out_num_written may be NULL;
  * *out_num_written < 1 after ECUIO_OK means the vendor reported

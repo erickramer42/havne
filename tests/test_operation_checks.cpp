@@ -214,3 +214,33 @@ TEST(OperationChecksTest, NoVoltageIsAskedWhenTheAdapterReadsOne)
 }
 
 } // namespace
+
+TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
+{
+    using ecuio_operation::volts;
+    using ecuio_operation::volts_take;
+    volts v;
+    v.write = true;
+    v.ram_only = true;
+    volts_take(v, 11790, false);
+    EXPECT_TRUE(v.low_warn) << "the dump's warn under 11.8 V";
+    volts_take(v, 11400, false);
+    EXPECT_TRUE(v.low_warn);
+    EXPECT_FALSE(v.refused_low) << "no write's floor";
+    volts_take(v, 11800, false);
+    EXPECT_FALSE(v.low_warn) << "nor the write's warn under 12.0 V";
+    for (const uint32_t high : {16100u, 24000u}) {
+        volts_take(v, high, false);
+        EXPECT_TRUE(v.high_warn) << high;
+        EXPECT_FALSE(v.refused_high) << "a supply's fault is warned";
+    }
+
+    volts write;
+    write.write = true;
+    volts_take(write, 11900, false);
+    EXPECT_TRUE(write.low_warn) << "a write's warn under 12.0 V";
+    volts_take(write, 11400, false);
+    EXPECT_TRUE(write.refused_low) << "a write's start under 11.5 V";
+    volts_take(write, 16100, false);
+    EXPECT_TRUE(write.refused_high) << "a write's start over 16 V";
+}

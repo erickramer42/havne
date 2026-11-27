@@ -717,6 +717,13 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
  *     address and the size, and each number fits its bytes. "session"
  *     is "extended". No two steps of a plan share an address, and
  *     their bytes add to at most ECUIO_DUMP_IMAGE_MAX.
+ *   - "kind" "kernel_read" is a dump through a helper: "kernel" declares
+ *     its RAM window, its start routines, whether it "stays" for a second
+ *     upload and the "functional" requests (10 82, 3E 80 with "every_ms"),
+ *     and its first two steps are "download" (the helper, a "bin" file
+ *     pinned by its "sha256", into the window) and "routine" (one of the
+ *     start routines), both "programming". The window shares no address
+ *     with a range.
  *
  * A step kind or a session this Havne doesn't run is refused by its
  * name, so a later Havne's plan never half-loads. Core derives three
@@ -731,6 +738,8 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 
 /* ecuio_plugin_operation_t.kind, append-only */
 #define ECUIO_OPERATION_KIND_DUMP 1u
+/* a dump through a helper the plan downloads to RAM and starts */
+#define ECUIO_OPERATION_KIND_KERNEL_READ 2u
 
 /* ecuio_plugin_operation_t.op_class: derived by core, never declared */
 #define ECUIO_OPERATION_CLASS_READ  1u /* every step only reads */
@@ -739,6 +748,11 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 /* ecuio_plugin_operation_step_t.kind, append-only */
 #define ECUIO_STEP_READ   1u /* service 23 */
 #define ECUIO_STEP_UPLOAD 2u /* services 35, 36 and 37 */
+#define ECUIO_STEP_DOWNLOAD 3u /* services 34, 36 and 37: the helper */
+#define ECUIO_STEP_ROUTINE  4u /* service 31 01: the helper started */
+
+/* A kernel read's start routines, at most */
+#define ECUIO_PLUGIN_MAX_STARTS 8u
 
 /* ecuio_plugin_operation_step_t.session: the session's own byte */
 #define ECUIO_STEP_SESSION_PROGRAMMING 2u
@@ -783,8 +797,27 @@ typedef struct ecuio_plugin_operation_step {
     uint8_t dfi;           /* an upload's data format, 00 */
     uint8_t reserved0;     /* zero */
     char name[32];
-    uint32_t reserved[4]; /* zero; ABI growth space */
+    uint32_t routine_id;  /* a routine's; 0 for any other step */
+    uint32_t reserved[3]; /* zero; ABI growth space */
 } ecuio_plugin_operation_step_t;
+
+/* A kernel read's helper: the RAM it is downloaded to, the routines that
+ * may start it, whether it outlives an upload, and the functional
+ * requests that quiet the bus around the read. POD, 72 bytes. */
+typedef struct ecuio_plugin_operation_kernel {
+    uint32_t struct_size;
+    uint32_t flags; /* zero */
+    uint64_t ram_address;
+    uint64_t ram_bytes;
+    uint32_t start_count;
+    uint16_t start[ECUIO_PLUGIN_MAX_STARTS];
+    uint8_t quiet_session;   /* 0x82: a functional 10 82 first; 0 none */
+    uint8_t quiet_keepalive; /* 0x80: a functional 3E 80; 0 none */
+    uint16_t reserved0;      /* zero */
+    uint32_t keepalive_ms;   /* the 3E 80's cadence; 0 with none */
+    uint32_t stays;          /* 1: the helper serves a second upload */
+    uint32_t reserved[4];    /* zero; ABI growth space */
+} ecuio_plugin_operation_kernel_t;
 
 /* One identification DID of a plan. POD, 32 bytes. */
 typedef struct ecuio_plugin_operation_ident {
@@ -812,6 +845,14 @@ static_assert(offsetof(ecuio_plugin_operation_step_t, name) == 40,
               "plugin operation step name offset is ABI");
 static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
               "ecuio_plugin_operation_ident_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_step_t, routine_id) == 72,
+              "plugin operation step routine_id offset is ABI");
+static_assert(sizeof(ecuio_plugin_operation_kernel_t) == 72,
+              "ecuio_plugin_operation_kernel_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_kernel_t, start) == 28,
+              "plugin operation kernel start offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_kernel_t, keepalive_ms) == 48,
+              "plugin operation kernel keepalive_ms offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_plugin_operation_t) == 160,
                "ecuio_plugin_operation_t size is ABI");
@@ -819,6 +860,8 @@ _Static_assert(sizeof(ecuio_plugin_operation_step_t) == 88,
                "ecuio_plugin_operation_step_t size is ABI");
 _Static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
                "ecuio_plugin_operation_ident_t size is ABI");
+_Static_assert(sizeof(ecuio_plugin_operation_kernel_t) == 72,
+               "ecuio_plugin_operation_kernel_t size is ABI");
 #endif
 
 /* How many plans plugin has: 0 without the tier. ECUIO_ERR_NULL_ARGUMENT
@@ -841,6 +884,18 @@ ecuio_status_t
 ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin, uint32_t operation,
                              uint32_t index,
                              ecuio_plugin_operation_ident_t* out);
+
+/* A kernel read's helper and its bytes, which stay the plugin's (valid
+ * until ecuio_plugin_free). ECUIO_ERR_INVALID_ARGUMENT for a plan with no
+ * helper or past the count, and for a struct_size smaller than the
+ * struct, out untouched; ECUIO_ERR_NULL_ARGUMENT for a NULL. */
+ecuio_status_t
+ecuio_plugin_operation_kernel(const ecuio_plugin_t* plugin, uint32_t operation,
+                              ecuio_plugin_operation_kernel_t* out);
+ecuio_status_t ecuio_plugin_operation_blob(const ecuio_plugin_t* plugin,
+                                           uint32_t operation,
+                                           const uint8_t** bytes,
+                                           uint64_t* length);
 
 /*
  * Making and changing a packed plugin (ADR-0064): a signal file wrapped

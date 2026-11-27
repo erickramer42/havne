@@ -419,7 +419,7 @@ ecuio_status_t ecuio_j2534_write_frame(ecuio_j2534_handle_t* handle,
     if (handle == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (len == 0 || len > ECUIO_PT_WRITE_MAX) {
+    if (len == 0 || len > ECUIO_PT_WRITE_LONG_MAX) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (out_num_written != nullptr) {
