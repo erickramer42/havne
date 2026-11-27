@@ -1,6 +1,7 @@
 // File/layer: fuzz/fuzz_sim.cpp | C++17, Qt-free, libFuzzer
 // Testing: FUZZ: fuzz_sim
 
+#include "fuzz_sim_gateway.h"
 #include "sim_ecu.h"
 
 #include <stddef.h>
@@ -318,6 +319,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             abort();
         }
         if (r == ecuio_sim_uri_result::ok) {
+            fuzz_sim_gateway::check_config(config);
             check_timing(config.timing);
             const ecuio_sim_memory_faults& m = config.memory;
             const uint32_t periods[] = {m.cut, m.flip,   m.relock,
@@ -355,6 +357,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     config.faults.stalled = (data[0] >> 7) & 1;
     ++data;
     --size;
+    if (size > 0 && data[0] == 'G') {
+        fuzz_sim_gateway::fuzz(data, size);
+        return 0;
+    }
     if (size > 1 && data[0] == 'K') {
         config.kernel = true;
         config.kernel_faults.once = (data[1] & 1) != 0;

@@ -64,6 +64,7 @@ import struct
 import sys
 
 from seeds_dump import dump_seeds
+from seeds_gateway import sim_gateway_seeds, sim_gateway_uris
 from seeds_operation import operation_seeds, sim_kernel_seeds
 from seeds_wasm import conversation_seeds, guest_seeds, wasm_seeds
 
@@ -674,6 +675,8 @@ def main(argv):
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
     for name, data in sim_kernel_seeds(sim_run, sim_key).items():
         write(out, "fuzz_sim", name, data)
+    for name, data in sim_gateway_seeds(sim_key).items():
+        write(out, "fuzz_sim", name, data)
     # Its URIs (an odd first byte): faults and timing for every module and
     # aimed at one
     for name, uri in {
@@ -685,6 +688,7 @@ def main(argv):
         "uri-timing-wide": "mock://sim?delay=1:10000000&seed=18446744073709551615",
         "uri-timing-refused": "mock://sim?delay=9000:3000&fc=1000001",
         "uri-busy-bus": "mock://sim?modules=2&busy=ignore,21@7E9&bus=500",
+        **sim_gateway_uris(),
     }.items():
         write(out, "fuzz_sim", name, b"\x01" + uri.encode())
 
