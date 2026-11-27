@@ -25,7 +25,7 @@ constexpr int64_t kVoltsLateUs = 5000000;
 /* The battery's readings at the adapter, or the engine module's 01 42 */
 struct volts {
     bool write = false; /* the write's rule: judged once, at the start */
-    bool ram_only = false; /* a kernel read: the dump's numbers, 16 V kept */
+    bool ram_only = false; /* a kernel read: the dump's numbers */
     bool first = false; /* the start's reading is settled, got or not */
     bool has = false;
     bool from_ecu = false;
@@ -52,7 +52,6 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
         v.refused_high = mv > kWriteRefuseHighMv;
     } else if (!running) {
         v.low_warn = mv < kDumpWarnLowMv;
-        v.refused_high = v.write && mv > kWriteRefuseHighMv;
     } else if (!v.write && mv < kDumpStopMv) {
         v.dropped = true;
     }

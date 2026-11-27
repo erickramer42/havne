@@ -188,9 +188,11 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
     EXPECT_FALSE(v.refused_low) << "no write's floor";
     volts_take(v, 11800, false);
     EXPECT_FALSE(v.low_warn) << "nor the write's warn under 12.0 V";
-    volts_take(v, 16100, false);
-    EXPECT_TRUE(v.refused_high) << "a 24 V system refused, as for a write";
-    v.refused_high = false;
+    for (const uint32_t high : {16100u, 24000u}) {
+        volts_take(v, high, false);
+        EXPECT_TRUE(v.high_warn) << high;
+        EXPECT_FALSE(v.refused_high) << "a supply's fault is warned";
+    }
     volts_take(v, 10999, true);
     EXPECT_FALSE(v.dropped) << "a sag never ends it";
 
@@ -200,4 +202,6 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
     EXPECT_TRUE(write.low_warn) << "a write's warn under 12.0 V";
     volts_take(write, 11400, false);
     EXPECT_TRUE(write.refused_low) << "a write's start under 11.5 V";
+    volts_take(write, 16100, false);
+    EXPECT_TRUE(write.refused_high) << "a write's start over 16 V";
 }
