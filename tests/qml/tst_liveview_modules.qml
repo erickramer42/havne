@@ -91,8 +91,12 @@ LiveViewKit {
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
-        connectMock(page)
-        verify(Bridge.liveSignalModel.modules.length < 2)
+        const one = JSON.stringify({
+            havne_signals: 3, name: "One", source: { name: "t" }, ecus: [{ id: "pcm", rx: "7E8", name: "Engine" }],
+            signals: [sig("ev", "Battery voltage", "pcm", "D100"), sig("fuel", "Fuel level", "pcm", "D101")]
+        })
+        compare(Bridge.connectSession("mock://?profile=" + keptProfile(one)), "")
+        tryCompare(Bridge.liveSignalModel.modules, "length", 1)
         bar.options.open()
         tryVerify(() => bar.options.opened)
         verify(!findChild(bar.options.contentItem, "modulesCaption").visible, "one module shows no part")
@@ -141,6 +145,12 @@ LiveViewKit {
         tryVerify(() => note.visible)
         verify(note.text.startsWith("M3 isn't read: the adapter listens to 2 modules at a time and all 2 are in use."),
                note.text)
+
+        for (const name of ["N s1b", "N s2b", "N s3b", "N s4", "N s5", "N s5b"])
+            tick(list, name)
+        tryVerify(() => Bridge.signalModel.unaskedCount === 0, 8000, "every row is asked or waits for room")
+        verify(Bridge.signalModel.noRoomCount > 0)
+        verify(note.visible, "the line follows the rows with no room, not the unasked ones")
     }
 
     function test_theNoRoomLineListsOnlyFreeableModules() {
