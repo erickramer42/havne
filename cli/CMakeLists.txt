@@ -7,6 +7,7 @@ add_executable(havne-cli
     common.cpp
     session_lines.cpp
     profile_source.cpp
+    together.cpp
     cmd_stream.cpp
     cmd_log.cpp
     cmd_view.cpp

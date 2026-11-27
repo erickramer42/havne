@@ -10,6 +10,7 @@
 #include "elm327_emulator.h"
 #include "elm327_lines.h"
 #include "log_lines.h"
+#include "together.h"
 
 #include "commands.h"
 #include "profile_source.h"
@@ -209,6 +210,10 @@ int run_sim(const SimArgs& args)
 int cmd_sim(int argc, char** argv)
 {
     SimArgs sim;
+    if (!take_together(argc, argv, 2, &sim.together)) {
+        usage(stderr);
+        return kExitUsage;
+    }
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--on" && i + 1 < argc) {
@@ -257,13 +262,20 @@ int cmd_sim(int argc, char** argv)
         usage(stderr);
         return kExitUsage;
     }
+    std::string opened;
+    if (sim.together.given) {
+        const int rc = use_together(sim.together, sim.uri, &opened);
+        if (rc >= 0) {
+            return rc;
+        }
+        sim.uri = opened.c_str();
+    }
     if (sim.plugin != nullptr) {
         const int rc = use_plugin(sim.plugin, sim.uri);
         if (rc >= 0) {
             return rc;
         }
     }
-    std::string opened;
     if (sim.signals != nullptr) {
         const int rc = use_signal_file(sim.signals, sim.uri, &opened);
         if (rc >= 0) {

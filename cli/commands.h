@@ -15,6 +15,7 @@
 #include "view_lines.h"
 #include "plugin_lines.h"
 #include "elm327_lines.h"
+#include "together.h"
 
 #include "common.h"
 
@@ -49,6 +50,7 @@ struct StreamArgs {
     const char* vehicle = nullptr;        // --vehicle's label
     uint32_t unlock_rx = 0;               // --unlock's module, by its reply ID
     uint8_t unlock_level = 0;             // and its level, checked
+    Together together;
 };
 
 int run_stream(const StreamArgs& args);
@@ -118,6 +120,7 @@ struct ViewArgs {
     std::string profile;                // --profile; "" for the default
     const char* signals_path = nullptr; // --signals
     const char* plugin_path = nullptr;  // --plugin
+    Together together;
 };
 
 struct RecordingCloser {
@@ -233,6 +236,7 @@ struct SimArgs {
     const char* plugin = nullptr;  /* --plugin's package */
     const char* elm327 = nullptr;  /* --elm327's tcp:[<address>:]<port> */
     cli::Elm327Address elm327_at;
+    Together together;
 };
 
 int run_sim_elm327(const SimArgs& args);

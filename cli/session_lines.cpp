@@ -16,6 +16,7 @@
 #include "refused_signals.h"
 #include "scan_line.h"
 #include "signal_file_lines.h"
+#include "together.h"
 
 #include "partial_file.h"
 #include "profile_source.h"
@@ -187,8 +188,8 @@ void write_held_session(Output& out, ecuio_session_t* session,
 void write_session(Output& out, const ecuio_session_t* session,
                    const ecuio_session_info_t& info)
 {
-    char buf[4096];
-    cli::Line l(buf, sizeof buf);
+    BigLine b(4096 + together_keys_bytes());
+    cli::Line& l = b.line;
     l.raw("{\"type\":\"session\"");
     l.key("backend");
     l.string(backend_name(info.backend), SIZE_MAX);
@@ -229,6 +230,7 @@ void write_session(Output& out, const ecuio_session_t* session,
     }
     flag_keys(l, info);
     awake_key(l, session, info);
+    together_keys(l);
     if (g_session_consent.applied) {
         l.key("consent");
         cli::session_consent(l, g_session_consent.fingerprint,
@@ -257,6 +259,7 @@ void write_session(Output& out, const ecuio_session_t* session,
     }
     l.ch('}');
     write_line(out, l);
+    write_together_notes(out);
 }
 
 namespace {

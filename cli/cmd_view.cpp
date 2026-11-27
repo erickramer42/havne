@@ -10,6 +10,7 @@
 #include "jsonl.h"
 #include "plugin_lines.h"
 #include "recording_signals.h"
+#include "together.h"
 
 #include "commands.h"
 #include "profile_source.h"
@@ -103,9 +104,10 @@ struct Viewed {
 // it (--signals' file, a --plugin's variant); NULL for any other profile
 const ecuio_signal_file_t* given_file(const std::string& profile)
 {
-    if (g_signal_file != nullptr &&
-        profile == ecuio_signal_file_profile(g_signal_file)) {
-        return g_signal_file;
+    for (const ecuio_signal_file_t* f : {g_together, g_signal_file}) {
+        if (f != nullptr && profile == ecuio_signal_file_profile(f)) {
+            return f;
+        }
     }
     for (uint32_t v = 0; g_plugin != nullptr; ++v) {
         const ecuio_signal_file_t* f = ecuio_plugin_variant_file(g_plugin, v);
@@ -196,10 +198,43 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
 // decode with when none was given. -1 to go on; else the exit code: a
 // file that can't be read or is refused is start and an error line (3),
 // a --profile that isn't the file's or a variant's a usage error (2)
+int use_view_together(Output& out, ViewArgs& args)
+{
+    TogetherSet set;
+    const int rc = merge_together(out, args.together, &set);
+    if (rc >= 0) {
+        return rc;
+    }
+    if (!args.profile.empty() && args.profile != set.profile) {
+        std::fprintf(stderr, "havne-cli: --profile isn't --together's, %s\n",
+                     set.profile.c_str());
+        ecuio_signal_file_free(set.merged);
+        return kExitUsage;
+    }
+    args.profile = set.profile;
+    if (set.merged == nullptr) {
+        return -1;
+    }
+    const ecuio_status_t st = ecuio_profile_register(
+        set.profile.c_str(), ecuio_signal_file_set(set.merged), nullptr);
+    if (st != ECUIO_OK) {
+        const std::string why = ecuio_last_error_detail();
+        ecuio_signal_file_free(set.merged);
+        write_start(out);
+        write_error(out, st, why.c_str());
+        return ended(out, kExitConnect);
+    }
+    g_together = set.merged;
+    return -1;
+}
+
 int use_view_signals(Output& out, ViewArgs& args)
 {
     std::string why;
     ecuio_status_t st = ECUIO_OK;
+    if (args.together.given) {
+        return use_view_together(out, args);
+    }
     if (args.signals_path != nullptr) {
         ecuio_signal_file_t* file = nullptr;
         st = load_signal_file(args.signals_path, &file, &why);
