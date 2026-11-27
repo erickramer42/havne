@@ -593,6 +593,29 @@ static bool read_request(ecuio_sur_request_t* req)
     return true;
 }
 
+static uint8_t g_long[ECUIO_SUR_LONG_MSG_MAX];
+
+/* A length past the wire leaves the pipe unreadable: a broken pipe */
+static bool read_long_data(const ecuio_sur_request_t& req)
+{
+    const uint32_t n = req.u.write_long.data_len;
+    if (n == 0 || n > ECUIO_SUR_LONG_MSG_MAX) {
+        stage("OP_WRITE_LONG: data_len %lu past the wire: the pipe is lost",
+              static_cast<unsigned long>(n));
+        return false;
+    }
+    DWORD have = 0;
+    while (have < n) {
+        DWORD rd = 0;
+        if (!ReadFile(g_pipe, g_long + have, n - have, &rd, nullptr) ||
+            rd == 0) {
+            return false;
+        }
+        have += rd;
+    }
+    return true;
+}
+
 /* Wide entry point: the client passes the DLL path as UTF-16, so a
  * non-ASCII path survives (an ANSI argv would mangle it). */
 int wmain(int argc, wchar_t* argv[])
@@ -719,7 +742,8 @@ int wmain(int argc, wchar_t* argv[])
 
     while (true) {
         ecuio_sur_request_t req = {};
-        if (!read_request(&req)) {
+        if (!read_request(&req) ||
+            (req.opcode == ECUIO_SUR_OP_WRITE_LONG && !read_long_data(req))) {
             break;
         }
 
@@ -774,6 +798,16 @@ int wmain(int argc, wchar_t* argv[])
                                           req.u.write.tx_flags,
                                           req.u.write.timeout_ms,
                                           &resp.aux);
+            break;
+        case ECUIO_SUR_OP_WRITE_LONG:
+            if (refuse_before_open("OP_WRITE_LONG", true)) {
+                resp.status = ECUIO_PT_STATUS_FAILED;
+                break;
+            }
+            resp.status = handle_op_write(
+                req.u.write_long.channel_id, g_long, req.u.write_long.data_len,
+                req.u.write_long.tx_flags, req.u.write_long.timeout_ms,
+                &resp.aux);
             break;
         case ECUIO_SUR_OP_IOCTL:
             /* Trust boundary: validate input length. READ_VBATT is

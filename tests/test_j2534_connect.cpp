@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "j2534_backend_fixture.h"
 #include "new_counter.h"
@@ -365,7 +366,10 @@ TEST_F(J2534ConnectTest, HelperFailuresHaveOneCodePerCause)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_write_frame(h, ch, req, 0, 0, 0, &written),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, big, 65, 0, 0, &written),
+    const std::vector<uint8_t> past(ECUIO_PT_WRITE_LONG_MAX + 1);
+    EXPECT_EQ(ecuio_j2534_write_frame(h, ch, past.data(),
+                                      ECUIO_PT_WRITE_LONG_MAX + 1, 0, 0,
+                                      &written),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(fake_control::writes(page), writes0);
 

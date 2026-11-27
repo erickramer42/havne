@@ -86,4 +86,49 @@ static_assert(
     "tier 3's read ceiling: 23, 35, 36 and 37, core's alone, and nothing "
     "that downloads, writes, resets or clears");
 
+/* A write-class operation's own: a download and a routine started */
+constexpr bool ecuio_tier3_write_allowed(uint8_t sid, uint8_t sub)
+{
+    return sid == 0x34 || sid == 0x36 || sid == 0x37 ||
+           (sid == 0x31 && sub == 0x01);
+}
+
+constexpr bool ecuio_tier3_write_ceiling_holds()
+{
+    constexpr uint8_t probes[] = {0x00, 0x01, 0x02, 0x03,
+                                  0x44, 0x7E, 0x80, 0xFF};
+    for (unsigned sid = 0; sid <= 0xFF; ++sid) {
+        const unsigned subs = sid == 0x31 ? 256u : sizeof probes;
+        for (unsigned k = 0; k < subs; ++k) {
+            const uint8_t s = static_cast<uint8_t>(sid);
+            const uint8_t b = sid == 0x31 ? static_cast<uint8_t>(k) : probes[k];
+            const bool listed =
+                s == 0x34 || s == 0x36 || s == 0x37 || (s == 0x31 && b == 0x01);
+            if (ecuio_tier3_write_allowed(s, b) != listed) {
+                return false;
+            }
+            if (listed && (ecuio_tier2_allowed(s, b) ||
+                           ecuio_tier2_guest_may_send(s, b))) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static_assert(ecuio_tier3_write_ceiling_holds() &&
+                  ecuio_tier3_write_allowed(0x34, 0x00) &&
+                  ecuio_tier3_write_allowed(0x36, 0x01) &&
+                  ecuio_tier3_write_allowed(0x37, 0x00) &&
+                  ecuio_tier3_write_allowed(0x31, 0x01) &&
+                  !ecuio_tier3_write_allowed(0x31, 0x02) &&
+                  !ecuio_tier3_write_allowed(0x31, 0x03) &&
+                  !ecuio_tier3_write_allowed(0x11, 0x01) &&
+                  !ecuio_tier3_write_allowed(0x2E, 0xF1) &&
+                  !ecuio_tier3_write_allowed(0x3D, 0x44) &&
+                  !ecuio_tier3_write_allowed(0x14, 0xFF) &&
+                  !ecuio_tier3_write_allowed(0x10, 0x02) &&
+                  !ecuio_tier3_write_allowed(0x27, 0x01),
+              "tier 3's write ceiling: 34, 36, 37 and 31 01, core's alone");
+
 #endif /* ECUIO_TIER3_CEILING_H */

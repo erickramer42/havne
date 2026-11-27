@@ -204,9 +204,9 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
 {
     const j2534_channel& ch = t->chans[r.channel];
     uint32_t len = 0; /* a talk's whole request: the adapter segments it */
-    const uint8_t* pdu = ecuio_engine_pdu_of(t->engine.chans[r.channel].talk,
-                                             once, r.bytes, r.len, &len);
-    uint8_t msg[J2534_ADDR_LEN + ECUIO_ENGINE_PDU_MAX];
+    const uint8_t* pdu =
+        ecuio_engine_wire(&t->engine, r.channel, once, r.bytes, r.len, &len);
+    uint8_t msg[ECUIO_PT_WRITE_LONG_MAX];
     pack_be32(msg, ch.tx_id);
     memcpy(msg + J2534_ADDR_LEN, pdu, len);
     uint32_t written = 0;

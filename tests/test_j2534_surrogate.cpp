@@ -250,7 +250,9 @@ TEST(J2534SurrogateTest, MalformedRequestsAreRefusedAtBothEnds)
     /* The client's: nothing crosses the pipe. */
     EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, req, 0, 0, 0, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, 0, big, 65, 0, 0, nullptr),
+    const std::vector<unsigned char> past(ECUIO_SUR_LONG_MSG_MAX + 1);
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(
+                  h, 0, past.data(), ECUIO_SUR_LONG_MSG_MAX + 1, 0, 0, nullptr),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_j2534_sur_ioctl(h, 0, ECUIO_PT_IOCTL_SET_CONFIG, big, 65,
                                     nullptr, 0, nullptr),
@@ -318,6 +320,47 @@ TEST(J2534SurrogateTest, WriteRoundTripProducesEchoResponse)
     EXPECT_EQ(cap.payloads[0][0], expect[0]);
     EXPECT_EQ(memcmp(cap.payloads[0], expect, 3), 0);
 
+    EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
+}
+
+TEST(J2534SurrogateTest, AWriteOfISOTPsLongestCrossesThePipeWhole)
+{
+    fake_control::Page* page = fake_control::create_for_this_process();
+    ASSERT_NE(page, nullptr);
+    fake_control::reset(page);
+    struct PageReset {
+        fake_control::Page* p;
+        ~PageReset() { fake_control::reset(p); }
+    } page_reset{page};
+    ecuio_j2534_sur_handle_t* h = nullptr;
+    ASSERT_EQ(ecuio_j2534_sur_open(fake_dll_path(), fake_dll_arch(), &h),
+              ECUIO_OK);
+    unsigned long channel = 0;
+    ASSERT_EQ(ecuio_j2534_sur_connect_channel(h, 0, 0, &channel), ECUIO_OK);
+
+    for (const uint32_t len :
+         {uint32_t{ECUIO_SUR_MSG_MAX}, uint32_t{ECUIO_SUR_MSG_MAX + 1},
+          uint32_t{ECUIO_SUR_LONG_MSG_MAX}}) {
+        std::vector<unsigned char> msg(len);
+        for (uint32_t i = 0; i < len; ++i) {
+            msg[i] = static_cast<unsigned char>(i * 7 + len);
+        }
+        const uint32_t before = fake_control::writes(page);
+        uint32_t written = 0;
+        ASSERT_EQ(ecuio_j2534_sur_write_frame(h, channel, msg.data(), len, 0,
+                                              1000, &written),
+                  ECUIO_OK)
+            << len;
+        EXPECT_EQ(written, 1u);
+        fake_control::Write w;
+        ASSERT_TRUE(fake_control::recorded_write(page, before, &w)) << len;
+        EXPECT_EQ(w.whole, len);
+        EXPECT_EQ(w.sum, fake_control::write_sum(msg.data(), len)) << len;
+    }
+    const unsigned char req[3] = {0x01, 0x0C, 0x00};
+    EXPECT_EQ(ecuio_j2534_sur_write_frame(h, channel, req, 3, 0, 1000, nullptr),
+              ECUIO_OK)
+        << "the pipe is in step after the long ones";
     EXPECT_EQ(ecuio_j2534_sur_close(h), ECUIO_OK);
 }
 

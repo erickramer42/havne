@@ -49,8 +49,25 @@ inline ecuio_talk_offer ecuio_engine_offer_talk(ecuio_request_engine* e,
     if (q.kind == ecuio_talk_kind::seed && ecuio_engine_functional_session(e)) {
         return ecuio_talk_offer::refused;
     }
+    if (q.kind == ecuio_talk_kind::write) {
+        for (uint32_t k = 0; k < e->chan_count; ++k) {
+            if (k != c && e->chans[k].talk.wide_len != 0) {
+                return ecuio_talk_offer::busy;
+            }
+        }
+    }
     return ecuio_engine_talk(ch.talk, ch.key, ecuio_engine_talk_bound(e, c), q,
-                             now_us);
+                             now_us, e->write_pdu, e->write_max);
+}
+
+/* What channel c's request puts on the wire (ecuio_engine_wire_of) */
+inline const uint8_t* ecuio_engine_wire(const ecuio_request_engine* e,
+                                        uint32_t c, bool once,
+                                        const uint8_t* bytes, uint8_t count,
+                                        uint32_t* len)
+{
+    return ecuio_engine_wire_of(e->chans[c].talk, e->write_pdu, once, bytes,
+                                count, len);
 }
 
 /* The offered talk takes channel c's one-shot */

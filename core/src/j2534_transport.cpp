@@ -361,6 +361,7 @@ ecuio_status_t build_channels(ecuio_session_t* session,
     }
     ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
     t->engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* the adapter sends ISO-TP */
+    t->engine.write_max = ECUIO_ENGINE_WRITE_MAX;
     t->engine.filters_most = J2534_FILTERS_GUARANTEED;
     t->engine.module_budget = J2534_FILTERS_GUARANTEED - 1;
     return ECUIO_OK;

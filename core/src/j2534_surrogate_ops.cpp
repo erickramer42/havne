@@ -97,22 +97,32 @@ ecuio_status_t ecuio_j2534_sur_write_frame(ecuio_j2534_sur_handle_t* h,
     if (h == nullptr || data == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (len == 0 || len > ECUIO_SUR_MSG_MAX) {
+    if (len == 0 || len > ECUIO_SUR_LONG_MSG_MAX) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (out_num_written != nullptr) *out_num_written = 0;
 
     ecuio_sur_request_t req = {};
     req.request_id = h->next_request_id++;
-    req.opcode = ECUIO_SUR_OP_WRITE;
-    req.u.write.channel_id = channel;
-    memcpy(req.u.write.data, data, len);
-    req.u.write.data_len = len;
-    req.u.write.tx_flags = tx_flags;
-    req.u.write.timeout_ms = timeout_ms;
+    const bool long_one = len > ECUIO_SUR_MSG_MAX;
+    if (long_one) {
+        req.opcode = ECUIO_SUR_OP_WRITE_LONG;
+        req.u.write_long.channel_id = channel;
+        req.u.write_long.data_len = len;
+        req.u.write_long.tx_flags = tx_flags;
+        req.u.write_long.timeout_ms = timeout_ms;
+    } else {
+        req.opcode = ECUIO_SUR_OP_WRITE;
+        req.u.write.channel_id = channel;
+        memcpy(req.u.write.data, data, len);
+        req.u.write.data_len = len;
+        req.u.write.tx_flags = tx_flags;
+        req.u.write.timeout_ms = timeout_ms;
+    }
 
     ecuio_sur_response_t resp = {};
-    if (!transact(h, req, &resp, h->transact_ms)) {
+    if (!transact(h, req, &resp, h->transact_ms, nullptr,
+                  long_one ? data : nullptr, long_one ? len : 0)) {
         return ECUIO_ERR_SURROGATE_FAILED;
     }
     if (resp.status != static_cast<int32_t>(ECUIO_PT_STATUS_NOERROR)) {

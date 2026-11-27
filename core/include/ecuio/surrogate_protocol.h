@@ -12,6 +12,7 @@
 #define ECUIO_SUR_MSG_MAX ECUIO_PT_WRITE_MAX  /* bytes of one written or injected
                                                  message's Data; a read's frames
                                                  are whole ecuio_pt_rx_t */
+#define ECUIO_SUR_LONG_MSG_MAX ECUIO_PT_WRITE_LONG_MAX
 #define ECUIO_SUR_IOCTL_DATA_MAX (ECUIO_PT_SCONFIG_MAX_PARAMS * 8)  /* ioctl input
                                            (whole SCONFIG pairs), and reply
                                            payload */
@@ -93,6 +94,8 @@
 #define ECUIO_SUR_OP_STOP_FILTER   10
 #define ECUIO_SUR_OP_GET_LAST_ERROR 11
 #define ECUIO_SUR_OP_READ_VERSION  12
+/* u.write_long, its data_len bytes right after the request */
+#define ECUIO_SUR_OP_WRITE_LONG    13
 
 typedef struct ecuio_sur_request {
     uint32_t request_id;   /* client-assigned, increasing; echoed back */
@@ -110,6 +113,8 @@ typedef struct ecuio_sur_request {
                  uint8_t data[ECUIO_SUR_MSG_MAX];
                  uint32_t data_len; uint32_t tx_flags;
                  uint32_t timeout_ms; } write;
+        struct { uint32_t channel_id; uint32_t data_len; uint32_t tx_flags;
+                 uint32_t timeout_ms; } write_long;
         /* The vendor's ReadMsgs timeout. The client waits that plus
          * 500 ms for the reply before it calls the child hung. */
         struct { uint32_t timeout_ms; } read;

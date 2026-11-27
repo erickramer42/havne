@@ -109,6 +109,7 @@ ecuio_status_t build_channels(ecuio_session_t* session,
     }
     ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
     r.engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* socketcan_send.h */
+    r.engine.write_max = ECUIO_ENGINE_WRITE_MAX;
     return ECUIO_OK;
 }
 

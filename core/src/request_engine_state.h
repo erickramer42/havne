@@ -511,6 +511,10 @@ struct ecuio_request_engine {
     /* The longest request the transport sends, a talk's bound: attach
      * sets ECUIO_ENGINE_PDU_MAX where a request goes out as ISO-TP */
     uint32_t pdu_max = ECUIO_ENGINE_PDU_SINGLE;
+    /* A write-class talk's bound, 0 for a transport that sends none, and
+     * its bytes: one channel's at a time */
+    uint32_t write_max = 0;
+    uint8_t write_pdu[ECUIO_ENGINE_WRITE_MAX] = {};
     /* Frames the transport said were lost before one it handed over
      * (ecuio_engine_overflowed), and writes the kernel refused for want
      * of buffers (SocketCAN's ENOBUFS); saturating, internal */

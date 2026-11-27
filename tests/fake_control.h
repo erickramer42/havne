@@ -45,7 +45,7 @@ constexpr uint32_t kMagic = 0x43464345u;   /* "ECFC" */
 /* Raised with any change to Page. A fake whose layout differs (a
  * build-win32 fake older than the tests) ignores the page, as it
  * ignores a wrong magic, and a test sees opener() stay 0. */
-constexpr uint32_t kLayout = 9;
+constexpr uint32_t kLayout = 10;
 constexpr uint32_t kMaxKnobs = 16;
 constexpr uint32_t kNameLen = 48;
 constexpr uint32_t kValueLen = 32;
@@ -73,6 +73,8 @@ struct Write {
     uint8_t data[kMsgMax];
     uint32_t us; /* when the fake took it: its steady clock's
                                 microseconds, low 32 bits */
+    uint32_t whole; /* its size before the cut to kMsgMax */
+    uint32_t sum;   /* write_sum of all of it */
 };
 
 struct Filter {
@@ -114,7 +116,7 @@ struct Page {
     volatile LONG filters_started; /* starts since the reset or the clear */
 };
 static_assert(sizeof(Page) == 12 + kMaxKnobs * 80 + kInboxDepth * 76 + 20 +
-                                  kWriteDepth * 76 + 12 + 48 + 4 + 4 +
+                                  kWriteDepth * 84 + 12 + 48 + 4 + 4 +
                                   kReadDepth * 4 + 4 + 4 + 16,
               "the page's layout must match in x86 and x64 builds");
 
@@ -331,6 +333,16 @@ inline uint32_t take(Page* p, Message* out, uint32_t cap)
 
 /* Fake side: a successful write at us, counted, and its bytes and stamp
  * kept while fewer than kWriteDepth are. */
+/* FNV-1a */
+inline uint32_t write_sum(const uint8_t* data, uint32_t size)
+{
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < size; ++i) {
+        h = (h ^ data[i]) * 16777619u;
+    }
+    return h;
+}
+
 inline void record_write(Page* p, const uint8_t* data, uint32_t size,
                          uint32_t tx_flags, uint32_t us)
 {
@@ -342,6 +354,8 @@ inline void record_write(Page* p, const uint8_t* data, uint32_t size,
         w.tx_flags = tx_flags;
         memcpy(w.data, data, w.size);
         w.us = us;
+        w.whole = size;
+        w.sum = write_sum(data, size);
     }
     InterlockedIncrement(&p->writes);
 }

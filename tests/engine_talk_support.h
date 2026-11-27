@@ -96,8 +96,8 @@ inline Bytes wire(const ecuio_request_engine* e, uint32_t c, int32_t r)
 {
     const ecuio_request& q = ecuio_engine_request_of(e, c, r);
     uint32_t len = 0;
-    const uint8_t* pdu = ecuio_engine_pdu_of(
-        e->chans[c].talk, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
+    const uint8_t* pdu =
+        ecuio_engine_wire(e, c, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
     return Bytes(pdu, pdu + len);
 }
 
