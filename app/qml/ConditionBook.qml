@@ -145,6 +145,37 @@ QtObject {
         }
     }
 
+    function carryOver(doc, beside, has) {
+        const d = copy(doc)
+        let count = 0
+        for (const c of conditions(d)) {
+            let changed = false
+            const terms = termsOf(c).map(t => {
+                const refs = Array.isArray(t.signal) ? VehicleBook.carryRefs(t.signal, beside, has, maxRefs) : null
+                if (refs === null)
+                    return t
+                changed = true
+                const n = copy(t)
+                n.signal = refs
+                return n
+            })
+            if (changed) {
+                c.when = whenOf(terms, joinOf(c), c.when)
+                ++count
+            }
+        }
+        return { doc: count > 0 ? d : doc, count: count }
+    }
+
+    // An enabled condition whose signals the set lacks never fires
+    function cantFire(c, has) {
+        if (c.enabled === false)
+            return false
+        const terms = termsOf(c)
+        const lacking = terms.filter(t => Array.isArray(t.signal) && !t.signal.some(r => has(r)))
+        return joinOf(c) === "any" ? lacking.length === terms.length : lacking.length > 0
+    }
+
     // A condition's terms, its join ("all", "any", "" for one term)
     function termsOf(c) {
         const w = c.when ?? ({})

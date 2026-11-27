@@ -151,6 +151,7 @@ Pane {
     // change. The earlier format's key, vehicles/document, is an older
     // Havne's to read and is never written
     property var vehicles: VehicleBook.empty()
+    property var carryGauges: null
     readonly property var pickedVehicle: VehicleBook.picked(vehicles)
     // A book a later Havne saved is left as it is: none shown, none saved
     readonly property bool bookLater: VehicleBook.isLater(vehicles)

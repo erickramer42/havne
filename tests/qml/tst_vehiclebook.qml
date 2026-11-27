@@ -678,4 +678,30 @@ TestCase {
         compare(VehicleBook.movePick(d, own, -1), d)
         compare(VehicleBook.movePick(d, "plugin.none.base", 1), d)
     }
+
+    readonly property var beside: [{ baseDef: 7, baseRef: "id:23", baseTick: "7E8:4133:2.0:8", standing: 40, standingKey: "boost", name: "Boost", part: "Example import" }]
+
+    // By the tick's key alone: a tick the plugin's own key keeps already reads the standing one
+    function test_tickCarryOverMovesOnlyAKeyResolvingToTheBase() {
+        const d = book()
+        d.list[0].plotted = ["7E8:4133:2.0:8", "7E8:410C:2.0:16", "boost"]
+        d.list[0].unplotted = ["7E8:4133:2.0:8"]
+        const r = VehicleBook.carryOver(d, beside, "said")
+        compare(r.ticks, 2)
+        const v = VehicleBook.picked(r.doc)
+        compare(v.plotted, ["boost", "7E8:410C:2.0:16", "boost"])
+        compare(v.unplotted, ["boost"])
+        compare(v.migrated, ["beside-obd2"])
+        compare(v.besideNote, "said")
+        compare(d.list[0].plotted[0], "7E8:4133:2.0:8", "the argument is unchanged")
+        const again = VehicleBook.carryOver(VehicleBook.change(r.doc, e => e.plotted = ["7E8:4133:2.0:8"]), beside, "")
+        compare(again.ticks, 0, "once for each vehicle")
+        compare(VehicleBook.picked(again.doc).plotted, ["7E8:4133:2.0:8"])
+        const read = VehicleBook.parse(VehicleBook.serialize(r.doc))
+        verify(VehicleBook.stepDone(VehicleBook.picked(read), "beside-obd2"), "the record reads back")
+        const dismissed = VehicleBook.picked(VehicleBook.dismissBesideNote(read))
+        compare(dismissed.besideNote, undefined)
+        compare(dismissed.migrated, ["beside-obd2", "beside-obd2-said"])
+        compare(VehicleBook.picked(d).migrated, undefined, "another vehicle's record is its own")
+    }
 }

@@ -219,6 +219,30 @@ ColumnLayout {
         }
     }
 
+    RowLayout {
+        objectName: "togetherCarried"
+        readonly property string words: root.host.pickedVehicle !== null
+                                        && root.host.pickedVehicle.besideNote !== undefined
+                                        ? root.host.pickedVehicle.besideNote : ""
+        visible: words !== ""
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Label {
+            textFormat: Text.PlainText
+            objectName: "togetherCarriedText"
+            text: parent.words
+            color: Theme.textDim
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+        }
+        ThemedButton {
+            objectName: "togetherCarriedDismiss"
+            flat: true
+            text: qsTr("Dismiss")
+            onClicked: root.host.saveVehicles(VehicleBook.dismissBesideNote(root.host.vehicles))
+        }
+    }
+
     Label {
         textFormat: Text.PlainText
         objectName: "togetherShareAlike"

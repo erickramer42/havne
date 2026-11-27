@@ -369,6 +369,24 @@ Page {
         return true
     }
 
+    // The built-in layout has no stored text to carry
+    function carryOver(beside, has) {
+        let count = 0
+        for (const key of ["phone", "desktop"]) {
+            const read = DashboardBook.parse(store[key], key)
+            if (store[key] === "" || read.problem !== "")
+                continue
+            const r = DashboardBook.carryOver(read.doc, beside, has)
+            if (r.count === 0)
+                continue
+            store[key] = DashboardBook.serialize(r.doc)
+            if (key === formKey)
+                doc = r.doc
+            count += r.count
+        }
+        return count
+    }
+
     DashLayoutFile {
         id: layoutFile
         host: root

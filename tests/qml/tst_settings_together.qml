@@ -259,4 +259,51 @@ SettingsKit {
             verify(!part.oneRow)
         }
     }
+
+    // Said once: the Log line and the Signals page's line, until Dismiss
+    function test_theCarryOverLineShowsOnceAndDismisses() {
+        const kept = Bridge.keepSignalText(JSON.stringify({
+            havne_signals: 1, name: "Boostie", source: { name: "t" }, extends: "obd2", ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "boost", name: "Boost", read: { service: "22", number: "D100" }, field: { byte: 0 } }]
+        }), "", "", "")
+        verify(kept.ok, kept.words)
+        const profile = kept.profiles[0]
+        let page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        const ahead = Bridge.vehicleSet(["obd2", profile], "", "Vehicle 1")
+        compare(ahead.beside.length, 1, JSON.stringify(ahead.notes))
+        const b = JSON.parse(JSON.stringify(ahead.beside[0]))
+        page.saveVehicles(VehicleBook.change(page.vehicles, e => e.plotted = [b.baseTick]))
+        const unit = Bridge.profileSignals("mock://?profile=obd2").find(r => r.ref === b.baseRef).unit
+        const saved = Bridge.saveConditions(JSON.stringify({ havne_conditions: 1, conditions: [
+            { key: "hi", name: "Boost high", when: { signal: [b.baseRef], unit: unit, above: 10 },
+              alert: { level: "warning", banner: true } }] }))
+        verify(saved.ok, saved.words)
+
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["obd2", profile]))
+        tryVerify(() => VehicleBook.stepDone(page.pickedVehicle, "beside-obd2"), 2000, "carried at the first merge")
+        compare(page.pickedVehicle.plotted, [b.standingKey])
+        compare(JSON.parse(Bridge.conditionsText()).conditions[0].when.signal, ["key:" + b.standingKey, b.baseRef])
+        const line = "1 alert and 1 tick that showed Boostie's 'Boost' keep showing it; obd2's 'Boost' is read beside it"
+        const carried = find(page, "togetherCarried")
+        verify(carried.visible)
+        compare(find(page, "togetherCarriedText").text, line)
+
+        page.destroy()
+        wait(10)
+        page = createPage()
+        page.open("signals")
+        verify(find(page, "togetherCarried").visible, "kept until dismissed")
+        find(page, "togetherCarriedDismiss").clicked()
+        verify(!find(page, "togetherCarried").visible)
+        verify(VehicleBook.stepDone(page.pickedVehicle, "beside-obd2-said"))
+        page.destroy()
+        wait(10)
+        page = createPage()
+        page.open("signals")
+        verify(!find(page, "togetherCarried").visible, "said once")
+        compare(page.pickedVehicle.plotted, [b.standingKey], "and carried once")
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
+    }
 }

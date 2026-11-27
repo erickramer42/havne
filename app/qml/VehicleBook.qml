@@ -37,7 +37,10 @@ QtObject {
     readonly property var bookKeys: ["format", "salt", "picked", "list", "unmigrated", "migrated"]
     readonly property string obd2Picked: "obd2-picked"
     readonly property var entryKeys: ["id", "label", "vinKey", "uri", "plotted", "unplotted",
-                                      "picks", "own", "vinMatches", "baseline", "unmigrated"]
+                                      "picks", "own", "vinMatches", "baseline", "unmigrated",
+                                      "migrated", "besideNote"]
+    readonly property string besideObd2: "beside-obd2"
+    readonly property string besideSaid: "beside-obd2-said"
 
     function empty() {
         return { format: format, salt: "", picked: "", list: [], migrated: [obd2Picked] }
@@ -182,7 +185,54 @@ QtObject {
         const left = records(v.unmigrated)
         if (left.length > 0)
             e.unmigrated = left
+        if (isStrings(v.migrated))
+            e.migrated = v.migrated.slice()
+        if (isString(v.besideNote) && v.besideNote !== "")
+            e.besideNote = v.besideNote
         return e
+    }
+
+    function stepDone(v, step) {
+        return v !== null && Array.isArray(v.migrated) && v.migrated.indexOf(step) >= 0
+    }
+
+    // The first ref the set has is the one read (gaugeIds' rule)
+    function carryRefs(refs, beside, has, cap) {
+        const first = refs.find(r => has(r))
+        const b = first === undefined ? undefined : beside.find(x => x.baseRef === first)
+        if (b === undefined)
+            return null
+        return ["key:" + b.standingKey].concat(refs).slice(0, cap)
+    }
+
+    function carryOver(doc, beside, note) {
+        const v = picked(doc)
+        if (v === null || stepDone(v, besideObd2))
+            return { doc: doc, ticks: 0 }
+        let ticks = 0
+        const moved = list => list.map(k => {
+            const b = beside.find(x => x.baseTick === k)
+            if (b === undefined)
+                return k
+            ++ticks
+            return b.standingKey
+        })
+        const d = change(doc, e => {
+            e.plotted = moved(e.plotted)
+            e.unplotted = moved(e.unplotted)
+            e.migrated = (e.migrated || []).concat([besideObd2])
+            if (note !== "")
+                e.besideNote = note
+        })
+        return { doc: d, ticks: ticks }
+    }
+
+    function dismissBesideNote(doc) {
+        return change(doc, e => {
+            delete e.besideNote
+            if (!stepDone(e, besideSaid))
+                e.migrated = (e.migrated || []).concat([besideSaid])
+        })
     }
 
     function copy(doc) {
