@@ -177,8 +177,7 @@ int confirm_parked(DumpArgs* a)
     std::fflush(stderr);
     char line[16] = {};
     if (std::fgets(line, sizeof line, stdin) != nullptr &&
-        std::strncmp(line, "yes", 3) == 0 &&
-        (line[3] == '\0' || line[3] == '\n' || line[3] == '\r')) {
+        cli::dump_said_yes(line)) {
         a->parked = true;
         return -1;
     }
@@ -284,12 +283,12 @@ bool await_talking(Output& out, ecuio_session_t* session, uint32_t channel)
         cli::conversation_line(l, r);
         write_line(out, l);
     }
-    if (r.state == ECUIO_CONVERSATION_TALKING) {
-        return true;
+    if (r.state == ECUIO_CONVERSATION_TALKING || g_interrupted.load()) {
+        return r.state == ECUIO_CONVERSATION_TALKING;
     }
     std::string why = "the plugin's code isn't talking to the plan's "
                       "module: ";
-    why += g_interrupted.load() ? "interrupted" : conversation_word(r.state);
+    why += conversation_word(r.state);
     write_error(out, ECUIO_ERR_INVALID_ARGUMENT, why.c_str());
     return false;
 }
@@ -311,7 +310,12 @@ int start_plan(Output& out, ecuio_session_t* session, const DumpArgs& a)
     write_error(out, st, why.c_str());
     std::fprintf(stderr, "havne-cli: the dump wasn't started: %s\n",
                  why.c_str());
-    return st == ECUIO_ERR_CONSENT_REQUIRED ? kExitUsage : kExitConnect;
+    return cli::dump_start_is_usage(st) ? kExitUsage : kExitConnect;
+}
+
+bool cancel_at(const char* where)
+{
+    return cli::env_utf8("HAVNE_CLI_DUMP_CANCEL_AT") == where;
 }
 
 std::string step_name(uint32_t index, uint32_t step)
@@ -486,12 +490,26 @@ int run_plan(Output& out, ecuio_session_t* session, const DumpArgs& a,
         write_error(out, st, ecuio_last_error_detail());
         return kExitConnect;
     }
-    if (!await_talking(out, session, channel)) {
+    const bool talking = await_talking(out, session, channel);
+    if (cancel_at("start")) {
+        g_interrupted.store(true);
+    }
+    if (g_interrupted.load()) {
+        ecuio_operation_state_t s{};
+        s.end = ECUIO_OPERATION_END_CANCELED;
+        cli::dump_set_words(s, "interrupted before the run began: nothing "
+                               "was asked of the module");
+        return finish(out, s, a);
+    }
+    if (!talking) {
         return kExitConnect;
     }
     const int refused = start_plan(out, session, a);
     if (refused >= 0) {
         return refused;
+    }
+    if (cancel_at("run")) {
+        g_interrupted.store(true);
     }
     const ecuio_operation_state_t s = follow(out, session, a.index);
     return finish(out, s, a);

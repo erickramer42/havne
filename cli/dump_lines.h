@@ -104,7 +104,22 @@ inline const char* dump_end_note(const ecuio_operation_state_t& s)
     return nullptr;
 }
 
-/* The 64 hex digits of a kept copy's name, "" for another name */
+inline bool dump_said_yes(const char* line)
+{
+    return std::strncmp(line, "yes", 3) == 0 &&
+           (line[3] == '\0' || line[3] == '\n' || line[3] == '\r');
+}
+
+inline bool dump_start_is_usage(ecuio_status_t st)
+{
+    return st == ECUIO_ERR_CONSENT_REQUIRED;
+}
+
+inline void dump_set_words(ecuio_operation_state_t& s, const char* words)
+{
+    std::snprintf(s.words, sizeof s.words, "%s", words);
+}
+
 inline std::string dump_name_hash(const char* name)
 {
     const char ext[] = ".havnedump";
@@ -185,9 +200,7 @@ inline void dump_volts_keys(Line& l, const ecuio_operation_state_t& s)
     (s.checks & ECUIO_OPERATION_CHECK_KMH) ? l.u64(s.kmh) : l.raw("null");
 }
 
-/* verified: 1 or 0 for a kept copy's read back, -1 for no copy. A path
- * is the caller's text: the line's room is kDumpLineBytes plus
- * Line::string_bytes(path) */
+/* Room: kDumpLineBytes plus Line::string_bytes(path) */
 inline void dump_line(Line& l, const ecuio_operation_state_t& s,
                       const std::string& path, int verified)
 {
