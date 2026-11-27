@@ -495,6 +495,21 @@ lists the keys it reads that way in `needs`:
 - A plugin's data file takes `needs` too. A key another file of the
   same variant defines is met inside the variant.
 
+**What the signal form writes.** A computed signal's expression is read
+for the names it uses (the same compiler the loader uses, so the names
+are as written). Each name that is neither one of the file's own keys nor
+`obd2.<key>` goes in `needs`, and the Save raises the file to format 3. A
+file stays at 3 once it is there, even with no need left: lowering it
+would turn a signal read beside `obd2`'s back into one that replaces it
+for a reader of the file alone. When the raise makes an own signal named
+as one of `obd2`'s read beside it, the Save says so. The form checks an
+expression against the vehicle's set, so it may read another part's key.
+
+**One address, one signal, at Save.** Two own signals at one address (the
+same module, request and field) are refused before the raise, in the
+form's words, naming both and the address: format 3 gives one address to
+one signal, as the loader does. Change or remove one first.
+
 ### A set made of several files
 
 Core can read several loaded files as one set (`ecuio_signal_file_merge`):
