@@ -219,6 +219,8 @@ TEST(SessionOperationTest, AWritesSagThroughTheRunGoesOn)
     const ecuio_operation_state_t v = b.until_ended();
     EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
     EXPECT_EQ(v.volts_min_mv, 9800u);
+    EXPECT_EQ(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u)
+        << "the sag's warning is a dump's";
 }
 
 TEST(SessionOperationTest, TheHostsPowerStopsAWriteAndWarnsADump)

@@ -751,7 +751,13 @@ OPERATIONS = [
     ("a step with no kind", PACKED4, RD + ["step"], DELETE, False),
     ("a step name with an underscore", PACKED4, RD + ["name"], "cal_1", False),
     ("a step with no name", PACKED4, RD + ["name"], DELETE, False),
-    ("a step in the programming session", PACKED4, RD + ["session"], "programming", False),
+    ("a step in a session it doesn't read in", PACKED4, RD + ["session"], "safety", False),
+    ("a plan in the programming session", PACKED4, OP + ["steps"],
+     [dict(READ, session="programming"), dict(UPLOAD, session="programming")], True),
+    ("a programming plan left by a reset", PACKED4, OP,
+     dict(PACKED4["operations"][0], steps=[dict(READ, session="programming")],
+          leave="reset"), True),
+    ("a leave it doesn't take", PACKED4, OP + ["leave"], "exit", False),
     ("a step with no session", PACKED4, RD + ["session"], DELETE, False),
     ("a step address of three digits", PACKED4, RD + ["address"], "100", False),
     ("a step address of ten digits", PACKED4, RD + ["address"], "0000010000", False),
@@ -793,7 +799,7 @@ PACKED5["operations"] = [{
     "kernel": {"ram": {"address": "00F00000", "bytes": 16384}, "start": ["0201"],
                "stays": True,
                "functional": [{"request": "10 82"}, {"request": "3E 80", "every_ms": 2000}]},
-    "steps": [DOWNLOAD, ROUTINE, dict(UPLOAD, name="code", address="00080000")],
+    "steps": [DOWNLOAD, ROUTINE, dict(UPLOAD, name="code", address="00080000", session="programming")],
 }]
 KR = OPS + [0]
 KN = KR + ["kernel"]

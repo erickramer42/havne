@@ -381,6 +381,9 @@ TEST(OperationRunTest, AStartAnsweredForAnotherRoutineIsABadReply)
     d.script = answer_to(0x31, {0x71, 0x01, 0x02, 0x02});
     EXPECT_EQ(d.go(), run_end::bad_reply);
     EXPECT_EQ(d.count_of(0x35), 0u);
+    KernelDrive high(kernel_plan());
+    high.script = answer_to(0x31, {0x71, 0x01, 0x03, 0x01});
+    EXPECT_EQ(high.go(), run_end::bad_reply);
     KernelDrive cut(kernel_plan());
     cut.script = answer_to(0x31, {0x71, 0x01, 0x02});
     EXPECT_EQ(cut.go(), run_end::bad_reply);

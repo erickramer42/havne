@@ -370,6 +370,10 @@ struct ecuio_engine_channel {
      * channel's window is open, and never a seed, a key or a talk longer
      * than a frame. Set once, by ecuio_build_requests. */
     bool functional = false;
+    /* A run's own session (ecuio_engine_session_handed): kept, never
+     * entered again by the engine */
+    bool handed = false;
+    uint8_t handed_prior = ECUIO_SESSION_STATE_NOT_ASKED;
     uint16_t session_entries = 0; /* each 50 03 */
     uint16_t session_lost = 0;    /* each re-entry */
     uint32_t refused_losses = 0;  /* 7E or 7F re-entries in this window */
@@ -384,6 +388,7 @@ struct ecuio_engine_channel {
      * state (ECUIO_MODULE_STATE_*): only an open module asks anything new */
     uint8_t reasons = ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ;
     uint8_t module_state = ECUIO_MODULE_STATE_OPEN;
+    uint16_t session_handed = 0; /* each hand-over and return of handed */
     /* With no room: its place among the modules waiting for a filter, 0
      * otherwise (ecuio_engine_modules_fill opens the lowest first) */
     uint32_t waiting = 0;

@@ -69,9 +69,13 @@ TEST(OperationPlanTest, EachNumberFitsWhatCarriesIt)
               "its kind isn't one this Havne runs");
     EXPECT_EQ(fault(r, [](step& s) { s.kind = 0; }),
               "its kind isn't one this Havne runs");
+    for (const uint32_t session : {0u, 1u, 4u}) {
+        EXPECT_EQ(fault(r, [session](step& s) { s.session = session; }),
+                  "its session isn't one this Havne reads in");
+    }
     EXPECT_EQ(
         fault(r, [](step& s) { s.session = ECUIO_STEP_SESSION_PROGRAMMING; }),
-        "its session isn't one this Havne reads in");
+        "");
     for (const uint8_t n : {uint8_t{0}, uint8_t{5}}) {
         EXPECT_EQ(fault(r, [n](step& s) { s.address_bytes = n; }),
                   "its address_bytes is 1 to 4");

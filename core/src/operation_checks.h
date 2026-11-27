@@ -11,10 +11,18 @@ constexpr bool ecuio_check_allowed(uint8_t sid, uint8_t pid)
            (pid == 0x0C || pid == 0x0D || pid == 0x40 || pid == 0x42);
 }
 
+/* A run's own session requests: the programming session's entry, and its
+ * leave by the default session or a reset */
+constexpr bool ecuio_operation_session_allowed(uint8_t sid, uint8_t sub)
+{
+    return (sid == 0x10 && (sub == 0x02 || sub == 0x01)) ||
+           (sid == 0x11 && sub == 0x01);
+}
+
 namespace ecuio_operation {
 
 constexpr uint32_t kDumpWarnLowMv = 11800;
-constexpr uint32_t kDumpStopMv = 11000;
+constexpr uint32_t kDumpSagMv = 11000;
 constexpr uint32_t kVoltsWarnHighMv = 15000;
 constexpr uint32_t kWriteStartFloorMv = 11500;
 constexpr uint32_t kWriteWarnMv = 12000;
@@ -31,7 +39,7 @@ struct volts {
     bool from_ecu = false;
     bool low_warn = false;
     bool high_warn = false;
-    bool dropped = false;
+    bool sagged = false;
     bool refused_low = false;
     bool refused_high = false;
     uint32_t mv = 0;
@@ -52,8 +60,8 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
         v.refused_high = mv > kWriteRefuseHighMv;
     } else if (!running) {
         v.low_warn = mv < kDumpWarnLowMv;
-    } else if (!v.write && mv < kDumpStopMv) {
-        v.dropped = true;
+    } else if ((!v.write || v.ram_only) && mv < kDumpSagMv) {
+        v.sagged = true;
     }
 }
 

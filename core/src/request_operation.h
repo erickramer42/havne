@@ -55,6 +55,9 @@ namespace ecuio_operation {
 static_assert(ECUIO_STEP_SESSION_EXTENDED == ECUIO_SESSION_EXTENDED,
               "a step's extended session is the engine's own entry");
 
+constexpr uint8_t kEcuReset = 0x11;
+constexpr uint8_t kHardReset = 0x01;
+
 inline uint32_t end_code(run_end e)
 {
     switch (e) {
@@ -153,12 +156,6 @@ inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
                       "supported); nothing was read",
                       static_cast<unsigned>(o.v.mv / 1000),
                       static_cast<unsigned>(o.v.mv % 1000 / 100));
-    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW) {
-        std::snprintf(out, cap,
-                      "the battery fell to %u.%u V at the adapter: the copy "
-                      "was incomplete, nothing was kept",
-                      static_cast<unsigned>(o.v.min_mv / 1000),
-                      static_cast<unsigned>(o.v.min_mv % 1000 / 100));
     } else {
         std::snprintf(out, cap, "%s", end_words(end));
     }
@@ -181,6 +178,10 @@ inline uint32_t phase_of(const session_run& o)
     if (o.checking) {
         return ECUIO_OPERATION_PHASE_PRECONDITIONS;
     }
+    if (o.own == own_step::leaving ||
+        (o.own == own_step::entered && o.r.at == run_stage::done)) {
+        return ECUIO_OPERATION_PHASE_LEAVING;
+    }
     switch (o.r.at) {
     case run_stage::enter:
         return ECUIO_OPERATION_PHASE_UNLOCKING;
@@ -201,7 +202,8 @@ inline uint32_t checks_of(const session_run& o)
            (v.has ? ECUIO_OPERATION_CHECK_VOLTS : 0u) |
            (v.from_ecu ? ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU : 0u) |
            (v.low_warn ? ECUIO_OPERATION_CHECK_VOLTS_LOW : 0u) |
-           (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u);
+           (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u) |
+           (v.sagged ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u);
 }
 
 /* The view follows the machine: taken under the lock only when it moved.
@@ -297,6 +299,70 @@ inline void drop_word(ecuio_bound_channel& b, session_run& o)
     ++r.words_ended;
 }
 
+/* A request of the run's own session offered as the channel's talk */
+inline bool offer_own(session_run& o, ecuio_request_engine* e, uint8_t sid,
+                      uint8_t sub, int64_t now_us)
+{
+    const uint8_t pdu[2] = {sid, sub};
+    ecuio_talk_request t;
+    t.pdu = pdu;
+    t.len = 2;
+    t.echo = 2;
+    t.kind = ecuio_talk_kind::session;
+    if (ecuio_engine_offer_talk(e, o.channel, t, now_us) !=
+        ecuio_talk_offer::taken) {
+        return false;
+    }
+    o.out = true;
+    o.own_out = true;
+    o.talk_at = o.channel;
+    o.sid = sid;
+    return true;
+}
+
+/* The own session's entry, settled: the engine is handed the session it
+ * entered, or the run ends before its first request */
+inline void own_settle(session_run& o, ecuio_request_engine* e, int64_t now_us)
+{
+    if (o.own != own_step::entering || o.own_out) {
+        return;
+    }
+    const ecuio_talk_end end = o.own_end.end;
+    if (end == ecuio_talk_end::answered) {
+        ecuio_engine_session_handed(e, o.channel, now_us);
+        o.own = own_step::entered;
+        return;
+    }
+    o.own = own_step::left;
+    if (o.r.at == run_stage::enter) {
+        not_entered(o.r,
+                    end == ecuio_talk_end::refused  ? run_end::refused
+                    : end == ecuio_talk_end::unsent ? run_end::link_lost
+                                                    : run_end::no_answer,
+                    o.own_end.nrc);
+    }
+}
+
+/* The own session left at the run's end, whatever the end: the plan's
+ * leave once nothing else is out, its answer not judged. True once
+ * nothing is left to leave. */
+inline bool own_leave(session_run& o, ecuio_request_engine* e, int64_t now_us)
+{
+    if (o.own == own_step::entered) {
+        const bool reset = o.p->leave == ECUIO_OPERATION_LEAVE_RESET;
+        if (offer_own(o, e, reset ? kEcuReset : ECUIO_SESSION_CONTROL,
+                      reset ? kHardReset : ECUIO_SESSION_DEFAULT, now_us)) {
+            o.own = own_step::leaving;
+        }
+        return false;
+    }
+    if (o.own == own_step::leaving) {
+        ecuio_engine_session_returned(e, o.channel);
+        o.own = own_step::left;
+    }
+    return true;
+}
+
 /* The machine's enter: the plan's session entered through the engine's
  * own step, then its level open. A level found open costs no attempt; a
  * locked one is opened only by the word the start saved a mark for, and
@@ -313,12 +379,24 @@ inline void enter(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     if (o.entering_us == 0) {
         o.entering_us = now_us;
     }
-    if (e->chans[o.channel].session_step != ECUIO_SESSION_STATE_ENTERED) {
+    if (!programming_of(*o.p) &&
+        e->chans[o.channel].session_step != ECUIO_SESSION_STATE_ENTERED) {
         if (!ecuio_engine_session_enter(e, o.channel) ||
             now_us - o.entering_us > kEnterMostUs) {
             not_entered(o.r, run_end::session_lost);
         }
         return;
+    }
+    if (programming_of(*o.p)) {
+        if (o.own == own_step::none) {
+            if (offer_own(o, e, ECUIO_SESSION_CONTROL,
+                          ECUIO_STEP_SESSION_PROGRAMMING, now_us)) {
+                o.own = own_step::entering;
+            } else {
+                not_entered(o.r, run_end::link_lost);
+            }
+            return;
+        }
     }
     ecuio_conversation& v = b->conversation;
     if (o.word_given) {
@@ -366,6 +444,13 @@ inline void take_settled(session_run& o, ecuio_engine_talk_state& t)
         return;
     }
     o.out = false;
+    if (o.own_out) {
+        o.own_out = false;
+        o.fed = false;
+        o.orphan = false;
+        o.own_end = res;
+        return;
+    }
     const bool told = o.fed || o.orphan;
     o.fed = false;
     o.orphan = false;
@@ -500,10 +585,16 @@ inline void check_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
 inline void finish(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
                    int64_t now_us)
 {
-    e->operation_hold = false;
+    if (o.own == own_step::none || o.own == own_step::left) {
+        e->operation_hold = false;
+    }
     if (o.out) {
         return; /* a talk given up is taken first: the slot is left free */
     }
+    if (!own_leave(o, e, now_us)) {
+        return; /* the hold stands until the session is left */
+    }
+    e->operation_hold = false;
     if (ecuio_bound_channel* b = ecuio_bound_channel_of(s, o.channel)) {
         drop_word(*b, o);
     }
@@ -585,6 +676,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
         cancel(r);
     }
     take_settled(o, e->chans[o.talk_at].talk);
+    own_settle(o, e, now_us);
     /* The writer's word, over the machine's complete too: a difference
      * or a file's failure ends the run before its next request */
     const sink_state w = o.sink->state();
@@ -595,8 +687,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     }
     drop_check(o, e, now_us);
     battery_step(s, o, now_us);
-    if ((o.v.dropped || o.v.refused_low || o.v.refused_high) &&
-        r.at != run_stage::done) {
+    if ((o.v.refused_low || o.v.refused_high) && r.at != run_stage::done) {
         o.orphan = o.out && !o.fed;
         stop(r, o.v.refused_high && !o.v.refused_low ? run_end::voltage_high
                                                      : run_end::voltage_low);
@@ -635,7 +726,7 @@ inline void on_frame(ecuio_session_t* s, const ecuio_request_engine* e,
     session_run* o = s->operation_live.load(std::memory_order_acquire);
     if (o == nullptr || c != o->talk_at || len == 0 ||
         o->stage.load(std::memory_order_acquire) != kStageRunning || !o->out ||
-        o->fed || o->orphan) {
+        o->fed || o->orphan || o->own_out) {
         return;
     }
     const ecuio_engine_channel& ch = e->chans[c];
@@ -686,6 +777,9 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
         check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);
         o->checking = true;
         o->talk_at = o->channel;
+        o->own = own_step::none;
+        o->own_out = false;
+        o->own_end = ecuio_talk_result{};
         o->v = volts{};
         o->v.write = o->write;
         o->v.ram_only = o->p->has_kernel;

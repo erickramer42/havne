@@ -135,10 +135,12 @@ step read_step(const Value& v)
                      " isn't one this Havne runs: \"read\" and \"upload\"");
     s.name = id_of(required(v, "name", "a step"), "a step's name");
     const std::string what = "step " + q(s.name);
-    (void)word_of(required(v, "session", what), {"extended"},
-                  what + "'s session",
-                  " isn't one this Havne reads in: \"extended\"");
-    s.session = ECUIO_STEP_SESSION_EXTENDED;
+    s.session = word_of(required(v, "session", what),
+                        {"extended", "programming"}, what + "'s session",
+                        " isn't one this Havne reads in: \"extended\" and "
+                        "\"programming\"") == 1
+                    ? ECUIO_STEP_SESSION_EXTENDED
+                    : ECUIO_STEP_SESSION_PROGRAMMING;
     s.address = hex_of(required(v, "address", what), 1, 4, what + "'s address");
     s.bytes = static_cast<uint64_t>(whole_of(required(v, "bytes", what), 1,
                                              ECUIO_DUMP_IMAGE_MAX,
@@ -333,6 +335,11 @@ void read_steps(const Value& list, plan& out)
                 refuse(v, "steps " + q(known.name) + " and " + q(s.name) +
                               " overlap in address");
             }
+            if (known.session != s.session) {
+                refuse(v, "steps " + q(known.name) + " and " + q(s.name) +
+                              " are in two sessions: this Havne reads a "
+                              "plan's steps in one");
+            }
         }
         out.steps.push_back(std::move(s));
     }
@@ -376,11 +383,33 @@ void read_target(const Value& op, const conversation& c, plan& out)
     }
 }
 
+/* A programming plan's "leave": "default" when left out, or "reset". An
+ * extended plan takes none: its session stays after the run. */
+void read_leave(const Value& op, plan& out)
+{
+    const std::string what = "operation " + q(out.id);
+    const Value* leave = op.find("leave");
+    if (!ecuio_operation::programming_of(out)) {
+        if (leave != nullptr) {
+            refuse(*leave, what + "'s steps are in the extended session, "
+                                  "which stays after the run: it takes no "
+                                  "'leave'");
+        }
+        return;
+    }
+    out.leave = leave == nullptr
+                    ? ECUIO_OPERATION_LEAVE_DEFAULT
+                    : word_of(*leave, {"default", "reset"}, what + "'s leave",
+                              " isn't one of \"default\" (10 01) and "
+                              "\"reset\" (11 01)");
+}
+
 plan read_operation(const Value& op, const conversation& c)
 {
     expect(op, Type::object, "an operation");
     only_keys(
-        op, {"id", "kind", "title", "ecu", "level", "ident", "kernel", "steps"},
+        op,
+        {"id", "kind", "title", "ecu", "level", "ident", "kernel", "steps", "leave"},
         "an operation");
     plan out;
     out.id = id_of(required(op, "id", "an operation"), "an operation's id");
@@ -410,6 +439,7 @@ plan read_operation(const Value& op, const conversation& c)
         refuse(op, what + " is a kernel read: a download, its routine, then "
                           "the ranges the helper reads");
     }
+    read_leave(op, out);
     return out;
 }
 
@@ -551,6 +581,7 @@ ecuio_status_t ecuio_plugin_operation(const ecuio_plugin_t* plugin,
     o.ident_count = static_cast<uint32_t>(p->idents.size());
     o.unlock_sessions = ecuio_operation::unlock_sessions(*p);
     o.image_bytes = ecuio_operation::image_bytes(*p);
+    o.leave = p->leave;
     ecuio_sf::copy_text(o.id, sizeof o.id, p->id);
     ecuio_sf::copy_text(o.title, sizeof o.title, p->title);
     *out = o;

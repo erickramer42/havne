@@ -162,6 +162,7 @@ struct ecuio_conversation {
     uint8_t word_level = 0;
     bool was_entered = false; /* the channel's session at the last look */
     uint16_t seen_lost = 0;   /* its session_lost at the last look */
+    uint16_t seen_handed = 0; /* and its session_handed */
     int64_t next_poll_us = 0;
     uint8_t buffer[ECUIO_GUEST_BUFFER_BYTES] = {};
 };

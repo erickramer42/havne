@@ -195,7 +195,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
 
     /* RESPONSE GENERATION.
      * A request: Service 01 or 09, EXACTLY 6 bytes with req[4] 0x01 or
-     * 0x09 (or 0x10 and 0x3E, the session's, ADR-0060); Service 0x22 or
+     * 0x09 (or 0x10, 0x11 and 0x3E, the session's, ADR-0060); Service 0x22 or
      * 02, 7 bytes; Service 03, 04, 07 or 0x0A, 5
      * bytes; Service 0x27 of any length (the engine ECU's security
      * access) and 0x23, 0x35, 0x36 or 0x37 (its memory): the
@@ -211,14 +211,15 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         const bool has_filter = (fake_j2534::g_last_filter.filter_id != 0)
                                  && (n >= 4);
         const bool request =
-            has_filter && ((n == 6 && (req[4] == 0x01 || req[4] == 0x09 ||
-                                       req[4] == 0x10 || req[4] == 0x3E)) ||
-                           (n >= 7 && n <= 11 && req[4] == 0x01) ||
-                           (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
-                           (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 ||
-                                       (req[4] >= 0x35 && req[4] <= 0x37))) ||
-                           (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
-                                       req[4] == 0x07 || req[4] == 0x0A)));
+            has_filter &&
+            ((n == 6 && (req[4] == 0x01 || req[4] == 0x09 || req[4] == 0x10 ||
+                         req[4] == 0x11 || req[4] == 0x3E)) ||
+             (n >= 7 && n <= 11 && req[4] == 0x01) ||
+             (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
+             (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 ||
+                         (req[4] >= 0x35 && req[4] <= 0x37))) ||
+             (n == 5 && (req[4] == 0x03 || req[4] == 0x04 || req[4] == 0x07 ||
+                         req[4] == 0x0A)));
 
         if (request && req[4] == held_service) {
             unsigned char pending[7];

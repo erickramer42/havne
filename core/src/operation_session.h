@@ -25,6 +25,7 @@
 #include "operation_plan.h"
 #include "operation_run.h"
 #include "operation_sink.h"
+#include "request_talk.h"
 
 #include <atomic>
 #include <cstdint>
@@ -43,6 +44,10 @@ constexpr uint8_t kStageEnded = 3;   /* the caller's again */
 constexpr int64_t kPollUs = 5000;
 /* The longest wait for the plan's session to be entered */
 constexpr int64_t kEnterMostUs = 10000000;
+
+/* A programming plan's own session: entered by the run's first talk and
+ * left by its last */
+enum class own_step : uint8_t { none, entering, entered, leaving, left };
 
 struct session_run {
     /* The start's, read by the worker once armed */
@@ -77,6 +82,9 @@ struct session_run {
     uint32_t unlocks = 0;     /* attempts that opened the level */
     int64_t began_us = 0;
     int64_t entering_us = 0; /* when the entry was first asked; 0 not yet */
+    own_step own = own_step::none;
+    bool own_out = false; /* the talk out is the session's */
+    ecuio_talk_result own_end;
     bool quiet_out = false;  /* the machine's functional request is due */
     int64_t keep_at_us = 0;  /* the next functional 3E 80; 0 none */
 
