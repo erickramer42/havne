@@ -881,6 +881,9 @@ int cmd_plugins(int argc, char** argv)
     if (word == "consent") {
         return plugins_consent(argc, argv);
     }
+    if (word == "together") {
+        return plugins_together(argc, argv);
+    }
     if (word == "match" && package && argc == 6 &&
         std::string(argv[4]) == "--vin") {
         return run_plugins_match(argv[3], argv[5]);
@@ -895,8 +898,8 @@ int cmd_plugins(int argc, char** argv)
                          "[--on <vcan>], match <pkg> --vin <VIN>, wrap "
                          "<signal-file> --out <pkg>, put <pkg> <signal-file> "
                          "--out <pkg>, drop <pkg> --variant <id> --out <pkg>, "
-                         "terms <pkg>, or consent <pkg> --give "
-                         "<fingerprint>\n");
+                         "terms <pkg>, consent <pkg> --give <fingerprint>, "
+                         "or together --together <profiles>\n");
     usage(stderr);
     return kExitUsage;
 }

@@ -6,10 +6,12 @@
 
 #include "default_pick.h"
 #include "log_lines.h"
+#include "no_room.h"
 #include "jsonl.h"
 #include "scan_line.h"
 #include "sleep_watch.h"
 #include "summary_lines.h"
+#include "together.h"
 
 #include "commands.h"
 #include "profile_source.h"
@@ -198,6 +200,7 @@ struct LogRun {
     cli::SummaryTally tally{nullptr}; /* made for the focus before start */
     uint64_t started = 0;
     const char* reason = nullptr;
+    std::vector<std::string> no_room_said;
 };
 
 // A phase's answer: kGoOn, or the command's exit code
@@ -284,7 +287,7 @@ int log_focus(Output& out, const cli::LogArgs& args, LogRun& r)
     const bool pick_only = session_pick_only(session);
     if (args.pick_ranked) {
         const std::vector<uint16_t> picked =
-            cli::default_pick(set, ids, pick_only);
+            cli::default_pick(set, ids, pick_only, together_left_out());
         if (!session_asks(session)) {
             std::fprintf(stderr, "havne-cli: the session asks no signal: "
                                  "--pick ranked adds none\n");
@@ -413,6 +416,21 @@ int log_start(Output& out, const cli::LogArgs&, LogRun& r)
     return kGoOn;
 }
 
+void poll_no_room(LogRun& r)
+{
+    ecuio_channel_support_t reports[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t c = 0; c < r.channels; ++c) {
+        (void)ecuio_session_get_channel_support(r.session, c, &reports[c]);
+    }
+    std::vector<std::string> names = cli::no_room_names(
+        r.set, session_signal_file(), r.ids, reports, r.channels);
+    if (!names.empty() && names != r.no_room_said) {
+        std::fprintf(stderr, "havne-cli: %s\n",
+                     cli::no_room_text(names).c_str());
+        r.no_room_said = std::move(names);
+    }
+}
+
 // The loop until its end's reason: the lines each poll writes
 void log_loop(Output& out, const cli::LogArgs& args, LogRun& r)
 {
@@ -454,6 +472,7 @@ void log_loop(Output& out, const cli::LogArgs& args, LogRun& r)
         }
         poll_health(out, session, &last_error, &episodes);
         poll_sessions(out, session, channels, session_seen);
+        poll_no_room(r);
         poll_conditions(out, session, &shown);
         reason = cli::log_end_reason(
             g_interrupted.load(), recording_failed,
@@ -603,8 +622,10 @@ int run_log(const cli::LogArgs& args)
 int cmd_log(int argc, char** argv)
 {
     cli::LogArgs la;
+    Together together;
     std::string why;
-    if (!take_consent_store(argc, argv, &la.consent_store)) {
+    if (!take_consent_store(argc, argv, &la.consent_store) ||
+        !take_together(argc, argv, 2, &together)) {
         usage(stderr);
         return kExitUsage;
     }
@@ -614,7 +635,8 @@ int cmd_log(int argc, char** argv)
         return kExitUsage;
     }
     std::string opened;
-    const int rc = take_profile_source(la.signals, la.plugin, &la.uri, &opened);
+    const int rc =
+        take_source(together, la.signals, la.plugin, &la.uri, &opened);
     if (rc >= 0) {
         return rc;
     }
