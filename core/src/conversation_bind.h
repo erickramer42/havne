@@ -65,6 +65,7 @@ struct ecuio_bound_channel {
     /* The worker's, from its start: the channel's bound for one request,
      * and whether a functional channel has a session (no seed then) */
     std::atomic<uint32_t> talk_bound{0};
+    std::atomic<uint32_t> write_bound{0};
     std::atomic<bool> functional{false};
     /* The store's counts for each level (the machine's order), handed to
      * the worker at the first unlock: the fields, then restore_seq */

@@ -757,6 +757,15 @@ void serve_session(ecuio_socketcan_transport* t, worker_state& w)
     (void)ecuio_take_modules(s, &e, w.modules_seen, now_us(t));
     follow_modules(t, w);
     ecuio_step_conversations(s, &e, now_us(t));
+    if (e.aside_due) {
+        e.aside_due = false;
+        isotp_can f;
+        f.id = e.aside_tx;
+        f.data[0] = sizeof e.aside;
+        std::memcpy(f.data + 1, e.aside, sizeof e.aside);
+        isotp_pad(&f, 1 + sizeof e.aside);
+        (void)write_frame(t->fd, f, e.aside_tx > 0x7FFu);
+    }
     for (uint32_t c = 0; c < t->chan_count; ++c) {
         ecuio_publish_support(s, e, c, t->rx_ids[c], w.published[c]);
         ecuio_publish_identity(s, e, c, t->rx_ids[c], w.published_identity[c]);

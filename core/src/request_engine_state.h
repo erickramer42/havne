@@ -462,6 +462,11 @@ struct ecuio_request_engine {
      * entry, a talk and its keep-alive, and nothing else; a module that
      * isn't open, or is visiting, sends nothing until the hold ends */
     bool operation_hold = false;
+    /* An operation's functional 10 82 or 3E 80: the worker writes it as
+     * one Single Frame to aside_tx and clears aside_due; never answered */
+    uint8_t aside[2] = {};
+    uint32_t aside_tx = 0;
+    bool aside_due = false;
     /* The set derives more requests than a rotation holds: a row takes
      * its pool row when a focus first keeps it, and with no focus every
      * row is parked (ecuio_engine_pick_only) */

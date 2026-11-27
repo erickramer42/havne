@@ -220,6 +220,22 @@ bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
     return sent;
 }
 
+/* An operation's functional request, one frame; its answers go unread */
+void send_aside(ecuio_j2534_transport* t, ecuio_request_engine& e)
+{
+    if (!e.aside_due) {
+        return;
+    }
+    e.aside_due = false;
+    uint8_t msg[J2534_ADDR_LEN + sizeof e.aside];
+    pack_be32(msg, e.aside_tx);
+    memcpy(msg + J2534_ADDR_LEN, e.aside, sizeof e.aside);
+    uint32_t written = 0;
+    (void)ecuio_j2534_write_frame(
+        t->handle, t->channel, msg, sizeof msg,
+        t->chans[0].addr_flags | ECUIO_PT_TX_ISO15765_FRAME_PAD, 0, &written);
+}
+
 /* Backoff-aware sleep, abortable within 20 ms of a stop request:
  * a 5 s capped backoff must not turn into a 5 s join at detach.
  * Returns true if stop was requested (caller should exit promptly). */
@@ -585,6 +601,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
                                  engine_now_us(t));
         (void)j2534_filters_follow(t, false);
         ecuio_step_conversations(t->session, &e, engine_now_us(t));
+        send_aside(t, e);
     }
     for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
         ecuio_publish_support(t->session, e, c, t->chans[c].rx_id,

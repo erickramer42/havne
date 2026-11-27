@@ -67,6 +67,11 @@ struct Bench {
     };
     uint32_t battery_reads = 0;
     int battery_held = 0; /* serves an ask only after this many tries */
+    const char* uri = "j2534://bench";
+    uint32_t write_max = ECUIO_ENGINE_WRITE_MAX;
+    std::vector<std::pair<uint32_t, Bytes>> functional; /* to, request */
+    std::vector<int64_t> functional_at;
+    std::vector<size_t> functional_after; /* the requests sent before */
 
     /* The session bound, the engine made and the module's begin past:
      * the extended session entered, nothing unlocked. worker false: bound
@@ -76,7 +81,7 @@ struct Bench {
                const char* store = nullptr, bool worker = true)
     {
         ASSERT_NO_FATAL_FAILURE(
-            conversation_session::make_session(&bound, m, "j2534://bench"));
+            conversation_session::make_session(&bound, m, uri));
         s = bound.session.get();
         if (store != nullptr) {
             ASSERT_EQ(ecuio_session_security_store(s, store, "bench car"),
@@ -89,6 +94,7 @@ struct Bench {
         s->started = true;
         ASSERT_NO_FATAL_FAILURE(engine_talk_test::engine(e.get()));
         e->pdu_max = pdu_max;
+        e->write_max = write_max;
         node.s.security.strict = true;
         node.ecu.config.values = ecuio_sim_values::parked;
         if (!worker) {
@@ -137,11 +143,24 @@ struct Bench {
         }
     }
 
+    /* As a transport writes it, after the step */
+    void serve_functional()
+    {
+        if (e->aside_due) {
+            e->aside_due = false;
+            functional.emplace_back(e->aside_tx, Bytes(e->aside, e->aside + 2));
+            functional_at.push_back(now);
+            functional_after.push_back(sent.size());
+            ecuio_sim_session_functional(node.s, true, now, e->aside, 2);
+        }
+    }
+
     /* One pass as a worker's: the step, channel 0's request answered */
     void pass()
     {
         serve_battery();
         ecuio_step_conversations(s, e.get(), now);
+        serve_functional();
         const int32_t r = ecuio_engine_due(e.get(), 0, now);
         if (r != ECUIO_ENGINE_NONE) {
             const Bytes q = engine_talk_test::wire(e.get(), 0, r);
@@ -166,6 +185,7 @@ struct Bench {
         now += ECUIO_ENGINE_GAP_US;
         serve_battery();
         ecuio_step_conversations(s, e.get(), now);
+        serve_functional();
     }
 
     /* The bench's clock is its own and the writer's thread is not: a

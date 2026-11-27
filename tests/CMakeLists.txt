@@ -56,7 +56,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_operation_plan.cpp test_dump_writer.cpp test_session_operation.cpp
     test_session_operation_ends.cpp
     test_session_operation_record.cpp test_session_operation_checks.cpp
-    test_session_operation_battery.cpp test_session_operation_write.cpp)
+    test_session_operation_battery.cpp test_session_operation_write.cpp
+    test_session_operation_kernel.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
