@@ -220,6 +220,7 @@ qt_add_qml_module(app_ui
         qml/SettingsVinLookup.qml
         qml/NavButton.qml
         qml/Theme.qml
+        qml/LiveSignalRow.qml
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml
