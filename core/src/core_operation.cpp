@@ -283,13 +283,6 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                       "this adapter reads no battery voltage: a write needs "
                       "one");
     }
-    /* Every run waits for the write flow's envelope (the engine off, the
-     * battery's floor): until core has it, only the tests' door starts one */
-    if (!g_ecuio_conversation_door.load(std::memory_order_relaxed)) {
-        return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
-                      "a run needs the write flow's checks before it, which "
-                      "this Havne has not got");
-    }
     const session_run* o = s->operation.get();
     const uint8_t stage =
         o == nullptr ? ecuio_operation::kStageIdle : o->stage.load();
