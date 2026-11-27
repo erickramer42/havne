@@ -83,6 +83,21 @@ bool arm_unlock(Output& out, ecuio_session_t* session, const StreamArgs& args,
 void poll_conversation(Output& out, ecuio_session_t* session, uint32_t channels,
                        UnlockRun* run);
 
+// cmd_dump.cpp
+struct DumpArgs {
+    const char* uri = nullptr;
+    const char* plugin = nullptr;
+    const char* out = nullptr;
+    const char* operation = nullptr;
+    bool parked = false;
+    const char* consent_store = nullptr;
+    const char* security_store = nullptr;
+    const char* vehicle = nullptr;
+    uint32_t index = 0;
+};
+int run_dump(const DumpArgs& args);
+int cmd_dump(int argc, char** argv);
+
 // cmd_log.cpp
 int run_log(const cli::LogArgs& args);
 int cmd_log(int argc, char** argv);
