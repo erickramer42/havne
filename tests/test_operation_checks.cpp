@@ -173,3 +173,37 @@ TEST(OperationChecksTest, NoVoltageIsAskedWhenTheAdapterReadsOne)
 }
 
 } // namespace
+
+TEST(OperationChecksTest, ASagEndsADumpAndAKernelReadButNeverAWrite)
+{
+    using ecuio_operation::volts;
+    using ecuio_operation::volts_take;
+    struct Kind {
+        bool write;
+        bool sags;
+    };
+    for (const Kind kind : {Kind{false, true}, Kind{true, true}}) {
+        volts v;
+        v.write = kind.write;
+        v.sags = kind.sags;
+        volts_take(v, 12500, false);
+        EXPECT_FALSE(v.refused_low);
+        volts_take(v, 11000, true);
+        EXPECT_FALSE(v.dropped) << "11.0 V is still the floor";
+        volts_take(v, 10999, true);
+        EXPECT_TRUE(v.dropped) << kind.write;
+        EXPECT_FALSE(v.refused_low) << "the start's rule is judged once";
+    }
+    volts write;
+    write.write = true;
+    volts_take(write, 11400, false);
+    EXPECT_TRUE(write.refused_low) << "a write-class start under 11.5 V";
+    volts_take(write, 9000, true);
+    EXPECT_FALSE(write.dropped) << "a write goes on through a sag";
+    volts kernel;
+    kernel.write = true;
+    kernel.sags = true;
+    volts_take(kernel, 11900, false);
+    EXPECT_TRUE(kernel.low_warn) << "the write's warn under 12.0 V";
+    EXPECT_FALSE(kernel.refused_low);
+}

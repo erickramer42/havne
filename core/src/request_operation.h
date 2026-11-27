@@ -133,11 +133,12 @@ inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
                       "the vehicle is moving (%u km/h): nothing was read",
                       static_cast<unsigned>(o.k.kmh));
     } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW && o.v.write &&
-               !o.v.has) {
+               !o.v.dropped && !o.v.has) {
         std::snprintf(out, cap,
                       "no battery reading at the adapter: a write "
                       "needs one; nothing was read");
-    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW && o.v.write) {
+    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW && o.v.write &&
+               !o.v.dropped) {
         std::snprintf(out, cap,
                       "the battery reads %u.%u V at the adapter, under the "
                       "%u.%u V a write needs: connect a charger; nothing was "
@@ -649,6 +650,7 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
         o->talk_at = o->channel;
         o->v = volts{};
         o->v.write = o->write;
+        o->v.sags = !o->write || o->p->has_kernel;
         o->volts_asked = 0;
         o->volts_at_us = 0;
         o->volts_step = 0;
