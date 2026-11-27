@@ -206,7 +206,7 @@ The conversation tier is v0.9.1's; v0.9.0 ships what is built.
 - **Planned:**
   - the whole car's read: a vehicle's plugins merged into one set, modules opened by what is picked, the bridge and the store for it, a faster default, sessions a plugin declares, and the simulated car's last step;
   - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, behind the consent gate (built: the fingerprint, the publisher block, the consent store, `havne-cli plugins consent` and `stream --unlock`, the app's consent screen and unlock dialog, Python's `ConsentStore` and `unlock()`);
-  - the safety gates, then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
+  - the safety gates (built: gate 1's dump and its file, and gate 2's light envelope for a dump, with no front end to start one yet), then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
 - **The release gate:** the consent gate is in: a conversation-tier plugin is data only until a person has consented to its version, pinned by tests. The running app's consent-then-unlock flow over a plugin that unlocks has not been looked at.
 
 ### The iPhone and Mac downloads
