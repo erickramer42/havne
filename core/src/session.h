@@ -50,6 +50,16 @@ struct ecuio_test_talk_slot {
     ecuio_talk_result result;
 };
 
+/* The worker's alone: a run asks (want moves on), the transport serves
+ * between requests (served catches up). source: attach found a way. */
+struct ecuio_battery_slot {
+    bool source = false;
+    uint32_t want = 0;
+    uint32_t served = 0;
+    bool got = false;
+    uint32_t mv = 0;
+};
+
 struct ecuio_session_talk; /* conversation_bind.h */
 void ecuio_session_talk_free(ecuio_session_talk* t) noexcept;
 
@@ -77,6 +87,7 @@ struct ecuio_session {
                     void (*)(ecuio_operation::session_run*)>
         operation{nullptr, ecuio_operation_free};
     std::atomic<ecuio_operation::session_run*> operation_live{nullptr};
+    ecuio_battery_slot battery;
     /* Held across each conversation call (the unlock, the getters, the
      * bind's hand-over and close's release); never by a worker */
     mutable std::mutex conversation_mutex;

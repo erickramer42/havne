@@ -171,7 +171,7 @@ inline bool ecuio_talk_kind_fits(const ecuio_talk_request& q,
         return q.echo == 1;
     }
     if (q.kind == ecuio_talk_kind::check) {
-        return q.len == 2 && q.echo == 2;
+        return q.len == 2;
     }
     if (!access || q.len < 2) {
         return false;

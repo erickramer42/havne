@@ -13,6 +13,8 @@ using session_operation::Bench;
 
 const Bytes kRpm = {0x01, 0x0C};
 const Bytes kKmh = {0x01, 0x0D};
+constexpr uint32_t kSpeeds =
+    ECUIO_OPERATION_CHECK_RPM | ECUIO_OPERATION_CHECK_KMH;
 
 /* The run's requests from from on: the rotation's row and the keep-alive
  * left out */
@@ -54,7 +56,7 @@ TEST(SessionOperationTest, AnEngineRunningEndsTheRunWithOnlyItsSpeedAsked)
     EXPECT_STREQ(v.words, "the engine is running (850 rpm): switch it off by "
                           "the key; nothing was read");
     EXPECT_EQ(v.rpm, 850u);
-    EXPECT_EQ(v.checks, ECUIO_OPERATION_CHECK_RPM);
+    EXPECT_EQ(v.checks & kSpeeds, ECUIO_OPERATION_CHECK_RPM);
     EXPECT_EQ(run_sent(b, from), std::vector<Bytes>{kRpm});
     EXPECT_TRUE(b.files().empty());
 }
@@ -71,7 +73,8 @@ TEST(SessionOperationTest, AMovingVehicleEndsTheRunBeforeTheUnlock)
     EXPECT_STREQ(v.words, "the vehicle is moving (12 km/h): nothing was read");
     EXPECT_EQ(v.kmh, 12u);
     EXPECT_EQ(v.rpm, 0u);
-    EXPECT_EQ(v.checks, ECUIO_OPERATION_CHECK_RPM | ECUIO_OPERATION_CHECK_KMH);
+    EXPECT_EQ(v.checks & kSpeeds,
+              ECUIO_OPERATION_CHECK_RPM | ECUIO_OPERATION_CHECK_KMH);
     EXPECT_EQ(run_sent(b, from), (std::vector<Bytes>{kRpm, kKmh}));
     EXPECT_TRUE(b.files().empty());
 }
@@ -85,7 +88,8 @@ TEST(SessionOperationTest, AParkedVehicleIsReadAndTheRunGoesOn)
     EXPECT_EQ(b.state().phase, ECUIO_OPERATION_PHASE_PRECONDITIONS);
     const ecuio_operation_state_t v = b.until_ended();
     ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
-    EXPECT_EQ(v.checks, ECUIO_OPERATION_CHECK_RPM | ECUIO_OPERATION_CHECK_KMH);
+    EXPECT_EQ(v.checks & kSpeeds,
+              ECUIO_OPERATION_CHECK_RPM | ECUIO_OPERATION_CHECK_KMH);
     EXPECT_EQ(v.rpm, 0u);
     EXPECT_EQ(v.kmh, 0u);
 }
@@ -110,7 +114,7 @@ TEST(SessionOperationTest, SpeedsUnansweredOrRefusedLetTheRunGoOn)
         ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
         const ecuio_operation_state_t v = b.until_ended();
         ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
-        EXPECT_EQ(v.checks, 0u);
+        EXPECT_EQ(v.checks & kSpeeds, 0u);
         const std::vector<Bytes> sent = run_sent(b, from);
         ASSERT_GT(sent.size(), 3u);
         EXPECT_EQ(sent[0], kRpm);
@@ -163,7 +167,7 @@ TEST(SessionOperationTest, AChecksTalkThatNeverGoesOutIsGivenUpAtTheBound)
     }
     const ecuio_operation_state_t v = b.until_ended(400);
     EXPECT_EQ(v.end, ECUIO_OPERATION_END_SESSION_LOST) << v.words;
-    EXPECT_EQ(v.checks, 0u);
+    EXPECT_EQ(v.checks & kSpeeds, 0u);
     EXPECT_EQ(b.count(0x01, from), 0u);
     EXPECT_EQ(b.count(0x27, from) + b.count(0x23, from), 0u);
     EXPECT_TRUE(b.files().empty());

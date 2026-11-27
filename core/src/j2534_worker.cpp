@@ -553,10 +553,29 @@ void after_read(ecuio_j2534_transport* t, worker_state& w)
     }
 }
 
+/* A failed read is no reading, never the link's failure */
+void serve_battery(ecuio_j2534_transport* t)
+{
+    ecuio_battery_slot& b = t->session->battery;
+    if (b.want == b.served) {
+        return;
+    }
+    uint8_t mv[4] = {};
+    uint32_t n = 0;
+    b.got = ecuio_j2534_ioctl(t->handle, t->channel, ECUIO_PT_IOCTL_READ_VBATT,
+                              nullptr, 0, mv, sizeof(mv), &n) == ECUIO_OK &&
+            n == sizeof(mv);
+    if (b.got) {
+        memcpy(&b.mv, mv, sizeof(mv));
+    }
+    b.served = b.want;
+}
+
 void serve_session(ecuio_j2534_transport* t, worker_state& w)
 {
     ecuio_request_engine& e = w.e;
     const bool requests = w.requests;
+    serve_battery(t);
     if (requests) {
         ecuio_take_diag_request(t->session, &e, w.diag_seen);
         ecuio_take_clear_requests(t->session, &e, &w.clear_seen);

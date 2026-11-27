@@ -690,10 +690,24 @@ void follow_modules(transport* t, const worker_state& w)
     }
 }
 
+/* Typed between commands, as AT SH is; anything but a reading is none */
+void serve_battery(transport* t)
+{
+    ecuio_battery_slot& b = t->session->battery;
+    if (b.want == b.served) {
+        return;
+    }
+    uint32_t mv = 0;
+    b.got = t->configured && read_battery(t, &mv);
+    b.mv = b.got ? mv : 0;
+    b.served = b.want;
+}
+
 /* What the session asked for since the last pass, and what it's told */
 void serve_session(transport* t, worker_state& w)
 {
     ecuio_request_engine& e = t->engine;
+    serve_battery(t);
     if (w.h.recovered) {
         w.h.recovered = false;
         if (t->probe) {

@@ -79,6 +79,8 @@ inline uint32_t end_code(run_end e)
         return ECUIO_OPERATION_END_ENGINE_RUNNING;
     case run_end::moving:
         return ECUIO_OPERATION_END_MOVING;
+    case run_end::voltage_low:
+        return ECUIO_OPERATION_END_VOLTAGE_LOW;
     default:
         return ECUIO_OPERATION_END_FILE;
     }
@@ -127,6 +129,12 @@ inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
         std::snprintf(out, cap,
                       "the vehicle is moving (%u km/h): nothing was read",
                       static_cast<unsigned>(o.k.kmh));
+    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW) {
+        std::snprintf(out, cap,
+                      "the battery fell to %u.%u V at the adapter: the copy "
+                      "was incomplete, nothing was kept",
+                      static_cast<unsigned>(o.v.min_mv / 1000),
+                      static_cast<unsigned>(o.v.min_mv % 1000 / 100));
     } else {
         std::snprintf(out, cap, "%s", end_words(end));
     }
@@ -160,6 +168,18 @@ inline uint32_t phase_of(const session_run& o)
     }
 }
 
+/* What the run has read, as the view's checks */
+inline uint32_t checks_of(const session_run& o)
+{
+    const volts& v = o.v;
+    return (o.k.has_rpm ? ECUIO_OPERATION_CHECK_RPM : 0u) |
+           (o.k.has_kmh ? ECUIO_OPERATION_CHECK_KMH : 0u) |
+           (v.has ? ECUIO_OPERATION_CHECK_VOLTS : 0u) |
+           (v.from_ecu ? ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU : 0u) |
+           (v.low_warn ? ECUIO_OPERATION_CHECK_VOLTS_LOW : 0u) |
+           (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u);
+}
+
 /* The view follows the machine: taken under the lock only when it moved.
  * The worker alone writes the view while the run is its own, so it reads
  * its own fields without the lock. */
@@ -173,8 +193,10 @@ inline void publish(ecuio_session_t* s, session_run& o)
     const uint32_t step =
         o.r.step < steps ? o.r.step : static_cast<uint32_t>(steps - 1);
     ecuio_operation_state_t& v = o.view;
+    const uint32_t checks = checks_of(o);
     if (v.phase == phase && v.pass == pass && v.step == step &&
-        v.bytes_done == o.r.handed) {
+        v.bytes_done == o.r.handed && v.checks == checks &&
+        v.volts_mv == o.v.mv && v.volts_min_mv == o.v.min_mv) {
         return;
     }
     const std::lock_guard<std::mutex> lock(s->support_mutex);
@@ -182,6 +204,11 @@ inline void publish(ecuio_session_t* s, session_run& o)
     v.pass = pass;
     v.step = step;
     v.bytes_done = o.r.handed;
+    v.checks = checks;
+    v.volts_mv = o.v.mv;
+    v.volts_min_mv = o.v.min_mv;
+    v.rpm = static_cast<uint16_t>(o.k.rpm);
+    v.kmh = static_cast<uint16_t>(o.k.kmh);
 }
 
 /* A recording's operation line for the run's start (end NONE) or end */
@@ -203,6 +230,11 @@ inline void end_run(ecuio_session_t* s, session_run& o, uint32_t end,
         v.end = end;
         v.pass = 0;
         v.bytes_done = o.r.handed;
+        v.checks = checks_of(o);
+        v.volts_mv = o.v.mv;
+        v.volts_min_mv = o.v.min_mv;
+        v.rpm = static_cast<uint16_t>(o.k.rpm);
+        v.kmh = static_cast<uint16_t>(o.k.kmh);
         v.nrc = end == ECUIO_OPERATION_END_REFUSED ||
                         end == ECUIO_OPERATION_END_UNLOCK_REFUSED
                     ? o.r.nrc
@@ -341,15 +373,41 @@ inline void offer(session_run& o, ecuio_request_engine* e, const run_request& q,
     }
 }
 
-/* The checks' readings into the view */
-inline void publish_checks(ecuio_session_t* s, session_run& o)
+/* The battery asked of the transport at the start, at each step's start
+ * and every kVoltsEveryUs; an ask not served in kVoltsLateUs is no
+ * reading. With no reading at the start the checks ask the engine
+ * module's own. */
+inline void battery_step(ecuio_session_t* s, session_run& o, int64_t now_us)
 {
-    const std::lock_guard<std::mutex> lock(s->support_mutex);
-    ecuio_operation_state_t& v = o.view;
-    v.checks = (o.k.has_rpm ? ECUIO_OPERATION_CHECK_RPM : 0u) |
-               (o.k.has_kmh ? ECUIO_OPERATION_CHECK_KMH : 0u);
-    v.rpm = static_cast<uint16_t>(o.k.rpm);
-    v.kmh = static_cast<uint16_t>(o.k.kmh);
+    ecuio_battery_slot& b = s->battery;
+    volts& v = o.v;
+    if (!b.source) {
+        if (!v.first) {
+            v.first = true;
+            o.k.want_volts = true;
+        }
+        return;
+    }
+    const bool served = o.volts_asked != 0 && b.served == o.volts_asked;
+    if (served ||
+        (o.volts_asked != 0 && now_us - o.volts_at_us > kVoltsLateUs)) {
+        if (served && b.got) {
+            volts_take(v, b.mv, v.first);
+        }
+        if (!v.first) {
+            v.first = true;
+            o.k.want_volts = !(served && b.got);
+        }
+        o.volts_asked = 0;
+    }
+    const bool step_moved = !o.checking && o.r.step != o.volts_step;
+    const bool due = o.volts_at_us == 0 || step_moved ||
+                     now_us - o.volts_at_us >= kVoltsEveryUs;
+    if (o.volts_asked == 0 && due && o.r.at != run_stage::done) {
+        o.volts_step = o.r.step;
+        o.volts_asked = ++b.want == 0 ? ++b.want : b.want;
+        o.volts_at_us = now_us;
+    }
 }
 
 /* A check's talk still waiting for its turn when the run has ended or the
@@ -366,8 +424,7 @@ inline void drop_check(session_run& o, ecuio_request_engine* e, int64_t now_us)
 
 /* The checks before the run, each a talk of its own on its module's
  * channel: one at a time, a busy channel asked again at the next pass */
-inline void check_step(ecuio_session_t* s, session_run& o,
-                       ecuio_request_engine* e, int64_t now_us)
+inline void check_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
 {
     checks& k = o.k;
     check_request q;
@@ -394,7 +451,10 @@ inline void check_step(ecuio_session_t* s, session_run& o,
         return;
     }
     o.checking = false;
-    publish_checks(s, o);
+    if (k.has_volts) {
+        volts_take(o.v, k.volts_mv, false);
+        o.v.from_ecu = true;
+    }
     if (k.result == check_end::engine_running) {
         stop(o.r, run_end::engine_running);
     } else if (k.result == check_end::moving) {
@@ -470,8 +530,13 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
         stop(r, w == sink_state::differ ? run_end::differ : run_end::file);
     }
     drop_check(o, e, now_us);
-    if (o.checking && r.at != run_stage::done) {
-        check_step(s, o, e, now_us);
+    battery_step(s, o, now_us);
+    if (o.v.dropped && r.at != run_stage::done) {
+        o.orphan = o.out && !o.fed;
+        stop(r, run_end::voltage_low);
+    }
+    if (o.checking && o.v.first && r.at != run_stage::done) {
+        check_step(o, e, now_us);
     }
     while (!o.checking && r.at != run_stage::done && !o.out && !t.offered &&
            !t.out && t.result.end == ecuio_talk_end::none) {
@@ -551,6 +616,10 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
         check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);
         o->checking = true;
         o->talk_at = o->channel;
+        o->v = volts{};
+        o->volts_asked = 0;
+        o->volts_at_us = 0;
+        o->volts_step = 0;
         o->began_us = now_us;
         e->operation_hold = true;
         record_line(s, *o, ECUIO_OPERATION_END_NONE);

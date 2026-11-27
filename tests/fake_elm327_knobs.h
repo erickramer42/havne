@@ -72,6 +72,10 @@
 //                settings gone, once: a reset as the adapter answered
 //   stop_resets  a monitor's next stop answered by a reset's banner and
 //                prompt, the settings gone, in place of STOPPED, once
+//   vbatt        what AT RV and STVR answer ("?" included); none the
+//                fake's 13.8 V
+//   vbatt_sag, vbatt_sag_at  what they answer from the vbatt_sag_at-th
+//                reading on (counted in battery_reads, the attach's first)
 
 #ifndef ECUIO_TESTS_FAKE_ELM327_KNOBS_H
 #define ECUIO_TESTS_FAKE_ELM327_KNOBS_H
@@ -110,6 +114,9 @@ struct knobs {
     const char* banner_in_reply = nullptr;
     bool stop_resets = false;
     bool no_prompt = false;
+    const char* vbatt = nullptr;
+    const char* vbatt_sag = nullptr;
+    uint32_t vbatt_sag_at = 0;
 };
 
 } // namespace fake_elm327

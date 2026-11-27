@@ -62,8 +62,13 @@ int c_abi_operation(void)
          ECUIO_OPERATION_END_FILE == 10u &&
          ECUIO_OPERATION_END_BAD_REPLY == 11u &&
          ECUIO_OPERATION_END_ENGINE_RUNNING == 12u &&
-         ECUIO_OPERATION_END_MOVING == 13u && ECUIO_OPERATION_CHECK_RPM == 1u &&
-         ECUIO_OPERATION_CHECK_KMH == 2u;
+         ECUIO_OPERATION_END_MOVING == 13u &&
+         ECUIO_OPERATION_END_VOLTAGE_LOW == 14u &&
+         ECUIO_OPERATION_CHECK_RPM == 1u && ECUIO_OPERATION_CHECK_KMH == 2u &&
+         ECUIO_OPERATION_CHECK_VOLTS == 4u &&
+         ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU == 8u &&
+         ECUIO_OPERATION_CHECK_VOLTS_LOW == 0x10u &&
+         ECUIO_OPERATION_CHECK_VOLTS_HIGH == 0x20u;
     if (!ok) {
         fprintf(stderr, "c_abi: an operation struct's layout moved\n");
         return 1;

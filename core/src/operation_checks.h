@@ -1,6 +1,7 @@
 #ifndef ECUIO_OPERATION_CHECKS_H
 #define ECUIO_OPERATION_CHECKS_H
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 
@@ -11,6 +12,38 @@ constexpr bool ecuio_check_allowed(uint8_t sid, uint8_t pid)
 }
 
 namespace ecuio_operation {
+
+constexpr uint32_t kDumpWarnLowMv = 11800;
+constexpr uint32_t kDumpStopMv = 11000;
+constexpr uint32_t kVoltsWarnHighMv = 15000;
+constexpr int64_t kVoltsEveryUs = 2000000;
+constexpr int64_t kVoltsLateUs = 5000000;
+
+/* The battery's readings at the adapter, or the engine module's 01 42 */
+struct volts {
+    bool first = false; /* the start's reading is settled, got or not */
+    bool has = false;
+    bool from_ecu = false;
+    bool low_warn = false;
+    bool high_warn = false;
+    bool dropped = false;
+    uint32_t mv = 0;
+    uint32_t min_mv = 0;
+};
+
+/* running: the start's reading is in, so this one is the run's */
+inline void volts_take(volts& v, uint32_t mv, bool running)
+{
+    v.mv = mv;
+    v.min_mv = v.has ? (std::min)(v.min_mv, mv) : mv;
+    v.has = true;
+    v.high_warn = v.high_warn || mv > kVoltsWarnHighMv;
+    if (!running) {
+        v.low_warn = mv < kDumpWarnLowMv;
+    } else if (mv < kDumpStopMv) {
+        v.dropped = true;
+    }
+}
 
 enum class check_stage : uint8_t { rpm, kmh, volts_listed, volts, done };
 enum class check_end : uint8_t { none, engine_running, moving };

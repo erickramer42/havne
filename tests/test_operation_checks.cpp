@@ -60,6 +60,13 @@ TEST(OperationChecksTest, OnlyTheFourReadingsPassTheDoor)
     q.echo = 1;
     EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::refused);
     q.echo = 2;
+    const uint8_t pack[] = {0x01, 0x0C, 0x0D};
+    q.pdu = pack;
+    q.len = 3;
+    EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::refused)
+        << "one PID a check";
+    q.pdu = rpm;
+    q.len = 2;
     EXPECT_EQ(ecuio_engine_talk(t, w, 60, q, 0), ecuio_talk_offer::taken);
     q.kind = ecuio_talk_kind::plain;
     ecuio_engine_talk_state plain;

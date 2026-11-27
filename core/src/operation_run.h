@@ -71,6 +71,7 @@ enum class run_end : uint8_t {
     file,           /* the sink's, through stop */
     engine_running, /* the caller's checks, through stop */
     moving,
+    voltage_low,
 };
 
 enum class run_action : uint8_t {

@@ -66,6 +66,7 @@ public:
     int64_t request_us[kRecordDepth] = {}; /* the first requests' steady_us */
     uint32_t commands = 0;
     uint32_t requests = 0;
+    uint32_t battery_reads = 0;
     uint32_t packs = 0;    /* Service 01 requests of two or more PIDs */
     uint32_t resets = 0;   /* AT Z */
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
@@ -384,6 +385,17 @@ private:
 
     void prompt(int64_t at) { put(">", 1, at); }
 
+    /* A battery reading's answer: the knobs' over the fake's own */
+    const char* battery(const char* own)
+    {
+        ++battery_reads;
+        if (k.vbatt_sag != nullptr && k.vbatt_sag_at != 0 &&
+            battery_reads >= k.vbatt_sag_at) {
+            return k.vbatt_sag;
+        }
+        return k.vbatt != nullptr ? k.vbatt : own;
+    }
+
     /* A reply: its lines, then a blank line and the prompt. */
     void reply(const char* text, int64_t at)
     {
@@ -529,7 +541,7 @@ private:
             char v[16];
             snprintf(v, sizeof(v), "%u.%uV", kVbattMv / 1000,
                      (kVbattMv % 1000) / 100);
-            reply(v, now);
+            reply(battery(v), now);
         } else if (is("PPS")) {
             char line[64];
             snprintf(line, sizeof(line),
@@ -593,7 +605,7 @@ private:
             char v[16];
             snprintf(v, sizeof(v), "%u.%02u", kVbattMv / 1000,
                      (kVbattMv % 1000) / 10);
-            reply(v, now);
+            reply(battery(v), now);
         } else {
             reply("?", now);
         }

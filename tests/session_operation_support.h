@@ -60,6 +60,13 @@ struct Bench {
     std::function<bool(const Bytes&)> unsent; /* the adapter takes it not */
     std::function<void(Bench&)> while_out; /* a request is on the wire */
     bool waits_for_writer = true;
+    /* The adapter's battery: the nth reading's millivolts, 0 none */
+    bool battery_source = true;
+    std::function<uint32_t(uint32_t nth)> battery = [](uint32_t) {
+        return 12600u;
+    };
+    uint32_t battery_reads = 0;
+    int battery_held = 0; /* serves an ask only after this many tries */
 
     /* The session bound, the engine made and the module's begin past:
      * the extended session entered, nothing unlocked. worker false: bound
@@ -115,9 +122,25 @@ struct Bench {
                                   static_cast<uint32_t>(b.size()));
     }
 
+    /* As a transport serves it, between requests */
+    void serve_battery()
+    {
+        ecuio_battery_slot& b = s->battery;
+        b.source = battery_source;
+        if (b.want != b.served && battery_held > 0) {
+            --battery_held;
+        } else if (b.want != b.served) {
+            const uint32_t mv = battery ? battery(++battery_reads) : 0u;
+            b.got = mv != 0;
+            b.mv = mv;
+            b.served = b.want;
+        }
+    }
+
     /* One pass as a worker's: the step, channel 0's request answered */
     void pass()
     {
+        serve_battery();
         ecuio_step_conversations(s, e.get(), now);
         const int32_t r = ecuio_engine_due(e.get(), 0, now);
         if (r != ECUIO_ENGINE_NONE) {
@@ -141,6 +164,7 @@ struct Bench {
             writer_idle();
         }
         now += ECUIO_ENGINE_GAP_US;
+        serve_battery();
         ecuio_step_conversations(s, e.get(), now);
     }
 

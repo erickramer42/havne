@@ -58,6 +58,10 @@ struct session_run {
     /* The worker's */
     run r;
     checks k;
+    volts v;
+    uint32_t volts_asked = 0; /* the battery's want this run waits on */
+    int64_t volts_at_us = 0;
+    uint32_t volts_step = 0;
     bool checking = false;
     uint32_t talk_at = 0;    /* the channel the run's talk is offered on */
     bool out = false;        /* that channel's talk is the run's */

@@ -4,6 +4,8 @@
 
 #include "fake_j2534_state.h"
 
+#include <atomic>
+
 extern "C"
 long __stdcall PassThruIoctl(unsigned long ChannelID,
                              long IoControlID,
@@ -32,10 +34,26 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
             static_cast<DWORD>(strtoul(stall_buf, nullptr, 10));
         if (delay > 0 && delay <= 60000) Sleep(delay);
     }
+    unsigned long vbatt_mv = 13800;
     if (IoControlID == static_cast<long>(ECUIO_PT_IOCTL_READ_VBATT)) {
         if (const long rc = fake_j2534::refusal("ECUIO_FAKE_VBATT_STATUS",
                                                 "READ_VBATT")) {
             return rc;
+        }
+        static std::atomic<unsigned long> reads{0};
+        const unsigned long nth = ++reads;
+        char nb[32] = {};
+        if (fake_j2534::read_knob("ECUIO_FAKE_VBATT", nb, sizeof(nb))) {
+            vbatt_mv = strtoul(nb, nullptr, 10);
+        }
+        /* <mv>:<n>: from the nth READ_VBATT since load on, the connect's
+         * own the first */
+        if (fake_j2534::read_knob("ECUIO_FAKE_VBATT_SAG", nb, sizeof(nb))) {
+            char* at = nullptr;
+            const unsigned long sag = strtoul(nb, &at, 10);
+            if (*at == ':' && nth >= strtoul(at + 1, nullptr, 10)) {
+                vbatt_mv = sag;
+            }
         }
     }
 
@@ -104,7 +122,7 @@ long __stdcall PassThruIoctl(unsigned long ChannelID,
             return STATUS_FAILED;
         }
         if (pOutput != nullptr) {
-            *static_cast<unsigned long*>(pOutput) = 13800;  /* 13.8 V in mV */
+            *static_cast<unsigned long*>(pOutput) = vbatt_mv;
         }
         return STATUS_NOERROR;
     case ECUIO_PT_IOCTL_CLEAR_TX_BUFFER:

@@ -610,6 +610,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
                        tx_ids);
     if (st == ECUIO_OK) {
         describe_session(t.get(), params.baud, connect_flags, &session->info);
+        session->battery.source = true;
         st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
     }
     if (st != ECUIO_OK) {

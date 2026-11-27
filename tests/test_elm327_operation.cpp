@@ -156,3 +156,33 @@ TEST_F(Elm327OperationTest, APlanAskedInMoreThanAFrameIsRefusedAtTheStart)
     ASSERT_EQ(ecuio_session_get_operation(s.get(), &v), ECUIO_OK);
     EXPECT_EQ(v.generation, 0u) << "no run began";
 }
+
+/* AT RV between the run's commands: a reading under the floor ends the
+ * run; an adapter that reads none leaves it to the engine module's 01 42 */
+TEST_F(Elm327OperationTest, TheBatteryIsReadThroughTheRun)
+{
+    {
+        fake_elm327::with([](fake_elm327::adapter& a) {
+            a.k.vbatt_sag = "10.9V";
+            a.k.vbatt_sag_at = a.battery_reads + 3;
+        });
+        conversation_session::Session s;
+        ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
+        ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = session_operation::ended(s.get());
+        EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
+        EXPECT_EQ(v.volts_min_mv, 10900u);
+        EXPECT_TRUE(files().empty());
+    }
+    fake_elm327::with([](fake_elm327::adapter& a) {
+        a.k.vbatt_sag = nullptr;
+        a.k.vbatt = "?";
+    });
+    conversation_session::Session s;
+    ASSERT_NO_FATAL_FAILURE(open(session_operation::one_frame_plan(), &s));
+    ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = session_operation::ended(s.get());
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU, 0u);
+    EXPECT_GT(v.volts_mv, 0u);
+}

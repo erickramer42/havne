@@ -194,3 +194,31 @@ TEST_F(J2534OperationTest, ACancelMidRunLeavesTheFolderEmpty)
     EXPECT_EQ(again.generation, v.generation + 1);
     EXPECT_EQ(files(), std::vector<std::string>{again.name});
 }
+
+/* READ_VBATT between the run's requests: the start's warns */
+TEST_F(J2534OperationTest, ALowBatteryAtTheStartWarns)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT", "11700"));
+    conversation_session::Session s;
+    ASSERT_NO_FATAL_FAILURE(open(&s));
+    ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = session_operation::ended(s.get());
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_EQ(v.volts_mv, 11700u);
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_LOW, 0u);
+    EXPECT_EQ(v.checks & ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU, 0u);
+}
+
+/* A reading under the floor through the run ends it with nothing kept:
+ * the connect's reading is the first, the run's start the second */
+TEST_F(J2534OperationTest, ASagThroughTheRunEndsIt)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_VBATT_SAG", "10900:3"));
+    conversation_session::Session s;
+    ASSERT_NO_FATAL_FAILURE(open(&s));
+    ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = session_operation::ended(s.get());
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_VOLTAGE_LOW) << v.words;
+    EXPECT_EQ(v.volts_min_mv, 10900u);
+    EXPECT_TRUE(files().empty());
+}

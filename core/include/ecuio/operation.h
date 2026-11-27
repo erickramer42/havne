@@ -76,7 +76,8 @@ extern "C" {
  *   FILE              the copy could not be written
  *   BAD_REPLY         a reply of the wrong shape
  *   ENGINE_RUNNING    rpm says how fast; nothing past the checks was sent
- *   MOVING            kmh says how fast; nothing past the checks was sent */
+ *   MOVING            kmh says how fast; nothing past the checks was sent
+ *   VOLTAGE_LOW       the battery fell under the run's floor (volts_min_mv) */
 #define ECUIO_OPERATION_END_NONE             0u
 #define ECUIO_OPERATION_END_SAVED            1u
 #define ECUIO_OPERATION_END_CANCELED         2u
@@ -91,10 +92,15 @@ extern "C" {
 #define ECUIO_OPERATION_END_BAD_REPLY        11u
 #define ECUIO_OPERATION_END_ENGINE_RUNNING   12u
 #define ECUIO_OPERATION_END_MOVING           13u
+#define ECUIO_OPERATION_END_VOLTAGE_LOW      14u
 
-/* A state's checks: what the run read before it began */
+/* A state's checks: what the run has read */
 #define ECUIO_OPERATION_CHECK_RPM 0x1u /* rpm holds the engine's answer */
 #define ECUIO_OPERATION_CHECK_KMH 0x2u /* kmh holds the vehicle's answer */
+#define ECUIO_OPERATION_CHECK_VOLTS 0x4u /* volts_mv and volts_min_mv hold */
+#define ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU 0x8u  /* the engine module's */
+#define ECUIO_OPERATION_CHECK_VOLTS_LOW      0x10u /* a warning at the start */
+#define ECUIO_OPERATION_CHECK_VOLTS_HIGH     0x20u /* a warning */
 
 typedef struct ecuio_operation_request {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
