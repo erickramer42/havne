@@ -140,8 +140,9 @@ TEST(SimMemoryTest, AMemRefusalNamesItsItemAndTheGrammar)
         << why;
     EXPECT_EQ(ecuio_sim_parse_uri("mock://x?bogus=1", &c, why, sizeof why),
               ecuio_sim_uri_result::bad);
-    EXPECT_NE(std::string(why).find("sa_delay, gwopt, mem, vin, faults"),
-              std::string::npos)
+    EXPECT_NE(
+        std::string(why).find("sa_delay, gwopt, mem, kernel, vin, faults"),
+        std::string::npos)
         << why;
 }
 

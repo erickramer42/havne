@@ -249,4 +249,36 @@ inline void ecuio_sim_kernel_upload_done(ecuio_sim_kernel& k)
     }
 }
 
+/* kernel=: "1", or any of once, storm, silent and refuse, comma-separated;
+ * false for any other word */
+inline bool ecuio_sim_parse_kernel(const char* text, size_t len, bool* on,
+                                   ecuio_sim_kernel_faults* out)
+{
+    size_t at = 0;
+    while (at <= len) {
+        size_t end = at;
+        while (end < len && text[end] != ',') {
+            ++end;
+        }
+        const size_t n = end - at;
+        const auto is = [&](const char* w) {
+            return std::strlen(w) == n && std::memcmp(text + at, w, n) == 0;
+        };
+        const bool once = is("once");
+        const bool storm = is("storm");
+        const bool silent = is("silent");
+        const bool refuse = is("refuse");
+        if (!is("1") && !once && !storm && !silent && !refuse) {
+            return false;
+        }
+        out->once = out->once || once;
+        out->storm = out->storm || storm;
+        out->silent = out->silent || silent;
+        out->refuse = out->refuse || refuse;
+        at = end + 1;
+    }
+    *on = true;
+    return true;
+}
+
 #endif /* ECUIO_SIM_KERNEL_H */
