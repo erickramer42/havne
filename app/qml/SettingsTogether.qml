@@ -149,7 +149,7 @@ ColumnLayout {
             enabled: root.canChange && !(root.obd2Picked && root.extender !== null)
             Accessible.name: root.obd2Picked ? qsTr("Unpick obd2") : qsTr("Pick obd2")
             Layout.fillWidth: true
-            Layout.maximumWidth: root.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: root.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             onClicked: root.togglePick("obd2")
         }
     }

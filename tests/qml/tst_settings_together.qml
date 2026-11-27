@@ -260,6 +260,26 @@ SettingsKit {
         }
     }
 
+    function test_aButtonOnTheRowKeepsItsWholeWord() {
+        const page = createPage()
+        page.open("signals")
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100"))
+        const part = find(page, "settingsTogether")
+        // A width with a fraction, as a scaled screen's font gives
+        for (const name of ["togetherObd2Pick", "togetherUp", "togetherDown", "togetherUnpick"])
+            find(page, name).leftPadding += 0.4
+        for (const w of [1100, 700]) {
+            page.width = w
+            tryVerify(() => part.oneRow && part.width <= w)
+            waitForPolish(part)
+            for (const name of ["togetherObd2Pick", "togetherUp", "togetherDown", "togetherUnpick"]) {
+                const b = find(page, name)
+                verify(b.width >= b.implicitWidth && b.contentItem.lineCount === 1, name + " at " + w + ": " + b.width + " < " + b.implicitWidth)
+            }
+        }
+    }
+
     // Said once: the Log line and the Signals page's line, until Dismiss
     function test_theCarryOverLineShowsOnceAndDismisses() {
         const kept = Bridge.keepSignalText(JSON.stringify({
