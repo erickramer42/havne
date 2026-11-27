@@ -431,7 +431,7 @@ if(TARGET havne-cli)
         test_cli_log.cpp test_cli_together.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
         test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp
-        test_cli_unlock.cpp)
+        test_cli_unlock.cpp test_cli_dump.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -1257,6 +1257,39 @@ if(TARGET havne-cli)
                     $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_unlock_fixture>)
         set_tests_properties(CliConsentRunTest.AnUnlockOpensTheGatedLevelOnce
             PROPERTIES TIMEOUT 180)
+        add_executable(cli_dump_fixture cli_dump_fixture.cpp)
+        target_include_directories(cli_dump_fixture PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/src)
+        target_link_libraries(cli_dump_fixture PRIVATE ecuio-core GTest::gtest)
+        app_enable_warnings(cli_dump_fixture)
+        set(_cli_dump ${CMAKE_CURRENT_SOURCE_DIR}/cli_dump.py)
+        if(TARGET ecuio)
+            set(_cli_dump_core $<TARGET_FILE:ecuio>)
+        else()
+            set(_cli_dump_core -)
+        endif()
+        add_test(NAME CliDumpTest.ACopyIsKeptAndReadsBack
+            COMMAND ${Python3_EXECUTABLE} ${_cli_dump} saved
+                    $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>
+                    ${_cli_dump_core})
+        add_test(NAME CliDumpTest.WhatARunNeedsIsAskedFirst
+            COMMAND ${Python3_EXECUTABLE} ${_cli_dump} refusals
+                    $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>)
+        add_test(NAME CliDumpTest.AnInterruptLeavesTheSessionAndKeepsNothing
+            COMMAND ${Python3_EXECUTABLE} ${_cli_dump} abort
+                    $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>)
+        set_tests_properties(CliDumpTest.ACopyIsKeptAndReadsBack
+            CliDumpTest.WhatARunNeedsIsAskedFirst
+            CliDumpTest.AnInterruptLeavesTheSessionAndKeepsNothing
+            PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+        if(WIN32)
+            add_test(NAME CliDumpTest.AKernelReadWarnsAndKeepsTheCode
+                COMMAND ${Python3_EXECUTABLE} ${_cli_dump} kernel
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>
+                        ${_cli_dump_core} $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliDumpTest.AKernelReadWarnsAndKeepsTheCode
+                PROPERTIES TIMEOUT 180)
+        endif()
         add_test(NAME CliPluginRunTest.AFormat2ConversationPluginReadsSignalsOnly
             COMMAND ${Python3_EXECUTABLE} ${_cli_consent} no-publisher
                     $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
@@ -1635,6 +1668,21 @@ if(TARGET havne-cli)
     app_cli_usage_says(TogetherAPluginWithoutAPackageIsUsage
         "stream|mock://x|--together|obd2|--plugin"
         "--plugin takes a package")
+    app_cli_usage_says(DumpWithoutAUriIsUsage "dump" "dump needs a URI")
+    app_cli_usage_says(DumpWithoutAPluginIsUsage "dump|mock://x|--out|d"
+        "--plugin <pkg>")
+    app_cli_usage_says(DumpWithoutAFolderIsUsage "dump|mock://x|--plugin|p"
+        "--out <folder>")
+    app_cli_usage_says(DumpParkedTwiceIsUsage
+        "dump|mock://x|--parked|--parked" "--parked is given once")
+    app_cli_usage_says(DumpAnOptionTwiceIsUsage
+        "dump|mock://x|--out|a|--out|b" "--out takes one folder")
+    app_cli_usage_says(DumpSeveralPlansNoneNamedIsUsage
+        "dump|mock://x?profile=plugin.copier.base|--plugin|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins/operation.json|--out|d"
+        "name one with --operation")
+    app_cli_usage_says(DumpAnUnknownPlanIsUsage
+        "dump|mock://x?profile=plugin.copier.base|--plugin|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/plugins/operation.json|--out|d|--operation|none"
+        "the plugin declares no plan 'none'")
     app_cli_usage_says(TogetherAnotherProfileInTheUriIsUsage
         "stream|mock://x?profile=mock|--together|obd2"
         "the URI's profile= isn't --together's, obd2")
