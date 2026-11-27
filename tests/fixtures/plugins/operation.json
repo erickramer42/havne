@@ -143,6 +143,45 @@
      "dfi": "00"
     }
    ]
+  },
+  {
+   "id": "copy-calibration",
+   "kind": "dump",
+   "title": "Copy the calibration",
+   "ecu": "tcm",
+   "level": "03",
+   "leave": "reset",
+   "steps": [
+    {
+     "step": "read",
+     "name": "calibration",
+     "session": "programming",
+     "address": "8000",
+     "bytes": 4096,
+     "address_bytes": 2,
+     "size_bytes": 2,
+     "chunk": 128
+    }
+   ]
+  },
+  {
+   "id": "copy-boot",
+   "kind": "dump",
+   "title": "Copy the boot block",
+   "ecu": "pcm",
+   "level": "01",
+   "steps": [
+    {
+     "step": "upload",
+     "name": "boot",
+     "session": "programming",
+     "address": "00000000",
+     "bytes": 2048,
+     "address_bytes": 4,
+     "size_bytes": 4,
+     "dfi": "00"
+    }
+   ]
   }
  ],
  "files": {
