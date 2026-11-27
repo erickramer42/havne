@@ -130,6 +130,8 @@ TEST_F(Elm327OperationTest, APlanThatFitsAFrameIsCopiedWhole)
     EXPECT_GT(cut_lines, 0u) << log;
     EXPECT_NE(log.find("< (a security access's line, cut: "),
               std::string::npos);
+    EXPECT_NE(log.find("run envelope  7E8  battery "), std::string::npos)
+        << log;
     std::string spaced;
     std::string bare;
     for (size_t i = 5; i < 12; ++i) {

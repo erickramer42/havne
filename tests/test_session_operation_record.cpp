@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -105,6 +106,12 @@ TEST(SessionOperationTest, ARecordingNamesTheRunsStartAndEnd)
     EXPECT_EQ(events.find(std::string(v.name).substr(13, 16)),
               std::string::npos)
         << "the checksum's digits";
+    char envelope[64];
+    std::snprintf(envelope, sizeof envelope,
+                  "  envelope  0x7E8,12600,0,0,0x%X\n", v.checks);
+    const size_t at = events.find(envelope);
+    EXPECT_NE(at, std::string::npos) << events;
+    EXPECT_LT(events.find("operation  " + kStarted), at) << "after the start";
 }
 
 TEST(SessionOperationTest, ARecordingNamesEachOtherEnd)

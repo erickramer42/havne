@@ -632,4 +632,38 @@ DashboardBookKit {
         // A setting never written may read as undefined: nothing to keep
         compare(DashboardBook.saveTexts("none", undefined, doc).unread, "")
     }
+
+    readonly property var beside: [{ baseDef: 7, baseRef: "id:23", baseTick: "7E8:4133:2.0:8", standing: 40, standingKey: "boost", name: "Boost", part: "Example import" }]
+    function carryDoc(refsList) {
+        return { format: 2, pages: [{ name: "One", cells: refsList.map(
+            refs => DashboardBook.gaugeCell("digital", 3, 3, "", refs, "", {})) }] }
+    }
+
+    // The first ref the set has wins: a set lacking the first passes to the next
+    function test_carryOverPutsTheKeyFirst() {
+        const has = r => r !== "key:other"
+        const doc = carryDoc([["id:23"], ["key:other", "id:23"], ["id:12"]])
+        const r = DashboardBook.carryOver(doc, beside, has)
+        compare(r.count, 2)
+        compare(r.doc.pages[0].cells.map(c => c.refs), [["key:boost", "id:23"], ["key:boost", "key:other", "id:23"], ["id:12"]])
+        compare(doc.pages[0].cells[0].refs, ["id:23"], "the argument is unchanged")
+        compare(DashboardBook.carryOver(doc, beside, r => false).count, 0, "a set that has none")
+    }
+
+    function test_carryOverLeavesAListAlreadyOnTheStandingSignal() {
+        const doc = carryDoc([["key:boost", "id:23"]])
+        const r = DashboardBook.carryOver(doc, beside, r => true)
+        compare(r.count, 0)
+        verify(r.doc === doc)
+    }
+
+    function test_carryOverDropsTheLastRefAtTheCap() {
+        const full = ["id:23"].concat(["a", "b", "c", "d", "e", "f", "g"].map(k => "key:" + k))
+        compare(full.length, DashboardBook.maxRefs)
+        const r = DashboardBook.carryOver(carryDoc([full]), beside, r => true)
+        const refs = r.doc.pages[0].cells[0].refs
+        compare(refs.length, DashboardBook.maxRefs)
+        compare(refs[0], "key:boost")
+        compare(refs[refs.length - 1], "key:f", "the last one goes")
+    }
 }

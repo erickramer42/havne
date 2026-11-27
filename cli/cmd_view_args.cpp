@@ -4,6 +4,7 @@
 // Public headers only: what any program linking core can do.
 
 #include "view_lines.h"
+#include "together.h"
 
 #include "commands.h"
 #include "common.h"
@@ -179,6 +180,10 @@ int check_view_args(ViewArgs& view, const StretchWords& words)
                              "--plugin go with --frames\n");
         return kExitUsage;
     }
+    if (!view.frames && view.together.given) {
+        std::fprintf(stderr, "havne-cli: --together goes with --frames\n");
+        return kExitUsage;
+    }
     if (view.signals_path != nullptr && view.plugin_path != nullptr) {
         std::fprintf(stderr, "havne-cli: --signals or --plugin, not "
                              "both\n");
@@ -195,6 +200,9 @@ int cmd_view(int argc, char** argv)
 {
     ViewArgs view;
     StretchWords words;
+    if (!take_together(argc, argv, 2, &view.together)) {
+        return kExitUsage;
+    }
     for (int i = 2; i < argc; ++i) {
         const std::string a = argv[i];
         const bool has_value = i + 1 < argc;

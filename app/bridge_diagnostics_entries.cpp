@@ -205,6 +205,7 @@ BridgeFormats::diagnosticsEntry(const ecuio_channel_diagnostics_t& s,
     m[QStringLiteral("ecu")] = hexId(s.rx_id);
     m[QStringLiteral("asked")] = (s.flags & ECUIO_DIAG_ASKED) != 0;
     m[QStringLiteral("complete")] = (s.flags & ECUIO_DIAG_COMPLETE) != 0;
+    m[QStringLiteral("notOpened")] = (s.flags & ECUIO_DIAG_NOT_OPENED) != 0;
     m[QStringLiteral("readiness")] = outcome(s.readiness);
     m[QStringLiteral("readinessNrc")] = nrc(s.readiness, 0x01, s.readiness_nrc);
     m[QStringLiteral("mil")] = (s.flags & ECUIO_DIAG_MIL_ON) != 0;

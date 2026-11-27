@@ -101,8 +101,8 @@ enum class ecuio_talk_kind : uint8_t {
               operation's run offers one (request_operation.h); a plugin's
               request is always plain */
     check,   /* an operation's reading before its run (ecuio_check_allowed) */
-    session, /* a run's own session (ecuio_operation_session_allowed) */
     write,   /* an operation's write-class request (ecuio_tier3_write_allowed) */
+    session, /* a run's own session (ecuio_operation_session_allowed) */
 };
 
 struct ecuio_talk_result {
@@ -209,11 +209,11 @@ inline bool ecuio_talk_inside_ceiling(const ecuio_talk_request& q)
     if (q.kind == ecuio_talk_kind::check) {
         return ecuio_check_allowed(q.pdu[0], sub);
     }
-    if (q.kind == ecuio_talk_kind::session) {
-        return ecuio_operation_session_allowed(q.pdu[0], sub);
-    }
     if (q.kind == ecuio_talk_kind::write) {
         return ecuio_tier3_write_allowed(q.pdu[0], sub);
+    }
+    if (q.kind == ecuio_talk_kind::session) {
+        return ecuio_operation_session_allowed(q.pdu[0], sub);
     }
     return q.kind == ecuio_talk_kind::plain
                ? ecuio_tier2_guest_may_send(q.pdu[0], sub)

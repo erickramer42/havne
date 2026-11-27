@@ -90,9 +90,9 @@ struct plan {
     uint8_t level = 0; /* the security level its reads need */
     std::vector<ident> idents;
     std::vector<step> steps;
-    uint32_t leave = 0; /* a programming plan's ECUIO_OPERATION_LEAVE_* */
     bool has_kernel = false;
     kernel helper;
+    uint32_t leave = 0; /* a programming plan's ECUIO_OPERATION_LEAVE_* */
 };
 
 /* The most an unsigned value of n bytes (1 to 4) holds */

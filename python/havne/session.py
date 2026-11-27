@@ -70,6 +70,11 @@ ModuleSession.__doc__ = ("One module's extended session (ADR-0060), in havne-cli
                          "or abandoned session's, else None) and how many times the session was "
                          "entered and lost")
 
+ModuleState = namedtuple("ModuleState", "ecu closed no_room")
+ModuleState.__doc__ = ("Whether a module is read: its reply ID as \"0x7E8\", closed when "
+                       "nothing asks it, no_room when something does and the adapter "
+                       "listens to as many modules as it can already")
+
 TEXT_KINDS = (e.ECUIO_VALUE_TEXT, e.ECUIO_VALUE_HEX)
 
 _SESSION_STATES = {
@@ -665,6 +670,12 @@ class Session(_Talk):
         check(lib.ecuio_session_get_channel_support(self._handle(), channel, ctypes.byref(out)),
               "ecuio_session_get_channel_support")
         return out
+
+    def module_state(self, channel=0):
+        """The channel's ModuleState, from its support report"""
+        s = self.support(channel)
+        return ModuleState(f"0x{s.rx_id:X}", bool(s.flags & e.ECUIO_SUPPORT_CLOSED),
+                           bool(s.flags & e.ECUIO_SUPPORT_NO_ROOM))
 
     def session_state(self, channel=0):
         """The channel's extended session as words (ADR-0060), the fields of

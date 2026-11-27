@@ -205,6 +205,8 @@ qt_add_qml_module(app_ui
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
         qml/SettingsSignals.qml
+        qml/SettingsTogether.qml
+        qml/TogetherPartRow.qml
         qml/SettingsConsents.qml
         qml/ConsentBody.qml
         qml/ConsentButtons.qml
@@ -220,6 +222,7 @@ qt_add_qml_module(app_ui
         qml/SettingsVinLookup.qml
         qml/NavButton.qml
         qml/Theme.qml
+        qml/LiveSignalRow.qml
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
         qml/ChartLayout.qml

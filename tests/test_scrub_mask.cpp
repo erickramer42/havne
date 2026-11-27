@@ -287,9 +287,9 @@ TEST(ScrubMaskTest, JsonEscapesSeparateRunsAsTheirCharacters)
     const std::string own = "\"" + bs + "nZZZFAKE12M0000001\"";
     EXPECT_EQ(refused(own, sc::kRefuse), 0u);
     EXPECT_EQ(refused(own, sc::kJson), kShaped);
-    /* an escape of a letter or digit reads as its bytes, as outside JSON */
     const std::string letter = "\"" + bs + "u0041" + kVin + "\"";
-    EXPECT_EQ(refused(letter, sc::kJson), refused(letter, sc::kRefuse));
+    EXPECT_EQ(refused(letter, sc::kJson),
+              refused("\"A" + std::string(kVin) + "\"", sc::kRefuse));
     /* an escape cut short reads as its bytes */
     const std::string cut = "\"" + bs + "u00" + kVin + "\"";
     EXPECT_EQ(refused(cut, sc::kJson), refused(cut, sc::kRefuse));
@@ -299,6 +299,45 @@ TEST(ScrubMaskTest, JsonEscapesSeparateRunsAsTheirCharacters)
     for (size_t piece = 1; piece <= 8; ++piece) {
         EXPECT_EQ(masked(in, piece, sc::kMask | sc::kJson).text, whole.text);
     }
+}
+
+/* An escaped letter or digit is its character in its run: a VIN holding
+ * one is found, and a mask, which can't cover the escape, refuses */
+TEST(ScrubMaskTest, AnEscapedLetterOrDigitInAVinRefuses)
+{
+    const std::string bs = "\\";
+    const std::string vin(kVin);
+    for (const std::string& v :
+         {vin.substr(0, 4) + bs + "u0041" + vin.substr(5),
+          vin.substr(0, 12) + bs + "u0030" + vin.substr(13),
+          bs + "u005a" + vin.substr(1), vin.substr(0, 16) + bs + "u0031",
+          "ZZZF" + bs + "u0041KE12M0000001",
+          "PN_" + vin.substr(0, 4) + bs + "u0041" + vin.substr(5) + "x",
+          "PN_" + vin + bs + "u0041x"}) {
+        SCOPED_TRACE(v);
+        const std::string in = "{\"name\": \"" + v + "\"}";
+        EXPECT_EQ(refused(in, sc::kJson), kShaped);
+        for (size_t piece : {size_t{1}, size_t{5}, SIZE_MAX}) {
+            const Masked m = masked(in, piece, sc::kMask | sc::kJson);
+            EXPECT_EQ(m.found, kShaped) << piece;
+        }
+    }
+
+    const std::string apart = "{\"a\": \"Boost " + bs + "u0041 and " + bs +
+                              "u00312\", \"b\": \"AB" + bs + "u0043D\"}";
+    EXPECT_EQ(refused(apart, sc::kJson), 0u);
+    const Masked m = masked(apart, SIZE_MAX, sc::kMask | sc::kJson);
+    EXPECT_EQ(m.found, 0u);
+    EXPECT_EQ(m.masked, 0u);
+    EXPECT_EQ(m.text, apart);
+
+    const std::string beside =
+        "{\"a\": \"" + bs + "u0041\", \"b\": \"" + vin + "\"}";
+    const Masked b = masked(beside, SIZE_MAX, sc::kMask | sc::kJson);
+    EXPECT_EQ(b.found, 0u);
+    EXPECT_EQ(b.masked, 1u);
+    EXPECT_EQ(b.text,
+              "{\"a\": \"" + bs + "u0041\", \"b\": \"" + stars(17) + "\"}");
 }
 
 TEST(ScrubMaskTest, WindowInIsTheWindowRuleAlone)

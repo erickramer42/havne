@@ -151,6 +151,7 @@ Pane {
     // change. The earlier format's key, vehicles/document, is an older
     // Havne's to read and is never written
     property var vehicles: VehicleBook.empty()
+    property var carryGauges: null
     readonly property var pickedVehicle: VehicleBook.picked(vehicles)
     // A book a later Havne saved is left as it is: none shown, none saved
     readonly property bool bookLater: VehicleBook.isLater(vehicles)
@@ -438,6 +439,15 @@ Pane {
             // a damaged store shows no versions until the next connect
         }
         vehicles = VehicleBook.parse(vehicleStore.book)
+        const migrated = VehicleBook.migrate(vehicles)
+        if (migrated.doc !== vehicles) {
+            saveVehicles(migrated.doc)
+            if (migrated.added > 0)
+                Bridge.logEvent(migrated.added === 1
+                    ? qsTr("Vehicles: obd2's standard signals added to the picks of 1 vehicle (once, at this version's first start)")
+                    : qsTr("Vehicles: obd2's standard signals added to the picks of %1 vehicles (once, at this version's first start)")
+                          .arg(migrated.added))
+        }
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens

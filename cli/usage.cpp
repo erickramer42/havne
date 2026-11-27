@@ -53,6 +53,15 @@ void usage_stream(FILE* to)
         "         another than the app's), and the session line says it;\n"
         "         without one nothing is sent, and the refusal says what\n"
         "         to read and run. log takes it the same way.\n"
+        "         --together reads profiles as one set, merged in the\n"
+        "         order named: obd2 (its signals) or obd2-modules (its\n"
+        "         modules alone, so the emissions codes are still read),\n"
+        "         a --plugin's variants and --signals files' profiles;\n"
+        "         --plugin and --signals may then each be given more than\n"
+        "         once. The session line names them and the merged set, a\n"
+        "         note line follows for each thing the merge did, and no\n"
+        "         plugin's code runs. log, sim and view --frames take it\n"
+        "         the same way.\n"
         "         --unlock asks one security access level of one module the\n"
         "         plugin's code talks to (its ECU id and the level in hex,\n"
         "         one the plugin declares for it): once, when the code\n"
@@ -113,6 +122,8 @@ void usage_stream_log_synopsis(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
+        "                         [--together <profiles> [--plugin <pkg>]...\n"
+        "                         [--signals <file>]...]\n"
         "                         [--conditions <file>] [--pick ranked]\n"
         "                         [--allow-sleep] [--consent-store <path>]\n"
         "                         [--unlock <ecu>:<level> [--security-store "
@@ -125,7 +136,9 @@ void usage_stream_log_synopsis(FILE* to)
         "                      [--signals <file> | --plugin <pkg>] "
         "[--conditions <file>\n"
         "                      [--armed]] [--allow-sleep] "
-        "[--consent-store <path>]\n");
+        "[--consent-store <path>]\n"
+        "                      [--together <profiles> [--plugin <pkg>]...\n"
+        "                      [--signals <file>]...]\n");
 }
 
 // plugins' lines of the synopsis
@@ -146,7 +159,10 @@ void usage_plugins_synopsis(FILE* to)
         "                      [--consent-store <path>]\n"
         "       havne-cli plugins consent --list [--consent-store <path>]\n"
         "       havne-cli plugins consent --withdraw <id> [<fingerprint>]\n"
-        "                      [--consent-store <path>]\n");
+        "                      [--consent-store <path>]\n"
+        "       havne-cli plugins together --together <profiles> "
+        "[--plugin <pkg>]...\n"
+        "                      [--signals <file>]... [--out <file>]\n");
 }
 
 // plugins' help
@@ -174,7 +190,12 @@ void usage_plugins(FILE* to)
         "         read and change the record. The store is the app's\n"
         "         consent.json unless --consent-store names one. Havne\n"
         "         checks no signature: check a publisher's with your own\n"
-        "         tool before you allow it.\n");
+        "         tool before you allow it.\n"
+        "         together merges the profiles --together names, as\n"
+        "         stream's --together reads them, and says what came of\n"
+        "         it: a part line for each file, a module line for each\n"
+        "         module, a totals line and a note line for each thing the\n"
+        "         merge did; --out writes the merged set's text.\n");
 }
 
 } // namespace
@@ -189,9 +210,13 @@ void usage(FILE* to)
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
+        "                      [--together <profiles> [--plugin <pkg>]...\n"
+        "                      [--signals <file>]...]\n"
         "       havne-cli sim <uri> --elm327 tcp:[<address>:]<port> "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
+        "                      [--together <profiles> [--plugin <pkg>]...\n"
+        "                      [--signals <file>]...]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
         "                      [--span A:B]... [--align-on <what>]\n"
@@ -202,7 +227,9 @@ void usage(FILE* to)
         "                      [--pull-end lift|top-speed]\n"
         "                      [--units metric|imperial]]\n"
         "                      [--frames [--profile <name>]\n"
-        "                      [--signals <file> | --plugin <pkg>]]\n"
+        "                      [--signals <file> | --plugin <pkg>]\n"
+        "                      [--together <profiles> [--plugin <pkg>]...\n"
+        "                      [--signals <file>]...]]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
         "[--settle S]\n"
         "       havne-cli frames <recording> [--from S] [--to S]\n"

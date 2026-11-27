@@ -587,11 +587,21 @@ void serve_battery(ecuio_j2534_transport* t)
     b.served = b.want;
 }
 
+void serve_run_lines(ecuio_j2534_transport* t)
+{
+    ecuio_run_lines& l = t->session->run_lines;
+    for (uint32_t i = 0; i < l.count; ++i) {
+        ecuio_j2534_log_line(t->handle, l.text[i]);
+    }
+    l.count = 0;
+}
+
 void serve_session(ecuio_j2534_transport* t, worker_state& w)
 {
     ecuio_request_engine& e = w.e;
     const bool requests = w.requests;
     serve_battery(t);
+    serve_run_lines(t);
     if (requests) {
         ecuio_take_diag_request(t->session, &e, w.diag_seen);
         ecuio_take_clear_requests(t->session, &e, &w.clear_seen);

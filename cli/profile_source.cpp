@@ -10,6 +10,7 @@
 #include "plugin_lines.h"
 #include "recording_signals.h"
 #include "signal_file_lines.h"
+#include "together.h"
 
 #include "profile_source.h"
 #include "common.h"
@@ -256,7 +257,8 @@ uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
 // recording's copy, the --plugin variant's files merged into one, or NULL
 const ecuio_signal_file_t* session_signal_file()
 {
-    return g_signal_file != nullptr ? g_signal_file
+    return g_together != nullptr      ? g_together
+           : g_signal_file != nullptr ? g_signal_file
            : g_plugin != nullptr
                ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
                : nullptr;

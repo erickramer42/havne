@@ -1,0 +1,16 @@
+{
+  "havne_signals": 3,
+  "name": "Trans part",
+  "source": { "name": "Made up for the merge tests" },
+  "ecus": [ { "id": "tcm", "rx": "7E9" } ],
+  "signals": [
+    {
+      "key": "tft",
+      "name": "Trans fluid temp",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "1E1C" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40, "unit": "°C", "decimals": 0, "plot": 2
+    }
+  ]
+}

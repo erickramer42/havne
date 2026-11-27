@@ -16,6 +16,7 @@
 #include "refused_signals.h"
 #include "scan_line.h"
 #include "sleep_watch.h"
+#include "together.h"
 
 #include "commands.h"
 #include "profile_source.h"
@@ -265,7 +266,8 @@ void pick_for_stream(Output& out, ecuio_session_t* session, bool ranked)
     if (ranked) {
         const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
         const bool pick_only = session_pick_only(session);
-        const std::vector<uint16_t> ids = cli::default_pick(set, {}, pick_only);
+        const std::vector<uint16_t> ids =
+            cli::default_pick(set, {}, pick_only, together_left_out());
         if (!session_asks(session)) {
             std::fprintf(stderr, "havne-cli: the session asks no signal: "
                                  "--pick ranked picks none\n");
@@ -687,8 +689,8 @@ int read_stream(int argc, char** argv, StreamArgs args)
         return checked;
     }
     std::string opened;
-    const int rc =
-        take_profile_source(args.signals, args.plugin, &args.uri, &opened);
+    const int rc = take_source(args.together, args.signals, args.plugin,
+                               &args.uri, &opened);
     if (rc >= 0) {
         return rc;
     }
@@ -706,7 +708,8 @@ int cmd_stream(int argc, char** argv)
 {
     StreamArgs args;
     if (!take_consent_store(argc, argv, &args.consent_store) ||
-        !take_unlock_options(argc, argv, &args)) {
+        !take_unlock_options(argc, argv, &args) ||
+        !take_together(argc, argv, 2, &args.together)) {
         usage(stderr);
         return kExitUsage;
     }

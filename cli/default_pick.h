@@ -80,6 +80,22 @@ default_pick(const ecuio_signal_set_t* set, const std::vector<uint16_t>& added,
     return pick;
 }
 
+inline std::vector<uint16_t> beside_base(const ecuio_signal_file_t* merged)
+{
+    std::vector<uint16_t> ids;
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(merged);
+    const uint32_t count = ecuio_signal_file_note_count(merged);
+    for (uint32_t i = 0; set != nullptr && i < count; ++i) {
+        ecuio_signal_note_t n{};
+        n.struct_size = sizeof n;
+        if (ecuio_signal_file_note(merged, i, &n) == ECUIO_OK &&
+            n.kind == ECUIO_NOTE_BESIDE_BASE && n.base_def < set->count) {
+            ids.push_back(set->defs[n.base_def].id);
+        }
+    }
+    return ids;
+}
+
 } // namespace cli
 
 #endif

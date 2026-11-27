@@ -95,7 +95,7 @@ SettingsKit {
         verify(!find(row, "rowCaption").visible, "imported for no vehicle, and not picked")
         verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
         pressRow(page, "plugin.extras.base")
-        compare(page.picksPart.picks, ["plugin.extras.base"])
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base"])
         row = rowOf(page, "plugin.extras.base")
         compare(find(row, "rowCaption").text, "For this car:", "a pick is this car's")
         verify(find(row, "rowPick").checked)
@@ -107,14 +107,14 @@ SettingsKit {
 
         // Another vehicle's pick keeps it in use; a press again undoes a pick
         press(page, "vehicleNew")
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         verify(!find(rowOf(page, "plugin.extras.base"), "rowUnused").visible, "Vehicle 1 picks it")
         verify(!rowData(page, "plugin.extras.base").forCar, "Vehicle 1's pick, not this one's")
         compare(signalsRow(page).summary, "1 plugin, none picked")
         pressRow(page, "plugin.extras.base")
         verify(rowData(page, "plugin.extras.base").forCar)
         pressRow(page, "plugin.extras.base")
-        compare(page.picksPart.picks, [], "pressed again, undone")
+        compare(page.picksPart.picks, ["obd2"], "pressed again, undone")
         verify(!rowData(page, "plugin.extras.base").forCar, "and no longer this car's")
     }
 
@@ -136,7 +136,7 @@ SettingsKit {
         press(page, "importAsNew")
         verify(!find(page, "importPanel").visible)
         compare(Harness.storedPlugins().length, 1)
-        compare(page.picksPart.picks, ["plugin.extras.base"], "picked at once for the picked vehicle")
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base"], "picked at once for the picked vehicle")
         compare(find(page, "signalNote").text, "Extras 1.0.0 added: picked for Vehicle 1")
         const row = rowOf(page, "plugin.extras.base")
         compare(find(row, "rowCaption").text, "For this car:")
@@ -144,14 +144,16 @@ SettingsKit {
         compare(find(row, "rowReads").text, "1 signal · yours")
         verify(find(row, "rowPick").checked)
 
-        // Its profile is a choice under Profile, and a session decodes
+        // The vehicle's set is a choice under Profile, and a session decodes
         // with it; nothing changes the store or the picks meanwhile
         find(page, "uriField").text = "mock://demo"
-        const choice = find(page, "profile_plugin.extras.base")
-        compare(choice.text, "Extras")
+        const set = page.picksPart.together.profile
+        const choice = find(page, "profile_" + set)
+        compare(choice.text, "Vehicle 1")
         choice.clicked()
-        compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base")
-        compare(find(page, "profileHint").text, "The signals of Extras 1.0.0, picked for this vehicle")
+        compare(find(page, "uriField").text, "mock://demo?profile=" + set)
+        compare(find(page, "profileHint").text,
+                "obd2's standard signals and those of the plugin picked for Vehicle 1, read together")
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "a session decodes with it")
         compare(find(page, "errorLabel").text, "")
@@ -168,11 +170,11 @@ SettingsKit {
                   2000, "the book is written")
         const book = JSON.parse(storedVehicles.value("book"))
         compare(book.format, 2)
-        compare(book.list[0].picks, ["plugin.extras.base"])
+        compare(book.list[0].picks, ["obd2", "plugin.extras.base"])
         compare(storedVehicles.value("document"), "an earlier version's text",
                 "the earlier version's key is never written")
         page = createPage()
-        compare(page.picksPart.picks, ["plugin.extras.base"], "a restart keeps the pick")
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base"], "a restart keeps the pick")
         verify(find(rowOf(page, "plugin.extras.base"), "rowPick").checked)
 
         // The same file again is the same plugin; two signals are counted
@@ -278,7 +280,7 @@ SettingsKit {
         let words = find(page, "signalProblem").text
         verify(words.includes("bitz") && words.includes("line"), words)
         verify(!words.includes("bad.json"), "never the path")
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(Harness.storedPlugins(), [])
         page.importPart.discardImport()
 
@@ -328,7 +330,7 @@ SettingsKit {
                 "Extras 1.1.0 now has the variant track: picked for Vehicle 1")
         compare(page.picksPart.variantRows.map(r => page.picksPart.rowTitle(r)),
                 ["Extras 1.1.0: base", "Extras 1.1.0: track"])
-        compare(page.picksPart.picks, ["plugin.extras.base", "plugin.extras.track"])
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base", "plugin.extras.track"])
         compare(Harness.storedPlugins().length, 1, "one copy: the plugin's newest")
         compare(signalsRow(page).summary, "1 plugin: Extras: base and 1 more")
 
@@ -338,12 +340,12 @@ SettingsKit {
         page.signalsPart.importVariantField.text = "track"
         press(page, "importKeep")
         compare(find(page, "signalNote").text, "Extras 1.2.0: variant track replaced")
-        compare(page.picksPart.picks.length, 2)
+        compare(page.picksPart.picks.length, 3)
 
         // The field emptied: the id is the one the file's name gives, so
         // the variant of that id is the one said, replaced and picked
         pressRow(page, "plugin.extras.base")
-        compare(page.picksPart.picks, ["plugin.extras.track"])
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.track"])
         verify(page.importPart.importFile(Harness.writeScratchFile("base.json", signalFileText("Base", "D104"))))
         find(page, "importInto_0").clicked()
         compare(page.signalsPart.importVariantField.text, "base")
@@ -351,7 +353,7 @@ SettingsKit {
         compare(find(page, "importReplaces").text, "replaces base")
         press(page, "importKeep")
         compare(find(page, "signalNote").text, "Extras 1.3.0: variant base replaced: picked for Vehicle 1")
-        compare(page.picksPart.picks, ["plugin.extras.track", "plugin.extras.base"], "not the plugin's last variant")
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.track", "plugin.extras.base"], "not the plugin's last variant")
         verify(Bridge.pluginVariantText(page.picksPart.pluginList[0].sha256, "base").text.includes("D104"))
 
         // Replace...: only a signal file takes a variant's place
@@ -363,15 +365,15 @@ SettingsKit {
         compare(page.importPart.replaceTarget, null, "and the next Import is an import")
         // It picks nothing: a variant the vehicle doesn't pick stays so
         pressRow(page, "plugin.extras.base")
-        compare(page.uriPart.profileChoice, "default")
+        compare(page.uriPart.profileChoice, page.picksPart.together.profile, "the field follows the set of now")
         page.importPart.startReplace(rowData(page, "plugin.extras.base"))
         verify(page.importPart.importFile(Harness.writeScratchFile("third.json", signalFileText("Third", "D103"))))
         verify(!find(page, "importPanel").visible, "kept at once")
         compare(find(page, "signalNote").text, "Extras 1.4.0: variant base replaced")
         verify(Bridge.pluginVariantText(page.picksPart.pluginList[0].sha256, "base").text.includes("D103"),
                "the row reads the new file")
-        compare(page.picksPart.picks, ["plugin.extras.track"], "Replace picks nothing")
-        compare(page.uriPart.profileChoice, "default", "and the field reads what it read")
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.track"], "Replace picks nothing")
+        compare(page.uriPart.profileChoice, page.picksPart.together.profile, "and the field reads the set of now")
         pressRow(page, "plugin.extras.base")
 
         // One variant of several is removed alone, its pick with it
@@ -380,7 +382,7 @@ SettingsKit {
         verify(remove.visible)
         remove.clicked()
         find(rowOf(page, "plugin.extras.track"), "signalsConfirmRemove").clicked()
-        compare(page.picksPart.picks, ["plugin.extras.base"])
+        compare(page.picksPart.picks, ["obd2", "plugin.extras.base"])
         compare(page.picksPart.variantRows.map(r => page.picksPart.rowTitle(r)), ["Extras 1.5.0"])
         page.rowActionsPart.openRow = "plugin.extras.base"
         const row = rowOf(page, "plugin.extras.base")
@@ -407,7 +409,7 @@ SettingsKit {
         // Its Boost takes the place of obd2's: the row says so, then what is added
         compare(page.picksPart.variantRows.map(r => page.picksPart.rowReads(r)),
                 ["obd2, Boost replaced, 4 more", "obd2, Boost replaced, 5 more"])
-        compare(page.picksPart.picks, [], "several variants: the pick is the user's")
+        compare(page.picksPart.picks, ["obd2"], "several variants: the pick is the user's")
         verify(!find(rowOf(page, "plugin.example-sim.base"), "rowCaption").visible, "no VIN, no groups")
         compare(find(rowOf(page, "plugin.example-sim.my2019"), "rowUnused").text,
                 "Not in use: press a variant to pick it for Vehicle 1.")
@@ -425,18 +427,18 @@ SettingsKit {
         const field = find(page, "uriField")
         field.text = "mock://demo"
         pressRow(page, "plugin.example-sim.my2019")
-        compare(page.picksPart.picks, ["plugin.example-sim.my2019"])
-        compare(field.text, "mock://demo?profile=plugin.example-sim.my2019", "read at once under Default")
+        compare(page.picksPart.picks, ["obd2", "plugin.example-sim.my2019"])
+        compare(field.text, "mock://demo?profile=" + page.picksPart.together.profile, "read at once under Default")
         compare(page.picksPart.variantRows.map(r => r.variant), ["base", "my2019"])
         compare(page.picksPart.variantRows.map(r => r.caption), ["For this car:", ""], "a pick lifts its plugin")
         verify(find(rowOf(page, "plugin.example-sim.my2019"), "rowPickMark").visible, "with its mark")
         verify(!rowData(page, "plugin.example-sim.base").picked, "the other variant beside it")
-        const choice = find(page, "profile_plugin.example-sim.my2019")
-        compare(choice.text, "Example: the simulated car: my2019")
+        const set = page.picksPart.together.profile
+        const choice = find(page, "profile_" + set)
+        compare(choice.text, "Vehicle 1")
         verify(choice.checked)
         compare(find(page, "profileHint").text,
-                "obd2's signals and those of Example: the simulated car 1.0.0: my2019, "
-                + "picked for this vehicle")
+                "obd2's standard signals and those of the plugin picked for Vehicle 1, read together")
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
         compare(find(page, "errorLabel").text, "")
@@ -446,7 +448,7 @@ SettingsKit {
         verify(importExample(page, "1.1.0"))
         compare(find(page, "signalNote").text, "Example: the simulated car 1.1.0 replaces 1.0.0")
         compare(Harness.storedPlugins().length, 1)
-        compare(page.picksPart.picks, ["plugin.example-sim.my2019"], "the pick is the new version's")
+        compare(page.picksPart.picks, ["obd2", "plugin.example-sim.my2019"], "the pick is the new version's")
         verify(importExample(page, "1.1.0"))
         compare(find(page, "signalNote").text, "Example: the simulated car 1.1.0 is here already")
 
@@ -458,10 +460,10 @@ SettingsKit {
         compare(page.confirming, "")
         verify(find(page, "signalsNone").visible)
         compare(Harness.storedPlugins(), [])
-        compare(page.picksPart.picks, [], "a removed plugin's variant is no pick")
+        compare(page.picksPart.picks, ["obd2"], "a removed plugin's variant is no pick")
         compare(field.text, "mock://demo", "the field reads Default again")
-        tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
-                  "a variant no plugin registers isn't offered")
+        tryVerify(() => findChild(page, "profile_" + set) === null, 1000,
+                  "a set no vehicle reads isn't offered")
     }
 
     // A plugin is this car's when it was imported for the vehicle, a VIN
@@ -478,13 +480,13 @@ SettingsKit {
         const base = "plugin.example-sim.base"
         const my2019 = "plugin.example-sim.my2019"
         pressRow(page, extras)   // the import's pick, undone: still this vehicle's import
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(page.picksPart.variantRows.map(r => r.profile), [extras, base, my2019])
         compare(page.picksPart.variantRows.map(r => r.caption), ["For this car:", "Other plugins:", ""])
         compare(find(rowOf(page, base), "rowCaption").text, "Other plugins:")
 
         pressRow(page, my2019)
-        compare(page.picksPart.picks, [my2019])
+        compare(page.picksPart.picks, ["obd2", my2019])
         compare(page.picksPart.variantRows.map(r => r.caption), ["For this car:", "", ""], "the pick lifts its plugin")
         verify(rowData(page, base).forCar, "the variant beside the picked one")
         verify(!rowData(page, base).picked)
@@ -495,7 +497,7 @@ SettingsKit {
         pressRow(page, base)
         compare(page.picksPart.variantRows.map(r => r.profile), order, "another variant picked moves nothing")
         pressRow(page, base)
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(page.picksPart.variantRows.map(r => r.caption), ["For this car:", "Other plugins:", ""],
                 "the picks undone, the plugin is back with the others")
 
@@ -521,12 +523,12 @@ SettingsKit {
         button.forceActiveFocus()
         verify(button.activeFocus)
         button.clicked()
-        compare(page.picksPart.picks, [my2019])
+        compare(page.picksPart.picks, ["obd2", my2019])
         verify(find(rowOf(page, my2019), "rowPick") === button, "the same button after the pick")
         verify(button.checked)
         verify(button.activeFocus, "the pick keeps the focus")
         button.clicked()
-        compare(page.picksPart.picks, [], "pressed again, undone")
+        compare(page.picksPart.picks, ["obd2"], "pressed again, undone")
         verify(find(rowOf(page, my2019), "rowPick") === button && button.activeFocus, "and once undone")
 
         // Zed's pick lifts it past the example: the focus goes with the row
@@ -608,7 +610,7 @@ SettingsKit {
         pressRow(page, base)
         verify(importExample(page, "1.1.0"))
         compare(page.pickedVehicle.vinMatches, [])
-        compare(page.picksPart.picks, [base], "the pick kept")
+        compare(page.picksPart.picks, ["obd2", base], "the pick kept")
         pressRow(page, base)
         verify(!rowData(page, base).forCar, "no match left, and no pick")
 
@@ -656,10 +658,10 @@ SettingsKit {
                 ["plugin.example-sim.base", "plugin.example-sim.my2019"], "kept on the vehicle")
         verify(rowData(page, "plugin.example-sim.base").forCar, "the session's matches stay")
         pressRow(page, "plugin.example-sim.base")
-        compare(page.picksPart.picks, ["plugin.example-sim.base"])
-        compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
+        compare(page.picksPart.picks, ["obd2", "plugin.example-sim.base"])
+        compare(find(page, "uriField").text, "mock://demo?profile=" + page.picksPart.together.profile)
         pressRow(page, "plugin.example-sim.base")
-        compare(page.picksPart.picks, [], "pressed again, undone")
+        compare(page.picksPart.picks, ["obd2"], "pressed again, undone")
         compare(find(page, "uriField").text, "mock://demo")
 
         // Another vehicle has no matches of this car's

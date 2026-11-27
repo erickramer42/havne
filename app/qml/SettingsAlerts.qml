@@ -70,7 +70,25 @@ ColumnLayout {
     Connections {
         target: Bridge
         function onConditionsChanged() { root.reload() }
-        function onConnectedChanged() { root.refreshRows() }
+        function onConnectedChanged() {
+            root.refreshRows()
+            if (!Bridge.connected)
+                return
+            const n = root.conditions.filter(c => root.cantFire(c)).length
+            if (n > 0)
+                Bridge.logEvent(n === 1 ? qsTr("Alerts: 1 alert reads a signal this vehicle's set doesn't have: it can't fire")
+                                        : qsTr("Alerts: %1 alerts read signals this vehicle's set doesn't have: they can't fire")
+                                              .arg(n))
+        }
+    }
+    readonly property var rowRefs: {
+        const refs = {}
+        for (const r of root.rows)
+            refs[r.ref] = true
+        return refs
+    }
+    function cantFire(c) {
+        return root.rows.length > 0 && ConditionBook.cantFire(c, r => root.rowRefs[r] === true)
     }
     onVisibleChanged: if (visible) refreshRows()
 
@@ -476,6 +494,16 @@ ColumnLayout {
                         font.pixelSize: Theme.fontEmphasis
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Label {
+                        textFormat: Text.PlainText
+                        objectName: "alertCantFire"
+                        visible: root.cantFire(alertRow.condition)
+                        text: qsTr("Its signal isn't in this vehicle's set: it can't fire")
+                        color: Theme.warning
+                        font.pixelSize: Theme.fontCaption
+                        wrapMode: Text.Wrap
                         Layout.fillWidth: true
                     }
                     Label {

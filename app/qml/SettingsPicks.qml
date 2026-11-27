@@ -39,9 +39,59 @@ Item {
     function picksNow() {
         return host.pickedVehicle !== null && host.pickedVehicle.picks !== undefined ? host.pickedVehicle.picks : []
     }
-    // The picks as the bridge reads them: each one's plugin, whether the
-    // store still has it and, on an adapter, the one standing in for Default
-    readonly property var pickRows: storeRev >= 0 ? Bridge.pickRow(picks, host.uriPart.adapterUri) : []
+    readonly property var pickRows: storeRev >= 0 ? Bridge.pickRow(picks, false) : []
+    // The bridge's cache holds one answer: only the picked vehicle's is asked
+    readonly property var together: storeRev >= 0 ? vehicleSetNow() : null
+    // Once for each vehicle: a deliberate later gauge on obd2's signal stays
+    onTogetherChanged: Qt.callLater(carryOverOnce)
+    function carryOverOnce() {
+        const v = host.pickedVehicle
+        const set = together
+        if (v === null || set === null || set.reads !== "merged" || host.bookLater
+                || VehicleBook.stepDone(v, VehicleBook.besideObd2))
+            return
+        const refs = {}
+        for (const r of Bridge.profileSignals("mock://?profile=" + set.profile))
+            refs[r.ref] = true
+        const has = r => refs[r] === true
+        const gauges = set.beside.length > 0 && host.carryGauges !== null ? host.carryGauges(set.beside, has) : 0
+        let alerts = 0
+        const conditions = ConditionBook.parse(Bridge.conditionsText())
+        if (set.beside.length > 0 && conditions !== null) {
+            const r = ConditionBook.carryOver(conditions, set.beside, has)
+            if (r.count > 0 && Bridge.saveConditions(ConditionBook.text(r.doc)).ok)
+                alerts = r.count
+        }
+        const ticks = VehicleBook.carryOver(host.vehicles, set.beside, "").ticks
+        const line = carryLine(set.beside, gauges, alerts, ticks)
+        host.saveVehicles(VehicleBook.carryOver(host.vehicles, set.beside, line).doc)
+        if (line !== "")
+            Bridge.logEvent(qsTr("Vehicles: %1").arg(line))
+    }
+    function carryLine(beside, gauges, alerts, ticks) {
+        const parts = []
+        if (gauges > 0)
+            parts.push(gauges === 1 ? qsTr("1 gauge") : qsTr("%1 gauges").arg(gauges))
+        if (alerts > 0)
+            parts.push(alerts === 1 ? qsTr("1 alert") : qsTr("%1 alerts").arg(alerts))
+        if (ticks > 0)
+            parts.push(ticks === 1 ? qsTr("1 tick") : qsTr("%1 ticks").arg(ticks))
+        if (parts.length === 0)
+            return ""
+        const what = parts.length === 1 ? parts[0]
+                   : qsTr("%1 and %2").arg(parts.slice(0, -1).join(qsTr(", ")), parts[parts.length - 1])
+        if (beside.length === 1)
+            return qsTr("%1 that showed %2's '%3' keep showing it; obd2's '%3' is read beside it")
+                       .arg(what, beside[0].part, beside[0].name)
+        return qsTr("%1 that showed the signals the vehicle's plugins read in obd2's place keep showing them; "
+                    + "obd2's are read beside them").arg(what)
+    }
+
+    function vehicleSetNow() {
+        const v = host.pickedVehicle
+        return v === null ? null
+             : JSON.parse(JSON.stringify(Bridge.vehicleSet(picksNow(), v.own, v.label)))
+    }
     // What the last import, pick, save or removal said
     property string signalProblem: ""
     property string signalNote: ""
@@ -157,13 +207,13 @@ Item {
         const plugins = n === 1 ? qsTr("1 plugin") : qsTr("%1 plugins").arg(n)
         if (host.pickedVehicle === null)
             return n === 0 ? qsTr("none yet") : plugins
-        const named = pickRows.filter(r => !r.missing)
-        const missing = pickRows.length - named.length
+        const named = pickRows.filter(r => !r.missing && !r.builtIn)
+        const missing = pickRows.filter(r => r.missing).length
         const first = named.length > 0 ? profileName(named[0].profile) : ""
         const said = named.length === 0 ? (n === 0 ? qsTr("none yet") : qsTr("%1, none picked").arg(plugins))
                    : named.length === 1 ? qsTr("%1: %2").arg(plugins, first)
                    : qsTr("%1: %2 and %3 more").arg(plugins, first).arg(named.length - 1)
-        const unread = named.length > 0 && host.uriPart.unreadPick !== null
+        const unread = host.uriPart.unreadPick !== null
                        && host.uriPart.profileChoice === "default" ? qsTr(" (Default reads plain OBD-II)") : ""
         return said + unread + (missing === 0 ? "" : missing === 1 ? qsTr(", 1 pick missing")
                                                            : qsTr(", %1 picks missing").arg(missing))
@@ -187,7 +237,7 @@ Item {
 
     // profile into the picked vehicle's picks, last: "" when refused (the
     // words in signalProblem), "read" when the field, reading Default,
-    // now reads it, else "picked"
+    // now reads the vehicle's set, else "picked"
     function pickProfile(profile) {
         const r = Bridge.pickVariant(picks, profile)
         if (!r.ok) {
@@ -197,9 +247,10 @@ Item {
         const readsDefault = host.uriPart.profileChoice === "default"
             && host.uriPart.queryValue(host.uriPart.splitUri(host.connectPart.uriField.text).pairs, "profile") === undefined
         host.saveVehicles(VehicleBook.setPicks(host.vehicles, r.picks))
-        if (!readsDefault)
+        const set = vehicleSetNow()
+        if (!readsDefault || set === null || set.reads !== "merged")
             return "picked"
-        host.uriPart.chooseProfile(profile)
+        host.uriPart.chooseProfile(set.profile)
         return "read"
     }
 }

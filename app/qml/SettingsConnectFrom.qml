@@ -14,19 +14,27 @@ Item {
     function requestConnect(uri, kept) {
         if (uri === "")
             return
+        const refused = setRefusal(uri)
+        if (refused !== "") {
+            host.connectPart.errorLabel.text = refused
+            host.connectPart.errorLabel.visible = true
+            Bridge.logEvent(refused)
+            return
+        }
+        const reads = withVehicleSet(uri)
+        if (reads !== uri && host.connectPart.uriField.text === uri)
+            host.connectPart.uriField.text = reads
         connectKeeps = kept === undefined ? "" : kept
-        Bridge.connectSessionAsync(uri)
-        // Connecting/Connected/failed lines arrive via logMessage.
+        Bridge.connectSessionAsync(reads)
     }
 
     // The addresses kept from the connects that succeeded, newest first,
     // for Dash's connect list
     readonly property int maxRecentUris: 5
     property var recentUris: []
-    // A replay or the mock is never kept: Recordings is a replay's way back
+    // Recordings is a replay's way back
     function keptUri(uri) {
-        const u = String(uri).trim().toLowerCase()
-        return !u.startsWith("replay://") && !u.startsWith("mock://")
+        return VehicleBook.isLiveUri(uri)
     }
     // The stored list, or `lastUri` alone when it holds none; a damaged
     // list reads as none, and anything but a non-empty kept string is left out
@@ -60,18 +68,17 @@ Item {
     readonly property var connectAdapters: host.devices.map(d => ({
             uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
-    // A connect from a list (Home's, Dash's): an address that names
-    // no profile reads the picked vehicle's plugin where obd2 is asked
-    // (ADR-0064 Q5)
-    // The first pick that loads and reads all of obd2, null for none
-    readonly property var listStandIn:
-        (host.picksPart.storeRev >= 0 ? Bridge.pickRow(host.picksPart.picks, true) : []).find(r => r.standIn) || null
+    readonly property var together: host.picksPart.together
+    // On an adapter Default is obd2 already
+    function vehicleProfileAt(uri) {
+        if (together === null || !takesVehicleSet(uri))
+            return ""
+        return together.reads === "merged" ? together.profile
+             : together.reads === "obd2" && !VehicleBook.isAdapterUri(uri) ? "obd2" : ""
+    }
 
-    // Whether a pick that reads obd2 is read at the address: a J2534 or
-    // ELM327 adapter's, or a CAN interface that sends requests (a virtual
-    // bus, or a controller up in one-shot mode). A listening interface
-    // is left to listen: a pick there would start sending
-    function takesStandIn(uri) {
+    // A listening CAN interface is left to listen: a set there would start sending
+    function takesVehicleSet(uri) {
         if (VehicleBook.isAdapterUri(uri))
             return true
         const found = /^socketcan:\/\/([^?]+)/.exec(uri)
@@ -80,22 +87,27 @@ Item {
                && (c.kind === "vcan" || (c.modes || []).indexOf("one-shot") >= 0)
     }
 
-    // A row's address as the picked vehicle reads it: a plugin's or a
-    // signal file's profile the vehicle doesn't pick is dropped, as the
-    // field drops it, so no connect reads another vehicle's signals
+    function withVehicleSet(uri) {
+        return together === null ? uri : VehicleBook.withVehicleSet(uri, together.reads, together.profile)
+    }
+
+    function setRefusal(uri) {
+        if (together === null || together.reads !== "refused")
+            return ""
+        const named = host.uriPart.queryValue(host.uriPart.splitUri(uri).pairs, "profile")
+        const merged = typeof named === "string" && named.startsWith("merged.") && keptUri(uri)
+        return merged || (named === undefined && takesVehicleSet(uri)) ? together.words : ""
+    }
+
     function listAddress(uri) {
         const named = host.uriPart.queryValue(host.uriPart.splitUri(uri).pairs, "profile")
         return typeof named === "string" && (named.startsWith("plugin.") || named.startsWith("user."))
                && host.picksPart.picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
     }
 
-    // The address a list's row connects: with the stand-in's profile
-    // where the rule applies, else as the vehicle reads it (one that
-    // names a profile, the demo, a recording, no vehicle, no such pick)
     function listConnectUri(uri) {
-        const plain = listAddress(uri)
-        return listStandIn !== null && takesStandIn(plain)
-            ? VehicleBook.withProfile(plain, listStandIn.profile) : plain
+        const plain = withVehicleSet(listAddress(uri))
+        return VehicleBook.withProfile(plain, vehicleProfileAt(plain))
     }
 
     // What a list's row reads, where its kind doesn't say: "obd2 + <name>"
@@ -106,7 +118,10 @@ Item {
         const named = host.uriPart.queryValue(host.uriPart.splitUri(plain).pairs, "profile")
         if (typeof named === "string" && named.startsWith("plugin."))
             return host.picksPart.placeOf(named) !== null ? host.picksPart.profileName(named) : qsTr("a plugin not in the store")
-        return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(host.picksPart.profileName(listStandIn.profile)) : ""
+        const reads = host.uriPart.queryValue(host.uriPart.splitUri(listConnectUri(uri)).pairs, "profile")
+        if (typeof reads !== "string" || reads === named && !reads.startsWith("merged."))
+            return ""
+        return reads === "obd2" ? "obd2" : host.uriPart.profileNames[reads] ?? ""
     }
     // The lists' rows by address, for those with a word
     readonly property var connectProfileWords: {

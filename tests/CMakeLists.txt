@@ -57,8 +57,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_session_operation_ends.cpp
     test_session_operation_record.cpp test_session_operation_checks.cpp
     test_session_operation_battery.cpp test_session_operation_write.cpp
-    test_session_operation_session.cpp
-    test_session_operation_kernel.cpp)
+    test_session_operation_kernel.cpp test_session_operation_session.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -429,7 +428,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_view.cpp test_cli_files.cpp
         test_cli_signals.cpp test_cli_elm327.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
+        test_cli_log.cpp test_cli_together.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
         test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp
         test_cli_unlock.cpp)
@@ -675,6 +674,35 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_absent.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.AnAbsentFieldIsNamed PROPERTIES TIMEOUT 30)
+        set(_cli_together ${CMAKE_CURRENT_SOURCE_DIR}/cli_together.py)
+        set(_cli_merge ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge)
+        add_test(NAME CliTogetherTest.Obd2ModulesGivesTheModuleAndNoSignal
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} modules
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        add_test(NAME CliTogetherTest.TheSessionLineNamesTheMergeAndItsNotes
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} notes
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        add_test(NAME CliTogetherTest.ASharedNameIsUsageListingBothKeys
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} shared
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        add_test(NAME CliTogetherTest.TheRankedPickLeavesOutAnObd2SignalReadBeside
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} ranked
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        set_tests_properties(CliTogetherTest.TheRankedPickLeavesOutAnObd2SignalReadBeside
+            PROPERTIES TIMEOUT 120)
+        add_test(NAME CliTogetherTest.PluginsTogetherWritesTheMergedSet
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} out
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        add_test(NAME CliTogetherTest.ViewFramesDecodesThroughTheMergedSet
+            COMMAND ${Python3_EXECUTABLE} ${_cli_together} view
+                    $<TARGET_FILE:havne-cli> ${_cli_merge})
+        if(WIN32)
+            add_test(NAME CliLogRunTest.ALogNamesTheSignalsTheAdapterHasNoRoomFor
+                COMMAND ${Python3_EXECUTABLE} ${_cli_together} noroom
+                        $<TARGET_FILE:havne-cli> ${_cli_merge} $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliLogRunTest.ALogNamesTheSignalsTheAdapterHasNoRoomFor
+                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+        endif()
         # A DID its ECU refuses is named on a refused line (ADR-0051 section
         # 3): the fake DLL's ECU on Windows, the simulated ECU on vcan0 on
         # Linux (skipped without it unless ECUIO_VCAN_REQUIRED, and serial:
@@ -1164,6 +1192,18 @@ if(TARGET havne-cli)
         # manifest lets its module cause to be sent, after the plugin line;
         # then the same plugin as a folder with its module a file, a
         # changed module, a put and a drop refused, and every bound at once
+        app_cli_golden(PluginsTogetherSaysWhatTheMergeMade
+            plugins-together.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins together
+               --together obd2,user.engine-part,plugin.example-sim.base,user.trans-part
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/engine-part.json
+               --plugin ${CMAKE_SOURCE_DIR}/plugins/example-sim
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/trans-part.json)
+        app_cli_golden(PluginsTogetherRefusesAPartGivenTwice
+            plugins-together-twice.jsonl
+            --exit 3 -- $<TARGET_FILE:havne-cli> plugins together
+               --together user.trans-part,user.trans-part
+               --signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/merge/trans-part.json)
         app_cli_golden(PluginsCheckSaysWhatAConversationDeclares
             plugins-check-conversation.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/conversation.json)
@@ -1579,6 +1619,39 @@ if(TARGET havne-cli)
         "unexpected '--allow-sleep=1'")
     app_cli_usage_says(AllowSleepIsStreamAndLogOnly "vin|mock://x|--allow-sleep"
         "--allow-sleep")
+    app_cli_usage_says(TogetherWithoutAListIsUsage "stream|mock://x|--together"
+        "--together takes one list of profiles")
+    app_cli_usage_says(TogetherTwiceIsUsage
+        "stream|mock://x|--together|obd2|--together|obd2"
+        "--together takes one list of profiles")
+    app_cli_usage_says(TogetherAnEmptyProfileIsUsage "stream|mock://x|--together|obd2,,obd2"
+        "--together takes one list of profiles")
+    app_cli_usage_says(TogetherObd2AndItsModulesIsUsage
+        "stream|mock://x|--together|obd2,obd2-modules"
+        "obd2 or obd2-modules once, not both")
+    app_cli_usage_says(TogetherAProfileNotGivenIsUsage
+        "log|mock://x|out|--together|obd2,plugin.x.base"
+        "--together names 'plugin.x.base', which isn't among what was given: obd2, obd2-modules")
+    app_cli_usage_says(TogetherAPluginWithoutAPackageIsUsage
+        "stream|mock://x|--together|obd2|--plugin"
+        "--plugin takes a package")
+    app_cli_usage_says(TogetherAnotherProfileInTheUriIsUsage
+        "stream|mock://x?profile=mock|--together|obd2"
+        "the URI's profile= isn't --together's, obd2")
+    app_cli_usage_says(ViewTogetherWithoutFramesIsUsage
+        "view|somewhere|--together|obd2"
+        "--together goes with --frames")
+    app_cli_usage_says(PluginsTogetherWithoutTogetherIsUsage "plugins|together"
+        "plugins together needs --together <profiles>")
+    app_cli_usage_says(PluginsTogetherAnUnknownOptionIsUsage
+        "plugins|together|--together|obd2-modules|--fast"
+        "unexpected '--fast'")
+    app_cli_usage_says(PluginsTogetherOutTwiceIsUsage
+        "plugins|together|--together|obd2-modules|--out|a|--out|b"
+        "unexpected '--out'")
+    app_cli_usage_says(PluginsTogetherObd2AloneIsUsage
+        "plugins|together|--together|obd2"
+        "obd2 alone is the built-in set")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")

@@ -237,7 +237,7 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
     volts_take(v, 11000, true);
     EXPECT_FALSE(v.sagged);
     volts_take(v, 10999, true);
-    EXPECT_TRUE(v.sagged) << "a kernel read's sag is the dump's warning";
+    EXPECT_TRUE(v.sagged) << "a sag warns as a dump's";
 
     volts write;
     write.write = true;
@@ -247,4 +247,6 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
     EXPECT_TRUE(write.refused_low) << "a write's start under 11.5 V";
     volts_take(write, 16100, false);
     EXPECT_TRUE(write.refused_high) << "a write's start over 16 V";
+    volts_take(write, 10999, true);
+    EXPECT_FALSE(write.sagged) << "a write is judged once, at its start";
 }

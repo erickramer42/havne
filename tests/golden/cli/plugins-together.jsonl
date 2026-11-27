@@ -1,0 +1,11 @@
+{"schema": 1, "type": "start"}
+{"format": 2, "modules": 1, "name": "Engine part", "plugin": null, "profile": "user.engine-part", "share_alike": false, "signals": 1, "type": "part", "variant": null, "version": null}
+{"format": 1, "modules": 2, "name": "Example: the simulated car", "plugin": "example-sim", "profile": "plugin.example-sim.base", "share_alike": false, "signals": 5, "type": "part", "variant": "base", "version": "1.0.0"}
+{"format": 3, "modules": 1, "name": "Trans part", "plugin": null, "profile": "user.trans-part", "share_alike": false, "signals": 1, "type": "part", "variant": null, "version": null}
+{"id": "pcm", "name": null, "part": "user.engine-part", "rx": "0x7E8", "tx": "0x7E0", "type": "module"}
+{"id": "tcm", "name": null, "part": "plugin.example-sim.base", "rx": "0x7E9", "tx": "0x7E1", "type": "module"}
+{"base": "obd2", "modules": 2, "notes": 3, "parts": 3, "profile": "merged.509b2190a6b1dfc5", "signals": 138, "type": "totals"}
+{"kind": "beside_base", "text": "'RPM' (Engine part) is read beside obd2's 'RPM': a merged set replaces no obd2 signal", "type": "note"}
+{"kind": "replaced_by_address", "text": "'Oil Temp' (Example: the simulated car) replaces 'Knock retard' (Engine part): both read PCM 22 F40D, byte 0", "type": "note"}
+{"kind": "beside_base", "text": "'Boost' (Example: the simulated car) is read beside obd2's 'Boost': a merged set replaces no obd2 signal", "type": "note"}
+{"out": null, "type": "end"}

@@ -407,10 +407,10 @@ void read_leave(const Value& op, plan& out)
 plan read_operation(const Value& op, const conversation& c)
 {
     expect(op, Type::object, "an operation");
-    only_keys(
-        op,
-        {"id", "kind", "title", "ecu", "level", "ident", "kernel", "steps", "leave"},
-        "an operation");
+    only_keys(op,
+              {"id", "kind", "title", "ecu", "level", "ident", "kernel",
+               "steps", "leave"},
+              "an operation");
     plan out;
     out.id = id_of(required(op, "id", "an operation"), "an operation's id");
     const std::string what = "operation " + q(out.id);
