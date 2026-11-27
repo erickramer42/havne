@@ -184,9 +184,19 @@ int pick_parts(const Together& t,
     return -1;
 }
 
-} // namespace
+void free_parts()
+{
+    for (ecuio_plugin_t* p : g_parts_plugins) {
+        ecuio_plugin_free(p);
+    }
+    for (ecuio_signal_file_t* f : g_parts_files) {
+        ecuio_signal_file_free(f);
+    }
+    g_parts_plugins.clear();
+    g_parts_files.clear();
+}
 
-int merge_together(Output& out, const Together& t, TogetherSet* set)
+int merge_parts(Output& out, const Together& t, TogetherSet* set)
 {
     const int loaded = load_parts(out, t);
     if (loaded >= 0) {
@@ -216,6 +226,15 @@ int merge_together(Output& out, const Together& t, TogetherSet* set)
     set->profile = ecuio_signal_file_profile(merged);
     set->flags = flags;
     return -1;
+}
+
+} // namespace
+
+int merge_together(Output& out, const Together& t, TogetherSet* set)
+{
+    const int rc = merge_parts(out, t, set);
+    free_parts();
+    return rc;
 }
 
 int use_together(const Together& t, const char* uri, std::string* opened)
