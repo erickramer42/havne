@@ -61,6 +61,45 @@ inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
            ch.session_step == ECUIO_SESSION_STATE_ENTERED;
 }
 
+/* A run entered channel c's session itself (request_operation.h): the
+ * engine keeps it with tester present and never enters one of its own
+ * there, a 7E or 7F is the run's to judge, and a close leaves it by
+ * 10 01. A conversation reads each hand-over and return as a session
+ * lost (its levels lock). */
+inline void ecuio_engine_session_handed(ecuio_request_engine* e, uint32_t c,
+                                        int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (e->session == 0) {
+        e->session = ECUIO_SESSION_EXTENDED;
+    }
+    if (!ch.handed) {
+        ch.handed_prior = ch.session_step;
+    }
+    ch.handed = true;
+    ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERED);
+    ch.session_fresh = true;
+    ch.last_sent_us = now_us;
+    ++ch.session_handed;
+    ++ch.generation;
+}
+
+/* The run left channel c's session: a channel the engine had entered
+ * enters its own again, any other reads in default */
+inline void ecuio_engine_session_returned(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ch.handed) {
+        return;
+    }
+    ch.handed = false;
+    ecuio_engine_session_step(ch, ch.handed_prior == ECUIO_SESSION_STATE_ENTERED
+                                      ? ECUIO_SESSION_STATE_ENTERING
+                                      : ch.handed_prior);
+    ++ch.session_handed;
+    ++ch.generation;
+}
+
 /* Whether channel c has a session to enter or keep */
 inline bool ecuio_engine_session_live(const ecuio_request_engine* e,
                                       const ecuio_engine_channel& ch)
@@ -196,7 +235,7 @@ inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
                                            int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (!ecuio_engine_session_live(e, ch)) {
+    if (ch.handed || !ecuio_engine_session_live(e, ch)) {
         return false;
     }
     if (ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
@@ -242,7 +281,9 @@ inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
     }
     if (ch.once.bytes[0] == ECUIO_TESTER_PRESENT) {
         if (outcome == ECUIO_DIAG_UNANSWERED) {
-            ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
+            ecuio_engine_session_step(ch, ch.handed
+                                              ? ECUIO_SESSION_STATE_UNANSWERED
+                                              : ECUIO_SESSION_STATE_ENTERING);
             ecuio_engine_count16(ch.session_lost);
             ++ch.generation;
         }
@@ -298,7 +339,7 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (e->session == 0 || ch.session_step != ECUIO_SESSION_STATE_ENTERED ||
-        ch.sessioning || ch.clearing || out == ECUIO_ENGINE_PACK ||
+        ch.handed || ch.sessioning || ch.clearing || out == ECUIO_ENGINE_PACK ||
         (code != ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION &&
          code != ECUIO_NRC_NOT_IN_ACTIVE_SESSION)) {
         return false;
@@ -365,7 +406,7 @@ inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
                                        ecuio_request* out)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (e->session == 0 || ch.session_entries == 0 ||
+    if (e->session == 0 || (ch.session_entries == 0 && !ch.handed) ||
         !ecuio_engine_module_hears(ch) ||
         !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL,
                                               ECUIO_SESSION_DEFAULT)) {

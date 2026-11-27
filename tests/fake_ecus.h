@@ -152,7 +152,9 @@ inline bool set_module_dids(const char* spec)
 /* ---- Diagnostic sessions (ADR-0060) ----
  * The engine ECU (any reply ID not in the module table) has an extended
  * session: 10 03 enters it, 10 01 leaves it, and kExtDid answers only in
- * it. A module has none: 10 03 gets 7F 10 session_nrc() (0x12 by
+ * it. It has a programming session too, as the simulated ECU's: 10 02
+ * from any session, left by 10 01 or by 11 01 (51 01), where its region B
+ * reads. A module has none: 10 03 gets 7F 10 session_nrc() (0x12 by
  * default). There is no S3 timer here: the fakes keep no clock of the
  * session's, and the simulated ECU covers the lapse. The state is a
  * small table of the reply IDs in the extended session, allocation-free
@@ -174,9 +176,14 @@ inline std::atomic<uint32_t> (&extended_ids()) [kSessionSlots] {
     return ids;
 }
 
-inline bool in_extended(uint32_t rx)
+inline std::atomic<uint32_t> (&programming_ids()) [kSessionSlots] {
+    static std::atomic<uint32_t> ids[kSessionSlots] = {};
+    return ids;
+}
+
+inline bool in_table(std::atomic<uint32_t> (&ids)[kSessionSlots], uint32_t rx)
 {
-    for (auto& s : extended_ids()) {
+    for (auto& s : ids) {
         if (s.load() == rx) {
             return true;
         }
@@ -184,12 +191,13 @@ inline bool in_extended(uint32_t rx)
     return false;
 }
 
-inline void set_extended(uint32_t rx, bool on)
+inline void set_in_table(std::atomic<uint32_t> (&ids)[kSessionSlots],
+                         uint32_t rx, bool on)
 {
-    if (on == in_extended(rx)) {
+    if (on == in_table(ids, rx)) {
         return;
     }
-    for (auto& s : extended_ids()) {
+    for (auto& s : ids) {
         uint32_t want = on ? 0 : rx;
         if (s.compare_exchange_strong(want, on ? rx : 0)) {
             return;
@@ -197,10 +205,36 @@ inline void set_extended(uint32_t rx, bool on)
     }
 }
 
+inline bool in_extended(uint32_t rx)
+{
+    return in_table(extended_ids(), rx);
+}
+
+inline bool in_programming(uint32_t rx)
+{
+    return in_table(programming_ids(), rx);
+}
+
+/* Whether rx is in a session security access and memory answer in */
+inline bool in_session(uint32_t rx)
+{
+    return in_extended(rx) || in_programming(rx);
+}
+
+/* rx into session 01, 02 or 03 */
+inline void set_session(uint32_t rx, unsigned char session)
+{
+    set_in_table(extended_ids(), rx, session == 0x03);
+    set_in_table(programming_ids(), rx, session == 0x02);
+}
+
 /* Every ECU back in the default session */
 inline void reset_sessions()
 {
     for (auto& s : extended_ids()) {
+        s.store(0);
+    }
+    for (auto& s : programming_ids()) {
         s.store(0);
     }
 }
@@ -357,22 +391,23 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
         return 0;
     }
     if (gated) {
-        return ecuio_sim_security_did(*s, in_extended(rx), out);
+        return ecuio_sim_security_did(*s, in_session(rx), out);
     }
     slot->memory.faults = t.memory;
     if (ident) {
-        return ecuio_sim_memory_did(slot->memory, in_extended(rx), did, out);
+        return ecuio_sim_memory_did(slot->memory, in_session(rx), did, out);
     }
     if (memory) {
-        return ecuio_sim_memory_answer(slot->memory, *s, in_extended(rx), req,
-                                       static_cast<uint32_t>(req_len), out);
+        return ecuio_sim_memory_answer(slot->memory, *s, in_session(rx), req,
+                                       static_cast<uint32_t>(req_len), out,
+                                       in_programming(rx));
     }
     const unsigned ms = security_delay_ms().load();
     const int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::steady_clock::now().time_since_epoch())
                             .count();
     return ecuio_sim_security_answer(
-        *s, in_extended(rx),
+        *s, in_session(rx),
         ms != 0 ? static_cast<int64_t>(ms) * 1000 : ECUIO_SIM_SECURITY_DELAY_US,
         now, req, static_cast<uint32_t>(req_len), out);
 }
@@ -381,7 +416,8 @@ inline size_t security_answer(uint32_t rx, const unsigned char* req,
  * other ECU's from answer() above. unsupported_nrc as answer()'s: -1
  * keeps a module's codes (31 for a DID, 11 for a service), 0 answers
  * nothing, any other value is the code. 10 and 3E (two bytes) are the
- * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
+ * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none,
+ * and 11 01 by the engine ECU.
  * 27 and kGatedDid are the engine ECU's security access, strict under
  * security_strict(); a memory read, an upload and the identification
  * DIDs are its memory's; a module refuses them as any service it lacks.
@@ -425,9 +461,17 @@ inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
         *out_len = 2;
         return true;
     }
+    if (req_len == 2 && req[0] == 0x11 && req[1] == 0x01 && !module) {
+        set_session(rx, 0x01);
+        (void)security_answer(rx, req, req_len, true, out);
+        out[0] = 0x51;
+        out[1] = 0x01;
+        *out_len = 2;
+        return true;
+    }
     if (req_len == 2 && req[0] == 0x10) {
-        if (req[1] == 0x01 || (req[1] == 0x03 && !module)) {
-            set_extended(rx, req[1] == 0x03);
+        if (req[1] == 0x01 || ((req[1] == 0x03 || req[1] == 0x02) && !module)) {
+            set_session(rx, req[1]);
             (void)security_answer(rx, req, req_len, true, out);
             const unsigned char ok[6] = {0x50, req[1], 0x00, 0x32, 0x01, 0xF4};
             memcpy(out, ok, sizeof ok);

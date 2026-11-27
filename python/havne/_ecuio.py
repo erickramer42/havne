@@ -389,6 +389,8 @@ ECUIO_OPERATION_END_UNLOCK_REFUSED = 7
 ECUIO_OPERATION_END_VOLTAGE_HIGH = 15
 ECUIO_OPERATION_END_VOLTAGE_LOW = 14
 ECUIO_OPERATION_KIND_DUMP = 1
+ECUIO_OPERATION_LEAVE_DEFAULT = 1
+ECUIO_OPERATION_LEAVE_RESET = 2
 ECUIO_OPERATION_MAY_UNLOCK = 1
 ECUIO_OPERATION_PARKED = 2
 ECUIO_OPERATION_PHASE_CHECKING = 1
@@ -1702,7 +1704,8 @@ ecuio_plugin_operation_t._fields_ = [
     ('image_bytes', c_uint64),
     ('id', (c_char * 32)),
     ('title', (c_char * 64)),
-    ('reserved', (c_uint32 * 4)),
+    ('leave', c_uint32),
+    ('reserved', (c_uint32 * 3)),
 ]
 ecuio_plugin_page_t._fields_ = [
     ('struct_size', c_uint32),

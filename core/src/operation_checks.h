@@ -11,6 +11,14 @@ constexpr bool ecuio_check_allowed(uint8_t sid, uint8_t pid)
            (pid == 0x0C || pid == 0x0D || pid == 0x40 || pid == 0x42);
 }
 
+/* A run's own session requests: the programming session's entry, and its
+ * leave by the default session or a reset */
+constexpr bool ecuio_operation_session_allowed(uint8_t sid, uint8_t sub)
+{
+    return (sid == 0x10 && (sub == 0x02 || sub == 0x01)) ||
+           (sid == 0x11 && sub == 0x01);
+}
+
 namespace ecuio_operation {
 
 constexpr uint32_t kDumpWarnLowMv = 11800;

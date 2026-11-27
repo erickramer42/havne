@@ -320,6 +320,30 @@ TEST_F(FakeMemoryTest, TheEngineEcuReadsItsMemoryOnceUnlockedByItsReplyId)
     EXPECT_EQ(ask(0x7E8, read), nrc(0x23, 0x7F));
 }
 
+TEST_F(FakeMemoryTest, TheEngineEcuReadsItsCodeOnlyInItsProgrammingSession)
+{
+    const Bytes code = read_of(ECUIO_SIM_MEMORY_CODE_ADDRESS, 32);
+    ask(0x7E8, {0x10, 0x03});
+    ask(0x7E8, {0x27, 0x01});
+    ASSERT_EQ(ask(0x7E8, key_for(0x01)), (Bytes{0x67, 0x02}));
+    EXPECT_EQ(ask(0x7E8, code), nrc(0x23, 0x31)) << "region B is programming's";
+    EXPECT_EQ(ask(0x7E8, {0x10, 0x02}),
+              (Bytes{0x50, 0x02, 0x00, 0x32, 0x01, 0xF4}));
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8));
+    EXPECT_EQ(ask(0x7E8, code), nrc(0x23, 0x33)) << "the session locks it";
+    ask(0x7E8, {0x27, 0x01});
+    ASSERT_EQ(ask(0x7E8, key_for(0x01)), (Bytes{0x67, 0x02}));
+    const Bytes reply = ask(0x7E8, code);
+    ASSERT_EQ(reply.size(), 33u);
+    EXPECT_EQ(reply[0], 0x63);
+    EXPECT_EQ(ask(0x7E8, {0x11, 0x01}), (Bytes{0x51, 0x01}));
+    EXPECT_FALSE(fake_ecu::in_programming(0x7E8));
+    EXPECT_EQ(ask(0x7E8, code), nrc(0x23, 0x7F)) << "a reset is the default";
+    ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));
+    EXPECT_EQ(ask(0x7E9, {0x10, 0x02}), nrc(0x10, 0x12))
+        << "a module has no programming session";
+}
+
 TEST_F(FakeMemoryTest, AModuleHasNoMemory)
 {
     ASSERT_TRUE(fake_ecu::set_module_dids("7E9:D801=00 12"));

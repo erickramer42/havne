@@ -250,8 +250,9 @@ void take_settled(ecuio_conversation* v, ecuio_request_engine* e,
 /* Step 2, after the talk's end (which decides wherever there is one): a
  * session entered again, or left, locks every level and ends an attempt
  * under way; a key on its way counts, and a seed not yet out is taken
- * back (else it goes with no attempt to tell its 36 or 37 to). Only a
- * rise of the loss count is a loss: the engine gives one back when a
+ * back (else it goes with no attempt to tell its 36 or 37 to). A run's
+ * session handed over or returned is a loss; of the loss count only a
+ * rise is: the engine gives one back when a
  * refusal was the request's own. The step's leaving is watched too,
  * since an abandoned session counts no loss and the count saturates. */
 void check_session(ecuio_conversation* v, ecuio_request_engine* e,
@@ -259,9 +260,11 @@ void check_session(ecuio_conversation* v, ecuio_request_engine* e,
 {
     const ecuio_engine_channel& ch = chan(e, v);
     const bool entered = ch.session_step == ECUIO_SESSION_STATE_ENTERED;
-    const bool lost =
-        ch.session_lost > v->seen_lost || (v->was_entered && !entered);
+    const bool lost = ch.session_lost > v->seen_lost ||
+                      ch.session_handed != v->seen_handed ||
+                      (v->was_entered && !entered);
     v->seen_lost = ch.session_lost;
+    v->seen_handed = ch.session_handed;
     v->was_entered = entered;
     if (!lost) {
         return;
@@ -513,6 +516,7 @@ void ecuio_conversation_begin(ecuio_conversation* v, ecuio_request_engine* e,
     }
     const ecuio_engine_channel& ch = chan(e, v);
     v->seen_lost = ch.session_lost;
+    v->seen_handed = ch.session_handed;
     v->was_entered = ch.session_step == ECUIO_SESSION_STATE_ENTERED;
     v->next_poll_us = now_us;
 }
