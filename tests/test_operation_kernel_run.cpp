@@ -113,6 +113,12 @@ struct KernelDrive {
             case run_action::send:
                 send(q);
                 break;
+            case run_action::leave:
+                sent.push_back(Bytes{0x10, 0x01});
+                functional.push_back(false);
+                n.ask({0x10, 0x01});
+                ecuio_operation::left(r);
+                break;
             }
         }
         ADD_FAILURE() << "the run never ended";
@@ -175,6 +181,7 @@ TEST(OperationRunTest, AKernelReadQuietsDownloadsStartsThenUploadsTwice)
     std::vector<uint8_t> want = {0x10, 0x34, 0x36, 0x36, 0x37, 0x31};
     want.insert(want.end(), pass.begin(), pass.end());
     want.insert(want.end(), pass.begin(), pass.end());
+    want.push_back(0x10); /* the leave */
     EXPECT_EQ(d.services(), want) << "both passes back to back, one helper";
     for (size_t i = 1; i < d.functional.size(); ++i) {
         EXPECT_FALSE(d.functional[i]) << i;
@@ -373,4 +380,98 @@ TEST(OperationRunTest, ASessionEnteredDropsTheHelper)
     EXPECT_FALSE(r.h.running);
     EXPECT_EQ(r.at, run_stage::helper);
     EXPECT_EQ(r.h.at, helper_stage::open);
+}
+
+TEST(OperationRunTest, AStartAnsweredForAnotherRoutineIsABadReply)
+{
+    KernelDrive d(kernel_plan());
+    d.script = answer_to(0x31, {0x71, 0x01, 0x02, 0x02});
+    EXPECT_EQ(d.go(), run_end::bad_reply);
+    EXPECT_EQ(d.count_of(0x35), 0u);
+    KernelDrive high(kernel_plan());
+    high.script = answer_to(0x31, {0x71, 0x01, 0x03, 0x01});
+    EXPECT_EQ(high.go(), run_end::bad_reply);
+    KernelDrive cut(kernel_plan());
+    cut.script = answer_to(0x31, {0x71, 0x01, 0x02});
+    EXPECT_EQ(cut.go(), run_end::bad_reply);
+}
+
+TEST(OperationRunTest, ACancelWhileThe34IsOutClosesWhatItOpened)
+{
+    KernelDrive d(kernel_plan());
+    d.while_out = [](KernelDrive& k) {
+        if (k.sent.back()[0] == 0x34) {
+            ecuio_operation::cancel(k.r);
+        }
+    };
+    EXPECT_EQ(d.go(), run_end::canceled);
+    EXPECT_EQ(d.services(), (std::vector<uint8_t>{0x10, 0x34, 0x37}));
+    KernelDrive refused(kernel_plan());
+    refused.while_out = d.while_out;
+    refused.script = answer_to(0x34, nrc(0x34, 0x70));
+    EXPECT_EQ(refused.go(), run_end::canceled);
+    EXPECT_EQ(refused.services(), (std::vector<uint8_t>{0x10, 0x34}))
+        << "a 34 refused opened nothing";
+}
+
+TEST(OperationRunTest, AKernelReadReadsItsIdentifiersAgainAfterTheLeave)
+{
+    const Bytes hardware = {0x22, 0xD2, 0x20};
+    plan p = kernel_plan(1000);
+    p.idents = {{ECUIO_SIM_HARDWARE_DID, ECUIO_DUMP_ROLE_HARDWARE}};
+    const auto first = [&](KernelDrive& d) {
+        d.script = [](const Bytes& q, size_t n, Bytes* out, uint32_t*) {
+            if (q[0] != 0x22 || n > 2) {
+                return false;
+            }
+            *out = {0x62, 0xD2, 0x20, 0x48, 0x57};
+            return true;
+        };
+    };
+    const auto after = [&](KernelDrive& d, Bytes answer) {
+        first(d);
+        Drive::Script before = d.script;
+        d.script = [=](const Bytes& q, size_t n, Bytes* out, uint32_t* w) {
+            if (q[0] == 0x22 && n > 2) {
+                *out = answer;
+                return true;
+            }
+            return before(q, n, out, w);
+        };
+    };
+
+    KernelDrive same(p);
+    after(same, {0x62, 0xD2, 0x20, 0x48, 0x57});
+    EXPECT_EQ(same.go(), run_end::complete);
+    const std::vector<uint8_t> all = same.services();
+    ASSERT_GE(all.size(), 3u);
+    EXPECT_EQ(std::vector<uint8_t>(all.end() - 3, all.end()),
+              (std::vector<uint8_t>{0x37, 0x10, 0x22}))
+        << "the uploads, the leave, then the identifier";
+    EXPECT_EQ(same.sent[same.sent.size() - 2], (Bytes{0x10, 0x01}));
+    EXPECT_EQ(same.sent.back(), hardware);
+    EXPECT_FALSE(same.r.ident_unread);
+
+    for (const Bytes& none :
+         {Bytes{}, nrc(0x22, 0x31), nrc(0x22, 0x33), nrc(0x22, 0x7F)}) {
+        KernelDrive d(p);
+        after(d, none);
+        EXPECT_EQ(d.go(), run_end::complete) << "a warning, never a fault";
+        EXPECT_TRUE(d.r.ident_unread);
+    }
+
+    KernelDrive changed(p);
+    after(changed, {0x62, 0xD2, 0x20, 0x48, 0x58});
+    EXPECT_EQ(changed.go(), run_end::identity_changed);
+
+    plan dump = plan_of({upload_step(kBase, 64)});
+    Drive d(dump);
+    d.script = [](const Bytes& q, size_t n, Bytes* out, uint32_t*) {
+        if (q[0] != 0x22 || n < 3) {
+            return false;
+        }
+        *out = {};
+        return true;
+    };
+    EXPECT_EQ(d.go(), run_end::no_answer) << "a dump's is still its end";
 }

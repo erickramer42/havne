@@ -17,6 +17,8 @@
 #include "fake_ecu.h"
 #include "j2534_backend_fixture.h"
 #include "operation_plan_support.h"
+#include "plugin_kernel_support.h"
+#include "sim_kernel.h" /* core/src */
 #include "sha256.h" /* core/src */
 
 #include <chrono>
@@ -83,12 +85,14 @@ protected:
         j2534_backends::BackendTest::TearDown();
     }
 
-    /* A started session over the plugin, its module talking */
-    void open(conversation_session::Session* s)
+    /* A started session over the plugin (profile, else this one's), its
+     * module talking */
+    void open(conversation_session::Session* s, const char* profile = nullptr)
     {
-        const std::string u =
-            uri((std::string("?profile=") + name_ + "&identify=0&diagnose=0")
-                    .c_str());
+        const std::string u = uri((std::string("?profile=") +
+                                   (profile != nullptr ? profile : name_) +
+                                   "&identify=0&diagnose=0")
+                                      .c_str());
         ecuio_session_t* raw = nullptr;
         ASSERT_EQ(ecuio_session_create(u.c_str(), &raw), ECUIO_OK)
             << ecuio_last_error_detail();
@@ -225,4 +229,38 @@ TEST_F(J2534OperationTest, ASagThroughTheRunWarns)
     EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u);
     EXPECT_EQ(v.volts_min_mv, 10900u);
     EXPECT_EQ(files().size(), 1u);
+}
+
+/* A kernel read on the fake's engine ECU, which reads region B only
+ * through a helper: the quieter, the download and the start, the
+ * uploads through it, the leave */
+TEST_F(J2534OperationTest, AKernelReadCopiesTheCodeThroughItsHelper)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_KERNEL", "1"));
+    kernel_test::Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    conversation_test::Made m = session_operation::made();
+    m.operations = k.json();
+    m.files_extra = R"(, "kernel.bin": {"kind": "bin", "base64": ")" +
+                    conversation_test::base64(k.blob) + "\"}";
+    const conversation_test::Plugin helper =
+        conversation_test::load_packed(m.json());
+    ASSERT_NE(helper, nullptr) << ecuio_last_error_detail();
+    char name[64] = {};
+    ASSERT_EQ(ecuio_plugin_register(helper.get(), 0, name, sizeof name),
+              ECUIO_OK);
+    {
+        conversation_session::Session s;
+        ASSERT_NO_FATAL_FAILURE(open(&s, name));
+        ASSERT_EQ(begin(s.get()), ECUIO_OK) << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = session_operation::ended(s.get());
+        ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+        EXPECT_EQ(v.bytes_done, 2u * 4096u);
+        ASSERT_EQ(files(), std::vector<std::string>{v.name});
+        EXPECT_EQ(
+            session_operation::image_at(folder_.at(v.name)),
+            session_operation::memory_of(fake_ecu::kVin, 0x00080000, 4096));
+    }
+    EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
 }

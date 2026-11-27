@@ -64,7 +64,7 @@ import struct
 import sys
 
 from seeds_dump import dump_seeds
-from seeds_operation import operation_seeds
+from seeds_operation import operation_seeds, sim_kernel_seeds
 from seeds_wasm import conversation_seeds, guest_seeds, wasm_seeds
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -672,6 +672,8 @@ def main(argv):
                                     b"\x23\x24\x00\x08\x00\x00\x00\x10"],
     }.items():
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
+    for name, data in sim_kernel_seeds(sim_run, sim_key).items():
+        write(out, "fuzz_sim", name, data)
     # Its URIs (an odd first byte): faults and timing for every module and
     # aimed at one
     for name, uri in {
@@ -744,7 +746,29 @@ def main(argv):
         write(out, "fuzz_dump_file", name, data)
     for name, data in operation_seeds().items():
         write(out, "fuzz_operation", name, data)
+    for name, doc in plan_manifests().items():
+        write(out, "fuzz_plugin_manifest", name,
+              b"\x00" + json.dumps(doc, indent=1).encode("utf-8"))
     return 0
+
+
+def plan_manifests():
+    """fuzz_plugin_manifest's packed plans, schema_fixtures.py's: a dump in
+    each session and each leave, and a kernel read"""
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    import schema_fixtures as f
+    dump, kernel = f.PACKED4, f.PACKED5
+    op = f.OP + ["steps"]
+    kn = f.KR + ["kernel"]
+    programming = [dict(f.READ, session="programming"), dict(f.UPLOAD, session="programming")]
+    return {
+        "packed_dump": dump,
+        "packed_dump_programming": f.changed(dump, op, programming),
+        "packed_dump_reset": f.changed(f.changed(dump, op, programming), f.OP + ["leave"], "reset"),
+        "packed_kernel_read": kernel,
+        "packed_kernel_read_unquiet": f.changed(kernel, kn + ["functional"], f.DELETE),
+        "packed_kernel_read_not_staying": f.changed(kernel, kn + ["stays"], False),
+    }
 
 
 # surrogate_protocol.h's reply (328 bytes) and j2534_ptypes.h's frame

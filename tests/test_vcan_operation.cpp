@@ -13,6 +13,8 @@
 #include "ecuio/internal.h"
 #include "ecuio/sim.h"
 #include "operation_plan_support.h"
+#include "plugin_kernel_support.h"
+#include "sim_kernel.h" /* core/src */
 #include "vcan_bus.h"
 
 #include <gtest/gtest.h>
@@ -91,6 +93,55 @@ TEST_F(SocketCanOperationTest, ARunCopiesTheSimulatedEcusMemory)
             session_operation::memory_of(kSimVin, kHighAt, kHighBytes);
         want.insert(want.end(), high.begin(), high.end());
         EXPECT_EQ(session_operation::image_at(folder.at(v.name)), want);
+        EXPECT_EQ(ecuio_session_close(s.get()), ECUIO_OK);
+    }
+    EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
+    ecuio_sim_destroy(sim);
+}
+
+/* A kernel read on vcan, no car's bus: the simulated ECU's code region
+ * read through the helper it downloads and starts */
+TEST_F(SocketCanOperationTest, AKernelReadCopiesTheCodeThroughItsHelper)
+{
+    ecuio_sim_t* sim = nullptr;
+    ASSERT_EQ(ecuio_sim_create_with("mock://sim?values=parked&kernel=1",
+                                    vcan_bus::interface_name(), 0, &sim),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    kernel_test::Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    conversation_test::Made m = session_operation::made();
+    m.operations = k.json();
+    m.files_extra = R"(, "kernel.bin": {"kind": "bin", "base64": ")" +
+                    conversation_test::base64(k.blob) + "\"}";
+    conversation_test::Plugin plugin = conversation_test::load_packed(m.json());
+    ASSERT_NE(plugin, nullptr) << ecuio_last_error_detail();
+    char name[64] = {};
+    ASSERT_EQ(ecuio_plugin_register(plugin.get(), 0, name, sizeof name),
+              ECUIO_OK);
+    const dump_file_test::Folder folder;
+    {
+        ecuio_session_t* raw = nullptr;
+        const std::string uri = std::string("socketcan://") +
+                                vcan_bus::interface_name() +
+                                "?profile=" + name + "&identify=0&diagnose=0";
+        ASSERT_EQ(ecuio_session_create(uri.c_str(), &raw), ECUIO_OK)
+            << ecuio_last_error_detail();
+        conversation_session::Session s(raw);
+        ASSERT_EQ(ecuio_session_start(s.get()), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_NO_FATAL_FAILURE(session_operation::talking(s.get()));
+        const ecuio_operation_request_t q =
+            session_operation::request(ECUIO_OPERATION_MAY_UNLOCK);
+        ASSERT_EQ(
+            ecuio_session_operation_start(s.get(), &q, folder.str().c_str()),
+            ECUIO_OK)
+            << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = session_operation::ended(s.get());
+        ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+        EXPECT_EQ(session_operation::image_at(folder.at(v.name)),
+                  session_operation::memory_of(kSimVin, 0x00080000, 4096));
         EXPECT_EQ(ecuio_session_close(s.get()), ECUIO_OK);
     }
     EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);

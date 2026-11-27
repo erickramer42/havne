@@ -799,7 +799,7 @@ PACKED5["operations"] = [{
     "kernel": {"ram": {"address": "00F00000", "bytes": 16384}, "start": ["0201"],
                "stays": True,
                "functional": [{"request": "10 82"}, {"request": "3E 80", "every_ms": 2000}]},
-    "steps": [DOWNLOAD, ROUTINE, dict(UPLOAD, name="code", address="00080000")],
+    "steps": [DOWNLOAD, ROUTINE, dict(UPLOAD, name="code", address="00080000", session="programming")],
 }]
 KR = OPS + [0]
 KN = KR + ["kernel"]

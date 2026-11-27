@@ -176,6 +176,28 @@ void check_memory(const ecuio_sim_session& s, const uint8_t* req, size_t len,
     }
 }
 
+void check_kernel(const ecuio_sim_session& s, bool was_running,
+                  const uint8_t* req, size_t len, const uint8_t* reply,
+                  uint32_t n)
+{
+    const ecuio_sim_kernel& k = s.kernel;
+    if (!k.on) {
+        if (k.running || k.downloading || (n >= 1 && reply[0] == 0x74)) {
+            abort();
+        }
+        return;
+    }
+    if (n >= 1 && reply[0] == 0x71 &&
+        (!k.running || k.faults.storm || k.faults.refuse)) {
+        abort();
+    }
+    if (n >= 1 && (reply[0] == 0x63 || reply[0] == 0x75) && s.programming &&
+        ecuio_sim_memory_asks_code(req, static_cast<uint32_t>(len)) &&
+        !was_running) {
+        abort();
+    }
+}
+
 /* The ECU answering the requests in data as a node on a bus does: each
  * a length byte (bits 0-3, and bit 5 for 16 more) then that many bytes,
  * a tick of the car after each; with no recording the node has a
@@ -190,6 +212,8 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
     e.recording = rec;
     ecuio_sim_session session;
     session.memory.vin = rec == nullptr ? e.config.vin : nullptr;
+    session.kernel.on = config.kernel;
+    session.kernel.faults = config.kernel_faults;
     ecuio_sim_counts counts;
     size_t at = 0;
     while (at < size) {
@@ -208,6 +232,9 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         const bool extended = session.extended;
         const bool programming = session.programming;
         const ecuio_sim_memory was = session.memory;
+        const bool running = session.kernel.running;
+        const bool to_kernel =
+            len > 0 && ecuio_sim_kernel_service(session.kernel, data + at);
         if (!functional && rec == nullptr) {
             n = ecuio_sim_session_answer(session, true, true, e.time_us,
                                          data + at, static_cast<uint32_t>(len),
@@ -223,7 +250,10 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         if (rec == nullptr) {
             check_security(session, data + at, len, reply, n);
             check_memory(session, data + at, len, reply, n);
-            check_upload(session, was, reply, n);
+            if (!to_kernel) {
+                check_upload(session, was, reply, n);
+            }
+            check_kernel(session, running, data + at, len, reply, n);
         }
         if (functional && (session.security.unlocked != unlocked ||
                            session.security.seed_out != seed_out ||
@@ -325,6 +355,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     config.faults.stalled = (data[0] >> 7) & 1;
     ++data;
     --size;
+    if (size > 1 && data[0] == 'K') {
+        config.kernel = true;
+        config.kernel_faults.once = (data[1] & 1) != 0;
+        config.kernel_faults.storm = (data[1] & 2) != 0;
+        config.kernel_faults.silent = (data[1] & 4) != 0;
+        config.kernel_faults.refuse = (data[1] & 8) != 0;
+        data += 2;
+        size -= 2;
+    }
     /* 'R' next: a recording first, then the requests. Its frames: a
      * count byte, then each a length byte (0-15), a flags byte (bit 0 an
      * ID other than the engine ECU's, the rest the frame's flags' low

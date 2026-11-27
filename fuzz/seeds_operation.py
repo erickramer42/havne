@@ -27,6 +27,14 @@ def plan(steps, idents=2, block=0x0402):
     return bytes([block & 0xFF, block >> 8, (len(steps) - 1) | idents << 4]) + b"".join(steps)
 
 
+def kernel_plan(steps, idents=2, block=0x0402, stays=True, quiet=True, blob=600,
+                wire=4095):
+    head = plan(steps, idents, block)
+    shape = (0 if stays else 1) | (2 if quiet else 0)
+    return (head[:2] + bytes([head[2] | 0x80]) + head[3:] +
+            bytes([shape, (blob - 1) & 0xFF, (blob - 1) >> 8, wire & 0xFF, wire >> 8]))
+
+
 def right(n):
     """n requests answered as the module answers"""
     return bytes(2 * n)
@@ -70,4 +78,81 @@ def operation_seeds():
         "upload_cancel_while_out": small + right(3) + bytes([0xFE, 0]),
         "upload_exit_refused": plan([step(upload=True, bytes_=8, size_bytes=4)],
                                     idents=0, block=0x0A) + right(2) + bytes([0, 4, 0x24, 0]),
+        **kernel_seeds(),
+    }
+
+
+def kernel_seeds():
+    """A kernel read: the functional 10 82, the session entered, two
+    identifiers, the helper's 34, 36 and 37 and its 31, the ranges, the
+    session left and the identifiers again"""
+    read = kernel_plan([step()])
+    head = right(1) + bytes(1) + right(2)
+    started = head + right(4)
+    return {
+        "kernel_read_whole": read,
+        "kernel_upload_whole": kernel_plan([step(upload=True, bytes_=2000, size_bytes=4)]),
+        "kernel_no_quieter": kernel_plan([step()], quiet=False),
+        "kernel_blocks_many": kernel_plan([step()], blob=3000, wire=258),
+        "kernel_counter_wraps": kernel_plan([step()], idents=0, blob=8192, wire=34),
+        "kernel_helper_again": kernel_plan([step(upload=True, bytes_=600, size_bytes=4),
+                                            step(upload=True, bytes_=900, size_bytes=4)],
+                                           stays=False, block=0x0A),
+        "kernel_wire_too_small": kernel_plan([step()], wire=2),
+        "kernel_block_named_small": kernel_plan([step()], block=0x02),
+        "kernel_quieter_silent": read + bytes([0, 3]),
+        "kernel_quieter_refused": read + bytes([0, 4, 0x12, 0]),
+        "kernel_download_refused": read + head + bytes([0, 4, 0x70, 0]),
+        "kernel_download_another_block": read + head + bytes([0, 7, 4, 0x74, 0x20, 0x00, 0x40]),
+        "kernel_block_lost": read + head + right(1) + bytes([0, 3]),
+        "kernel_block_wrong_counter": read + head + right(1) + bytes([0, 7, 2, 0x76, 0x09]),
+        "kernel_exit_refused": read + head + right(2) + bytes([0, 4, 0x24, 0]),
+        "kernel_start_refused": read + head + right(3) + bytes([0, 4, 0x22, 0]),
+        "kernel_start_other_routine": read + head + right(3) + bytes([0, 5]),
+        "kernel_cancel_in_download": kernel_plan([step()], blob=3000, wire=258) + head +
+        right(2) + bytes([0xFE, 0]),
+        "kernel_cancel_at_start": read + head + right(3) + bytes([0xFF]),
+        "kernel_session_refused": read + right(1) + bytes([0x3F]),
+        "kernel_ident_unread_after": read + started + right(8) + bytes(1) + bytes([0, 4, 0x31, 0]),
+        "kernel_ident_changed_after": read + started + right(8) + bytes(1) + bytes([0, 0x25]),
+    }
+
+
+def sim_helper(size=20, wrong=False):
+    """The simulated ECU's made-up helper: HAVNEKRN, then the big-endian
+    sum of the bytes after its 12-byte head"""
+    body = bytes((i * 31 + 7) & 0xFF for i in range(12, size))
+    total = sum(body) + (1 if wrong else 0)
+    return b"HAVNEKRN" + total.to_bytes(4, "big") + body
+
+
+def sim_kernel_seeds(sim_run, sim_key):
+    """fuzz_sim's kernel= runs: the config byte, K and the faults byte
+    (once, storm, silent, refuse from bit 0), then the requests"""
+    def k(faults, requests):
+        run = sim_run(0x02, requests)
+        return run[:1] + b"K" + bytes([faults]) + run[1:]
+
+    entry = [b"\x10\x02", b"\x27\x01", sim_key(0x01)]
+    image = sim_helper()
+    download = [b"\x34\x00\x44\x00\xF0\x00\x00" + len(image).to_bytes(4, "big"),
+                b"\x36\x01" + image, b"\x37", b"\x31\x01\x02\x01"]
+    code = b"\x23\x24\x00\x08\x00\x00\x00\x10"
+    upload = [b"\x35\x00\x44\x00\x08\x00\x00\x00\x00\x00\x20", b"\x36\x01", b"\x37"]
+    bad = list(download)
+    bad[1] = b"\x36\x01" + sim_helper(wrong=True)
+    return {
+        "kernel-read-code": k(0, entry + download + [code]),
+        "kernel-withheld-then-read": k(0, entry + [code] + download + [code]),
+        "kernel-upload-code": k(0, entry + download + upload + [code]),
+        "kernel-once": k(1, entry + download + upload + [code]),
+        "kernel-storm": k(2, entry + download + [code]),
+        "kernel-silent": k(4, entry + download + [code, b"\x3E\x00"]),
+        "kernel-refuse": k(8, entry + download + [code]),
+        "kernel-bad-sum": k(0, entry + bad + [code]),
+        "kernel-session-left": k(0, entry + download + [b"\x10\x01"] + entry + [code]),
+        "kernel-download-twice": k(0, entry + download + download[:1]),
+        "kernel-out-of-ram": k(0, entry + [b"\x34\x00\x44\x00\xF0\x40\x00\x00\x00\x00\x14"]),
+        "kernel-locked": k(0, [b"\x10\x02"] + download + [code]),
+        "kernel-quieter": k(0, entry) + b"\x12\x10\x82" + sim_run(0x02, download + [code])[1:],
     }

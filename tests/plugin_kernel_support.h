@@ -41,7 +41,7 @@ struct Kernel {
     std::string kind = "\"kernel_read\"";
     std::string kernel_extra;
     std::string ranges =
-        R"({"step": "upload", "name": "code", "session": "extended", )"
+        R"({"step": "upload", "name": "code", "session": "programming", )"
         R"("address": "00080000", "bytes": 4096, "address_bytes": 4, )"
         R"("size_bytes": 4, "dfi": "00"})";
     std::string lead; /* the steps before the ranges, when not the two */

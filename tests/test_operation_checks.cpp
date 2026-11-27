@@ -234,6 +234,8 @@ TEST(OperationChecksTest, AKernelReadsBatteryIsJudgedAsADumpsAtItsStart)
         EXPECT_TRUE(v.high_warn) << high;
         EXPECT_FALSE(v.refused_high) << "a supply's fault is warned";
     }
+    volts_take(v, 11000, true);
+    EXPECT_FALSE(v.sagged);
     volts_take(v, 10999, true);
     EXPECT_TRUE(v.sagged) << "a sag warns as a dump's";
 

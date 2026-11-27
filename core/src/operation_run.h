@@ -81,6 +81,7 @@ enum class run_action : uint8_t {
     send,  /* send request.bytes, then reply() or silence() */
     hold,  /* the sink has no room for the answer yet: ask again later */
     done,
+    leave, /* a kernel read's: leave the plan's session, then left() */
 };
 
 enum class run_stage : uint8_t {
@@ -92,6 +93,7 @@ enum class run_stage : uint8_t {
     upload_exit,
     quiet,  /* the functional 10 82, its answers not judged */
     helper, /* a kernel read's download and start, helper_run's stage */
+    leave,  /* a kernel read's session left before the identifiers again */
     ident_after,
     closing, /* the one 37 after a cancel or a fault in an upload */
     done,
@@ -129,6 +131,8 @@ struct run {
     uint8_t ident_size[ECUIO_PLUGIN_MAX_IDENTS] = {};
     uint8_t ident_value[ECUIO_PLUGIN_MAX_IDENTS][ECUIO_DUMP_IDENT_MAX] = {};
     helper_run h;
+    bool left = false;
+    bool ident_unread = false; /* a warning: the module's word is the read's */
     uint32_t wire_max = 0; /* the most bytes one request may carry */
     uint8_t wire[kWireMost] = {};
 };
@@ -185,7 +189,9 @@ inline void settle(run& r)
     const plan& p = *r.p;
     r.asks = 0;
     if (r.step == p.steps.size()) {
-        if (r.ident < p.idents.size()) {
+        if (p.has_kernel && !r.left) {
+            r.at = run_stage::leave;
+        } else if (r.ident < p.idents.size()) {
             r.at = run_stage::ident_after;
         } else {
             stop(r, run_end::complete);
@@ -236,6 +242,30 @@ inline void entered(run& r)
         r.h.running = false;
         settle(r);
     }
+}
+
+/* The plan's session is left: the identifiers are read again in default */
+inline void left(run& r)
+{
+    if (r.at == run_stage::leave) {
+        r.left = true;
+        settle(r);
+    }
+}
+
+/* An identifier read again after a kernel read's leave may go unread */
+inline bool may_go_unread(const run& r)
+{
+    return r.at == run_stage::ident_after && r.p->has_kernel;
+}
+
+/* The identifier asked is left unread, a warning */
+inline void unread(run& r)
+{
+    r.ident_unread = true;
+    r.asked = false;
+    ++r.ident;
+    settle(r);
 }
 
 /* It couldn't be entered or unlocked: the run ends as e */
@@ -316,6 +346,9 @@ template <typename Sink> run_action next(run& r, run_request& out, Sink& sink)
     if (r.at == run_stage::enter) {
         out.session = r.p->steps[r.step].session;
         return run_action::enter;
+    }
+    if (r.at == run_stage::leave) {
+        return run_action::leave;
     }
     const bool data =
         r.at == run_stage::read || r.at == run_stage::upload_block;
@@ -532,10 +565,12 @@ run_wait reply(run& r, const uint8_t* d, size_t n, uint32_t waited_ms,
         close(r, run_end::bad_reply);
     } else if (!negative) {
         take_positive(r, d, n, sink);
-    } else if (d[2] == 0x33) {
-        stop(r, run_end::session_lost, 0x33);
     } else if (d[2] == 0x21 && may_ask_again(r)) {
         /* busy: next() asks the same again */
+    } else if (may_go_unread(r)) {
+        unread(r);
+    } else if (d[2] == 0x33) {
+        stop(r, run_end::session_lost, 0x33);
     } else {
         close(r, run_end::refused, d[2]);
     }
@@ -561,6 +596,8 @@ inline void silence(run& r)
     r.open = r.open || opens(r);
     if (r.canceled) {
         close(r, run_end::canceled);
+    } else if (!may_ask_again(r) && may_go_unread(r)) {
+        unread(r);
     } else if (!may_ask_again(r)) {
         close(r, run_end::no_answer);
     }

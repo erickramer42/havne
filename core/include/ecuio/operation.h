@@ -112,6 +112,7 @@ extern "C" {
 #define ECUIO_OPERATION_CHECK_VOLTS_SAG                                        \
     0x100u /* a dump's warning: under
                                                        11.0 V during it */
+#define ECUIO_OPERATION_CHECK_IDENT_UNREAD 0x200u /* a kernel read's, after */
 
 typedef struct ecuio_operation_request {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */

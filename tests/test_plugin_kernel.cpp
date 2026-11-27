@@ -8,6 +8,8 @@
 
 #include "plugin_kernel_support.h"
 
+#include "../core/src/operation_plan.h"
+
 namespace {
 
 using conversation_test::base64;
@@ -250,7 +252,9 @@ TEST(PluginOperationTest, AFunctionalRequestIsSuppressedAndOnlyOneOfTwo)
           R"([{"request": "11 81"}])", R"([{"request": "10 81"}])",
           R"([{"request": "10 82", "every_ms": 2000}])",
           R"([{"request": "3E 80"}])",
-          R"([{"request": "10 82"}, {"request": "10 82"}])"}) {
+          R"([{"request": "10 82"}, {"request": "10 82"}])",
+          R"([{"request": "3E 80", "every_ms": 2000}, )"
+          R"({"request": "3E 80", "every_ms": 1000}])"}) {
         EXPECT_EQ(with(f), refused) << f;
     }
     EXPECT_NE(
@@ -295,4 +299,24 @@ TEST(PluginOperationTest, AHelpersFileIsABinFileTheManifestNames)
     m = made(k);
     m.files_extra = "";
     EXPECT_EQ(why(m), "file 'kernel.bin' isn't a binary file in \"files\"");
+}
+
+TEST(PluginOperationTest, AKeepAlivesTimeGoesWithItsFunctional3E80)
+{
+    ecuio_operation::plan p;
+    p.has_kernel = true;
+    ecuio_operation::kernel& k = p.helper;
+    k.ram_address = 0x00F00000;
+    k.ram_bytes = 0x4000;
+    k.address = k.ram_address;
+    k.blob.assign(300, 0x5A);
+    k.starts = {0x0201};
+    k.routine = 0x0201;
+    EXPECT_EQ(ecuio_operation::kernel_fault(p), nullptr);
+    k.keepalive_ms = 2000;
+    ASSERT_NE(ecuio_operation::kernel_fault(p), nullptr);
+    EXPECT_STREQ(ecuio_operation::kernel_fault(p),
+                 "a keep-alive's every_ms goes with a functional 3E 80");
+    k.quiet_keepalive = 0x80;
+    EXPECT_EQ(ecuio_operation::kernel_fault(p), nullptr);
 }

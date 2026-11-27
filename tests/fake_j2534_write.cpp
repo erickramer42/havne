@@ -155,6 +155,12 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             fake_j2534::read_knob("ECUIO_FAKE_MEM", mem, sizeof(mem))
                 ? mem
                 : nullptr);
+        /* The helper region B wants, in the simulated ECU's kernel= words */
+        char kernel[64];
+        (void)fake_ecu::set_kernel(
+            fake_j2534::read_knob("ECUIO_FAKE_KERNEL", kernel, sizeof(kernel))
+                ? kernel
+                : nullptr);
     }
 
     std::unique_lock<std::mutex> lk(fake_j2534::g_lock);
@@ -216,8 +222,8 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                          req[4] == 0x11 || req[4] == 0x3E)) ||
              (n >= 7 && n <= 11 && req[4] == 0x01) ||
              (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
-             (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 ||
-                         (req[4] >= 0x35 && req[4] <= 0x37))) ||
+             (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 || req[4] == 0x31 ||
+                         (req[4] >= 0x34 && req[4] <= 0x37))) ||
              (n == 5 && (req[4] == 0x03 || req[4] == 0x04 || req[4] == 0x07 ||
                          req[4] == 0x0A)));
 

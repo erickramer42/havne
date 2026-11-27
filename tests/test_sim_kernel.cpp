@@ -94,6 +94,9 @@ TEST(SimKernelTest, AHelperDownloadedAndStartedRuns)
     EXPECT_EQ(n.ask(kStart), kStarted);
     EXPECT_TRUE(n.k.running);
     EXPECT_EQ(n.ask(kStart), refused(0x31, 0x24)) << "it runs already";
+    EXPECT_EQ(n.ask(download(ECUIO_SIM_KERNEL_RAM_ADDRESS, size)),
+              refused(0x34, 0x70))
+        << "nor is another downloaded over it";
     EXPECT_EQ(n.k.downloads, 1u);
     EXPECT_EQ(n.k.starts, 1u);
 }
