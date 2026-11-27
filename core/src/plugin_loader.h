@@ -214,6 +214,10 @@ private:
     bool is_page(const std::string& path) const;
     void read_conversation(const Value& root, ecuio_plugin& p);
     static void read_operations(const Value& root, ecuio_plugin& p);
+    void read_blobs(const Value& root, ecuio_plugin& p);
+    void packed_binary(const Value& file, const std::string& path,
+                       const char* kind, std::vector<uint8_t>* out);
+    void check_binaries() const;
     void read_code(const Value& code, conversation& c);
     void packed_code(const Value& file, const std::string& path,
                      conversation& c);

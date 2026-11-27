@@ -291,6 +291,20 @@ typedef char abi_plugin_step_dfi_check
     [(offsetof(ecuio_plugin_operation_step_t, dfi) == 38) ? 1 : -1];
 typedef char abi_plugin_step_name_check
     [(offsetof(ecuio_plugin_operation_step_t, name) == 40) ? 1 : -1];
+typedef char abi_plugin_step_routine_check
+    [(offsetof(ecuio_plugin_operation_step_t, routine_id) == 72) ? 1 : -1];
+typedef char abi_plugin_kernel_size_check
+    [(sizeof(ecuio_plugin_operation_kernel_t) == 72) ? 1 : -1];
+typedef char abi_plugin_kernel_ram_check
+    [(offsetof(ecuio_plugin_operation_kernel_t, ram_address) == 8) ? 1 : -1];
+typedef char abi_plugin_kernel_start_check
+    [(offsetof(ecuio_plugin_operation_kernel_t, start) == 28) ? 1 : -1];
+typedef char abi_plugin_kernel_quiet_check
+    [(offsetof(ecuio_plugin_operation_kernel_t, quiet_session) == 44) ? 1 : -1];
+typedef char abi_plugin_kernel_keepalive_check
+    [(offsetof(ecuio_plugin_operation_kernel_t, keepalive_ms) == 48) ? 1 : -1];
+typedef char abi_plugin_kernel_stays_check
+    [(offsetof(ecuio_plugin_operation_kernel_t, stays) == 52) ? 1 : -1];
 typedef char abi_plugin_ident_size_check
     [(sizeof(ecuio_plugin_operation_ident_t) == 32) ? 1 : -1];
 typedef char abi_plugin_ident_role_check

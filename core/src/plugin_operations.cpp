@@ -8,6 +8,7 @@
 
 #include "operation_plan.h"
 #include "plugin_loader.h"
+#include "sha256.h"
 
 #include <cstring>
 #include <memory>
@@ -165,6 +166,138 @@ step read_step(const Value& v)
     return s;
 }
 
+constexpr uint32_t kKeepaliveMinMs = 500;
+constexpr uint32_t kKeepaliveMaxMs = 4500;
+
+/* One of "functional": a suppressed request to the functional address,
+ * 10 82 or 3E 80 alone: no reset in a read, and a physical suppressed
+ * request would leave core unable to read the target's reply */
+void read_functional(const Value& v, ecuio_operation::kernel& k)
+{
+    expect(v, Type::object, "a functional request");
+    only_keys(v, {"request", "every_ms"}, "a functional request");
+    const std::string& r =
+        text_of(required(v, "request", "a functional request"), 5, 5,
+                "a functional request's request");
+    const Value* every = v.find("every_ms");
+    if (r == "10 82" && every == nullptr && k.quiet_session == 0) {
+        k.quiet_session = 0x82;
+        return;
+    }
+    if (r == "3E 80" && every != nullptr && k.quiet_keepalive == 0) {
+        k.quiet_keepalive = 0x80;
+        k.keepalive_ms = static_cast<uint32_t>(whole_of(
+            *every, kKeepaliveMinMs, kKeepaliveMaxMs, "a 3E 80's every_ms"));
+        return;
+    }
+    refuse(v, "a functional request is \"10 82\", or \"3E 80\" with its "
+              "\"every_ms\", each once: nothing else goes to every module");
+}
+
+void read_kernel(const Value& v, ecuio_operation::kernel& k)
+{
+    expect(v, Type::object, "the kernel");
+    only_keys(v, {"ram", "start", "stays", "functional"}, "the kernel");
+    const Value& ram = required(v, "ram", "the kernel");
+    expect(ram, Type::object, "the kernel's ram");
+    only_keys(ram, {"address", "bytes"}, "the kernel's ram");
+    k.ram_address = hex_of(required(ram, "address", "the kernel's ram"), 1, 4,
+                           "the kernel's ram address");
+    k.ram_bytes = static_cast<uint64_t>(
+        whole_of(required(ram, "bytes", "the kernel's ram"), 1,
+                 static_cast<int64_t>(ecuio_operation::most_of(4)),
+                 "the kernel's ram bytes"));
+    const Value& start = required(v, "start", "the kernel");
+    expect(start, Type::array, "the kernel's start");
+    if (start.items.empty() || start.items.size() > ECUIO_PLUGIN_MAX_STARTS) {
+        refuse(start, "the kernel's start lists 1 to " +
+                          std::to_string(ECUIO_PLUGIN_MAX_STARTS) +
+                          " routines");
+    }
+    for (const Value& id : start.items) {
+        k.starts.push_back(
+            static_cast<uint16_t>(hex_of(id, 2, 2, "a start routine")));
+    }
+    const Value& stays = required(v, "stays", "the kernel");
+    expect(stays, Type::boolean, "the kernel's stays");
+    k.stays = stays.boolean;
+    if (const Value* list = v.find("functional")) {
+        expect(*list, Type::array, "the kernel's functional");
+        for (const Value& f : list->items) {
+            read_functional(f, k);
+        }
+    }
+}
+
+int hex_digit(char c)
+{
+    return (c >= '0' && c <= '9')   ? c - '0'
+           : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                                    : -1;
+}
+
+void read_download(const Value& v, const std::string& what,
+                   ecuio_operation::kernel& k)
+{
+    only_keys(v,
+              {"step", "name", "session", "address", "address_bytes",
+               "size_bytes", "file", "sha256"},
+              "a download");
+    k.address = hex_of(required(v, "address", what), 1, 4, what + "'s address");
+    k.address_bytes = static_cast<uint8_t>(whole_of(
+        required(v, "address_bytes", what), 1, 4, what + "'s address_bytes"));
+    k.size_bytes = static_cast<uint8_t>(whole_of(
+        required(v, "size_bytes", what), 1, 4, what + "'s size_bytes"));
+    k.file = path_of(required(v, "file", what), what + "'s file");
+    const Value& sha = required(v, "sha256", what);
+    const std::string& t = text_of(sha, 64, 64, what + "'s sha256");
+    for (size_t i = 0; i < 32; ++i) {
+        const int hi = hex_digit(t[2 * i]);
+        const int lo = hex_digit(t[2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            refuse(sha, what + "'s sha256 takes 64 of 0-9 and a-f");
+        }
+        k.sha256[i] = static_cast<uint8_t>(hi * 16 + lo);
+    }
+}
+
+/* The helper's two steps, the download then its routine, both in the
+ * programming session; false for any other step */
+bool read_kernel_step(const Value& v, plan& out, uint32_t at)
+{
+    expect(v, Type::object, "a step");
+    const Value* kind = v.find("step");
+    const bool named = kind != nullptr && kind->type == Type::string;
+    const bool download = named && kind->text == "download";
+    const bool routine = named && kind->text == "routine";
+    if (!download && !routine) {
+        return false;
+    }
+    const std::string& name =
+        id_of(required(v, "name", "a step"), "a step's name");
+    const std::string what = "step " + q(name);
+    if (!out.has_kernel || at != (download ? 0u : 1u)) {
+        refuse(v, what + ": a kernel read's download and its routine are its "
+                         "first two steps, and only a kernel read's");
+    }
+    (void)word_of(required(v, "session", what), {"programming"},
+                  what + "'s session", " isn't the helper's: \"programming\"");
+    ecuio_operation::kernel& k = out.helper;
+    if (download) {
+        k.download_name = name;
+        read_download(v, what, k);
+        return true;
+    }
+    only_keys(v, {"step", "name", "session", "routine"}, "a routine");
+    if (name == k.download_name) {
+        refuse(v, what + " is given twice");
+    }
+    k.routine_name = name;
+    k.routine = static_cast<uint16_t>(
+        hex_of(required(v, "routine", what), 2, 2, what + "'s routine"));
+    return true;
+}
+
 void read_steps(const Value& list, plan& out)
 {
     expect(list, Type::array, "an operation's steps");
@@ -172,8 +305,20 @@ void read_steps(const Value& list, plan& out)
         refuse(list, "an operation's steps lists 1 to " +
                          std::to_string(ECUIO_PLUGIN_MAX_STEPS));
     }
+    uint32_t at = 0;
     for (const Value& v : list.items) {
+        if (read_kernel_step(v, out, at++)) {
+            continue;
+        }
+        if (out.has_kernel && at <= 2) {
+            refuse(v, "a kernel read's first two steps are its download and "
+                      "its routine");
+        }
         step s = read_step(v);
+        if (s.name == out.helper.download_name ||
+            s.name == out.helper.routine_name) {
+            refuse(v, "step " + q(s.name) + " is given twice");
+        }
         for (const step& known : out.steps) {
             if (known.name == s.name) {
                 refuse(v, "step " + q(s.name) + " is given twice");
@@ -228,14 +373,25 @@ void read_target(const Value& op, const conversation& c, plan& out)
 plan read_operation(const Value& op, const conversation& c)
 {
     expect(op, Type::object, "an operation");
-    only_keys(op, {"id", "kind", "title", "ecu", "level", "ident", "steps"},
-              "an operation");
+    only_keys(
+        op, {"id", "kind", "title", "ecu", "level", "ident", "kernel", "steps"},
+        "an operation");
     plan out;
     out.id = id_of(required(op, "id", "an operation"), "an operation's id");
     const std::string what = "operation " + q(out.id);
-    (void)word_of(required(op, "kind", what), {"dump"}, what + "'s kind",
-                  " isn't one this Havne runs: \"dump\"");
-    out.kind = ECUIO_OPERATION_KIND_DUMP;
+    static_assert(ECUIO_OPERATION_KIND_KERNEL_READ == 2,
+                  "the words' order is the kinds'");
+    out.kind = word_of(required(op, "kind", what), {"dump", "kernel_read"},
+                       what + "'s kind",
+                       " isn't one this Havne runs: \"dump\" and "
+                       "\"kernel_read\"");
+    const Value* kernel = op.find("kernel");
+    out.has_kernel = out.kind == ECUIO_OPERATION_KIND_KERNEL_READ;
+    if (out.has_kernel) {
+        read_kernel(required(op, "kernel", what), out.helper);
+    } else if (kernel != nullptr) {
+        refuse(*kernel, what + " is a dump, which takes no \"kernel\"");
+    }
     out.title =
         plain_of(required(op, "title", what), 1, 63, what + "'s title", false);
     read_target(op, c, out);
@@ -243,6 +399,11 @@ plan read_operation(const Value& op, const conversation& c)
         read_ident(*list, c, out);
     }
     read_steps(required(op, "steps", what), out);
+    if (out.has_kernel &&
+        (out.helper.routine_name.empty() || out.steps.empty())) {
+        refuse(op, what + " is a kernel read: a download, its routine, then "
+                          "the ranges the helper reads");
+    }
     return out;
 }
 
@@ -285,6 +446,51 @@ void loader::read_operations(const Value& root, ecuio_plugin& p)
             }
         }
         p.operations.push_back(std::move(next));
+    }
+}
+
+constexpr size_t kBinaryMax = size_t{1} << 20;
+
+/* Each kernel read's helper: its bytes, their SHA-256 against the
+ * manifest's, and the window they go to */
+void loader::read_blobs(const Value& root, ecuio_plugin& p)
+{
+    for (size_t i = 0; i < p.operations.size(); ++i) {
+        plan& op = p.operations[i];
+        if (!op.has_kernel) {
+            continue;
+        }
+        const Value& at = root.find("operations")->items[i];
+        const Value& file = *at.find("steps")->items[0].find("file");
+        const std::string name = "file " + q(op.helper.file);
+        std::vector<uint8_t>& blob = op.helper.blob;
+        if (packed()) {
+            packed_binary(file, op.helper.file, "bin", &blob);
+        } else {
+            const char* bytes = nullptr;
+            size_t length = 0;
+            read_folder_file(file, name, op.helper.file, &bytes, &length);
+            if (length > kBinaryMax) {
+                refuse(file, name + " is over 1 MiB");
+            }
+            total_ += length;
+            if (total_ > ECUIO_PLUGIN_PACKAGE_MAX) {
+                refuse(file, "the package is over 16 MiB");
+            }
+            blob.assign(bytes, bytes + length);
+        }
+        uint8_t have[32];
+        ecuio_sha256::hasher h;
+        h.add(blob.data(), blob.size());
+        h.finish(have);
+        if (std::memcmp(have, op.helper.sha256, sizeof have) != 0) {
+            refuse(file, name + " has SHA-256 " + ecuio_sha256::hex(have) +
+                             ", and the manifest says " +
+                             ecuio_sha256::hex(op.helper.sha256));
+        }
+        if (const char* fault = ecuio_operation::kernel_fault(op)) {
+            refuse(at, "operation " + q(op.id) + ": " + fault);
+        }
     }
 }
 
@@ -334,7 +540,8 @@ ecuio_status_t ecuio_plugin_operation(const ecuio_plugin_t* plugin,
     o.rx_id = p->rx_id;
     o.tx_id = p->tx_id;
     o.level = p->level;
-    o.step_count = static_cast<uint32_t>(p->steps.size());
+    o.step_count =
+        static_cast<uint32_t>(p->steps.size()) + (p->has_kernel ? 2u : 0u);
     o.ident_count = static_cast<uint32_t>(p->idents.size());
     o.unlock_sessions = ecuio_operation::unlock_sessions(*p);
     o.image_bytes = ecuio_operation::image_bytes(*p);
@@ -352,13 +559,32 @@ ecuio_status_t ecuio_plugin_operation_step(const ecuio_plugin_t* plugin,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     const plan* p = plan_at(plugin, operation);
-    if (p == nullptr || index >= p->steps.size() ||
+    const uint32_t lead = p != nullptr && p->has_kernel ? 2u : 0u;
+    if (p == nullptr || index >= p->steps.size() + lead ||
         out->struct_size < sizeof(ecuio_plugin_operation_step_t)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    const ecuio_operation::step& from = p->steps[index];
     ecuio_plugin_operation_step_t s{};
     s.struct_size = sizeof s;
+    if (index < lead) {
+        const ecuio_operation::kernel& k = p->helper;
+        s.session = ECUIO_STEP_SESSION_PROGRAMMING;
+        if (index == 0) {
+            s.kind = ECUIO_STEP_DOWNLOAD;
+            s.address = k.address;
+            s.bytes = k.blob.size();
+            s.address_bytes = k.address_bytes;
+            s.size_bytes = k.size_bytes;
+            ecuio_sf::copy_text(s.name, sizeof s.name, k.download_name);
+        } else {
+            s.kind = ECUIO_STEP_ROUTINE;
+            s.routine_id = k.routine;
+            ecuio_sf::copy_text(s.name, sizeof s.name, k.routine_name);
+        }
+        *out = s;
+        return ECUIO_OK;
+    }
+    const ecuio_operation::step& from = p->steps[index - lead];
     s.kind = from.kind;
     s.session = from.session;
     s.address = from.address;
@@ -389,6 +615,52 @@ ecuio_status_t ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin,
     d.did = p->idents[index].did;
     d.role = p->idents[index].role;
     *out = d;
+    return ECUIO_OK;
+}
+
+ecuio_status_t
+ecuio_plugin_operation_kernel(const ecuio_plugin_t* plugin, uint32_t operation,
+                              ecuio_plugin_operation_kernel_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    if (p == nullptr || !p->has_kernel ||
+        out->struct_size < sizeof(ecuio_plugin_operation_kernel_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const ecuio_operation::kernel& from = p->helper;
+    ecuio_plugin_operation_kernel_t k{};
+    k.struct_size = sizeof k;
+    k.ram_address = from.ram_address;
+    k.ram_bytes = from.ram_bytes;
+    k.start_count = static_cast<uint32_t>(from.starts.size());
+    for (size_t i = 0; i < from.starts.size(); ++i) {
+        k.start[i] = from.starts[i];
+    }
+    k.quiet_session = from.quiet_session;
+    k.quiet_keepalive = from.quiet_keepalive;
+    k.keepalive_ms = from.keepalive_ms;
+    k.stays = from.stays ? 1u : 0u;
+    *out = k;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_operation_blob(const ecuio_plugin_t* plugin,
+                                           uint32_t operation,
+                                           const uint8_t** bytes,
+                                           uint64_t* length)
+{
+    if (plugin == nullptr || bytes == nullptr || length == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    if (p == nullptr || !p->has_kernel) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *bytes = p->helper.blob.data();
+    *length = p->helper.blob.size();
     return ECUIO_OK;
 }
 
