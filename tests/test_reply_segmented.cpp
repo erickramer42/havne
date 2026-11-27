@@ -238,6 +238,60 @@ TEST(RequestEngineTest, ALateReplyTeachesItsRowsFrames)
 /* A recovery's rescan takes back a wait run out before any answer, so the
  * defs judge the row again; an answer it had stays, a refusal too, and
  * the module's waking does the same for its own rows */
+TEST(RequestEngineTest, AnOutOfStepAnswerAtAnotherLengthEndsTheWaitsRunOut)
+{
+    const std::vector<ecuio_signal_def_t> defs = {def(0x410C, 2, 2, 16)};
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    ASSERT_TRUE(ecuio_engine_derive(&e, &set, &rx, 1, nullptr));
+
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_EQ(e.requests[0].ran_out, 1u);
+    ASSERT_FALSE(e.chans[0].in_step);
+
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {0x41, 0x0C, 0x1A, 0xF8, 0x2A}), 0);
+    EXPECT_EQ(e.requests[0].ran_out, 0u);
+    EXPECT_EQ(e.requests[0].reply_frames, 1u) << "nothing learned";
+    EXPECT_EQ(e.chans[0].pid_len[0x0C], 0u);
+    EXPECT_TRUE(e.chans[0].in_step);
+
+    now += 100 * kMs;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now + ECUIO_ENGINE_WAIT_US));
+    EXPECT_EQ(e.requests[0].ran_out, 0u) << "an answered row";
+}
+
+TEST(RequestEngineTest, ALateAnswerAtAnotherLengthEndsTheWaitsRunOut)
+{
+    const std::vector<ecuio_signal_def_t> defs = {def(0x410C, 2, 2, 16)};
+    const ecuio_signal_set_t set = set_of(defs);
+    const uint32_t rx = 0x7E8;
+    ecuio_request_engine e;
+    ASSERT_TRUE(ecuio_engine_init(&e, 1));
+    ASSERT_TRUE(ecuio_engine_derive(&e, &set, &rx, 1, nullptr));
+
+    int64_t now = 0;
+    ASSERT_EQ(ask(&e, 0, now, {}), 0);
+    now += ECUIO_ENGINE_WAIT_US;
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, now));
+    ASSERT_EQ(e.requests[0].ran_out, 1u);
+
+    const Bytes late = {0x41, 0x0C, 0x1A, 0xF8, 0x2A};
+    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, late.data(),
+                                    static_cast<uint16_t>(late.size()),
+                                    now + kMs, nullptr),
+              ecuio_reply::none);
+    EXPECT_EQ(e.requests[0].ran_out, 0u);
+    EXPECT_EQ(e.requests[0].reply_frames, 1u) << "nothing learned";
+    EXPECT_EQ(e.chans[0].pid_len[0x0C], 0u);
+}
+
 TEST(RequestEngineTest, ARecoveryTakesBackAWaitRunOutBeforeAnyAnswer)
 {
     const std::vector<ecuio_signal_def_t> defs = {

@@ -287,14 +287,20 @@ TEST(FolderExportTest, ACopyWithNoMaskHasNoNote)
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_VIN_MASKED], 0u);
 }
 
-/* A signal file whose masks would stop it loading refuses the copy: an
- * escape of a letter reads as its bytes, so a VIN glued to it masks the
- * escape's digits too */
+/* A signal file whose masks would stop it loading refuses the copy: two
+ * names the masks make one */
 TEST(FolderExportTest, ASignalFileThatWouldNotLoadMaskedRefusesTheCopy)
 {
     Folder f;
     named_recording(f);
-    const std::string signals = signals_json(std::string(1, '\\') + "u0041" + kVin);
+    const std::string signals =
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"a","name":"ZZZFAKE11M0000001",)"
+        R"("read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"b","name":"ZZZFAKE11M0000002",)"
+        R"("read":{"service":"22","number":"D101"},"field":{"byte":0}}]})"
+        "\n";
     ecuio_signal_file_t* loaded = nullptr;
     ASSERT_EQ(ecuio_signal_file_load_with(signals.data(), signals.size(),
                                           ECUIO_SIGNAL_FILE_LOAD_SET, &loaded),
@@ -307,6 +313,29 @@ TEST(FolderExportTest, ASignalFileThatWouldNotLoadMaskedRefusesTheCopy)
                         "VIN-shaped tokens masked: nothing was written");
     EXPECT_FALSE(fs::exists(f.path / "copy"));
     EXPECT_FALSE(partial_left(f.path, "copy"));
+}
+
+TEST(FolderExportTest, AVinWithAnEscapedCharacterRefusesTheCopy)
+{
+    const std::string vin(kVin);
+    const std::string escaped =
+        vin.substr(0, 4) + std::string(1, '\\') + "u0041" + vin.substr(5);
+    for (const std::string file : {"signals.json", "conditions.json"}) {
+        SCOPED_TRACE(file);
+        Folder f;
+        named_recording(f);
+        f.write("rec/" + file, file == "signals.json"
+                                   ? signals_json(escaped)
+                                   : conditions_json(escaped));
+        FolderExported e(f);
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.report.failed_class, ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED + 1);
+        EXPECT_EQ(e.detail,
+                  "the check found a VIN-shaped token in the copy's " + file +
+                      ": nothing was written");
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+        EXPECT_FALSE(partial_left(f.path, "copy"));
+    }
 }
 
 } // namespace
