@@ -90,6 +90,25 @@ TEST(CliDumpLineTest, ASameSecondClashIsSaidInWords)
     EXPECT_EQ(cli::dump_end_note(s), nullptr);
 }
 
+TEST(CliDumpLineTest, OnlyAWholeYesConfirms)
+{
+    EXPECT_TRUE(cli::dump_said_yes("yes"));
+    EXPECT_TRUE(cli::dump_said_yes("yes\n"));
+    EXPECT_TRUE(cli::dump_said_yes("yes\r\n"));
+    EXPECT_FALSE(cli::dump_said_yes("yesterday\n"));
+    EXPECT_FALSE(cli::dump_said_yes("Yes\n"));
+    EXPECT_FALSE(cli::dump_said_yes("y\n"));
+    EXPECT_FALSE(cli::dump_said_yes("\n"));
+}
+
+TEST(CliDumpLineTest, OnlyAConsentRefusalAtTheStartIsUsage)
+{
+    EXPECT_TRUE(cli::dump_start_is_usage(ECUIO_ERR_CONSENT_REQUIRED));
+    EXPECT_FALSE(cli::dump_start_is_usage(ECUIO_ERR_INVALID_ARGUMENT));
+    EXPECT_FALSE(cli::dump_start_is_usage(ECUIO_ERR_NOT_IMPLEMENTED));
+    EXPECT_FALSE(cli::dump_start_is_usage(ECUIO_ERR_IN_USE));
+}
+
 TEST(CliDumpLineTest, ProgressAndPhaseLines)
 {
     ecuio_operation_state_t s = state();

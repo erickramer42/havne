@@ -1278,10 +1278,14 @@ if(TARGET havne-cli)
         add_test(NAME CliDumpTest.AnInterruptLeavesTheSessionAndKeepsNothing
             COMMAND ${Python3_EXECUTABLE} ${_cli_dump} abort
                     $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>)
+        add_test(NAME CliDumpTest.AnInterruptBeforeTheStartAsksNothing
+            COMMAND ${Python3_EXECUTABLE} ${_cli_dump} before
+                    $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>)
         set_tests_properties(CliDumpTest.ACopyIsKeptAndReadsBack
             CliDumpTest.WhatARunNeedsIsAskedFirst
             CliDumpTest.AnInterruptLeavesTheSessionAndKeepsNothing
-            PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+            CliDumpTest.AnInterruptBeforeTheStartAsksNothing
+            PROPERTIES TIMEOUT 180)
         if(WIN32)
             add_test(NAME CliDumpTest.AKernelReadWarnsAndKeepsTheCode
                 COMMAND ${Python3_EXECUTABLE} ${_cli_dump} kernel

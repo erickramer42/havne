@@ -2,12 +2,10 @@ import ctypes
 import hashlib
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
 import threading
-import time
 
 
 def run(cli, args, env=None):
@@ -40,8 +38,6 @@ def consent(cli, package, store):
 
 
 class Sim:
-    """havne-cli sim's ELM327 on an OS-picked port"""
-
     def __init__(self, cli, uri):
         self.p = subprocess.Popen(
             [cli, "sim", uri, "--elm327", "tcp:0", "--seconds", "120"],
@@ -79,8 +75,6 @@ def kept(d):
 
 
 def read_back(lib_path, path):
-    """The copy's checksum by Python's own reading, and core's verify
-    through ctypes when the shared core is given"""
     with open(path, "rb") as f:
         whole = f.read()
     name = os.path.basename(path)
@@ -155,36 +149,30 @@ def refusals_case(cli, plain, kernel, d):
     return None
 
 
-def abort_case(cli, plain, d):
+def cancel_run(cli, plain, d, at, out):
     sim = Sim(cli, "mock://sim?values=parked")
-    args = [cli] + dump_args(elm_uri(sim.port), plain, d, ["--parked"])
-    flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         stdin=subprocess.DEVNULL, text=True,
-                         creationflags=flags)
-    rows = []
+    env = dict(os.environ, HAVNE_CLI_DUMP_CANCEL_AT=at)
     try:
-        for line in p.stdout:
-            rows.append(json.loads(line))
-            if rows[-1].get("type") == "phase" and \
-                    rows[-1].get("phase") == "reading":
-                break
-        try:
-            p.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt"
-                          else signal.SIGINT)
-        except OSError as e:
-            p.kill()
-            p.communicate()
-            print(f"skip  no console to send the interrupt through: {e}")
-            return 77
-        out, err = p.communicate(timeout=60)
+        code, text, err = run(cli, dump_args(elm_uri(sim.port), plain, d,
+                                             ["--parked"], out), env)
     finally:
         sim.end()
-    rows += rows_of(out)
+    return code, rows_of(text), err
+
+
+def abort_case(cli, plain, d):
+    code, rows, err = cancel_run(cli, plain, d, "run", "out")
     dumps = of_type(rows, "dump")
-    if p.returncode != 4 or len(dumps) != 1 or \
-            dumps[0].get("end") != "canceled" or kept(d):
-        return f"abort: exit {p.returncode} {dumps!r} {kept(d)!r} {err!r}"
+    if code != 4 or len(dumps) != 1 or dumps[0].get("end") != "canceled"             or kept(d) or "stopping" not in err:
+        return f"abort: exit {code} {dumps!r} {kept(d)!r} {err!r}"
+    return None
+
+
+def before_case(cli, plain, d):
+    code, rows, err = cancel_run(cli, plain, d, "start", "before")
+    dumps = of_type(rows, "dump")
+    if code != 4 or [x.get("end") for x in dumps] != ["canceled"]             or of_type(rows, "phase") or "nothing was asked" not in err             or os.path.exists(os.path.join(d, "before")):
+        return f"before the start: exit {code} {rows!r} {err!r}"
     return None
 
 
@@ -234,7 +222,7 @@ def fixtures(writer, d):
 
 def main(argv):
     if len(argv) < 4:
-        print("usage: cli_dump.py saved|refusals|abort|kernel <havne-cli> "
+        print("usage: cli_dump.py saved|refusals|abort|before|kernel <havne-cli> "
               "<cli_dump_fixture> [<shared core>|-] [<fake_j2534.dll>]")
         return 2
     case, cli, writer = argv[1], argv[2], argv[3]
@@ -256,8 +244,8 @@ def main(argv):
             why = why or refusals_case(cli, plain, kernel, d)
         elif case == "abort":
             why = abort_case(cli, plain, d)
-            if why == 77:
-                return 77
+        elif case == "before":
+            why = before_case(cli, plain, d)
         elif case == "kernel" and len(argv) > 5:
             why = kernel_case(cli, kernel, argv[5], lib_path, d)
         else:
