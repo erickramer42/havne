@@ -199,9 +199,6 @@ static_assert(offsetof(ecuio_operation_state_t, reserved) == 332,
  *   A write-class plan also: ECUIO_ERR_NOT_IMPLEMENTED on an adapter that
  *     reads no battery voltage, and the keep-awake hold's own refusal
  *     (a read-class run warns of it in the state's checks).
- *   ECUIO_ERR_NOT_IMPLEMENTED, with words: a run needs the write flow's
- *     checks before it (the engine off, the battery's floor), which this
- *     Havne has not got: no call here starts a run on a car yet.
  *   ECUIO_ERR_IN_USE: a run is under way in this session.
  *   ECUIO_ERR_TOO_SOON, with words: the level's delay after a refused key
  *     runs, or the module's identity is still being read.
