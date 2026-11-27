@@ -374,3 +374,32 @@ TEST(OperationRunTest, ASessionEnteredDropsTheHelper)
     EXPECT_EQ(r.at, run_stage::helper);
     EXPECT_EQ(r.h.at, helper_stage::open);
 }
+
+TEST(OperationRunTest, AStartAnsweredForAnotherRoutineIsABadReply)
+{
+    KernelDrive d(kernel_plan());
+    d.script = answer_to(0x31, {0x71, 0x01, 0x02, 0x02});
+    EXPECT_EQ(d.go(), run_end::bad_reply);
+    EXPECT_EQ(d.count_of(0x35), 0u);
+    KernelDrive cut(kernel_plan());
+    cut.script = answer_to(0x31, {0x71, 0x01, 0x02});
+    EXPECT_EQ(cut.go(), run_end::bad_reply);
+}
+
+TEST(OperationRunTest, ACancelWhileThe34IsOutClosesWhatItOpened)
+{
+    KernelDrive d(kernel_plan());
+    d.while_out = [](KernelDrive& k) {
+        if (k.sent.back()[0] == 0x34) {
+            ecuio_operation::cancel(k.r);
+        }
+    };
+    EXPECT_EQ(d.go(), run_end::canceled);
+    EXPECT_EQ(d.services(), (std::vector<uint8_t>{0x10, 0x34, 0x37}));
+    KernelDrive refused(kernel_plan());
+    refused.while_out = d.while_out;
+    refused.script = answer_to(0x34, nrc(0x34, 0x70));
+    EXPECT_EQ(refused.go(), run_end::canceled);
+    EXPECT_EQ(refused.services(), (std::vector<uint8_t>{0x10, 0x34}))
+        << "a 34 refused opened nothing";
+}

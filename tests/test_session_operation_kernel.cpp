@@ -111,3 +111,70 @@ TEST(SessionOperationTest, TheQuieterAndItsKeepAliveGoToTheFunctionalId)
     EXPECT_GT(b.now - ended, 3000 * engine_talk_test::kMs);
     EXPECT_EQ(b.functional.size(), heard) << "none once the run has ended";
 }
+
+TEST(SessionOperationTest, AKernelReadGoesOnWithNoReadingAtTheAdapter)
+{
+    Bench b;
+    b.battery = [](uint32_t) { return 0u; };
+    ASSERT_NO_FATAL_FAILURE(b.start(kernel_made()));
+    ASSERT_EQ(start_kernel(b), ECUIO_OK) << ecuio_last_error_detail();
+    for (int i = 0; i < 400 && b.functional.empty() &&
+                    b.state().end == ECUIO_OPERATION_END_NONE;
+         ++i) {
+        b.pass();
+    }
+    EXPECT_NE(b.state().end, ECUIO_OPERATION_END_VOLTAGE_LOW)
+        << b.state().words;
+    EXPECT_FALSE(b.functional.empty()) << "past the checks to the quieter";
+    (void)ecuio_session_operation_cancel(b.s);
+    (void)b.until_ended();
+}
+
+/* The worker's half of the functional sends, stepped by hand: the
+ * quieter written, then the keep-alive every keepalive_ms */
+TEST(SessionOperationTest, TheKeepAliveGoesEveryKeepaliveMsUntilTheEnd)
+{
+    for (const uint32_t tx : {0x7E0u, 0x18DA10F1u}) {
+        Bench b;
+        ASSERT_NO_FATAL_FAILURE(b.start(kernel_made()));
+        b.s->module_tx[0] = tx;
+        ecuio_operation::plan p;
+        p.has_kernel = true;
+        p.helper.quiet_session = 0x82;
+        p.helper.quiet_keepalive = 0x80;
+        p.helper.keepalive_ms = 2000;
+        p.steps.resize(1);
+        auto o = std::make_unique<ecuio_operation::session_run>();
+        o->p = &p;
+        ecuio_operation::begin(o->r, p);
+        o->r.asked = true;
+        o->quiet_out = true;
+        std::vector<int64_t> at;
+        int64_t now = 1000000;
+        for (; now < 1000000 + 9000 * engine_talk_test::kMs;
+             now += 100 * engine_talk_test::kMs) {
+            ecuio_operation::functional_step(b.s, *o, b.e.get(), now);
+            if (b.e->aside_due) {
+                b.e->aside_due = false;
+                EXPECT_EQ(Bytes(b.e->aside, b.e->aside + 2),
+                          (Bytes{0x3E, 0x80}));
+                EXPECT_EQ(b.e->aside_tx, tx > 0x7FF ? 0x18DB33F1u : 0x7DFu);
+                at.push_back(now);
+            }
+            if (at.empty() && now == 1000000) {
+                EXPECT_EQ(o->r.at, ecuio_operation::run_stage::enter)
+                    << "the quieter written settles the machine";
+            }
+        }
+        ASSERT_EQ(at.size(), 4u) << "at 2, 4, 6 and 8 s";
+        EXPECT_EQ(at[0], 1000000 + 2000 * engine_talk_test::kMs);
+        for (size_t i = 1; i < at.size(); ++i) {
+            EXPECT_EQ(at[i] - at[i - 1], 2000 * engine_talk_test::kMs);
+        }
+        ecuio_operation::stop(o->r, ecuio_operation::run_end::canceled);
+        for (int i = 0; i < 50; ++i, now += 100 * engine_talk_test::kMs) {
+            ecuio_operation::functional_step(b.s, *o, b.e.get(), now);
+        }
+        EXPECT_FALSE(b.e->aside_due) << "none once the run has ended";
+    }
+}
