@@ -11,15 +11,19 @@
 // the arming neither fails nor allocates.
 
 #include "ecuio/operation.h"
+#include "ecuio/internal.h"
 #include "ecuio/version.h"
 #include "consent_gate.h"
 #include "conversation_bind.h"
 #include "error_detail.h"
+#include "host_awake.h"
+#include "host_power.h"
 #include "operation_session.h"
 #include "recorder.h"
 #include "request_engine_ident.h"
 #include "session.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -33,6 +37,8 @@ using ecuio_operation::dump_sink;
 using ecuio_operation::plan;
 using ecuio_operation::session_run;
 using ecuio_operation::sink_state;
+
+std::atomic<bool> g_write_class{false};
 
 constexpr char kClosedWords[] =
     "the session closed before the read ended: nothing was kept";
@@ -151,8 +157,8 @@ ecuio_status_t judge_request(const ecuio_operation_request_t& q)
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "the request's struct_size is smaller than the struct");
     }
-    if ((q.flags & ~(ECUIO_OPERATION_MAY_UNLOCK | ECUIO_OPERATION_PARKED)) !=
-        0) {
+    if ((q.flags & ~(ECUIO_OPERATION_MAY_UNLOCK | ECUIO_OPERATION_PARKED |
+                     ECUIO_OPERATION_BATTERY_SUPPORT)) != 0) {
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "the request sets a flag this Havne doesn't know");
     }
@@ -205,7 +211,8 @@ ecuio_status_t find_plan(const ecuio_session_t* s,
 }
 
 ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
-                           const ecuio_bound_channel* b, uint32_t flags)
+                           const ecuio_bound_channel* b, uint32_t flags,
+                           bool write)
 {
     if (b == nullptr && ecuio_session_channel_wants_consent(s, channel)) {
         return refuse(ECUIO_ERR_CONSENT_REQUIRED,
@@ -227,6 +234,16 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
                       "Ready; engine off by the key, not by start-stop; in P "
                       "or neutral with the parking brake on");
     }
+    if (write && (flags & ECUIO_OPERATION_BATTERY_SUPPORT) == 0) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "connect battery support (a charger in its "
+                      "power-supply mode) and confirm it first");
+    }
+    if (write && !s->battery.source) {
+        return refuse(ECUIO_ERR_NOT_IMPLEMENTED,
+                      "this adapter reads no battery voltage: a write needs "
+                      "one");
+    }
     /* Every run waits for the write flow's envelope (the engine off, the
      * battery's floor): until core has it, only the tests' door starts one */
     if (!g_ecuio_conversation_door.load(std::memory_order_relaxed)) {
@@ -244,11 +261,60 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
     return ECUIO_OK;
 }
 
+/* The host's half of the envelope, last before the copy's file: its power
+ * and core's keep-awake hold. A read-class run is warned of either in
+ * *checks; a write stops on a hold refused or the host's battery under
+ * host_power::kWriteLeastPercent. */
+ecuio_status_t take_envelope(ecuio_session_t* s, bool write, uint32_t* checks,
+                             bool* held)
+{
+    *checks = 0;
+    *held = false;
+    const host_power::reading power = host_power::read();
+    if (write && host_power::write_stops(power)) {
+        ecuio_detail_set("plug the computer in: it runs on its battery at "
+                         "%d%%",
+                         power.percent);
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (host_power::off_mains(power)) {
+        *checks |= ECUIO_OPERATION_CHECK_ON_BATTERY;
+    }
+    const ecuio_status_t st = ecuio_awake_core_hold(s, true);
+    if (st == ECUIO_OK) {
+        *held = true;
+        return ECUIO_OK;
+    }
+    if (write) {
+        return st;
+    }
+    ecuio_detail_clear();
+    *checks |= ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE;
+    return ECUIO_OK;
+}
+
+/* Core's keep-awake claim, given back unless the run is armed with it */
+struct awake_claim {
+    ecuio_session_t* s;
+    bool on;
+    awake_claim(const awake_claim&) = delete;
+    awake_claim& operator=(const awake_claim&) = delete;
+    ~awake_claim()
+    {
+        if (on) {
+            (void)ecuio_awake_core_hold(s, false);
+        }
+    }
+};
+
 /* The run armed for the worker: nothing here fails or allocates */
 void arm(ecuio_session_t* s, session_run& o, const plan& p,
          std::unique_ptr<dump_sink> sink, uint32_t channel, uint32_t index,
-         bool marked)
+         bool marked, bool write, uint32_t checks, bool held)
 {
+    o.write = write;
+    o.start_checks = checks;
+    o.held_awake = held;
     o.p = &p;
     o.sink = std::move(sink);
     o.channel = channel;
@@ -287,7 +353,9 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return st;
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
-    st = judge_gates(s, channel, b, q.flags);
+    const bool write = g_write_class.load() || ecuio_operation::class_of(*p) ==
+                                                   ECUIO_OPERATION_CLASS_WRITE;
+    st = judge_gates(s, channel, b, q.flags, write);
     if (st != ECUIO_OK) {
         return st;
     }
@@ -315,6 +383,13 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
                          p->level);
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    uint32_t checks = 0;
+    bool held = false;
+    st = take_envelope(s, write, &checks, &held);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    awake_claim claim{s, held};
     session_run* o = s->operation.get();
     if (o == nullptr) {
         s->operation.reset(new session_run());
@@ -338,7 +413,9 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
             return st; /* the sink's end removes the unfinished file */
         }
     }
-    arm(s, *o, *p, std::move(sink), channel, q.operation, !open);
+    claim.on = false;
+    arm(s, *o, *p, std::move(sink), channel, q.operation, !open, write, checks,
+        held);
     return ECUIO_OK;
 }
 
@@ -387,6 +464,11 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
 }
 
 extern "C" {
+
+void ecuio_test_operation_write_class(int on)
+{
+    g_write_class.store(on != 0);
+}
 
 ecuio_status_t
 ecuio_session_operation_start(ecuio_session_t* session,

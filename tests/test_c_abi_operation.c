@@ -68,7 +68,11 @@ int c_abi_operation(void)
          ECUIO_OPERATION_CHECK_VOLTS == 4u &&
          ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU == 8u &&
          ECUIO_OPERATION_CHECK_VOLTS_LOW == 0x10u &&
-         ECUIO_OPERATION_CHECK_VOLTS_HIGH == 0x20u;
+         ECUIO_OPERATION_CHECK_VOLTS_HIGH == 0x20u &&
+         ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE == 0x40u &&
+         ECUIO_OPERATION_CHECK_ON_BATTERY == 0x80u &&
+         ECUIO_OPERATION_BATTERY_SUPPORT == 4u &&
+         ECUIO_OPERATION_END_VOLTAGE_HIGH == 15u;
     if (!ok) {
         fprintf(stderr, "c_abi: an operation struct's layout moved\n");
         return 1;

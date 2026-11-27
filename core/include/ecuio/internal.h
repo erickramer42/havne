@@ -538,6 +538,17 @@ typedef void (*ecuio_test_awake_release_t)(void* handle);
 void ecuio_test_set_awake_platform(ecuio_test_awake_take_t take,
                                    ecuio_test_awake_release_t release);
 
+/* Test-only: read stands in for the host's power (core/src/host_power.h):
+ * -1 unknown, 0 on its battery, 1 on mains, *percent the battery's (-1
+ * none). NULL restores the platform's. One for the process. */
+typedef int (*ecuio_test_host_power_t)(int* percent);
+void ecuio_test_set_host_power(ecuio_test_host_power_t read);
+
+/* Test-only: every run's start judges its plan write-class (1) or by its
+ * steps (0), so the write envelope is reached before a write step exists.
+ * One for the process. */
+void ecuio_test_operation_write_class(int on);
+
 #ifdef __cplusplus
 }
 #endif

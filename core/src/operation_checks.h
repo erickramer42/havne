@@ -16,17 +16,23 @@ namespace ecuio_operation {
 constexpr uint32_t kDumpWarnLowMv = 11800;
 constexpr uint32_t kDumpStopMv = 11000;
 constexpr uint32_t kVoltsWarnHighMv = 15000;
+constexpr uint32_t kWriteStartFloorMv = 11500;
+constexpr uint32_t kWriteWarnMv = 12000;
+constexpr uint32_t kWriteRefuseHighMv = 16000;
 constexpr int64_t kVoltsEveryUs = 2000000;
 constexpr int64_t kVoltsLateUs = 5000000;
 
 /* The battery's readings at the adapter, or the engine module's 01 42 */
 struct volts {
+    bool write = false; /* the write's rule: judged once, at the start */
     bool first = false; /* the start's reading is settled, got or not */
     bool has = false;
     bool from_ecu = false;
     bool low_warn = false;
     bool high_warn = false;
     bool dropped = false;
+    bool refused_low = false;
+    bool refused_high = false;
     uint32_t mv = 0;
     uint32_t min_mv = 0;
 };
@@ -38,9 +44,13 @@ inline void volts_take(volts& v, uint32_t mv, bool running)
     v.min_mv = v.has ? (std::min)(v.min_mv, mv) : mv;
     v.has = true;
     v.high_warn = v.high_warn || mv > kVoltsWarnHighMv;
-    if (!running) {
+    if (!running && v.write) {
+        v.low_warn = mv < kWriteWarnMv;
+        v.refused_low = mv < kWriteStartFloorMv;
+        v.refused_high = mv > kWriteRefuseHighMv;
+    } else if (!running) {
         v.low_warn = mv < kDumpWarnLowMv;
-    } else if (mv < kDumpStopMv) {
+    } else if (!v.write && mv < kDumpStopMv) {
         v.dropped = true;
     }
 }

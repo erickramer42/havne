@@ -51,6 +51,9 @@ struct session_run {
     uint32_t channel = 0;   /* the plan's module among the session's */
     uint32_t operation = 0; /* its index, for the view */
     bool marked = false;    /* an attempt's mark was saved: its word is owed */
+    bool write = false;     /* the write class's envelope */
+    bool held_awake = false; /* core's keep-awake claim, released at the end */
+    uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
 
     std::atomic<uint8_t> stage{kStageIdle};
     std::atomic<bool> cancel{false};

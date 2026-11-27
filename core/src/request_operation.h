@@ -38,6 +38,7 @@
 #define ECUIO_REQUEST_OPERATION_H
 
 #include "conversation_bind.h"
+#include "host_awake.h"
 #include "operation_session.h"
 #include "recorder.h"
 #include "request_engine.h"
@@ -81,6 +82,8 @@ inline uint32_t end_code(run_end e)
         return ECUIO_OPERATION_END_MOVING;
     case run_end::voltage_low:
         return ECUIO_OPERATION_END_VOLTAGE_LOW;
+    case run_end::voltage_high:
+        return ECUIO_OPERATION_END_VOLTAGE_HIGH;
     default:
         return ECUIO_OPERATION_END_FILE;
     }
@@ -129,6 +132,27 @@ inline void words_of(const session_run& o, uint32_t end, char* out, size_t cap)
         std::snprintf(out, cap,
                       "the vehicle is moving (%u km/h): nothing was read",
                       static_cast<unsigned>(o.k.kmh));
+    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW && o.v.write &&
+               !o.v.has) {
+        std::snprintf(out, cap,
+                      "no battery reading at the adapter: a write "
+                      "needs one; nothing was read");
+    } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW && o.v.write) {
+        std::snprintf(out, cap,
+                      "the battery reads %u.%u V at the adapter, under the "
+                      "%u.%u V a write needs: connect a charger; nothing was "
+                      "read",
+                      static_cast<unsigned>(o.v.mv / 1000),
+                      static_cast<unsigned>(o.v.mv % 1000 / 100),
+                      static_cast<unsigned>(kWriteStartFloorMv / 1000),
+                      static_cast<unsigned>(kWriteStartFloorMv % 1000 / 100));
+    } else if (end == ECUIO_OPERATION_END_VOLTAGE_HIGH) {
+        std::snprintf(out, cap,
+                      "the battery reads %u.%u V at the adapter: set the "
+                      "charger to its power-supply mode (24 V systems aren't "
+                      "supported); nothing was read",
+                      static_cast<unsigned>(o.v.mv / 1000),
+                      static_cast<unsigned>(o.v.mv % 1000 / 100));
     } else if (end == ECUIO_OPERATION_END_VOLTAGE_LOW) {
         std::snprintf(out, cap,
                       "the battery fell to %u.%u V at the adapter: the copy "
@@ -172,7 +196,7 @@ inline uint32_t phase_of(const session_run& o)
 inline uint32_t checks_of(const session_run& o)
 {
     const volts& v = o.v;
-    return (o.k.has_rpm ? ECUIO_OPERATION_CHECK_RPM : 0u) |
+    return o.start_checks | (o.k.has_rpm ? ECUIO_OPERATION_CHECK_RPM : 0u) |
            (o.k.has_kmh ? ECUIO_OPERATION_CHECK_KMH : 0u) |
            (v.has ? ECUIO_OPERATION_CHECK_VOLTS : 0u) |
            (v.from_ecu ? ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU : 0u) |
@@ -249,6 +273,10 @@ inline void end_run(ecuio_session_t* s, session_run& o, uint32_t end,
         const size_t n = (std::min)(std::strlen(words), sizeof v.words - 1);
         std::memcpy(v.words, words, n);
         v.words[n] = '\0';
+    }
+    if (o.held_awake) {
+        o.held_awake = false;
+        (void)ecuio_awake_core_hold(s, false);
     }
     o.stage.store(kStageEnded, std::memory_order_release);
 }
@@ -396,7 +424,8 @@ inline void battery_step(ecuio_session_t* s, session_run& o, int64_t now_us)
         }
         if (!v.first) {
             v.first = true;
-            o.k.want_volts = !(served && b.got);
+            o.k.want_volts = !(served && b.got) && !v.write;
+            v.refused_low = v.refused_low || (v.write && !(served && b.got));
         }
         o.volts_asked = 0;
     }
@@ -531,9 +560,11 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     }
     drop_check(o, e, now_us);
     battery_step(s, o, now_us);
-    if (o.v.dropped && r.at != run_stage::done) {
+    if ((o.v.dropped || o.v.refused_low || o.v.refused_high) &&
+        r.at != run_stage::done) {
         o.orphan = o.out && !o.fed;
-        stop(r, run_end::voltage_low);
+        stop(r, o.v.refused_high && !o.v.refused_low ? run_end::voltage_high
+                                                     : run_end::voltage_low);
     }
     if (o.checking && o.v.first && r.at != run_stage::done) {
         check_step(o, e, now_us);
@@ -617,6 +648,7 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
         o->checking = true;
         o->talk_at = o->channel;
         o->v = volts{};
+        o->v.write = o->write;
         o->volts_asked = 0;
         o->volts_at_us = 0;
         o->volts_step = 0;

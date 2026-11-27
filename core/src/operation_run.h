@@ -72,6 +72,7 @@ enum class run_end : uint8_t {
     engine_running, /* the caller's checks, through stop */
     moving,
     voltage_low,
+    voltage_high,
 };
 
 enum class run_action : uint8_t {
