@@ -198,7 +198,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_sim_memory_upload.cpp test_sim_memory_faults.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp test_operation_run.cpp
-    test_operation_checks.cpp)
+    test_operation_checks.cpp test_sim_programming.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

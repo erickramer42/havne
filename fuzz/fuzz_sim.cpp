@@ -55,6 +55,13 @@ void check_timing(const ecuio_sim_timing::timings& t)
     }
 }
 
+/* The extended or the programming session: where security and memory
+ * answer */
+bool in_session(const ecuio_sim_session& s)
+{
+    return s.extended || s.programming;
+}
+
 /* What the node's session and security access must hold after a reply
  * to req: a key is accepted only when it is its level's own, in the
  * extended session, and the gated DID answers only while unlocked */
@@ -65,7 +72,7 @@ void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
         const ecuio_sim_security_level* l =
             ecuio_sim_security_find(static_cast<uint8_t>(reply[1] - 1));
         uint8_t want[sizeof l->seed];
-        if (l == nullptr || !s.extended || len != 2u + l->bytes) {
+        if (l == nullptr || !in_session(s) || len != 2u + l->bytes) {
             abort();
         }
         ecuio_sim_security_key(l->seed, l->bytes, want);
@@ -75,10 +82,13 @@ void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
         }
     }
     if (n >= 3 && reply[0] == 0x62 && reply[1] == 0xD2 && reply[2] == 0x10 &&
-        (!s.extended || s.security.unlocked == 0)) {
+        (!in_session(s) || s.security.unlocked == 0)) {
         abort();
     }
-    if (s.security.unlocked != 0 && !s.extended) {
+    if (s.extended && s.programming) {
+        abort();
+    }
+    if (s.security.unlocked != 0 && !in_session(s)) {
         abort();
     }
 }
@@ -90,7 +100,7 @@ void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
 void check_upload(const ecuio_sim_session& s, const ecuio_sim_memory& was,
                   const uint8_t* reply, uint32_t n)
 {
-    const bool open = s.extended && s.security.unlocked != 0;
+    const bool open = in_session(s) && s.security.unlocked != 0;
     if (n >= 1 && reply[0] == 0x75 &&
         (!open || was.uploading || n != 4 || !s.memory.uploading ||
          s.memory.left == 0)) {
@@ -109,10 +119,10 @@ void check_upload(const ecuio_sim_session& s, const ecuio_sim_memory& was,
         }
     }
     if (n >= 1 && reply[0] == 0x77 &&
-        (!s.extended || !was.uploading || was.left != 0 || n != 1)) {
+        (!in_session(s) || !was.uploading || was.left != 0 || n != 1)) {
         abort();
     }
-    if (s.memory.uploading && !s.extended) {
+    if (s.memory.uploading && !in_session(s)) {
         abort();
     }
 }
@@ -125,7 +135,7 @@ void check_memory(const ecuio_sim_session& s, const uint8_t* req, size_t len,
                   const uint8_t* reply, uint32_t n)
 {
     if (n >= 1 && reply[0] == 0x63) {
-        if (!s.extended || s.security.unlocked == 0 || len < 4 ||
+        if (!in_session(s) || s.security.unlocked == 0 || len < 4 ||
             req[0] != 0x23) {
             abort();
         }
@@ -142,9 +152,14 @@ void check_memory(const ecuio_sim_session& s, const uint8_t* req, size_t len,
         for (size_t i = 0; i < z; ++i) {
             size = (size << 8) | req[2 + a + i];
         }
-        if (size == 0 || n != 1 + size || address < ECUIO_SIM_MEMORY_ADDRESS ||
-            address + size >
-                uint64_t{ECUIO_SIM_MEMORY_ADDRESS} + ECUIO_SIM_MEMORY_BYTES) {
+        const auto inside = [&](uint64_t from, uint64_t bytes) {
+            return address >= from && address + size <= from + bytes;
+        };
+        const bool code = s.programming && inside(ECUIO_SIM_MEMORY_CODE_ADDRESS,
+                                                  ECUIO_SIM_MEMORY_CODE_BYTES);
+        if (size == 0 || n != 1 + size ||
+            (!inside(ECUIO_SIM_MEMORY_ADDRESS, ECUIO_SIM_MEMORY_BYTES) &&
+             !code)) {
             abort();
         }
         for (uint64_t i = 0; i < size; ++i) {
@@ -156,7 +171,7 @@ void check_memory(const ecuio_sim_session& s, const uint8_t* req, size_t len,
         }
     }
     if (n >= 3 && reply[0] == 0x62 && reply[1] == 0xD2 &&
-        (reply[2] == 0x20 || reply[2] == 0x21) && !s.extended) {
+        (reply[2] == 0x20 || reply[2] == 0x21) && !in_session(s)) {
         abort();
     }
 }
@@ -191,6 +206,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         const uint8_t unlocked = session.security.unlocked;
         const uint8_t seed_out = session.security.seed_out;
         const bool extended = session.extended;
+        const bool programming = session.programming;
         const ecuio_sim_memory was = session.memory;
         if (!functional && rec == nullptr) {
             n = ecuio_sim_session_answer(session, true, true, e.time_us,
@@ -212,6 +228,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         if (functional && (session.security.unlocked != unlocked ||
                            session.security.seed_out != seed_out ||
                            session.extended != extended ||
+                           session.programming != programming ||
                            session.memory.uploading != was.uploading ||
                            session.memory.left != was.left ||
                            (n > 0 && (reply[0] == 0x63 || reply[0] == 0x75 ||
