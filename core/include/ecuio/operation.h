@@ -183,7 +183,7 @@ static_assert(offsetof(ecuio_operation_state_t, reserved) == 332,
  *     the struct, an unknown flag, a reserved word not zero, no
  *     ECUIO_OPERATION_PARKED; a write-class plan without
  *     ECUIO_OPERATION_BATTERY_SUPPORT, or with the host off mains under
- *     30%; a session not
+ *     10%; a session not
  *     started; no such operation, or a session whose plugin declares
  *     none; a transport that asks nothing (mock://, replay://, a
  *     listening session); the plan's module not one this session talks

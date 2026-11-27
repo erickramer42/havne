@@ -264,7 +264,7 @@ ecuio_status_t judge_gates(const ecuio_session_t* s, uint32_t channel,
 /* The host's half of the envelope, last before the copy's file: its power
  * and core's keep-awake hold. A read-class run is warned of either in
  * *checks; a write stops on a hold refused or the host's battery under
- * host_power::kWriteLeastPercent. */
+ * host_power::kWriteStopPercent. */
 ecuio_status_t take_envelope(ecuio_session_t* s, bool write, uint32_t* checks,
                              bool* held)
 {

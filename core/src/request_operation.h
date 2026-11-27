@@ -424,7 +424,7 @@ inline void battery_step(ecuio_session_t* s, session_run& o, int64_t now_us)
         }
         if (!v.first) {
             v.first = true;
-            o.k.want_volts = !(served && b.got) && !v.write;
+            o.k.want_volts = !(served && b.got);
             v.refused_low = v.refused_low || (v.write && !(served && b.got));
         }
         o.volts_asked = 0;
