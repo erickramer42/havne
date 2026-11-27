@@ -165,12 +165,16 @@ TestCase {
             { tag: "empty", text: "" },
             { tag: "an array", text: "[]" },
             { tag: "null", text: "null" },
-            { tag: "no list", text: JSON.stringify({ format: 2, salt: "", picked: "" }) },
-            { tag: "a list that isn't one", text: JSON.stringify({ format: 2, list: {} }) }
+            { tag: "no list", text: JSON.stringify({ format: 2, salt: "", picked: "" }), book: true },
+            { tag: "a list that isn't one", text: JSON.stringify({ format: 2, list: {} }), book: true }
         ]
     }
+    // A stored book with no record of its steps still takes them
     function test_whatIsNoBookReadsAsEmpty(data) {
-        compare(VehicleBook.parse(data.text), VehicleBook.empty())
+        const none = VehicleBook.empty()
+        if (data.book)
+            delete none.migrated
+        compare(VehicleBook.parse(data.text), none)
         verify(!VehicleBook.isLater(VehicleBook.parse(data.text)))
     }
 
@@ -363,7 +367,7 @@ TestCase {
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
                 { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], picks: [], own: "", vinMatches: [], baseline: "" })
+                  unplotted: [], picks: ["obd2"], own: "", vinMatches: [], baseline: "" })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
@@ -536,7 +540,7 @@ TestCase {
         compare(VehicleBook.find(r.doc, "v3"),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
                   uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
-                  picks: [], own: "", vinMatches: [], baseline: "" })
+                  picks: ["obd2"], own: "", vinMatches: [], baseline: "" })
         compare(VehicleBook.logLine(r),
                 "Vehicle: Daily driver (the car's VIN differs; saved as Vehicle 1, not picked)")
 
@@ -586,5 +590,118 @@ TestCase {
         compare(VehicleBook.withProfile(data.uri, extras), data.to)
         compare(VehicleBook.withProfile(data.uri, ""), data.uri, "no profile to give")
         compare(VehicleBook.namesProfile(data.uri), data.to === data.uri)
+    }
+
+    function test_aNewVehiclePicksObd2() {
+        compare(VehicleBook.picked(VehicleBook.add(VehicleBook.empty(), "Track day")).picks, ["obd2"])
+        const r = VehicleBook.recognize(VehicleBook.empty(), "key-n", "elm327://COM3")
+        compare(r.doc.list[0].picks, ["obd2"], "a vehicle a VIN adds too")
+    }
+
+    // The step runs once, recorded on the book: never keyed on obd2 absent
+    function test_migrationPutsObd2FirstOnce() {
+        const d = book()
+        const once = VehicleBook.migrate(d)
+        compare(once.added, 2)
+        compare(once.doc.list[0].picks, ["obd2", extras, sim2019, own])
+        compare(once.doc.list[1].picks, ["obd2"])
+        compare(once.doc.migrated, ["obd2-picked"])
+        compare(d, book(), "the given document is unchanged")
+        const again = VehicleBook.migrate(once.doc)
+        compare(again.added, 0)
+        verify(again.doc === once.doc, "a migrated book is given back as it is")
+        const read = VehicleBook.parse(VehicleBook.serialize(once.doc))
+        verify(VehicleBook.migrate(read).doc === read, "the record reads back")
+    }
+
+    function test_migrationLeavesADeliberateUnpickAfterIt() {
+        const once = VehicleBook.migrate(book()).doc
+        const unpicked = VehicleBook.setPicks(once, [extras, sim2019, own])
+        const after = VehicleBook.migrate(VehicleBook.parse(VehicleBook.serialize(unpicked)))
+        compare(after.added, 0)
+        compare(VehicleBook.picked(after.doc).picks, [extras, sim2019, own])
+    }
+
+    // An older version reads a later format as empty
+    function test_migrationKeepsTheFormatAt2() {
+        const d = book()
+        d.list[1].picks = ["obd2"]
+        const once = VehicleBook.migrate(d)
+        compare(once.doc.format, 2)
+        compare(once.added, 1, "a vehicle that picks obd2 already is left")
+        compare(once.doc.list[1].picks, ["obd2"])
+        const later = VehicleBook.parse(JSON.stringify({ format: 3, list: [] }))
+        verify(VehicleBook.migrate(later).doc === later, "a later book is never touched")
+    }
+
+    function test_aNewBookHasTheStepDone() {
+        const fresh = VehicleBook.add(VehicleBook.empty(), "Track day")
+        verify(VehicleBook.migrate(fresh).doc === fresh)
+        compare(VehicleBook.parse(VehicleBook.serialize(VehicleBook.empty())).migrated, ["obd2-picked"])
+    }
+
+    function test_withVehicleSetSwapsAKeptMergedName() {
+        compare(VehicleBook.withVehicleSet("elm327://COM5?baud=38400&profile=merged.0123456789abcdef",
+                                           "merged", "merged.fedcba9876543210"),
+                "elm327://COM5?baud=38400&profile=merged.fedcba9876543210")
+        compare(VehicleBook.withVehicleSet("socketcan://can0?profile=merged.0123456789abcdef", "obd2", "obd2"),
+                "socketcan://can0?profile=obd2")
+        compare(VehicleBook.withVehicleSet("elm327://COM5?profile=plugin.extras.base", "merged", "merged.fe"),
+                "elm327://COM5?profile=plugin.extras.base", "only a merged name")
+        compare(VehicleBook.withVehicleSet("elm327://COM5", "merged", "merged.fe"), "elm327://COM5",
+                "an address naming none is the list connect's")
+    }
+
+    // A replay keeps its header's profile; a typed mock reads as typed
+    function test_withVehicleSetNeverTouchesReplayOrMock() {
+        for (const uri of ["replay://C:/rec/a?profile=merged.0123456789abcdef",
+                           "mock://demo?profile=merged.0123456789abcdef",
+                           "Mock://?profile=merged.0123456789abcdef"])
+            compare(VehicleBook.withVehicleSet(uri, "merged", "merged.fedcba9876543210"), uri)
+    }
+
+    // No vehicle picked, or a refused set: the name stays for core to name
+    function test_withVehicleSetLeavesTheNameWithNoSet() {
+        const uri = "elm327://COM5?profile=merged.0123456789abcdef"
+        compare(VehicleBook.withVehicleSet(uri, "refused", ""), uri)
+        compare(VehicleBook.withVehicleSet(uri, "", ""), uri)
+    }
+
+    function test_movePickReturnsANewDocument() {
+        const d = book()
+        d.list[0].picks = ["obd2", extras, sim2019, own]
+        const moved = VehicleBook.movePick(d, sim2019, -1)
+        compare(VehicleBook.picked(moved).picks, ["obd2", sim2019, extras, own])
+        compare(d.list[0].picks, ["obd2", extras, sim2019, own], "the argument is unchanged")
+        compare(VehicleBook.movePick(d, extras, -1), d, "past obd2 nothing moves")
+        compare(VehicleBook.movePick(d, sim2019, 1), d, "the own variant isn't passed")
+        compare(VehicleBook.movePick(d, own, -1), d)
+        compare(VehicleBook.movePick(d, "plugin.none.base", 1), d)
+    }
+
+    readonly property var beside: [{ baseDef: 7, baseRef: "id:23", baseTick: "7E8:4133:2.0:8", standing: 40, standingKey: "boost", name: "Boost", part: "Example import" }]
+
+    // By the tick's key alone: a tick the plugin's own key keeps already reads the standing one
+    function test_tickCarryOverMovesOnlyAKeyResolvingToTheBase() {
+        const d = book()
+        d.list[0].plotted = ["7E8:4133:2.0:8", "7E8:410C:2.0:16", "boost"]
+        d.list[0].unplotted = ["7E8:4133:2.0:8"]
+        const r = VehicleBook.carryOver(d, beside, "said")
+        compare(r.ticks, 2)
+        const v = VehicleBook.picked(r.doc)
+        compare(v.plotted, ["boost", "7E8:410C:2.0:16", "boost"])
+        compare(v.unplotted, ["boost"])
+        compare(v.migrated, ["beside-obd2"])
+        compare(v.besideNote, "said")
+        compare(d.list[0].plotted[0], "7E8:4133:2.0:8", "the argument is unchanged")
+        const again = VehicleBook.carryOver(VehicleBook.change(r.doc, e => e.plotted = ["7E8:4133:2.0:8"]), beside, "")
+        compare(again.ticks, 0, "once for each vehicle")
+        compare(VehicleBook.picked(again.doc).plotted, ["7E8:4133:2.0:8"])
+        const read = VehicleBook.parse(VehicleBook.serialize(r.doc))
+        verify(VehicleBook.stepDone(VehicleBook.picked(read), "beside-obd2"), "the record reads back")
+        const dismissed = VehicleBook.picked(VehicleBook.dismissBesideNote(read))
+        compare(dismissed.besideNote, undefined)
+        compare(dismissed.migrated, ["beside-obd2", "beside-obd2-said"])
+        compare(VehicleBook.picked(d).migrated, undefined, "another vehicle's record is its own")
     }
 }

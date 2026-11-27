@@ -44,7 +44,7 @@ ColumnLayout {
         const name = root.host.ownFormPart.formName.text.trim()
         if (!root.shown || name === "" || root.host.ownSignals.some(s => s.name === name))
             return ""
-        return root.nameRows.some(r => r.name === name) ? name : ""
+        return root.obd2Names.indexOf(name) >= 0 ? name : ""
     }
     // Where these values move on the demo car: an obd2 input, or a file that extends obd2
     readonly property bool demoHint: {
@@ -90,8 +90,16 @@ ColumnLayout {
         }
     }
 
+    readonly property var obd2Names: Array.from(Bridge.profileSignals("mock://?profile=obd2"), r => String(r.name))
+    readonly property string vehicleSetText: {
+        const set = root.host.picksPart.together
+        return set !== null && set.reads === "merged" ? Bridge.vehicleSetText(set.profile) : ""
+    }
+    onVehicleSetTextChanged: loadFile()
+
     function loadFile() {
         exprEditorItem.setFile(JSON.stringify(root.fileDoc))
+        exprEditorItem.setVehicleFile(root.vehicleSetText)
         // Plain JS copies: a delegate never reads a C++ map (qml.md)
         root.nameRows = JSON.parse(JSON.stringify(exprEditorItem.names())).filter(r => r.ref !== "placeholder_")
         root.recheck()
@@ -257,9 +265,20 @@ ColumnLayout {
         }
         if (c.leaves.some(l => String(l.ref).startsWith("obd2.")) && doc.extends === undefined) {
             doc = SignalForm.withExtends(doc)
-            note += qsTr(". Your signals now read with obd2's: the profile row shows obd2 + %1, "
-                         + "and the car is asked obd2's PIDs too.").arg(base.name)
+            note += qsTr(". Your signals now read with obd2's, and the car is asked obd2's PIDs too.")
         }
+        const raised = SignalForm.withSaveNeeds(doc, e => {
+            const r = exprEditorItem.readNames(e)
+            return r.ok ? Array.from(r.names) : []
+        }, root.obd2Names)
+        if (raised.refused !== "") {
+            root.host.ownPart.formProblem = raised.refused
+            return false
+        }
+        doc = raised.doc
+        for (const name of raised.beside)
+            note += qsTr(". Saved as format 3: '%1' is now read beside obd2's '%1' when this file is read alone, "
+                         + "as the vehicle's set already reads it").arg(name)
         if (!root.host.ownPart.saveOwn(doc, note))
             return false
         root.host.ownPart.editingKey = ""
@@ -325,7 +344,7 @@ ColumnLayout {
         textFormat: Text.PlainText
         objectName: "formReplaces"
         visible: root.replaced !== ""
-        text: qsTr("Replaces obd2's %1: a gauge or layout that shows it will show this one.").arg(root.replaced)
+        text: qsTr("obd2 has a signal named %1: the vehicle reads both. Put this one on a gauge to show it.").arg(root.replaced)
         color: Theme.warning
         wrapMode: Text.Wrap
         Layout.fillWidth: true

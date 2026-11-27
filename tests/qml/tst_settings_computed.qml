@@ -376,15 +376,15 @@ TestCase {
         verify(find(page, "formDemoHint").visible, "a file that extends obd2, whatever is typed")
     }
 
-    // Saving a name obd2 has replaces that signal, and the form says so first
-    function test_aNameObd2HasSaysItReplacesIt() {
+    // A name obd2 has is read beside obd2's, and the form says so first
+    function test_aNameObd2HasSaysTheVehicleReadsBoth() {
         const page = createPage()
         press(page, "vehicleNew")
         page.openOwnForm()
         typeComputed(page, "Boost", "obd2.map - obd2.baro")
         const note = find(page, "formReplaces")
         verify(note.visible, "Boost is obd2's")
-        verify(note.text.indexOf("obd2's Boost") >= 0, note.text)
+        compare(note.text, "obd2 has a signal named Boost: the vehicle reads both. Put this one on a gauge to show it.")
         find(page, "formName").text = "Boost gauge"
         verify(!note.visible, "another name replaces nothing")
         find(page, "formName").text = "Boost"

@@ -199,6 +199,11 @@ Page {
         if (!e.asked) return qsTr("Not read: diagnose=0, poll= or a profile that asks nothing")
         if (e.clearing) return qsTr("Clearing…")
         if (!e.complete) return qsTr("Reading…")
+        const lists = e.lists || []
+        if (e.readiness === "unasked" && lists.every(l => l.outcome === "unasked"))
+            return e.notOpened ? qsTr("Not read: no room") : qsTr("Not read")
+        if (e.readiness === "unanswered" && lists.every(l => l.outcome === "unanswered"))
+            return qsTr("No response")
         return qsTr("Read")
     }
 
@@ -246,7 +251,7 @@ Page {
                                     : qsTr("Check-engine light on · %1 confirmed codes").arg(e.dtcCount)
         case "refused":    return qsTr("Readiness refused (%1)").arg(e.readinessNrc)
         case "unanswered": return qsTr("Readiness: no answer")
-        default:           return qsTr("Reading…")
+        default:           return e.complete ? qsTr("Readiness: not asked") : qsTr("Reading…")
         }
     }
 

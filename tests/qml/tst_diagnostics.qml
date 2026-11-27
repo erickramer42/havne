@@ -510,4 +510,35 @@ TestCase {
                    + b.implicitWidth)
         compare(pastTheEdge(page, page, []).length, 0, "inside the page")
     }
+
+    function stubEcu(readiness, outcome, notOpened) {
+        return { asked: true, complete: true, clearing: false, readiness: readiness, notOpened: notOpened,
+                 lists: [{ outcome: outcome }, { outcome: outcome }, { outcome: outcome }] }
+    }
+
+    function test_aClosedModuleReadsNotRead() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        compare(page.ecuState(stubEcu("unasked", "unasked", false)), "Not read")
+        compare(page.ecuState(stubEcu("answered", "answered", false)), "Read")
+        const half = stubEcu("unasked", "unasked", false)
+        half.lists[0].outcome = "answered"
+        compare(page.ecuState(half), "Read", "a list read is a read")
+    }
+
+    function test_aModuleNotReadNeverSaysReading() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const closed = stubEcu("unasked", "unasked", true)
+        compare(page.milText(closed), "Readiness: not asked")
+        closed.complete = false
+        compare(page.milText(closed), "Reading…")
+    }
+
+    function test_noRoomAndNoResponseAreTheirOwnWords() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        compare(page.ecuState(stubEcu("unasked", "unasked", true)), "Not read: no room")
+        compare(page.ecuState(stubEcu("unanswered", "unanswered", false)), "No response")
+        const some = stubEcu("unanswered", "unanswered", false)
+        some.lists[1].outcome = "answered"
+        compare(page.ecuState(some), "Read")
+    }
 }

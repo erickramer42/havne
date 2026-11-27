@@ -163,8 +163,10 @@ GaugeCard {
                             objectName: "pickSignal_" + modelData.ref
                             // Dim: the ECU doesn't send it (a group's last ones)
                             opacity: section.modelData.hiddenFrom >= 0 && chip.index >= section.modelData.hiddenFrom ? 0.5 : 1
-                            text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
-                                                        : modelData.name
+                            readonly property string named: modelData.tag ? qsTr("%1, %2").arg(modelData.name, modelData.tag)
+                                                                          : modelData.name
+                            text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(named).arg(modelData.unit)
+                                                        : named
                             onClicked: signalCard.host.addFlowPart.pickSignal(modelData)
                         }
                     }

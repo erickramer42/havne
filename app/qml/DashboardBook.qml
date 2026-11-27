@@ -317,6 +317,21 @@ QtObject {
         }
     }
 
+    function carryOver(doc, beside, has) {
+        const d = JSON.parse(JSON.stringify(doc))
+        let count = 0
+        for (const p of d.pages) {
+            for (const c of p.cells) {
+                const refs = Array.isArray(c.refs) ? VehicleBook.carryRefs(c.refs, beside, has, maxRefs) : null
+                if (refs !== null) {
+                    c.refs = refs
+                    ++count
+                }
+            }
+        }
+        return { doc: count > 0 ? d : doc, count: count }
+    }
+
     function serialize(doc) {
         return JSON.stringify(doc)
     }

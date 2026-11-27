@@ -275,6 +275,81 @@ QtObject {
         return d
     }
 
+    function needsOf(names, ownKeys) {
+        const out = []
+        for (const n of names) {
+            if (ownKeys.indexOf(n) < 0 && !String(n).startsWith("obd2.") && out.indexOf(n) < 0)
+                out.push(n)
+        }
+        return out
+    }
+
+    // The loader refuses an unread need
+    function withNeeds(file, needs) {
+        const d = copy(file)
+        if (needs.length === 0)
+            delete d.needs
+        else
+            d.needs = needs.slice()
+        return d
+    }
+
+    function moduleName(file, s) {
+        const ecu = file.ecus.find(e => e.id === s.ecu)
+        return ecu === undefined ? "?" : ecu.name ? String(ecu.name)
+             : ecu.id ? String(ecu.id).toUpperCase() : String(ecu.rx)
+    }
+
+    // Equal as core's address key judges them (ecuio_signal_address_key)
+    function sharedAddress(file) {
+        const seen = {}
+        for (const s of file.signals) {
+            if (s.read === undefined)
+                continue
+            const ecu = file.ecus.find(e => e.id === s.ecu)
+            const f = s.field || {}
+            const text = s.kind === "text" || s.kind === "hex"
+            const at = [ecu === undefined ? "" : String(ecu.rx).toUpperCase(),
+                        String(s.read.service).toUpperCase(), String(s.read.number).toUpperCase(),
+                        Number(f.byte ?? 0),
+                        text ? "t" + (f.bytes ?? "") : Number(f.bit ?? 0) + "." + Number(f.bits ?? 8)].join("/")
+            const first = seen[at]
+            if (first !== undefined) {
+                return { first: first, second: s,
+                         words: qsTr("'%1' and '%2' read the same value (%3, %4 %5, byte %6): a file that reads "
+                                     + "another plugin's signals gives one address to one signal. Change or "
+                                     + "remove one first.")
+                                    .arg(first.name, s.name, moduleName(file, s), s.read.service, s.read.number)
+                                    .arg(Number(f.byte ?? 0)) }
+            }
+            seen[at] = s
+        }
+        return null
+    }
+
+    // Never lowered: that turns "beside" back into "replaces" for the file read alone
+    function withSaveNeeds(file, names, obd2Names) {
+        const keys = file.signals.map(s => s.key)
+        let all = []
+        for (const s of file.signals) {
+            if (s.kind === "computed")
+                all = all.concat(names(s.expr))
+        }
+        const needs = needsOf(all, keys)
+        const format = file.havne_signals === undefined ? 1 : file.havne_signals
+        if (needs.length > 0 && format < 3) {
+            const shared = sharedAddress(file)
+            if (shared !== null)
+                return { doc: file, refused: shared.words, beside: [] }
+        }
+        let doc = withNeeds(file, needs)
+        if (needs.length === 0)
+            return { doc: doc, refused: "", beside: [] }
+        doc = withFormat(doc, 3)
+        const beside = format < 3 ? file.signals.filter(s => obd2Names.indexOf(s.name) >= 0).map(s => s.name) : []
+        return { doc: doc, refused: "", beside: beside }
+    }
+
     function withoutSignal(file, key) {
         const d = copy(file)
         d.signals = d.signals.filter(s => s.key !== key)

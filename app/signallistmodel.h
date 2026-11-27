@@ -244,7 +244,7 @@ public:
     void applyNoRoom(const std::vector<int>& modules);
     int noRoomCount() const { return m_noRoomCount; }
     // "<module>'s <name>" for each shown row with no room
-    QStringList noRoomNames() const;
+    Q_INVOKABLE QStringList noRoomNames() const;
     // The unasked rows Live shows, for its "N signals not asked" line
     int unaskedCount() const { return m_unaskedCount; }
 
