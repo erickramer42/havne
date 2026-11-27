@@ -53,11 +53,11 @@ struct ecuio_test_talk_slot {
 /* The worker's alone: a run asks (want moves on), the transport serves
  * between requests (served catches up). source: attach found a way. */
 struct ecuio_battery_slot {
-    bool source = false;
     uint32_t want = 0;
     uint32_t served = 0;
-    bool got = false;
     uint32_t mv = 0;
+    bool source = false;
+    bool got = false;
 };
 
 struct ecuio_session_talk; /* conversation_bind.h */
@@ -87,7 +87,6 @@ struct ecuio_session {
                     void (*)(ecuio_operation::session_run*)>
         operation{nullptr, ecuio_operation_free};
     std::atomic<ecuio_operation::session_run*> operation_live{nullptr};
-    ecuio_battery_slot battery;
     /* Held across each conversation call (the unlock, the getters, the
      * bind's hand-over and close's release); never by a worker */
     mutable std::mutex conversation_mutex;
@@ -230,6 +229,7 @@ struct ecuio_session {
     uint32_t clear_flags = 0;
     uint32_t clear_requests = 0;
     uint32_t clear_ended = 0;
+    ecuio_battery_slot battery;
     /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
      * caller's order and one byte per def (1 picked), under the mutex;
      * focus_generation moves with each call and a requesting worker takes

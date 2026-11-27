@@ -10,8 +10,8 @@
 #include <dirent.h>
 
 #include <cstdio>
-#include <string>
-#include <vector>
+#include <cstdlib>
+#include <cstring>
 #endif
 
 namespace {
@@ -32,60 +32,57 @@ host_power::reading platform()
     return r;
 }
 #elif defined(__linux__) && !defined(__ANDROID__)
-int read_int(const std::string& path)
+/* The first word of a file of the supply's, into out; "" for none */
+void read_field(const char* dir, const char* name, char* out, size_t cap)
 {
-    FILE* f = std::fopen(path.c_str(), "r");
-    if (f == nullptr) {
-        return -1;
+    char path[320];
+    out[0] = '\0';
+    if (std::snprintf(path, sizeof path, "/sys/class/power_supply/%s/%s", dir,
+                      name) >= static_cast<int>(sizeof path)) {
+        return;
     }
-    int v = -1;
-    if (std::fscanf(f, "%d", &v) != 1) {
-        v = -1;
+    FILE* f = std::fopen(path, "r");
+    if (f == nullptr) {
+        return;
+    }
+    if (std::fgets(out, static_cast<int>(cap), f) == nullptr) {
+        out[0] = '\0';
     }
     std::fclose(f);
-    return v;
+    out[std::strcspn(out, " \n")] = '\0';
 }
 
-std::string read_word(const std::string& path)
+int read_number(const char* dir, const char* name)
 {
-    char buf[32] = {};
-    FILE* f = std::fopen(path.c_str(), "r");
-    if (f == nullptr) {
-        return {};
-    }
-    if (std::fscanf(f, "%31s", buf) != 1) {
-        buf[0] = '\0';
-    }
-    std::fclose(f);
-    return buf;
+    char text[16];
+    read_field(dir, name, text, sizeof text);
+    return text[0] >= '0' && text[0] <= '9' ? std::atoi(text) : -1;
 }
 
+/* Nothing here allocates: a start's out-of-memory pin fails every
+ * allocation it makes */
 host_power::reading platform()
 {
-    const std::string root = "/sys/class/power_supply/";
-    DIR* d = opendir(root.c_str());
+    DIR* d = opendir("/sys/class/power_supply");
     if (d == nullptr) {
         return {};
     }
-    std::vector<std::string> types;
-    std::vector<host_power::supply> found;
-    for (dirent* e = readdir(d); e != nullptr && found.size() < 16;
-         e = readdir(d)) {
+    constexpr size_t kMost = 16;
+    char types[kMost][16];
+    host_power::supply found[kMost];
+    size_t n = 0;
+    for (dirent* e = readdir(d); e != nullptr && n < kMost; e = readdir(d)) {
         if (e->d_name[0] == '.') {
             continue;
         }
-        const std::string at = root + e->d_name + "/";
-        types.push_back(read_word(at + "type"));
-        host_power::supply s;
-        s.online = read_int(at + "online");
-        s.capacity = read_int(at + "capacity");
-        found.push_back(s);
+        read_field(e->d_name, "type", types[n], sizeof types[n]);
+        found[n].type = types[n];
+        found[n].online = read_number(e->d_name, "online");
+        found[n].capacity = read_number(e->d_name, "capacity");
+        ++n;
     }
     closedir(d);
-    for (size_t i = 0; i < found.size(); ++i) {
-        found[i].type = types[i].c_str();
-    }
-    return host_power::judge_supplies(found.data(), found.size());
+    return host_power::judge_supplies(found, n);
 }
 #else
 host_power::reading platform()
@@ -107,11 +104,7 @@ host_power::reading host_power::read()
         r.percent = percent;
         return r;
     }
-    try {
-        return platform();
-    } catch (...) {
-        return {};
-    }
+    return platform();
 }
 
 extern "C" void ecuio_test_set_host_power(ecuio_test_host_power_t read)
