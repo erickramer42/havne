@@ -339,18 +339,61 @@ bool is_id(const char* s, size_t cap)
     return true;
 }
 
-/* Returns the steps' bytes, added */
-uint64_t check_steps(const ecuio_plugin_t* a, uint32_t op, uint32_t count)
+ecuio_plugin_operation_step_t step_at(const ecuio_plugin_t* a, uint32_t op,
+                                      uint32_t i)
+{
+    ecuio_plugin_operation_step_t s{};
+    s.struct_size = sizeof s;
+    check(ecuio_plugin_operation_step(a, op, i, &s) == ECUIO_OK);
+    check(s.struct_size == sizeof s && s.flags == 0 && s.reserved0 == 0);
+    for (const uint32_t r : s.reserved) {
+        check(r == 0);
+    }
+    check(is_id(s.name, sizeof s.name) && s.dfi == 0);
+    return s;
+}
+
+/* A kernel read's download and routine, its first two steps */
+void check_helper_step(const ecuio_plugin_operation_step_t& s, uint32_t i)
+{
+    check(s.kind == (i == 0 ? ECUIO_STEP_DOWNLOAD : ECUIO_STEP_ROUTINE));
+    check(s.session == ECUIO_STEP_SESSION_PROGRAMMING && s.chunk == 0);
+    if (i == 1) {
+        check(s.address == 0 && s.bytes == 0 && s.address_bytes == 0 &&
+              s.size_bytes == 0 && s.routine_id <= 0xFFFFu);
+        return;
+    }
+    check(s.routine_id == 0 && s.address_bytes >= 1 && s.address_bytes <= 4 &&
+          s.size_bytes >= 1 && s.size_bytes <= 4 && s.bytes >= 1);
+    check(s.address + s.bytes - 1 <=
+          (uint64_t{1} << (8 * s.address_bytes)) - 1);
+    check(s.bytes <= (uint64_t{1} << (8 * s.size_bytes)) - 1);
+}
+
+/* Returns the ranges' bytes, added; *session their one session */
+uint64_t check_steps(const ecuio_plugin_t* a, uint32_t op, uint32_t count,
+                     bool kernel, uint32_t* session)
 {
     std::vector<ecuio_plugin_operation_step_t> seen;
     uint64_t image = 0;
+    const uint32_t lead = kernel ? 2u : 0u;
+    check(count > lead);
     for (uint32_t i = 0; i < count; ++i) {
-        ecuio_plugin_operation_step_t s{};
-        s.struct_size = sizeof s;
-        check(ecuio_plugin_operation_step(a, op, i, &s) == ECUIO_OK);
-        check(s.struct_size == sizeof s && s.flags == 0 && s.reserved0 == 0);
+        const ecuio_plugin_operation_step_t s = step_at(a, op, i);
+        for (const ecuio_plugin_operation_step_t& known : seen) {
+            check(strcmp(known.name, s.name) != 0);
+        }
+        if (i < lead) {
+            check_helper_step(s, i);
+            seen.push_back(s);
+            continue;
+        }
         check(s.kind == ECUIO_STEP_READ || s.kind == ECUIO_STEP_UPLOAD);
-        check(s.session == ECUIO_STEP_SESSION_EXTENDED && s.dfi == 0);
+        check(s.routine_id == 0);
+        check(s.session == ECUIO_STEP_SESSION_EXTENDED ||
+              s.session == ECUIO_STEP_SESSION_PROGRAMMING);
+        check(*session == 0 || *session == s.session);
+        *session = s.session;
         check(s.address_bytes >= 1 && s.address_bytes <= 4);
         check(s.size_bytes >= 1 && s.size_bytes <= 4);
         const uint64_t last = (uint64_t{1} << (8 * s.address_bytes)) - 1;
@@ -362,14 +405,9 @@ uint64_t check_steps(const ecuio_plugin_t* a, uint32_t op, uint32_t count)
         } else {
             check(s.chunk == 0 && s.bytes <= most);
         }
-        check(is_id(s.name, sizeof s.name));
-        for (const uint32_t r : s.reserved) {
-            check(r == 0);
-        }
-        for (const ecuio_plugin_operation_step_t& known : seen) {
-            check(strcmp(known.name, s.name) != 0);
-            check(s.address >= known.address + known.bytes ||
-                  known.address >= s.address + s.bytes);
+        for (size_t k = lead; k < seen.size(); ++k) {
+            check(s.address >= seen[k].address + seen[k].bytes ||
+                  seen[k].address >= s.address + s.bytes);
         }
         seen.push_back(s);
         image += s.bytes;
@@ -379,6 +417,52 @@ uint64_t check_steps(const ecuio_plugin_t* a, uint32_t op, uint32_t count)
     check(ecuio_plugin_operation_step(a, op, count, &past) ==
           ECUIO_ERR_INVALID_ARGUMENT);
     return image;
+}
+
+void check_kernel(const ecuio_plugin_t* a, const ecuio_plugin_t* b, uint32_t op,
+                  uint32_t count, bool kernel)
+{
+    ecuio_plugin_operation_kernel_t k{};
+    k.struct_size = sizeof k;
+    ecuio_plugin_operation_kernel_t same = k;
+    const uint8_t* blob = nullptr;
+    const uint8_t* blob_again = nullptr;
+    uint64_t n = 0;
+    uint64_t n_again = 0;
+    const ecuio_status_t got = ecuio_plugin_operation_kernel(a, op, &k);
+    check(ecuio_plugin_operation_kernel(b, op, &same) == got);
+    check(ecuio_plugin_operation_blob(a, op, &blob, &n) == got);
+    check(ecuio_plugin_operation_blob(b, op, &blob_again, &n_again) == got);
+    if (!kernel) {
+        check(got == ECUIO_ERR_INVALID_ARGUMENT);
+        return;
+    }
+    check(got == ECUIO_OK && memcmp(&k, &same, sizeof k) == 0);
+    check(k.struct_size == sizeof k && k.flags == 0 && k.reserved0 == 0);
+    for (const uint32_t r : k.reserved) {
+        check(r == 0);
+    }
+    check(k.ram_bytes >= 1 && k.ram_address + k.ram_bytes - 1 <= 0xFFFFFFFFu);
+    check(k.start_count >= 1 && k.start_count <= ECUIO_PLUGIN_MAX_STARTS);
+    check(k.quiet_session == 0 || k.quiet_session == 0x82);
+    check(k.quiet_keepalive == 0 || k.quiet_keepalive == 0x80);
+    check((k.keepalive_ms != 0) == (k.quiet_keepalive != 0) && k.stays <= 1);
+    const ecuio_plugin_operation_step_t download = step_at(a, op, 0);
+    const ecuio_plugin_operation_step_t routine = step_at(a, op, 1);
+    check(blob != nullptr && n == download.bytes && n <= k.ram_bytes &&
+          n_again == n && memcmp(blob, blob_again, n) == 0);
+    check(download.address >= k.ram_address &&
+          download.address - k.ram_address <= k.ram_bytes - n);
+    bool listed = false;
+    for (uint32_t i = 0; i < k.start_count; ++i) {
+        listed = listed || k.start[i] == routine.routine_id;
+    }
+    check(listed);
+    for (uint32_t i = 2; i < count; ++i) {
+        const ecuio_plugin_operation_step_t s = step_at(a, op, i);
+        check(s.address >= k.ram_address + k.ram_bytes ||
+              k.ram_address >= s.address + s.bytes);
+    }
 }
 
 void check_idents(const ecuio_plugin_t* a, uint32_t op, uint32_t count,
@@ -465,8 +549,10 @@ void check_operations(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
         check(ecuio_plugin_operation(b, i, &same) == ECUIO_OK);
         check(memcmp(&op, &same, sizeof op) == 0);
         check(op.struct_size == sizeof op && op.flags == 0);
-        check(op.kind == ECUIO_OPERATION_KIND_DUMP);
-        check(op.op_class == ECUIO_OPERATION_CLASS_READ);
+        const bool kernel = op.kind == ECUIO_OPERATION_KIND_KERNEL_READ;
+        check(op.kind == ECUIO_OPERATION_KIND_DUMP || kernel);
+        check(op.op_class == (kernel ? ECUIO_OPERATION_CLASS_WRITE
+                                     : ECUIO_OPERATION_CLASS_READ));
         check(unlocks(a, c, op));
         check(op.step_count >= 1 && op.step_count <= ECUIO_PLUGIN_MAX_STEPS);
         check(is_id(op.id, sizeof op.id));
@@ -479,7 +565,14 @@ void check_operations(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
             check(known != op.id);
         }
         ids.push_back(op.id);
-        check(check_steps(a, i, op.step_count) == op.image_bytes);
+        uint32_t session = 0;
+        check(check_steps(a, i, op.step_count, kernel, &session) ==
+              op.image_bytes);
+        check(session == ECUIO_STEP_SESSION_PROGRAMMING
+                  ? op.leave == ECUIO_OPERATION_LEAVE_DEFAULT ||
+                        op.leave == ECUIO_OPERATION_LEAVE_RESET
+                  : op.leave == 0);
+        check_kernel(a, b, i, op.step_count, kernel);
         check(op.image_bytes <= ECUIO_DUMP_IMAGE_MAX);
         check(op.unlock_sessions == 1);
         check_idents(a, i, op.ident_count, c.service_count);

@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <vector>
 
 namespace {
@@ -38,6 +39,9 @@ using bytes = std::vector<uint8_t>;
 
 constexpr int kStepsMost = 400000;
 constexpr uint32_t kFirstDid = 0xD220;
+constexpr uint64_t kRamAt = 0x80000;
+constexpr uint64_t kRamBytes = 0x2000;
+constexpr uint16_t kRoutine = 0x0201;
 
 void check(bool ok)
 {
@@ -71,22 +75,42 @@ uint8_t memory_at(uint64_t address)
     return static_cast<uint8_t>(address * 31 + (address >> 8) + 7);
 }
 
+bool kernel_from(reader& in, plan& p, uint32_t* wire_max)
+{
+    kernel& k = p.helper;
+    const uint8_t shape = in.byte();
+    k.stays = (shape & 1) == 0;
+    k.quiet_session = (shape & 2) != 0 ? 0x82 : 0;
+    k.ram_address = k.address = kRamAt;
+    k.ram_bytes = kRamBytes;
+    k.routine = kRoutine;
+    k.starts = {kRoutine};
+    k.blob.resize(1 + in.pair(0x1F));
+    for (size_t i = 0; i < k.blob.size(); ++i) {
+        k.blob[i] = memory_at(i + 0x5A);
+    }
+    *wire_max = in.pair(0x0F);
+    return kernel_fault(p) == nullptr;
+}
+
 /* The plan the input's next bytes make, or one with no step when they
  * make none a loader would take */
-plan plan_from(reader& in)
+plan plan_from(reader& in, uint32_t* wire_max)
 {
     plan p;
     const uint8_t head = in.byte();
-    const unsigned steps = 1 + head % 3;
-    for (unsigned i = 0; i < (head >> 4) % 3u; ++i) {
+    const unsigned steps = 1 + (head & 0x0Fu) % 3u;
+    p.has_kernel = (head & 0x80) != 0;
+    for (unsigned i = 0; i < ((head >> 4) & 3u) % 3u; ++i) {
         p.idents.push_back({kFirstDid + i, ECUIO_DUMP_ROLE_SOFTWARE});
     }
     for (unsigned i = 0; i < steps; ++i) {
         const uint8_t shape = in.byte();
         step s;
         s.kind = (shape & 1) != 0 ? ECUIO_STEP_UPLOAD : ECUIO_STEP_READ;
-        s.session = (shape & 2) != 0 ? ECUIO_STEP_SESSION_PROGRAMMING
-                                     : ECUIO_STEP_SESSION_EXTENDED;
+        s.session = (shape & 2) != 0 || p.has_kernel
+                        ? ECUIO_STEP_SESSION_PROGRAMMING
+                        : ECUIO_STEP_SESSION_EXTENDED;
         s.address_bytes = (shape & 4) != 0 ? 3 : 4;
         s.size_bytes = static_cast<uint8_t>(1 + (shape >> 3) % 4);
         s.address = 0x10000 + 0x4000 * i;
@@ -96,6 +120,9 @@ plan plan_from(reader& in)
             return plan{};
         }
         p.steps.push_back(s);
+    }
+    if (p.has_kernel && !kernel_from(in, p, wire_max)) {
+        return plan{};
     }
     return p;
 }
@@ -138,6 +165,12 @@ struct model {
     bool settled = true; /* the last request got an answer of its shape */
     bool loose = false;  /* the 75 wasn't this model's: its block is the
                              run's to know, so a 36's length isn't judged */
+    bool writing = false; /* the transfer is the helper's download */
+    bool begun = false;   /* a request past the quieter went out */
+    bool quieted = false;
+    bool running = false; /* the helper started, its session kept */
+    bool gone = false;    /* the plan's session was left */
+    uint32_t wire = 0;
     uint8_t counter = 0;
     uint32_t block = 0;
     uint32_t tries = 0;
@@ -185,6 +218,7 @@ struct model {
         check(s != nullptr && address == s->address && size == s->bytes &&
               !open && tries == 1);
         open = owed = true;
+        writing = false;
         exited = false;
         counter = 1;
         block = block_named >= 3 ? block_named - 2u : 0;
@@ -194,16 +228,87 @@ struct model {
                 static_cast<uint8_t>(block_named)};
     }
 
+    void judge_helper(const bytes& q, bool write, uint16_t block_named,
+                      bytes* out)
+    {
+        const kernel& k = p->helper;
+        check(p->has_kernel && !gone && (write || q[0] == 0x37) &&
+              ecuio_tier3_write_allowed(q[0], q.size() > 1 ? q[1] : 0));
+        if (q[0] == 0x34) {
+            bytes want = {0x34, 0x00, 0x44};
+            for (int i = 3; i >= 0; --i) {
+                want.push_back(static_cast<uint8_t>(k.address >> (8 * i)));
+            }
+            for (int i = 3; i >= 0; --i) {
+                want.push_back(static_cast<uint8_t>(k.blob.size() >> (8 * i)));
+            }
+            check(q == want && !open && !running && tries == 1);
+            open = owed = writing = true;
+            exited = false;
+            counter = 1;
+            uint32_t most = block_named < wire ? block_named : wire;
+            most = most < kWireMost ? most : kWireMost;
+            block = most >= 3 ? most - 2 : 0;
+            at = 0;
+            left = k.blob.size();
+            *out = {0x74, 0x20, static_cast<uint8_t>(block_named >> 8),
+                    static_cast<uint8_t>(block_named)};
+        } else if (q[0] == 0x36) {
+            const size_t n = q.size() - 2;
+            check(q.size() >= 3 && open && owed && q[1] == counter &&
+                  tries == 1 && n <= left &&
+                  (loose || n == (std::min)(left, uint64_t{block})) &&
+                  memcmp(q.data() + 2, k.blob.data() + at, n) == 0);
+            ++counter;
+            at += n;
+            left -= n;
+            *out = {0x76, q[1]};
+        } else if (q[0] == 0x37) {
+            check(q.size() == 1 && !exited);
+            exited = true;
+            open = false;
+            *out = {0x77};
+        } else {
+            check(q.size() == 4 && q[1] == 0x01 &&
+                  q[2] == static_cast<uint8_t>(k.routine >> 8) &&
+                  q[3] == static_cast<uint8_t>(k.routine) && !open && exited &&
+                  left == 0 && tries == 1);
+            *out = {0x71, 0x01, q[2], q[3]};
+        }
+    }
+
     /* Aborts unless the request is one the run may send now; the right
      * answer into out */
-    void judge(const bytes& q, uint16_t block_named, bytes* out)
+    void judge(const bytes& q, bool functional, bool write,
+               uint16_t block_named, bytes* out)
     {
-        check(!q.empty() && (settled || q == last || q[0] == 0x37));
+        const bool next_unread =
+            gone && q.size() == 3 && last.size() == 3 && q[0] == 0x22 &&
+            last[0] == 0x22 &&
+            field(q.data() + 1, 2) == field(last.data() + 1, 2) + 1;
+        check(!q.empty() &&
+              (settled || q == last || q[0] == 0x37 || next_unread));
+        check(functional == (q[0] == 0x10));
         tries = settled || q != last ? 1 : tries + 1;
         last = q;
         check(tries <= kAsksMost);
         uint64_t address = 0;
         uint64_t size = 0;
+        if (q[0] == 0x10) {
+            check(q.size() == 2 && q[1] == p->helper.quiet_session &&
+                  q[1] != 0 && !begun && !quieted);
+            quieted = true;
+            *out = {0x50, q[1]};
+            return;
+        }
+        check(!p->has_kernel || p->helper.quiet_session == 0 || quieted);
+        begun = true;
+        if (q[0] == 0x34 || q[0] == 0x31 ||
+            (writing && (q[0] == 0x36 || q[0] == 0x37))) {
+            judge_helper(q, write, block_named, out);
+            return;
+        }
+        check(!write);
         if (q[0] == 0x22) {
             const uint64_t did = q.size() == 3 ? field(q.data() + 1, 2) : 0;
             check(did >= kFirstDid && did < kFirstDid + p->idents.size());
@@ -211,6 +316,7 @@ struct model {
             return;
         }
         check(ecuio_tier3_read_allowed(q[0], 0));
+        check(!p->has_kernel || running || (q[0] != 0x23 && q[0] != 0x35));
         if (q[0] == 0x35) {
             open_upload(q, block_named, out);
             return;
@@ -247,19 +353,30 @@ struct model {
     void settle(const bytes& right, const bytes* got)
     {
         const uint8_t sid = last[0];
-        if (got == nullptr || got->empty()) {
+        if (sid == 0x10) {
+            settled = true;
+        } else if (got == nullptr || got->empty()) {
             settled = false;
+        } else if (sid == 0x31) {
+            settled =
+                got->size() >= 4 && memcmp(got->data(), right.data(), 4) == 0;
+            running = settled;
+        } else if (sid == 0x36 && writing) {
+            settled =
+                got->size() >= 2 && (*got)[0] == 0x76 && (*got)[1] == right[1];
         } else if (sid == 0x22) {
             settled = got->size() >= 4 &&
                       got->size() <= 3 + ECUIO_DUMP_IDENT_MAX &&
                       memcmp(got->data(), right.data(), 3) == 0;
-        } else if (sid == 0x35 || sid == 0x37) {
+        } else if (sid == 0x34 || sid == 0x35 || sid == 0x37) {
             settled = (*got)[0] == right[0];
+            running = running &&
+                      (sid != 0x37 || writing || !settled || p->helper.stays);
         } else {
             settled = got->size() == right.size() && (*got)[0] == right[0] &&
                       (sid == 0x23 || (*got)[1] == right[1]);
         }
-        if (sid == 0x35) {
+        if (sid == 0x34 || sid == 0x35) {
             loose = got == nullptr || *got != right;
         }
         settled = settled || (sid == 0x36 && loose);
@@ -305,11 +422,14 @@ bool scripted(reader& in, uint8_t sid, bytes* answer, uint32_t* waited)
 void exchange(reader& in, run& r, sink& out, model& m, const run_request& q,
               uint16_t block_named, uint8_t control, bool* canceled)
 {
-    const bytes request(q.bytes, q.bytes + q.size);
-    check(q.size >= 1 && q.size <= kRequestMax);
-    check(!out.full || (request[0] != 0x23 && request[0] != 0x36));
+    const bytes request = q.wide != nullptr
+                              ? bytes(q.wide, q.wide + q.wide_size)
+                              : bytes(q.bytes, q.bytes + q.size);
+    check(q.wide != nullptr ? q.size == 0 && q.wide_size <= kWireMost
+                            : q.size >= 1 && q.size <= kRequestMax);
+    check(!out.full || (request[0] != 0x23 && (request[0] != 0x36 || q.write)));
     bytes answer;
-    m.judge(request, block_named, &answer);
+    m.judge(request, q.functional, q.write, block_named, &answer);
     const bytes right = answer;
     uint32_t waited = 0;
     const bool answered = scripted(in, request[0], &answer, &waited);
@@ -339,16 +459,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
     reader in{data, size};
     const auto block_named = static_cast<uint16_t>(in.pair(0x0F));
-    const plan p = plan_from(in);
+    uint32_t wire_max = 0;
+    const plan p = plan_from(in, &wire_max);
     if (p.steps.empty()) {
         return 0;
     }
     run r;
-    begin(r, p);
+    begin(r, p, wire_max);
     sink out;
     out.p = &p;
     model m;
     m.p = &p;
+    m.wire = wire_max;
     bool canceled = false;
     for (int steps = 0;; ++steps) {
         check(steps < kStepsMost);
@@ -367,9 +489,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             check(out.full);
         } else if (action == run_action::send) {
             exchange(in, r, out, m, q, block_named, control, &canceled);
+        } else if (action == run_action::leave) {
+            check(p.has_kernel && !m.gone && !m.open);
+            m.gone = true;
+            m.running = false;
+            left(r);
         } else {
             check(q.session == ECUIO_STEP_SESSION_EXTENDED ||
                   q.session == ECUIO_STEP_SESSION_PROGRAMMING);
+            m.running = false;
             if ((control & 0x3F) == 0x3F) {
                 not_entered(r, run_end::unlock_refused);
             } else {
@@ -382,7 +510,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
           r.result != run_end::none && r.handed <= total_bytes(r));
     if (r.result == run_end::complete) {
         check(!canceled && !out.differ && r.handed == total_bytes(r) &&
-              out.idents == p.idents.size() && !m.open);
+              out.idents == p.idents.size() && !m.open &&
+              (!p.has_kernel || m.gone));
         for (size_t i = 0; i < p.steps.size(); ++i) {
             check(out.got[0][i].size() == p.steps[i].bytes &&
                   out.got[0][i] == out.got[1][i]);
