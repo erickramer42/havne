@@ -183,7 +183,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_session_control.cpp test_session_control_late.cpp
     test_session_enter.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_tier3_ceiling.cpp
-    test_sim_security.cpp
+    test_sim_security.cpp test_sim_kernel.cpp
     test_engine_talk.cpp test_engine_talk_write.cpp test_engine_hold.cpp
     test_key_window.cpp
     test_request_turns.cpp
