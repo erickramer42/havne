@@ -32,6 +32,12 @@ const Value& required(const Value& in, const char* key, const std::string& what)
     return *v;
 }
 
+/* For a literal: GCC's -Wdangling-reference flags a temporary string */
+const Value& required(const Value& in, const char* key, const char* what)
+{
+    return required(in, key, std::string(what));
+}
+
 /* v's text as whole bytes of upper-case hex, lo to hi of them */
 uint64_t hex_of(const Value& v, size_t lo, size_t hi, const std::string& what)
 {
@@ -176,7 +182,7 @@ void read_functional(const Value& v, ecuio_operation::kernel& k)
 {
     expect(v, Type::object, "a functional request");
     only_keys(v, {"request", "every_ms"}, "a functional request");
-    const std::string& r =
+    const std::string r =
         text_of(required(v, "request", "a functional request"), 5, 5,
                 "a functional request's request");
     const Value* every = v.find("every_ms");
@@ -273,7 +279,7 @@ bool read_kernel_step(const Value& v, plan& out, uint32_t at)
     if (!download && !routine) {
         return false;
     }
-    const std::string& name =
+    const std::string name =
         id_of(required(v, "name", "a step"), "a step's name");
     const std::string what = "step " + q(name);
     if (!out.has_kernel || at != (download ? 0u : 1u)) {
