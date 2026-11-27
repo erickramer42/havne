@@ -251,7 +251,7 @@ Page {
                                     : qsTr("Check-engine light on · %1 confirmed codes").arg(e.dtcCount)
         case "refused":    return qsTr("Readiness refused (%1)").arg(e.readinessNrc)
         case "unanswered": return qsTr("Readiness: no answer")
-        default:           return qsTr("Reading…")
+        default:           return e.complete ? qsTr("Readiness: not asked") : qsTr("Reading…")
         }
     }
 

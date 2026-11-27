@@ -525,6 +525,14 @@ TestCase {
         compare(page.ecuState(half), "Read", "a list read is a read")
     }
 
+    function test_aModuleNotReadNeverSaysReading() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const closed = stubEcu("unasked", "unasked", true)
+        compare(page.milText(closed), "Readiness: not asked")
+        closed.complete = false
+        compare(page.milText(closed), "Reading…")
+    }
+
     function test_noRoomAndNoResponseAreTheirOwnWords() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         compare(page.ecuState(stubEcu("unasked", "unasked", true)), "Not read: no room")
