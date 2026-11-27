@@ -764,15 +764,13 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
             offer(o, e, q, now_us);
         } else if (a == run_action::leave && own_leave(o, e, now_us)) {
             left(r);
-        } else if (a == run_action::leave) {
-            break; /* the leave runs */
         } else if (a == run_action::enter) {
             enter(s, o, e, now_us);
             if (r.at == run_stage::enter) {
                 break; /* the entry or the attempt runs */
             }
         } else {
-            break; /* hold: the ring's room first; done */
+            break; /* the leave runs; hold: the ring's room first; done */
         }
     }
     if (r.at == run_stage::done) {
