@@ -56,6 +56,13 @@ inline const char* step_session_word(uint32_t session)
                                                        : "unknown";
 }
 
+inline const char* operation_leave_word(uint32_t leave)
+{
+    return leave == ECUIO_OPERATION_LEAVE_DEFAULT ? "default"
+           : leave == ECUIO_OPERATION_LEAVE_RESET ? "reset"
+                                                  : "unknown";
+}
+
 inline const char* ident_role_word(uint32_t role)
 {
     return role == ECUIO_DUMP_ROLE_HARDWARE   ? "hardware"
@@ -67,8 +74,10 @@ inline const char* ident_role_word(uint32_t role)
 // The services a plan's steps send, each once, in the order of their
 // numbers: [{"sid", "name"}]
 inline void operation_services(Line& l, const ecuio_plugin_t* p,
-                               uint32_t operation, uint32_t steps)
+                               uint32_t operation, uint32_t steps,
+                               uint32_t leave)
 {
+    bool programming = false;
     bool reads = false;
     bool uploads = false;
     bool downloads = false;
@@ -77,6 +86,8 @@ inline void operation_services(Line& l, const ecuio_plugin_t* p,
         ecuio_plugin_operation_step_t s{};
         s.struct_size = sizeof s;
         if (ecuio_plugin_operation_step(p, operation, i, &s) == ECUIO_OK) {
+            programming =
+                programming || s.session == ECUIO_STEP_SESSION_PROGRAMMING;
             reads = reads || s.kind == ECUIO_STEP_READ;
             uploads = uploads || s.kind == ECUIO_STEP_UPLOAD;
             downloads = downloads || s.kind == ECUIO_STEP_DOWNLOAD;
@@ -94,6 +105,12 @@ inline void operation_services(Line& l, const ecuio_plugin_t* p,
         first = false;
     };
     l.ch('[');
+    if (programming) {
+        service("10", "diagnostic session control");
+    }
+    if (leave == ECUIO_OPERATION_LEAVE_RESET) {
+        service("11", "ECU reset");
+    }
     if (reads) {
         service("23", "read memory by address");
     }
@@ -174,7 +191,8 @@ inline void operation_ident(Line& l, const ecuio_plugin_t* p,
 
 // {"type":"operation", package, id, kind, class ("read" when every step
 // only reads: core derives it, a manifest never states it), title, ecu
-// (its id among the conversation's ecus), level, unlock_sessions (the
+// (its id among the conversation's ecus), level, leave (a programming
+// plan's, null for one in the extended session), unlock_sessions (the
 // unlock attempts one run makes), image_bytes (the steps' bytes, added),
 // services [{sid, name}] (what its steps send), ident [{did, role}],
 // steps [{step, name, session, address, bytes, chunk}]}, one for each
@@ -203,12 +221,19 @@ inline void operation_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
     l.key("level");
     const auto level = static_cast<uint8_t>(o.level);
     l.hex_bytes(&level, 1);
+    l.key("leave");
+    if (o.leave == 0) {
+        l.raw("null");
+    } else {
+        const char* leave = operation_leave_word(o.leave);
+        l.string(leave, std::strlen(leave));
+    }
     l.key("unlock_sessions");
     l.u64(o.unlock_sessions);
     l.key("image_bytes");
     l.u64(o.image_bytes);
     l.key("services");
-    operation_services(l, p, index, o.step_count);
+    operation_services(l, p, index, o.step_count, o.leave);
     l.key("ident");
     l.ch('[');
     for (uint32_t i = 0; i < o.ident_count; ++i) {

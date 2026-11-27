@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -121,6 +122,27 @@ TEST(SessionOperationTest, SpeedsUnansweredOrRefusedLetTheRunGoOn)
         EXPECT_EQ(sent[1], kKmh);
         EXPECT_EQ(sent[2], (Bytes{0x27, 0x01}));
     }
+}
+
+TEST(SessionOperationTest, AnEnvelopeWithNothingReadLogsADashForEach)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    b.battery_source = false;
+    b.script = [](const Bytes& q, size_t, Answer*) {
+        return q.size() == 2 && q[0] == 0x01 &&
+               (q[1] == 0x0C || q[1] == 0x0D || q[1] == 0x40 || q[1] == 0x42);
+    };
+    ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    const ecuio_run_lines& l = b.s->run_lines;
+    ASSERT_GE(l.count, 1u);
+    char want[128];
+    std::snprintf(want, sizeof want,
+                  "run envelope  7E8  battery - mV  rpm -  km/h -  checks %X",
+                  static_cast<unsigned>(v.checks));
+    EXPECT_STREQ(l.text[0], want);
 }
 
 TEST(SessionOperationTest, ACancelDuringTheChecksSendsNothingMore)
