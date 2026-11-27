@@ -73,7 +73,7 @@ Rectangle {
             // index is -1 while a model reset (a connect)
             // removes the delegate
             readonly property color trace: signalDelegate.index >= 0
-                                           ? host.seriesColor(signalDelegate.row)
+                                           ? signalDelegate.host.seriesColor(signalDelegate.row)
                                            : "transparent"
             implicitWidth: 10; implicitHeight: 10   // layout-managed
             radius: 2
@@ -146,7 +146,7 @@ Rectangle {
                     ? (Bridge.replayFinished ? qsTr("Not in this recording") : qsTr("—"))
                   : signalDelegate.isText ? signalDelegate.text
                   : signalDelegate.label !== "" ? signalDelegate.label
-                  : host.valueText(signalDelegate.value, signalDelegate.decimals,
+                  : signalDelegate.host.valueText(signalDelegate.value, signalDelegate.decimals,
                                    signalDelegate.unit)
             // A text value can run to kilobytes: the name
             // keeps its room
@@ -194,7 +194,7 @@ Rectangle {
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
             opacity: signalDelegate.hasValue
-                     && signalDelegate.ageMs > host.staleMs
+                     && signalDelegate.ageMs > signalDelegate.host.staleMs
                          ? 0.45 : 1.0
         }
     }
