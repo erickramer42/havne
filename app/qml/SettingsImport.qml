@@ -36,12 +36,10 @@ Item {
             return
         }
         const how = host.picksPart.pickProfile(profile)
-        // The row's word where it says more than the name: obd2 + <name>
-        const shown = host.uriPart.profiles.find(p => p.name === profile)
-        const label = shown !== undefined ? shown.label : ""
         host.picksPart.signalNote = how === "" ? note
-                   : how === "read" && label !== "" && label !== host.picksPart.profileName(profile)
-                     ? qsTr("%1: picked for %2, now reading %3").arg(note, host.pickedVehicle.label, label)
+                   : how === "read" && host.picksPart.together.totals.plugins > 1
+                     ? qsTr("%1: picked for %2, now reading its picks together")
+                                          .arg(note, host.pickedVehicle.label)
                    : qsTr("%1: picked for %2").arg(note, host.pickedVehicle.label)
     }
 

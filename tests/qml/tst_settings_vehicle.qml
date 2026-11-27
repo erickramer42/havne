@@ -101,11 +101,11 @@ SettingsKit {
         compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
         const own = "plugin.vehicle-1-signals.base"
         compare(page.pickedVehicle.own, own, "the vehicle's own variant")
-        compare(page.picksPart.picks, [own], "made with the first save, and picked")
+        compare(page.picksPart.picks, ["obd2", own], "made with the first save, and picked")
         compare(find(rowOf(page, own), "rowTitle").text, "Vehicle 1 signals 1.0.0")
         compare(find(rowOf(page, own), "rowReads").text, "1 signal · yours")
         compare(find(rowOf(page, own), "rowCaption").text, "For this car:")
-        verify(findChild(page, "profile_" + own), "a profile under Profile")
+        verify(findChild(page, "profile_" + page.picksPart.together.profile), "the vehicle's set under Profile")
         compare(Harness.storedPlugins().length, 1)
 
         // A second signal goes into the same variant; the last copy goes
@@ -119,7 +119,7 @@ SettingsKit {
         compare(Harness.storedPlugins().length, 1, "one copy: the plugin's newest")
         compare(page.picksPart.pluginList.length, 1, "no second plugin")
         compare(page.pickedVehicle.own, own)
-        compare(page.picksPart.picks, [own])
+        compare(page.picksPart.picks, ["obd2", own])
         compare(find(rowOf(page, own), "rowReads").text, "2 signals · yours")
 
         // Edit fills the form; Save replaces the signal of that name
@@ -152,7 +152,7 @@ SettingsKit {
         compare(find(question, "signalsConfirmText").text,
                 "Remove Vehicle 1 signals? It is yours, and no other copy exists")
         find(question, "signalsConfirmRemove").clicked()
-        compare(page.picksPart.picks, [])
+        compare(page.picksPart.picks, ["obd2"])
         compare(page.pickedVehicle.own, "")
         compare(Harness.storedPlugins(), [])
 
@@ -161,7 +161,7 @@ SettingsKit {
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.pickedVehicle.own, own)
-        compare(page.picksPart.picks, [own])
+        compare(page.picksPart.picks, ["obd2", own])
     }
 
     // The last signal's Remove of a plugin with several variants asks as
@@ -523,7 +523,7 @@ SettingsKit {
         press(page, "connectButton")
         tryVerify(() => page.vehicles.list.length === 2, 30000, "the VIN adds a vehicle")
         const added = page.vehicles.list.find(v => v.id !== weekend)
-        compare(added.picks, [])
+        compare(added.picks, ["obd2"])
         compare(added.uri, uri, "no profile of Weekend car's pick")
         compare(page.pickedVehicle.id, weekend, "the session's pick stays")
         Bridge.disconnectSession()

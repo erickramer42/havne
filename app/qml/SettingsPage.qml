@@ -438,6 +438,15 @@ Pane {
             // a damaged store shows no versions until the next connect
         }
         vehicles = VehicleBook.parse(vehicleStore.book)
+        const migrated = VehicleBook.migrate(vehicles)
+        if (migrated.doc !== vehicles) {
+            saveVehicles(migrated.doc)
+            if (migrated.added > 0)
+                Bridge.logEvent(migrated.added === 1
+                    ? qsTr("Vehicles: obd2's standard signals added to the picks of 1 vehicle (once, at this version's first start)")
+                    : qsTr("Vehicles: obd2's standard signals added to the picks of %1 vehicles (once, at this version's first start)")
+                          .arg(migrated.added))
+        }
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens

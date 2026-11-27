@@ -31,10 +31,11 @@ PhoneKit {
         return list
     }
 
-    // Main hands both lists Settings' words: with a picked vehicle whose
-    // pick reads obd2, an adapter's row says the plugin a connect reads,
-    // and the connect puts the address in Settings' field with its profile
-    function test_theListsSayThePluginAConnectReads() {
+    // Main hands both lists Settings' words: with a picked vehicle that
+    // picks a plugin, an adapter's row names the vehicle whose set a
+    // connect reads, and the connect puts the address in Settings' field
+    // with its profile
+    function test_theListsSayTheSetAConnectReads() {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")
         verify(settings.importPart.importFile(Harness.writeExamplePlugin("list-words.havne-plugin.json")))
@@ -45,7 +46,7 @@ PhoneKit {
             const list = connectListOn(main, [], [
                 { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }])
             tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the adapter and the demo")
-            const word = "obd2 + Example: the simulated car: my2019"
+            const word = "Desk car"
             const row = find(list, "connectRow_0")
             compare(find(row, "connectRowAddress").text, "OBD adapter")
             const kind = find(row, "connectRowKind")
@@ -58,12 +59,13 @@ PhoneKit {
 
             tryCompare(list, "chosen", address, 2000, "the sole adapter")
             find(list, "connectGo").clicked()
-            compare(find(settings, "uriField").text, address + "?profile=plugin.example-sim.my2019",
+            compare(find(settings, "uriField").text, address + "?profile=" + settings.picksPart.together.profile,
                     "the address Settings connects")
             tryVerify(() => !Bridge.connecting, 5000, "the desktop refuses a Bluetooth link")
         } finally {
             for (const p of settings.picksPart.pluginList)
                 settings.rowActionsPart.removePlugin(p.sha256)
+            settings.saveVehicles(VehicleBook.empty())
         }
     }
 

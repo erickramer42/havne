@@ -6,15 +6,16 @@ import QtQml
 
 // The vehicles (ADR-0027) as rules on one document, format 2 (ADR-0064),
 // { format, salt, picked, list: [{ id, label, vinKey, uri, plotted,
-// unplotted, picks, own, vinMatches, baseline, unmigrated }], unmigrated }:
+// unplotted, picks, own, vinMatches, baseline, unmigrated }], unmigrated,
+// migrated }: migrated lists the one-time steps applied to the book.
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8), each by its signal's key
 // (ADR-0065 section 9); a list kept by name is read as it stands and
 // written by key at the next tick (SignalListModel::setPlotChoices).
 // picks are the plugin variants picked for the vehicle, by their profiles
-// (plugin.<id>.<variant>), in the order picked; the plugins themselves are
-// the app's, not a vehicle's. own is the profile of the variant the
-// vehicle's form writes, "" for none.
+// (plugin.<id>.<variant>, or obd2 for its standard signals), in the order
+// picked; the plugins themselves are the app's, not a vehicle's. own is
+// the profile of the variant the vehicle's form writes, "" for none.
 // vinMatches are the variants' profiles the car's VIN matched when it was
 // last read, so the list marks them with no session. Never the VIN
 // (ADR-0027 section 3).
@@ -33,12 +34,18 @@ QtObject {
     readonly property int maxLabel: 40
     readonly property int format: 2
 
-    readonly property var bookKeys: ["format", "salt", "picked", "list", "unmigrated"]
+    readonly property var bookKeys: ["format", "salt", "picked", "list", "unmigrated", "migrated"]
+    readonly property string obd2Picked: "obd2-picked"
     readonly property var entryKeys: ["id", "label", "vinKey", "uri", "plotted", "unplotted",
                                       "picks", "own", "vinMatches", "baseline", "unmigrated"]
 
     function empty() {
-        return { format: format, salt: "", picked: "", list: [] }
+        return { format: format, salt: "", picked: "", list: [], migrated: [obd2Picked] }
+    }
+
+    function isLiveUri(uri) {
+        const u = String(uri).trim().toLowerCase()
+        return !u.startsWith("replay://") && !u.startsWith("mock://")
     }
 
     function isAdapterUri(uri) {
@@ -129,7 +136,26 @@ QtObject {
         const left = records(d.unmigrated)
         if (left.length > 0)
             doc.unmigrated = left
+        if (isStrings(d.migrated))
+            doc.migrated = d.migrated.slice()
         return doc
+    }
+
+    // Keyed on the book's record, never on obd2 absent, so a later unpick stays
+    function migrate(doc) {
+        const done = doc.migrated === undefined ? [] : doc.migrated
+        if (isLater(doc) || done.indexOf(obd2Picked) >= 0)
+            return { doc: doc, added: 0 }
+        const d = copy(doc)
+        let added = 0
+        for (const v of d.list) {
+            if (v.picks.indexOf("obd2") >= 0)
+                continue
+            v.picks = ["obd2"].concat(v.picks)
+            ++added
+        }
+        d.migrated = done.concat([obd2Picked])
+        return { doc: d, added: added }
     }
 
     function isLater(doc) {
@@ -168,6 +194,8 @@ QtObject {
         const left = records(doc.unmigrated)
         if (left.length > 0)
             d.unmigrated = left
+        if (doc.migrated !== undefined)
+            d.migrated = doc.migrated.slice()
         return d
     }
 
@@ -238,7 +266,7 @@ QtObject {
     function add(doc, label) {
         const d = copy(doc)
         const id = nextId(d)
-        d.list.push(entry({ id: id, label: String(label).trim() }))
+        d.list.push(entry({ id: id, label: String(label).trim(), picks: ["obd2"] }))
         d.picked = id
         return d
     }
@@ -481,6 +509,17 @@ QtObject {
         const q = s.indexOf("?")
         const sep = q < 0 ? "?" : s.endsWith("?") || s.endsWith("&") ? "" : "&"
         return s + sep + "profile=" + profile
+    }
+
+    // With no set to read, the name stays for core to name
+    function withVehicleSet(uri, reads, profile) {
+        const s = String(uri)
+        const q = s.indexOf("?")
+        if (q < 0 || !isLiveUri(s) || (reads !== "merged" && reads !== "obd2"))
+            return s
+        const pairs = s.slice(q + 1).split("&")
+            .map(p => p.startsWith("profile=merged.") ? "profile=" + profile : p)
+        return s.slice(0, q + 1) + pairs.join("&")
     }
 
     // Beside the vehicles, for a recognize() that named another saved

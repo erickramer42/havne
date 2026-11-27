@@ -19,49 +19,35 @@ Item {
     // uds-generic's extended session (session=03), composed as did= is
     property bool extSession: false
 
-    // The profiles the row offers (ADR-0013, ADR-0020), then the picked
-    // vehicle's picks the store has (ADR-0064 Q5). "default" is the
-    // scheme's own profile, so it adds no profile= key. A typed name
-    // outside the list highlights no button; core judges it at connect.
-    readonly property var profiles: builtInProfiles.concat(pickProfiles)
+    // A typed name outside the list highlights no button; core judges it at connect
+    readonly property var profiles: builtInProfiles
 
-    // On an adapter, Default is obd2, and a variant that extends obd2
-    // reads all of obd2 and more, so the first such pick takes obd2's
-    // place there (ADR-0064 Q5): null for none or on another scheme,
-    // where Default isn't obd2. Default's button stays only while the
-    // field reads it, so the row always shows the URI's
     readonly property bool adapterUri: VehicleBook.isAdapterUri(host.connectPart.uriField.text)
-    readonly property var standIn: host.picksPart.pickRows.find(r => r.standIn) || null
-    // The picked vehicle's first pick that Default doesn't read on an
-    // adapter: with no stand-in, Default is plain obd2 (ADR-0064 Q5)
-    readonly property var unreadPick: adapterUri && standIn === null
-        ? host.picksPart.pickRows.find(r => !r.missing) || null : null
+    readonly property var together: host.picksPart.together
+    // obd2 alone is what Default reads on an adapter
+    readonly property var vehicleSet: together !== null && together.reads === "merged" ? together : null
+    readonly property var unreadPick: adapterUri && vehicleSet !== null && vehicleSet.totals.plugins > 0
+                                      ? vehicleSet : null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
         hint: unreadPick !== null && host.pickedVehicle !== null
-              ? qsTr("Plain OBD-II, without the signals of %1; choose %2 to read them")
-                    .arg(host.pickedVehicle.label).arg(host.picksPart.profileName(unreadPick.profile))
+              ? qsTr("Plain OBD-II, without the signals picked for %1; choose %1 to read them")
+                    .arg(host.pickedVehicle.label)
               : qsTr("Default reads OBD-II values on an adapter; a recording or a "
                      + "CAN interface shows its frames") })
-
-    // A pick as the row's entry: one that extends obd2 says so on an
-    // adapter, where obd2 is what Default reads
-    function pickEntry(r) {
-        const name = host.picksPart.profileName(r.profile)
-        const obd2 = r.extends === "obd2"
-        return { name: r.profile,
-                 label: obd2 && adapterUri ? qsTr("obd2 + %1").arg(name) : name,
-                 hint: obd2 ? qsTr("obd2's signals and those of %1, picked for this vehicle")
-                                  .arg(host.picksPart.profileTitle(r.profile))
-                            : qsTr("The signals of %1, picked for this vehicle")
-                                  .arg(host.picksPart.profileTitle(r.profile)) }
+    function vehicleSetHint(set, label) {
+        const n = set.totals.plugins
+        if (n === 0)
+            return qsTr("Nothing is picked for %1: no signals; the emissions codes are still read").arg(label)
+        const plugins = n === 1 ? qsTr("the plugin") : qsTr("the %1 plugins").arg(n)
+        return set.base === "obd2"
+               ? qsTr("obd2's standard signals and those of %1 picked for %2, read together").arg(plugins, label)
+               : qsTr("The signals of %1 picked for %2, read together").arg(plugins, label)
     }
-    // The picks but the stand-in, which sits where Default does
-    readonly property var pickProfiles: host.picksPart.pickRows.filter(r => !r.missing && !r.standIn)
-                                                .map(r => pickEntry(r))
-    readonly property var builtInProfiles: (standIn === null ? [defaultProfile]
-        : profileChoice === "default" ? [defaultProfile, pickEntry(standIn)]
-        : [pickEntry(standIn)]).concat([
+    readonly property var builtInProfiles: [defaultProfile].concat(
+        vehicleSet === null || host.pickedVehicle === null ? []
+        : [{ name: vehicleSet.profile, label: host.pickedVehicle.label,
+             hint: vehicleSetHint(vehicleSet, host.pickedVehicle.label) }]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
           hint: qsTr("Raw (log only): no decode, frames reach the Activity page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
@@ -70,45 +56,40 @@ Item {
           hint: qsTr("UDS DIDs (uds-generic): Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
     ])
+    // A field the page set to the vehicle's set follows it as the picks change
+    onTogetherChanged: {
+        if (!profileChoice.startsWith("merged."))
+            return
+        const set = host.picksPart.together
+        const now = set !== null && set.reads === "merged" ? set.profile : "default"
+        if (profileChoice !== now)
+            chooseProfile(now)
+    }
 
-    // The picked vehicle's sets as [{ profile, name, variant }]: its picks
-    // the store has, in their order
-    readonly property var pickedSets: host.picksPart.pickRows.filter(r => !r.missing)
+    readonly property var pickedSets: host.picksPart.pickRows.filter(r => !r.missing && !r.builtIn)
         .map(r => ({ profile: r.profile, name: r.name, variant: r.variant }))
-    // A profile's name as the user knows it: every loaded plugin's
-    // variants by the plugin's name
     readonly property var profileNames: {
         const names = {}
         for (const p of host.picksPart.pluginList) {
             for (const profile of (p.ok ? p.profiles : []))
                 names[profile] = p.name
         }
+        if (vehicleSet !== null && host.pickedVehicle !== null)
+            names[vehicleSet.profile] = host.pickedVehicle.label
         return names
     }
 
-    // The first picked set that reads all of obd2, which stands in for
-    // Default on an adapter (ADR-0064)
-    readonly property var obd2PickedSet: {
-        const first = host.picksPart.pickRows.find(r => !r.missing && r.extends === "obd2")
-        return first === undefined ? null
-             : { profile: first.profile, name: first.name, variant: first.variant }
-    }
-
-    // What a page that works with no session lists its signals from: the
-    // field's URI, which carries the chosen profile, except an adapter's
-    // read under Default, where the vehicle's obd2 stand-in is listed;
-    // with no URI typed the chosen profile alone, or under Default the
-    // picked vehicle's first set, which a restart doesn't forget as it
-    // does the choice
+    // A restart forgets the profile choice but not the vehicle's set
     readonly property string offlineUri: {
         const typed = host.connectPart.uriField.text.trim()
         if (typed !== "") {
-            return profileChoice === "default" && VehicleBook.isAdapterUri(typed) && obd2PickedSet !== null
-                   ? "mock://?profile=" + obd2PickedSet.profile : typed
+            return profileChoice === "default" && VehicleBook.isAdapterUri(typed) && vehicleSet !== null
+                   ? "mock://?profile=" + vehicleSet.profile : typed
         }
         if (profileChoice !== "default")
             return composeUri("mock://", [])
-        return pickedSets.length > 0 ? "mock://?profile=" + pickedSets[0].profile : ""
+        return together !== null && (together.reads === "merged" || together.reads === "obd2")
+               ? "mock://?profile=" + together.profile : ""
     }
 
     // True while a typed URI is being read into the choices, so the DID
