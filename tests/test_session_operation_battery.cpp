@@ -92,6 +92,23 @@ TEST(SessionOperationTest, ADropUnderElevenVoltsWarnsAndTheReadGoesOn)
     }
 }
 
+TEST(SessionOperationTest, ALinePastTheLogsRoomIsLost)
+{
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(b.start());
+    b.battery = [](uint32_t nth) { return nth < 2 ? 12600u : 10999u; };
+    ecuio_run_lines& l = b.s->run_lines;
+    l.count = ecuio_run_lines::kMost - 1;
+    ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_VOLTS_SAG, 0u);
+    EXPECT_EQ(l.count, ecuio_run_lines::kMost);
+    EXPECT_EQ(std::string(l.text[ecuio_run_lines::kMost - 1])
+                  .rfind("run envelope  7E8  ", 0),
+              0u);
+}
+
 /* The start's reading warns at any voltage: the run's own readings judge */
 TEST(SessionOperationTest, AStartUnderTheFloorOnlyWarns)
 {

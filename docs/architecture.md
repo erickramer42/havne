@@ -218,9 +218,12 @@ A **profile** is a named signal set ([ADR-0013](adr/0013-protocol-profiles.md)).
   (`security_store.h`) keeps the failed attempts and their delay across
   a restart. A module binds only behind the consent gate (`consent_gate.h`): a consent a person gave to the plugin's fingerprint and a front end applied, a `vcan` link or the test door; otherwise such a plugin is data only.
 - **Plugins' operation tier: the dump** ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)
-  section 4 and its appendix of 2026-11-26; built, with no start outside
-  the tests' door until the write flow's checks exist): a format 3
-  manifest may declare a plan that copies a module's memory. The start
+  section 4 and its appendices of 2026-11-26 and 2026-11-27; built, with
+  no front end to start one yet): a format 3 manifest may declare a plan
+  that copies a module's memory, read in the extended or the programming
+  session. Gate 2's light envelope comes first: the parked confirmation
+  and consent, the engine and the vehicle still, the battery read between
+  requests and warned on, never a reason to stop a dump. The start
   (`ecuio/operation.h`, `core_operation.cpp`) checks the plan on the
   caller's thread and hands it to the session's worker, which steps a
   pure machine (`operation_run.h`) from the conversations' hooks

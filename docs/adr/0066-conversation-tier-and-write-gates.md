@@ -2286,6 +2286,8 @@ a dump.
   (`volts_mv`, `volts_min_mv`, `rpm`, `kmh`, `parked_tick`), which a run
   leaves out until the checks exist. So `havne-cli` and the app have no
   dump command.
+  *Note, 2026-11-27:* gate 2's light envelope is built and the door is
+  gone; see the appendix "Gate 2's light envelope as built" below.
 - **A copy's name holds the SHA-256 of the whole file,** not of the image
   alone as section 4.2 says: `<yyyymmdd>-<tx>-<64 hex>.havnedump`, with no
   VIN and no vehicle name. The hash seals the record beside the bytes, and
@@ -2407,3 +2409,76 @@ ELM327 and J2534 do.
   | Change | ABI | Notes |
   |---|---|---|
   | `ecuio_session_wants_consent` | Additive | A new name; `out` is a `uint32_t` |
+
+### Gate 2's light envelope as built (2026-11-27)
+
+What step 3 built of section 5 for a dump, and where it departs from
+sections 4 and 5. Built: the checks before a run, the battery read through
+it, a programming plan's session, and the run's lines in the recording and
+the transports' logs. The write's rules are in core and are reached only
+by a test-only seam until a write step exists.
+
+- **A dump stops on five things:** the engine running, the vehicle moving,
+  the module not answering, no consent and no parked confirmation
+  (`ECUIO_OPERATION_PARKED`, which every run needs). In its first phase
+  (`ECUIO_OPERATION_PHASE_PRECONDITIONS`, the default session) the run asks
+  `01 0C` and `01 0D` of the engine module, then of the target, and nothing
+  else is sent when one ends it (`ECUIO_OPERATION_END_ENGINE_RUNNING`,
+  `_MOVING`); a speed left unanswered goes on under the parked
+  confirmation. The start's checks need no test door: `judge_gates`
+  holds the envelope, and the door that kept every front end from starting
+  a run is gone. A front end that offers a dump still has to ask for the
+  parked confirmation as the person's word.
+- **Low voltage never stops a dump or a kernel read.** Section 5's light
+  read said it honors the floor; as built it warns. A start under
+  11.8 V (`kDumpWarnLowMv`) raises `ECUIO_OPERATION_CHECK_VOLTS_LOW`; a
+  reading under 11.0 V (`kDumpSagMv`) during the run raises
+  `ECUIO_OPERATION_CHECK_VOLTS_SAG` once ("the car may not start") and the
+  read goes on. Over 15.0 V (`kVoltsWarnHighMv`) warns; a kernel read is
+  never refused for a high supply either.
+- **The battery is read between requests,** every 2 s while the run goes
+  on (`kVoltsEveryUs`): `READ_VBATT` on J2534, `ATRV` or `STVR` on ELM327,
+  else the engine module's `01 42` when it lists it supported
+  (`ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU`); with none the run goes on.
+  The state holds `volts_mv`, `volts_min_mv`, `rpm` and `kmh`, and a copy's
+  record holds them (`volts_mv`, `volts_min_mv`, `rpm`, `kmh`, `parked_tick`
+  in `ecuio/dump.h`).
+- **A write is judged once, at its start** (reached only by a test-only
+  seam, as no write step exists): refused under 11.5 V
+  (`kWriteStartFloorMv`, `ECUIO_OPERATION_END_VOLTAGE_LOW`, also for no
+  reading) or over 16.0 V (`kWriteRefuseHighMv`, `_VOLTAGE_HIGH`), warned
+  from 11.5 to 12.0 V (`kWriteWarnMv`), and refused without
+  `ECUIO_OPERATION_BATTERY_SUPPORT`. The host's battery stops a write only
+  under 10%; it warns a dump (`ECUIO_OPERATION_CHECK_ON_BATTERY`,
+  `_NOT_HELD_AWAKE`).
+- **A plan's steps may name `programming`** (section 4's "later step",
+  `ECUIO_STEP_SESSION_PROGRAMMING`). One session for a plan; a plan that
+  mixes `extended` and `programming` is refused at the manifest. Core
+  enters `10 02` as a talk of kind `session` (the services check allows
+  `10 02`, `10 01` and `11 01` for a run's own session and nothing else),
+  unlocks in it, reads, and leaves however the run ends: the manifest's
+  `leave` is `default` (`10 01`) or `reset` (`11 01`), and an extended
+  plan stays as it was (`ecuio_plugin_operation_t.leave`, 0). No `10 03`
+  goes before the `10 02`, so a module that enters programming only from
+  extended refuses it. A programming entry refused ends the run with
+  nothing read; a module answering that it left the session ends it too.
+- **The simulated ECU** reads its code region only in its programming
+  session ([ADR-0046](0046-simulated-ecu.md)), so a plan that skips the
+  entry is refused as a real module would.
+- **The run's lines.** A recording's `events.log` takes an `envelope` line
+  at the checks' end (`<reply ID>,<mV>,<rpm>,<km/h>,<checks>`, `-` for
+  what was not read), which a scrubbed copy keeps. The surrogate's session
+  log and the ELM327 wire log say `run envelope` at the same point and
+  `run battery` once, at the first reading under 11.0 V. A kernel read's
+  sag warns as a dump's.
+- **`havne-cli plugins check`** gives an operation line a `leave` key
+  (`default`, `reset` or null) and lists services `10` for a plan read in
+  the programming session and `11` for one that leaves by a reset.
+- **The ABI.**
+
+  | Change | ABI | Notes |
+  |---|---|---|
+  | `ECUIO_OPERATION_CHECK_VOLTS_SAG` (0x100) | Additive | A new bit in the state's `checks` |
+  | `ECUIO_OPERATION_PARKED`, `_BATTERY_SUPPORT`, the state's `volts_mv`, `volts_min_mv`, `checks`, `waiting_ms`, `rpm`, `kmh`, and the ends `ECUIO_OPERATION_END_ENGINE_RUNNING`, `_MOVING`, `_VOLTAGE_LOW`, `_VOLTAGE_HIGH` | Additive | Names and fields of the checks, in `operation.h`; the state's size stands and `reserved` shrinks |
+  | `ECUIO_OPERATION_LEAVE_DEFAULT` (1), `_LEAVE_RESET` (2) and `ecuio_plugin_operation_t.leave` | Additive | `plugin.h`; `leave` takes a word of `reserved`, the struct's size stands |
+  | `ECUIO_OPERATION_END_VOLTAGE_LOW`'s meaning | Meaning change | A write's battery under 11.5 V at its start, or no reading, not "fell under the run's floor"; the value stands and no #define changes, so no line in `abi/api_changes.txt` |
