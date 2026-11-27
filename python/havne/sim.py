@@ -87,6 +87,9 @@ class Sim:
                       r.fc_us, r.cf_us)
                 for r in out[:count.value]]
 
+    def set_value(self, signal_id, value):
+        check(lib.ecuio_sim_set_value(self._sim, signal_id, float(value)), "ecuio_sim_set_value")
+
     @property
     def stats(self):
         out = e.ecuio_sim_stats_t()

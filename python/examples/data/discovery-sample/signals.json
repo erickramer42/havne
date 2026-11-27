@@ -1,0 +1,150 @@
+{
+  "havne_signals": 1,
+  "name": "Discovery sample",
+  "notes": "Synthetic: the simulated car's enhanced DIDs (mock://?enhanced=1), each read whole as hex beside obd2's PIDs, for discovery's solver. Made by make_discovery_sample.py",
+  "source": {
+    "name": "Written by hand for Havne's examples",
+    "license": "MIT"
+  },
+  "extends": "obd2",
+  "ecus": [
+    {
+      "id": "pcm",
+      "rx": "7E8",
+      "tx": "7E0"
+    },
+    {
+      "id": "tcm",
+      "rx": "7E9",
+      "tx": "7E1"
+    }
+  ],
+  "signals": [
+    {
+      "key": "did_fd00",
+      "name": "DID FD00",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD00"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd01",
+      "name": "DID FD01",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD01"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd02",
+      "name": "DID FD02",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD02"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd03",
+      "name": "DID FD03",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD03"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd04",
+      "name": "DID FD04",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD04"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd05",
+      "name": "DID FD05",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD05"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd06",
+      "name": "DID FD06",
+      "ecu": "pcm",
+      "read": {
+        "service": "22",
+        "number": "FD06"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd80",
+      "name": "DID FD80",
+      "ecu": "tcm",
+      "read": {
+        "service": "22",
+        "number": "FD80"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    },
+    {
+      "key": "did_fd81",
+      "name": "DID FD81",
+      "ecu": "tcm",
+      "read": {
+        "service": "22",
+        "number": "FD81"
+      },
+      "field": {
+        "byte": 0
+      },
+      "kind": "hex",
+      "group": "diagnostics"
+    }
+  ]
+}

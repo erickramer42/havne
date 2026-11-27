@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/wanted-list.schema.json",
+  "title": "Havne wanted list",
+  "description": "The signals discovery looks for first, in packs a user picks: each signal's unit, class, plausible range, common encodings, the references and recognizers that find it, and the drive conditions that reveal it. Generic: no make, model or manufacturer's identifier.",
+  "$comment": "python/tests/test_wanted_list.py checks what a schema can't: each recognizer and condition named is declared, keys are unique across packs, a pair_of names a signal of the list, and each encoding's span reaches the signal's range.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["wanted_list", "recognizers", "conditions", "packs"],
+  "properties": {
+    "wanted_list": {"const": 1},
+    "recognizers": {"$ref": "#/$defs/meanings"},
+    "conditions": {"$ref": "#/$defs/meanings"},
+    "packs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "name", "signals"],
+        "properties": {
+          "key": {"$ref": "#/$defs/key"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 31},
+          "signals": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/signal"}}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "key": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,47}$"},
+    "meanings": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"$ref": "#/$defs/key"},
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 240}
+    },
+    "encoding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bits", "signed", "scale", "offset"],
+      "properties": {
+        "bits": {"type": "integer", "minimum": 1, "maximum": 32},
+        "signed": {"type": "boolean"},
+        "scale": {"type": "number", "not": {"const": 0}},
+        "offset": {"type": "number"}
+      }
+    },
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "unit", "class", "range", "encodings", "references", "recognizers", "conditions"],
+      "properties": {
+        "key": {"$ref": "#/$defs/key"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 31},
+        "unit": {"type": "string", "maxLength": 15},
+        "class": {"enum": ["temperature", "pressure", "speed", "angle", "ratio", "boolean", "counter", "percent", "voltage", "flow", "time", "torque"]},
+        "range": {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+        "encodings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/encoding"}},
+        "references": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(obd2|adapter|phone)\\.[a-z0-9_]+$"}},
+        "recognizers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/key"}},
+        "conditions": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/key"}},
+        "per": {"enum": ["cylinder", "bank"]},
+        "pair_of": {"$ref": "#/$defs/key"},
+        "notes": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    }
+  }
+}

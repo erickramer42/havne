@@ -8,7 +8,7 @@
 # ADR-0063, ADR-0066):
 # - every committed signal file, condition file, plugin manifest (a
 #   folder's or packed), a folder plugin's data files and value-fixture
-#   files validate;
+#   files validate, and the wanted list (python/havne/data/);
 # - each file in tests/fixtures/schema/ (and tests/fixtures/signals/
 #   refused.json) fails validation at the rule its table entry names, and
 #   with havne-cli given, its check refuses the file in the words named;
@@ -823,7 +823,8 @@ def main():
     root = sys.argv[1]
     fixtures = os.path.join(root, "tests", "fixtures")
     schemas = {}
-    for name in ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file"):
+    for name in ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file",
+                 "wanted-list"):
         with open(os.path.join(root, "schema", name + ".schema.json"), encoding="utf-8") as f:
             schemas[name] = json.load(f)
         jsonschema.Draft202012Validator.check_schema(schemas[name])
@@ -881,6 +882,8 @@ def main():
             validate("page-file", os.path.join(folder, rel))
     for path in sorted(glob.glob(os.path.join(fixtures, "plugins", "*.json"))):
         validate("plugin-manifest", path)
+
+    validate("wanted-list", os.path.join(root, "python", "havne", "data", "wanted-list.json"))
 
     cli = None
     scratch = tempfile.mkdtemp(prefix="havne-schema-")

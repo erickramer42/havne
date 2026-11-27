@@ -338,6 +338,12 @@ def build(version, library, out, tag="auto", surrogates=None, package_dir=None,
         if entry.endswith(".py") and os.path.isfile(path):
             with open(path, "rb") as f:
                 files.append((f"{NAME}/{entry}", f.read(), False))
+    data_dir = os.path.join(package_dir, "data")
+    for entry in sorted(os.listdir(data_dir)) if os.path.isdir(data_dir) else []:
+        path = os.path.join(data_dir, entry)
+        if entry.endswith(".json") and os.path.isfile(path):
+            with open(path, "rb") as f:
+                files.append((f"{NAME}/data/{entry}", f.read(), False))
     if not any(n == f"{NAME}/__init__.py" for n, _, _ in files):
         raise Refused(f"{package_dir} has no __init__.py")
     if kind == "pe":
@@ -575,9 +581,11 @@ def selftest():
     with tempfile.TemporaryDirectory() as d:
         pkg = os.path.join(d, "havne")
         os.makedirs(os.path.join(pkg, "__pycache__"))
+        os.makedirs(os.path.join(pkg, "data"))
         for name, text in (("__init__.py", "from ._version import __version__\n"),
                            ("_version.py", '__version__ = "0.6.0"\n'), ("notes.txt", "no\n"),
-                           ("__pycache__/x.pyc", "no\n")):
+                           ("__pycache__/x.pyc", "no\n"), ("data/list.json", "{}\n"),
+                           ("data/notes.txt", "no\n")):
             with open(os.path.join(pkg, name), "w", encoding="utf-8") as f:
                 f.write(text)
         lic = os.path.join(d, "LICENSE")
@@ -601,6 +609,8 @@ def selftest():
             check("havne/libecuio.so.0.6" in names and "havne/notes.txt" not in names and
                   not any("__pycache__" in n for n in names),
                   "the library under its SONAME, the .py files only")
+            check("havne/data/list.json" in names and "havne/data/notes.txt" not in names,
+                  "data/'s .json files and nothing else of it")
             rows = z.read("havne-0.6.0.dist-info/RECORD").decode().splitlines()
             ok = all(_record_hash(z.read(r.split(",")[0])) == r.split(",")[1]
                      for r in rows if not r.endswith(",,"))

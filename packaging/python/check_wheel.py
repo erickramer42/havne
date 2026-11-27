@@ -48,6 +48,10 @@ with tempfile.TemporaryDirectory() as t:
     assert havne.export_pcapng(t / "rec", t / "bus.pcapng").frames == 1
     assert havne.health_report(t / "rec", t / "health.txt", "text").source == "recording"
 print("export and health report through the wheel")
+import importlib.resources, json
+wanted = json.loads(importlib.resources.files(havne).joinpath("data/wanted-list.json").read_text("utf-8"))
+assert wanted["wanted_list"] == 1 and wanted["packs"], "the wanted list in the wheel"
+print("the wanted list through the wheel")
 for fake in sys.argv[1:]:
     with havne.Session("j2534://" + fake.replace("\\", "/")) as s:
         assert s.info.backend == havne.c.ECUIO_BACKEND_J2534_SURROGATE
