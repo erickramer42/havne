@@ -203,7 +203,8 @@ inline uint32_t checks_of(const session_run& o)
            (v.from_ecu ? ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU : 0u) |
            (v.low_warn ? ECUIO_OPERATION_CHECK_VOLTS_LOW : 0u) |
            (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u) |
-           (v.sagged ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u);
+           (v.sagged ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u) |
+           (o.r.ident_unread ? ECUIO_OPERATION_CHECK_IDENT_UNREAD : 0u);
 }
 
 /* The view follows the machine: taken under the lock only when it moved.
@@ -705,6 +706,10 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
             o.quiet_out = true;
         } else if (a == run_action::send) {
             offer(o, e, q, now_us);
+        } else if (a == run_action::leave && own_leave(o, e, now_us)) {
+            left(r);
+        } else if (a == run_action::leave) {
+            break; /* the leave runs */
         } else if (a == run_action::enter) {
             enter(s, o, e, now_us);
             if (r.at == run_stage::enter) {
@@ -744,7 +749,7 @@ inline void on_frame(ecuio_session_t* s, const ecuio_request_engine* e,
             end == ecuio_talk_end::refused && len == 3 &&
             (bytes[2] == ECUIO_NRC_NOT_IN_ACTIVE_SESSION ||
              bytes[2] == ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION);
-        if (left) {
+        if (left && !may_go_unread(o->r)) {
             stop(o->r, run_end::session_lost, bytes[2]);
         } else {
             (void)reply(o->r, bytes, len, 0, *o->sink);

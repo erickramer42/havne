@@ -202,6 +202,9 @@ struct Drive {
             case run_action::send:
                 send(q);
                 break;
+            case run_action::leave:
+                ecuio_operation::left(r);
+                break;
             }
         }
         ADD_FAILURE() << "the run never ended";
