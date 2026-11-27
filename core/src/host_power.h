@@ -7,7 +7,7 @@
 
 namespace host_power {
 
-constexpr int kWriteLeastPercent = 30;
+constexpr int kWriteStopPercent = 10;
 
 struct reading {
     bool known = false;
@@ -52,12 +52,12 @@ inline reading judge_supplies(const supply* s, size_t n)
     return r;
 }
 
-/* A write off mains under kWriteLeastPercent stops; any run off mains is
+/* A write off mains under kWriteStopPercent stops; any run off mains is
  * told so */
 inline bool write_stops(const reading& r)
 {
     return r.known && !r.mains && r.percent >= 0 &&
-           r.percent < kWriteLeastPercent;
+           r.percent < kWriteStopPercent;
 }
 
 inline bool off_mains(const reading& r)

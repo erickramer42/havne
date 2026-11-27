@@ -702,7 +702,7 @@ TEST(SimEcuTest, SessionControlEntersKeepsAndLeaves)
         << "the suppress bit: no reply";
     EXPECT_TRUE(handled);
     EXPECT_TRUE(s.extended) << "and the session kept";
-    EXPECT_EQ(call(true, 3000000, {0x10, 0x02}),
+    EXPECT_EQ(call(true, 3000000, {0x10, 0x05}),
               (std::vector<uint8_t>{0x7F, 0x10, 0x12}));
     EXPECT_EQ(call(true, 3000000, {0x10}),
               (std::vector<uint8_t>{0x7F, 0x10, 0x13}));

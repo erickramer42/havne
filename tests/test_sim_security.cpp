@@ -377,7 +377,7 @@ TEST(SimSecurityTest, AStrictEcuWantsItsKeyStraightAfterItsSeed)
     /* A node: tester present, a read, a session request each come between;
      * another 27 doesn't */
     for (const Bytes& between : {Bytes{0x3E, 0x00}, Bytes{0x3E, 0x80}, kD210,
-                                 Bytes{0x01, 0x0C}, Bytes{0x10, 0x02}}) {
+                                 Bytes{0x01, 0x0C}, Bytes{0x10, 0x05}}) {
         Node n;
         n.s.security.strict = true;
         n.ask({0x10, 0x03});
@@ -424,7 +424,7 @@ TEST(SimSecurityTest, EverySessionEnteredOrLeftLocksIt)
     n.ask({0x10, 0x03});
     n.unlock();
     EXPECT_EQ(n.ask({0x3E, 0x00}), (Bytes{0x7E, 0x00}));
-    EXPECT_EQ(n.ask({0x10, 0x02}), (Bytes{0x7F, 0x10, 0x12}));
+    EXPECT_EQ(n.ask({0x10, 0x05}), (Bytes{0x7F, 0x10, 0x12}));
     EXPECT_EQ(n.ask(kD210), kD210Data) << "a keep-alive and a refused session";
 
     EXPECT_EQ(n.ask({0x10, 0x03}), kEntered);

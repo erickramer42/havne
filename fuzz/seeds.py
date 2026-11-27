@@ -666,6 +666,10 @@ def main(argv):
                                   enter, did],
         "default-session": [b"\x27\x01", did, b"\x3E\x00", b"\x27"],
         "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
+        "programming-code-region": [b"\x10\x02", b"\x27\x01", sim_key(0x01),
+                                    b"\x23\x24\x00\x08\x00\x00\x00\x10",
+                                    b"\x11\x01",
+                                    b"\x23\x24\x00\x08\x00\x00\x00\x10"],
     }.items():
         write(out, "fuzz_sim", name, sim_run(0x02, requests))
     # Its URIs (an odd first byte): faults and timing for every module and

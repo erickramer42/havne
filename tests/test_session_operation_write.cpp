@@ -76,14 +76,14 @@ TEST(HostPowerTest, TheSuppliesSayMainsOrTheBatterysPercent)
         << "the emptier battery";
 }
 
-TEST(HostPowerTest, AWriteStopsOffMainsUnderThirtyPercent)
+TEST(HostPowerTest, AWriteStopsOffMainsUnderItsStopPercent)
 {
     host_power::reading r;
     r.known = true;
     r.mains = false;
-    r.percent = 29;
+    r.percent = host_power::kWriteStopPercent - 1;
     EXPECT_TRUE(host_power::write_stops(r));
-    r.percent = 30;
+    r.percent = host_power::kWriteStopPercent;
     EXPECT_FALSE(host_power::write_stops(r));
     EXPECT_TRUE(host_power::off_mains(r));
     r.percent = -1;
@@ -224,17 +224,17 @@ TEST(SessionOperationTest, AWritesSagThroughTheRunGoesOn)
 TEST(SessionOperationTest, TheHostsPowerStopsAWriteAndWarnsADump)
 {
     {
-        const HostPower power(0, 29);
+        const HostPower power(0, 9);
         const WriteClass write;
         Bench b;
         ASSERT_NO_FATAL_FAILURE(b.start());
         EXPECT_EQ(start_write(b), ECUIO_ERR_INVALID_ARGUMENT);
         EXPECT_STREQ(ecuio_last_error_detail(),
-                     "plug the computer in: it runs on its battery at 29%");
+                     "plug the computer in: it runs on its battery at 9%");
         EXPECT_EQ(b.state().generation, 0u);
     }
     {
-        const HostPower power(0, 30);
+        const HostPower power(0, 10);
         const WriteClass write;
         Bench b;
         ASSERT_NO_FATAL_FAILURE(b.start());
