@@ -203,7 +203,8 @@ add_executable(test_obd2 test_obd2.cpp
     test_scan_retry.cpp test_security_access.cpp test_conversation.cpp
     test_conversation_requests.cpp test_operation_run.cpp
     test_operation_checks.cpp test_sim_programming.cpp
-    test_sim_kernel_session.cpp test_operation_kernel_run.cpp)
+    test_sim_kernel_session.cpp test_operation_kernel_run.cpp
+    test_sim_flash.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src

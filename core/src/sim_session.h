@@ -10,6 +10,7 @@
 #define ECUIO_SIM_SESSION_H
 
 #include "sim_types.h"
+#include "sim_flash.h"
 #include "sim_kernel.h"
 #include "sim_memory.h"
 #include "sim_security.h"
@@ -28,6 +29,7 @@ struct ecuio_sim_session {
     ecuio_sim_security security;
     ecuio_sim_memory memory; /* answers where its vin is set */
     ecuio_sim_kernel kernel; /* kernel=: region B through a helper alone */
+    ecuio_sim_flash flash;   /* flash=: region B erased and written */
 };
 
 static_assert(ECUIO_SIM_MEMORY_REPLY_MAX == ECUIO_SIM_REPLY_MAX,
@@ -60,6 +62,7 @@ inline void ecuio_sim_session_enter(ecuio_sim_session& s, uint8_t session)
     ecuio_sim_security_lock(s.security);
     ecuio_sim_memory_end(s.memory);
     ecuio_sim_kernel_end(s.kernel);
+    ecuio_sim_flash_end(s.flash);
 }
 
 /* S3 of silence at the ECU's time now_us leaves the extended session,
@@ -138,6 +141,11 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
     if (s.kernel.running && s.kernel.faults.silent) {
         *handled = true;
         return 0;
+    }
+    if (s.memory.vin != nullptr && ecuio_sim_flash_service(s.flash, req, len)) {
+        *handled = true;
+        return ecuio_sim_flash_answer(s.flash, s.memory, s.security,
+                                      s.programming, req, len, out);
     }
     if (s.memory.vin != nullptr && len > 0 &&
         ecuio_sim_kernel_service(s.kernel, req)) {

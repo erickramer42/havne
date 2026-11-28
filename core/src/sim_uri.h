@@ -277,6 +277,22 @@ inline taken take_kernel(const ecuio_uri::param& p, ecuio_sim_config* out,
     return taken::bad;
 }
 
+inline taken take_flash(const ecuio_uri::param& p, ecuio_sim_config* out,
+                        char* why, size_t why_cap)
+{
+    if (!p.is("flash")) {
+        return taken::other;
+    }
+    if (ecuio_sim_parse_flash(p.val, p.val_len, &out->flash,
+                              &out->flash_faults)) {
+        return taken::ok;
+    }
+    std::snprintf(why, why_cap,
+                  "flash takes 1, or counter, general, volts, check, erase "
+                  "and silent, comma-separated");
+    return taken::bad;
+}
+
 /* One key, through each group in turn: a key belongs to one group only,
  * so their order changes nothing */
 inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
@@ -285,9 +301,9 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
     using reader =
         taken (*)(const ecuio_uri::param&, ecuio_sim_config*, char*, size_t);
     static const reader kReaders[] = {
-        take_mock_shape,  take_profile, take_vin,
-        take_replay_span, take_faults,  take_timing,
-        take_gateway,     take_memory,  take_kernel};
+        take_mock_shape, take_profile, take_vin,     take_replay_span,
+        take_faults,     take_timing,  take_gateway, take_memory,
+        take_kernel,     take_flash};
     for (const reader r : kReaders) {
         const taken t = r(p, out, why, why_cap);
         if (t != taken::other) {
@@ -302,7 +318,7 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 /* The simulated ECU's URI into *out:
  *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
  *          [&timing][&gateway][&behind][&route][&sa][&sa_delay][&gwopt]
- *          [&mem][&kernel]
+ *          [&mem][&kernel][&flash]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
  * where timing is delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h)
  * (ADR-0046 sections 3 and 7, and the appendix "a second module"). why
@@ -332,7 +348,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         "values",     "modules", "sessions", "profile", "vin",   "faults",
         "pending_ms", "delay",   "fc",       "cf",      "seed",  "busy",
         "bus",        "gateway", "behind",   "route",   "gwopt", "sa",
-        "sa_delay",   "mem",     "kernel",   nullptr};
+        "sa_delay",   "mem",     "kernel",   "flash",   nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "pending_ms", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
@@ -361,7 +377,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       replay ? "loop, from, to"
                              : "values, modules, sessions, profile, "
                                "gateway, behind, route, sa, sa_delay, gwopt, "
-                               "mem, kernel");
+                               "mem, kernel, flash");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {

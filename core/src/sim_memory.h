@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 /* A region: its first address and its length */
 struct ecuio_sim_memory_region {
@@ -122,6 +123,8 @@ struct ecuio_sim_memory {
     uint32_t pass = 0;
     uint32_t last = 0; /* the last 23's address, once read is set */
     bool read = false;
+    std::vector<uint8_t>
+        code; /* region B as a flash wrote it; empty: the fill */
 };
 
 /* The diagnostic session changed, or lapsed: an upload ends with it */
@@ -150,6 +153,10 @@ inline uint8_t ecuio_sim_memory_byte(const ecuio_sim_memory& m,
         address - ECUIO_SIM_MEMORY_VIN_ADDRESS < ECUIO_SIM_MEMORY_VIN_BYTES) {
         return static_cast<uint8_t>(
             m.vin[address - ECUIO_SIM_MEMORY_VIN_ADDRESS]);
+    }
+    if (!m.code.empty() && address >= ECUIO_SIM_MEMORY_CODE_ADDRESS &&
+        address - ECUIO_SIM_MEMORY_CODE_ADDRESS < m.code.size()) {
+        return m.code[address - ECUIO_SIM_MEMORY_CODE_ADDRESS];
     }
     return ecuio_sim_memory_fill(address);
 }
