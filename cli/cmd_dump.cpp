@@ -328,6 +328,17 @@ std::string step_name(uint32_t index, uint32_t step)
     return std::string(s.name, strnlen(s.name, sizeof s.name));
 }
 
+uint8_t helper_dfi(uint32_t index)
+{
+    ecuio_plugin_operation_step_t s{};
+    s.struct_size = sizeof s;
+    if (ecuio_plugin_operation_step(g_plugin, index, 0, &s) != ECUIO_OK ||
+        s.kind != ECUIO_STEP_DOWNLOAD) {
+        return 0;
+    }
+    return s.dfi;
+}
+
 struct Watch {
     uint32_t index = 0;
     uint32_t phase = ECUIO_OPERATION_PHASE_NONE;
@@ -345,7 +356,8 @@ void show_warnings(Output& out, const ecuio_operation_state_t& s, Watch* w)
             continue;
         }
         w->warned |= d.bit;
-        const std::string words = cli::dump_warning_words(d.bit, s);
+        const std::string words =
+            cli::dump_warning_words(d.bit, s, helper_dfi(w->index));
         char buf[cli::kDumpLineBytes];
         cli::Line l(buf, sizeof buf);
         cli::warning_line(l, d.word, words);

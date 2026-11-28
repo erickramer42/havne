@@ -275,3 +275,71 @@ TEST(SessionOperationTest, AStartLongerThanTheAdaptersWritesIsRefused)
                  "the helper's start is asked in 20 bytes: this adapter "
                  "carries no write that long");
 }
+
+TEST(SessionOperationTest, EachStartOfAHelperThatEndsShowsAndLogsItsStatus)
+{
+    Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    k.stays = "false";
+    Bench b;
+    b.node.s.kernel.on = true;
+    b.node.s.kernel.faults.once = true;
+    uint8_t status = 0x10;
+    b.script = [&](const Bytes& q, size_t, Answer* a) {
+        if (q.empty() || q[0] != 0x31) {
+            return false;
+        }
+        Bytes reply = b.node.ask(q);
+        if (reply.size() >= 4 && reply[0] == 0x71) {
+            reply.resize(4);
+            reply.push_back(status);
+            status = 0x20;
+        }
+        a->frames = {reply};
+        return true;
+    };
+    ASSERT_NO_FATAL_FAILURE(b.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_EQ(b.node.s.kernel.starts, 2u) << "a start for each pass";
+    EXPECT_EQ(v.routine_status_given, 1);
+    EXPECT_EQ(v.routine_status, 0x20) << "the latest start's";
+    const ecuio_run_lines& l = b.s->run_lines;
+    std::vector<std::string> lines(l.text, l.text + l.count);
+    for (const char* want :
+         {"run helper  started, status 10", "run helper  started, status 20"}) {
+        EXPECT_NE(std::find(lines.begin(), lines.end(), want), lines.end())
+            << want;
+    }
+
+    Bench refused;
+    refused.node.s.kernel.on = true;
+    refused.node.s.kernel.faults.once = true;
+    status = 0x10;
+    size_t uploads = 0;
+    refused.script = [&](const Bytes& q, size_t, Answer* a) {
+        if (!q.empty() && q[0] == 0x35 && ++uploads == 2) {
+            a->frames = {Bytes{0x7F, 0x35, 0x22}};
+            return true;
+        }
+        if (q.empty() || q[0] != 0x31) {
+            return false;
+        }
+        Bytes reply = refused.node.ask(q);
+        if (reply.size() >= 4 && reply[0] == 0x71) {
+            reply.resize(4);
+            reply.push_back(status);
+            status = 0x20;
+        }
+        a->frames = {reply};
+        return true;
+    };
+    ASSERT_NO_FATAL_FAILURE(refused.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(refused), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t w = refused.until_ended();
+    ASSERT_EQ(w.end, ECUIO_OPERATION_END_REFUSED) << w.words;
+    EXPECT_EQ(w.routine_status, 0x20)
+        << "the second start's, though nothing else moved before the end";
+}

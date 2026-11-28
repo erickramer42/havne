@@ -74,9 +74,11 @@ TEST(CliDumpLineTest, EachWarningSaysItsReading)
     s.checks = 0;
     EXPECT_EQ(cli::dump_warning_words(ECUIO_OPERATION_CHECK_VOLTS_LOW, s),
               "the battery is low: keep a charger on");
-    EXPECT_EQ(cli::dump_warning_words(ECUIO_OPERATION_CHECK_DFI_CLAIMED, s),
-              "the helper is sent encrypted as the plugin states; Havne "
-              "cannot check its contents");
+    EXPECT_EQ(
+        cli::dump_warning_words(ECUIO_OPERATION_CHECK_DFI_CLAIMED, s, 0x10),
+        "the helper is sent in the data format the plugin states (dfi 10); "
+        "Havne cannot check its contents")
+        << "a high nibble is compression: the words name no method";
     for (const cli::DumpWarning& w : cli::kDumpWarnings) {
         EXPECT_FALSE(cli::dump_warning_words(w.bit, s).empty()) << w.word;
     }

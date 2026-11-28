@@ -227,7 +227,8 @@ inline void publish(ecuio_session_t* s, session_run& o)
     if (v.phase == phase && v.pass == pass && v.step == step &&
         v.bytes_done == o.r.handed && v.checks == checks &&
         v.volts_mv == o.v.mv && v.volts_min_mv == o.v.min_mv &&
-        v.routine_status_given == uint8_t{o.r.h.status_given}) {
+        v.routine_status_given == uint8_t{o.r.h.status_given} &&
+        v.routine_status == o.r.h.status) {
         return;
     }
     const std::lock_guard<std::mutex> lock(s->support_mutex);
@@ -557,10 +558,13 @@ inline void log_dfi(ecuio_session_t* s, const session_run& o)
 
 inline void log_status(ecuio_session_t* s, session_run& o)
 {
-    if (o.status_logged || !o.r.h.status_given) {
+    if (o.status_logged == o.r.h.starts) {
         return;
     }
-    o.status_logged = true;
+    o.status_logged = o.r.h.starts;
+    if (!o.r.h.status_given) {
+        return;
+    }
     if (char* line = log_slot(s)) {
         std::snprintf(line, sizeof s->run_lines.text[0],
                       "run helper  started, status %02X",

@@ -356,7 +356,8 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
     o.cancel.store(false);
     o.r = ecuio_operation::run{};
     o.out = o.fed = o.orphan = o.word_given = o.closed_sink = false;
-    o.checking = o.status_logged = false;
+    o.checking = false;
+    o.status_logged = 0;
     o.talk_at = channel;
     o.sid = 0;
     o.ends_at = 0;

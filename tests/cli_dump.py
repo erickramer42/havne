@@ -227,7 +227,7 @@ def claimed_case(cli, claimed, uri, d):
     if code != 0 or len(dumps) != 1 or dumps[0].get("end") != "saved" \
             or dumps[0].get("routine_status") != "10" \
             or warned.count("dfi_claimed") != 1 \
-            or "cannot check its contents" not in err:
+            or "(dfi 01); Havne cannot check its contents" not in err:
         return f"claimed: exit {code} {dumps!r} {warned!r} {err!r}"
     return None
 
