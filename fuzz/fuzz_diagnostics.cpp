@@ -4,6 +4,7 @@
 #include <ecuio/core.h>
 #include <ecuio/signals.h>
 
+#include "diagnostics.h"
 #include "request_engine.h" /* core/src: the engine, with the time passed in */
 
 #include <math.h>
@@ -87,6 +88,34 @@ void check(const ecuio_request_engine& e)
     for (uint8_t id = 0; id < 16; ++id) {
         if (((in.incomplete_ids >> id) & 1u) != 0 &&
             ecuio_monitor_name(id, in.diag_flags)[0] == '\0') {
+            abort();
+        }
+    }
+}
+
+void check_uds(const uint8_t* data, size_t size,
+               const ecuio_channel_diagnostics_t& d)
+{
+    const uint32_t len = static_cast<uint32_t>(size < 4096 ? size : 4096);
+    ecuio_module_codes_t r{};
+    if (ecuio_diag_take_uds_count(data, len, &r) != (len >= 6) ||
+        ((r.flags & ECUIO_MODULE_CODES_FORMAT) != 0) != (len >= 6)) {
+        abort();
+    }
+    ecuio_diag_take_uds_list(data, len, &r);
+    if (r.held > ECUIO_MODULE_CODES_MAX || r.held > r.reported ||
+        (len >= 3 && r.reported > (len - 3) / 4)) {
+        abort();
+    }
+    for (uint32_t i = 0; i < r.held; ++i) {
+        const ecuio_module_code_t& c = r.codes[i];
+        char text[ECUIO_DTC_UDS_TEXT_LEN];
+        if (c.code > 0xFFFFFFu || (c.code == 0 && c.status == 0) ||
+            ecuio_dtc_format_uds(c.code, r.format, text, sizeof text) !=
+                ECUIO_OK ||
+            strlen(text) != 8 ||
+            (ecuio_module_code_emissions_lists(&d, c.code, r.format) & ~7u) !=
+                0) {
             abort();
         }
     }
@@ -200,5 +229,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     if (memcmp(&a, &b, sizeof a) != 0) {
         abort();
     }
+    check_uds(data, size, a);
     return 0;
 }

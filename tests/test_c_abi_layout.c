@@ -174,6 +174,13 @@ typedef char abi_clear_target_reserved_check[(offsetof(ecuio_clear_target_t, res
 typedef char abi_diag_lists_check[(offsetof(ecuio_channel_diagnostics_t, lists) == 40) ? 1 : -1];
 typedef char abi_diag_monitors_check[(offsetof(ecuio_channel_diagnostics_t, monitors) == 244) ? 1 : -1];
 typedef char abi_diag_freeze_check[(offsetof(ecuio_channel_diagnostics_t, freeze_values) == 296) ? 1 : -1];
+typedef char abi_module_code_size_check[(sizeof(ecuio_module_code_t) == 8) ? 1 : -1];
+typedef char abi_module_codes_size_check[(sizeof(ecuio_module_codes_t) == 1080) ? 1 : -1];
+typedef char abi_module_codes_mask_check[(offsetof(ecuio_module_codes_t, mask) == 16) ? 1 : -1];
+typedef char abi_module_codes_count_check[(offsetof(ecuio_module_codes_t, count) == 24) ? 1 : -1];
+typedef char abi_module_codes_settled_check[(offsetof(ecuio_module_codes_t, settled_us) == 32) ? 1 : -1];
+typedef char abi_module_codes_reserved_check[(offsetof(ecuio_module_codes_t, reserved) == 40) ? 1 : -1];
+typedef char abi_module_codes_codes_check[(offsetof(ecuio_module_codes_t, codes) == 56) ? 1 : -1];
 typedef char abi_display_size_check[(sizeof(ecuio_display_value_t) == 32) ? 1 : -1];
 typedef char abi_display_unit_check[(offsetof(ecuio_display_value_t, unit) == 8) ? 1 : -1];
 typedef char abi_display_decimals_check[(offsetof(ecuio_display_value_t, decimal_places) == 24) ? 1 : -1];

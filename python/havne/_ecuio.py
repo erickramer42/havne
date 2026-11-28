@@ -239,6 +239,20 @@ ECUIO_DROP_ACCESS = 4
 ECUIO_DROP_BITMAP = 1
 ECUIO_DROP_NOT_SUPPORTED = 2
 ECUIO_DROP_SERVICE = 3
+ECUIO_DTC_FORMAT_ISO11992 = 3
+ECUIO_DTC_FORMAT_ISO14229 = 1
+ECUIO_DTC_FORMAT_J1939 = 2
+ECUIO_DTC_FORMAT_J2012 = 0
+ECUIO_DTC_FORMAT_J2012_WWH = 4
+ECUIO_DTC_STATUS_CONFIRMED = 8
+ECUIO_DTC_STATUS_FAILED_SINCE_CLEAR = 32
+ECUIO_DTC_STATUS_FAILED_THIS_CYCLE = 2
+ECUIO_DTC_STATUS_LAMP = 128
+ECUIO_DTC_STATUS_NOT_DONE_SINCE_CLEAR = 16
+ECUIO_DTC_STATUS_NOT_DONE_THIS_CYCLE = 64
+ECUIO_DTC_STATUS_PENDING = 4
+ECUIO_DTC_STATUS_TEST_FAILED = 1
+ECUIO_DTC_UDS_TEXT_LEN = 10
 ECUIO_DUMP_ENTRY_NAME_CUT = 1
 ECUIO_DUMP_ENTRY_NAME_MAX = 0x100
 ECUIO_DUMP_EXPORT_IMAGE = 2
@@ -338,6 +352,13 @@ ECUIO_MERGE_BASE_MODULES = 2
 ECUIO_MERGE_BASE_OBD2 = 1
 ECUIO_MERGE_MAX_PARTS = 16
 ECUIO_MODULE_BASE = 1
+ECUIO_MODULE_CODES_ASKABLE = 1
+ECUIO_MODULE_CODES_COMPLETE = 4
+ECUIO_MODULE_CODES_FORMAT = 8
+ECUIO_MODULE_CODES_MASK_DEFAULT = 175
+ECUIO_MODULE_CODES_MAX = 128
+ECUIO_MODULE_CODES_NOT_OPENED = 16
+ECUIO_MODULE_CODES_READING = 2
 ECUIO_MODULE_MAX_REQUESTS = 0x400
 ECUIO_MODULE_REASON_CONVERSATION = 4
 ECUIO_MODULE_REASON_RANGE = 1
@@ -876,6 +897,12 @@ class ecuio_j2534_handle_t(Structure):
     pass
 
 class ecuio_merge_options_t(Structure):
+    pass
+
+class ecuio_module_code_t(Structure):
+    pass
+
+class ecuio_module_codes_t(Structure):
     pass
 
 class ecuio_monitor_t(Structure):
@@ -1597,6 +1624,32 @@ ecuio_merge_options_t._fields_ = [
     ('flags', c_uint32),
     ('reserved', (c_uint32 * 6)),
 ]
+ecuio_module_code_t._fields_ = [
+    ('code', c_uint32),
+    ('status', c_uint8),
+    ('reserved', (c_uint8 * 3)),
+]
+ecuio_module_codes_t._fields_ = [
+    ('flags', c_uint32),
+    ('rx_id', c_uint32),
+    ('generation', c_uint32),
+    ('read_id', c_uint32),
+    ('mask', c_uint8),
+    ('available', c_uint8),
+    ('format', c_uint8),
+    ('count_outcome', c_uint8),
+    ('count_nrc', c_uint8),
+    ('list_outcome', c_uint8),
+    ('list_nrc', c_uint8),
+    ('reserved0', c_uint8),
+    ('count', c_uint16),
+    ('reported', c_uint16),
+    ('held', c_uint16),
+    ('reserved1', c_uint16),
+    ('settled_us', c_int64),
+    ('reserved', (c_uint32 * 4)),
+    ('codes', (ecuio_module_code_t * 128)),
+]
 ecuio_obdb_note_t._fields_ = [
     ('what', c_uint32),
     ('line', c_uint32),
@@ -2236,10 +2289,15 @@ FUNCTIONS = {
     'ecuio_diag_inspect': (c_int, [POINTER(ecuio_channel_diagnostics_t), c_uint32, c_uint32, POINTER(ecuio_inspection_t)]),  # core.h
     'ecuio_display_convert': (c_int, [c_char_p, c_uint8, c_double, c_uint32, POINTER(ecuio_display_value_t)]),  # signals.h
     'ecuio_dtc_format': (c_int, [c_uint16, c_char_p, c_uint32]),  # core.h
+    'ecuio_dtc_format_uds': (c_int, [c_uint32, c_uint8, c_char_p, c_uint32]),  # core.h
     'ecuio_dtc_parse': (c_int, [c_char_p, POINTER(c_uint16)]),  # core.h
+    'ecuio_dtc_status_class': (c_char_p, [c_uint8]),  # core.h
+    'ecuio_dtc_status_lamp': (c_int, [c_uint8]),  # core.h
+    'ecuio_dtc_status_state': (c_char_p, [c_uint8]),  # core.h
     'ecuio_dtc_title': (c_char_p, [c_uint16]),  # core.h
     'ecuio_dtc_title_notice': (c_char_p, []),  # core.h
     'ecuio_dtc_title_source': (c_char_p, []),  # core.h
+    'ecuio_dtc_title_uds': (c_char_p, [c_uint32, c_uint8]),  # core.h
     'ecuio_dump_close': (None, [POINTER(ecuio_dump_t)]),  # dump.h
     'ecuio_dump_export': (c_int, [POINTER(ecuio_dump_t), c_uint32, c_char_p, ecuio_cancel_t, c_void_p, POINTER(ecuio_dump_export_result_t)]),  # dump.h
     'ecuio_dump_get_calibration': (c_int, [POINTER(ecuio_dump_t), c_uint32, POINTER(ecuio_dump_calibration_t)]),  # dump.h
@@ -2272,6 +2330,7 @@ FUNCTIONS = {
     'ecuio_j2534_open': (c_int, [POINTER(ecuio_j2534_device_t), POINTER(POINTER(ecuio_j2534_handle_t))]),  # j2534.h
     'ecuio_last_error_detail': (c_char_p, []),  # core.h
     'ecuio_mock_signal_set': (POINTER(ecuio_signal_set_t), []),  # signals.h
+    'ecuio_module_code_emissions_lists': (c_uint32, [POINTER(ecuio_channel_diagnostics_t), c_uint32, c_uint8]),  # core.h
     'ecuio_monitor_name': (c_char_p, [c_uint8, c_uint32]),  # core.h
     'ecuio_monitor_short_name': (c_char_p, [c_uint8, c_uint32]),  # core.h
     'ecuio_obd2_signal_set': (POINTER(ecuio_signal_set_t), []),  # signals.h
