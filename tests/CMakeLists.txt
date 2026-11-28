@@ -1331,7 +1331,7 @@ if(TARGET havne-cli)
         # havne-cli's check alike, and edge cases get one verdict from
         # both; skipped without jsonschema unless ECUIO_SCHEMA_REQUIRED
         add_test(NAME SchemaFixturesTest.TheSchemasAndTheLoadersAgree
-            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_fixtures.py
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/schema_fixtures_run.py
                     ${CMAKE_SOURCE_DIR} $<TARGET_FILE:havne-cli>)
         set_tests_properties(SchemaFixturesTest.TheSchemasAndTheLoadersAgree
             PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
