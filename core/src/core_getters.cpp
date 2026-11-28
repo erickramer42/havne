@@ -398,7 +398,8 @@ ecuio_session_clear_diagnostics_set(ecuio_session_t* session,
         }
         for (uint32_t k = 0; k < count; ++k) {
             if (ecuio_module_part_written(session, targets[k].channel)) {
-                return ecuio_refuse_part_written();
+                return ecuio_refuse_part_written_held(session,
+                                                      targets[k].channel);
             }
         }
         for (uint32_t k = 0; k < count; ++k) {

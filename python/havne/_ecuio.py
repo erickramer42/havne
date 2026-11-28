@@ -407,6 +407,7 @@ ECUIO_OPERATION_END_LINK_LOST = 9
 ECUIO_OPERATION_END_MOVING = 13
 ECUIO_OPERATION_END_NONE = 0
 ECUIO_OPERATION_END_NO_ANSWER = 4
+ECUIO_OPERATION_END_RECOVERED = 19
 ECUIO_OPERATION_END_RECOVERY_NEEDED = 18
 ECUIO_OPERATION_END_REFUSED = 3
 ECUIO_OPERATION_END_SAVED = 1
@@ -435,6 +436,7 @@ ECUIO_OPERATION_PHASE_SAVING = 6
 ECUIO_OPERATION_PHASE_UNLOCKING = 3
 ECUIO_OPERATION_PHASE_VERIFYING = 11
 ECUIO_OPERATION_PHASE_WRITING = 10
+ECUIO_OPERATION_RECOVER = 8
 ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
@@ -527,6 +529,12 @@ ECUIO_RECORDING_STRETCH_CUT_START = 8
 ECUIO_RECORDING_STRETCH_NO_THROTTLE = 4
 ECUIO_RECORDING_STRETCH_PULL = 1
 ECUIO_RECORD_ARMED = 1
+ECUIO_RECOVERY_COPY_PINNED = 1
+ECUIO_RECOVERY_NEEDED = 1
+ECUIO_RECOVERY_NONE = 0
+ECUIO_RECOVERY_NOTHING_ERASED = 2
+ECUIO_RECOVERY_RECOVERED = 3
+ECUIO_RECOVERY_UNREADABLE = 2
 ECUIO_REFERENCE_ID = 0
 ECUIO_REFERENCE_KEY = 1
 ECUIO_SERIAL_DEVICE_LEN = 128
@@ -915,6 +923,9 @@ class ecuio_module_code_t(Structure):
     pass
 
 class ecuio_module_codes_t(Structure):
+    pass
+
+class ecuio_module_recovery_t(Structure):
     pass
 
 class ecuio_monitor_t(Structure):
@@ -1667,6 +1678,17 @@ ecuio_module_codes_t._fields_ = [
     ('settled_us', c_int64),
     ('reserved', (c_uint32 * 4)),
     ('codes', (ecuio_module_code_t * 128)),
+]
+ecuio_module_recovery_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('state', c_uint32),
+    ('flags', c_uint32),
+    ('attempts', c_uint32),
+    ('operation', c_uint32),
+    ('sectors', c_uint16),
+    ('sectors_written', c_uint16),
+    ('words', (c_char * 160)),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_obdb_note_t._fields_ = [
     ('what', c_uint32),
@@ -2474,12 +2496,14 @@ FUNCTIONS = {
     'ecuio_session_get_info': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_info_t)]),  # core.h
     'ecuio_session_get_module': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_decl_t)]),  # profile.h
     'ecuio_session_get_module_codes': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_module_codes_t)]),  # core.h
+    'ecuio_session_get_module_recovery': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_module_recovery_t)]),  # operation.h
     'ecuio_session_get_operation': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_state_t)]),  # operation.h
     'ecuio_session_get_replay_faults': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_replay_faults_t)]),  # core.h
     'ecuio_session_get_timing': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_timing_t), POINTER(ecuio_request_timing_t), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unasked_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unsplit_replies': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint64)]),  # profile.h
     'ecuio_session_get_unsupported_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
+    'ecuio_session_journal_folder': (c_int, [POINTER(ecuio_session_t), c_char_p]),  # operation.h
     'ecuio_session_keep_awake': (c_int, [POINTER(ecuio_session_t), c_uint32, c_char_p]),  # core.h
     'ecuio_session_operation_cancel': (c_int, [POINTER(ecuio_session_t)]),  # operation.h
     'ecuio_session_operation_start': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_request_t), c_char_p]),  # operation.h

@@ -102,6 +102,7 @@ add_library(ecuio-core STATIC
     src/operation_journal.cpp
     src/core_operation.cpp
     src/core_operation_flash.cpp
+    src/core_recovery.cpp
     src/core_consent.cpp
     src/security_store_owner.cpp
     src/conversation.cpp

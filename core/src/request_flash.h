@@ -16,7 +16,8 @@ inline uint32_t flash_end_code(const session_run& o)
         return end_code(o.r.result);
     }
     if (f.result == flash_end::written) {
-        return ECUIO_OPERATION_END_WRITTEN;
+        return o.recover ? ECUIO_OPERATION_END_RECOVERED
+                         : ECUIO_OPERATION_END_WRITTEN;
     }
     if (f.result == flash_end::check_failed) {
         return ECUIO_OPERATION_END_CHECK_FAILED;
@@ -56,8 +57,8 @@ inline const char* flash_cause(const flash_run& f)
     }
 }
 
-inline void flash_words(const session_run& o, uint32_t end, char* out,
-                        size_t cap)
+inline void flash_words_of(const session_run& o, uint32_t end, char* out,
+                           size_t cap)
 {
     const flash_run& f = o.f;
     if (f.result == flash_end::none) {
@@ -67,7 +68,13 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
                       "written and checked, but %.70s: the next flash of this "
                       "module is refused while it says writing",
                       o.journal.words());
-    } else if (end == ECUIO_OPERATION_END_WRITTEN) {
+    } else if (end == ECUIO_OPERATION_END_RECOVERED && o.journal.failed()) {
+        std::snprintf(out, cap,
+                      "recovered and checked, but %.70s: the next connect "
+                      "holds this module while it says writing",
+                      o.journal.words());
+    } else if (end == ECUIO_OPERATION_END_WRITTEN ||
+               end == ECUIO_OPERATION_END_RECOVERED) {
         std::snprintf(out, cap, "%s", "");
     } else if (end == ECUIO_OPERATION_END_CHECK_FAILED && !f.floor) {
         std::snprintf(out, cap,
@@ -77,16 +84,16 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
     } else if (end == ECUIO_OPERATION_END_CHECK_FAILED) {
         std::snprintf(out, cap,
                       "the module's own check of what was written "
-                      "failed: flash it again before it runs");
+                      "failed: recover the module before it runs");
     } else if (end == ECUIO_OPERATION_END_RECOVERY_NEEDED && f.nrc != 0) {
         std::snprintf(out, cap,
                       "the flash stopped after it began writing (%s, code "
-                      "%02X): flash the module again before it runs",
+                      "%02X): recover the module before it runs",
                       flash_cause(f), f.nrc);
     } else if (end == ECUIO_OPERATION_END_RECOVERY_NEEDED) {
         std::snprintf(out, cap,
-                      "the flash stopped after it began writing (%s): flash "
-                      "the module again before it runs",
+                      "the flash stopped after it began writing (%s): "
+                      "recover the module before it runs",
                       flash_cause(f));
     } else if (end == ECUIO_OPERATION_END_FILE) {
         std::snprintf(out, cap, "%.138s: nothing was written",
@@ -94,6 +101,48 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
     } else {
         std::snprintf(out, cap, "%s: nothing was written", flash_cause(f));
     }
+}
+
+inline void flash_words(const session_run& o, uint32_t end, char* out,
+                        size_t cap)
+{
+    char words[sizeof o.view.words];
+    flash_words_of(o, end, words, sizeof words);
+    if (!o.recover || end == ECUIO_OPERATION_END_RECOVERED || o.f.floor) {
+        std::snprintf(out, cap, "%s", words);
+        return;
+    }
+    std::snprintf(out, cap,
+                  "%.90s; the module is still part-written: recover it "
+                  "again before it runs",
+                  words);
+}
+
+inline void flash_report(ecuio_session_t* s, const session_run& o, bool written,
+                         bool held)
+{
+    if ((!o.recover && !held) || o.channel >= ECUIO_MAX_CHANNELS) {
+        return;
+    }
+    const std::lock_guard<std::mutex> lock(s->support_mutex);
+    ecuio_module_recovery_t& r = s->recovery[o.channel];
+    const uint32_t operation = o.operation;
+    r = ecuio_module_recovery_t{};
+    r.operation = operation;
+    r.attempts = o.attempts;
+    r.sectors = static_cast<uint16_t>(o.journal_sectors);
+    r.flags = o.copy_pinned ? ECUIO_RECOVERY_COPY_PINNED : 0u;
+    if (written) {
+        r.state = ECUIO_RECOVERY_RECOVERED;
+        r.sectors_written = r.sectors;
+        return;
+    }
+    r.state = ECUIO_RECOVERY_NEEDED;
+    r.sectors_written =
+        static_cast<uint16_t>(o.journal_base + o.f.done_sectors);
+    std::snprintf(r.words, sizeof r.words, "%s",
+                  "a flash of this module didn't finish: recover it before "
+                  "it runs");
 }
 
 /* The flash's request offered as the channel's talk, a write */
@@ -149,7 +198,8 @@ inline bool flash_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
     case flash_action::journal: {
         journal_mark m;
         m.state = journal_state::writing;
-        m.written = f.done_sectors;
+        m.written = o.journal_base + f.done_sectors;
+        m.erased = m.written + (f.at == flash_stage::erase ? 1u : 0u);
         o.journal.post(m);
         flash_journaled(f);
         return true;
@@ -175,10 +225,12 @@ inline void flash_finish(ecuio_session_t* s, session_run& o,
     }
     const flash_run& f = o.f;
     const bool written = f.result == flash_end::written;
-    if (!o.journal_closed && o.journal.is_open() && (written || !f.floor)) {
+    const bool held = !written && (f.floor || o.recover);
+    if (!o.journal_closed && o.journal.is_open() && !held) {
         journal_mark m;
         m.state = written ? journal_state::done : journal_state::ready;
-        m.written = f.done_sectors;
+        m.written = o.journal_base + f.done_sectors;
+        m.erased = m.written;
         o.journal.post(m);
     }
     o.journal_closed = true;
@@ -190,10 +242,15 @@ inline void flash_finish(ecuio_session_t* s, session_run& o,
             return;
         }
     } else {
-        e->chans[o.channel].part_written = true;
-        s->part_written.fetch_or(1u << o.channel);
         o.own = own_step::left;
     }
+    if (held) {
+        e->chans[o.channel].part_written = true;
+        s->part_written.fetch_or(1u << o.channel);
+    } else if (o.recover) {
+        s->part_written.fetch_and(~(1u << o.channel));
+    }
+    flash_report(s, o, written, held);
     e->operation_hold = false;
     if (ecuio_bound_channel* b = ecuio_bound_channel_of(s, o.channel)) {
         drop_word(*b, o);

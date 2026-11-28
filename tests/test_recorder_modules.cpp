@@ -203,18 +203,20 @@ TEST(RecorderModulesTest, EachEndAndAnEnvelopeHaveTheirWords)
     run_line(m, "copy", ECUIO_OPERATION_END_WRITTEN);
     run_line(m, "copy", ECUIO_OPERATION_END_CHECK_FAILED);
     run_line(m, "copy", ECUIO_OPERATION_END_RECOVERY_NEEDED);
+    run_line(m, "copy", ECUIO_OPERATION_END_RECOVERED);
     m.close();
     EXPECT_EQ(
         kind_lines(m.folder, "envelope"),
         (std::vector<std::string>{"0x7E8,12600,0,0,0x47", "0x7E8,-,-,3,0x8"}));
-    EXPECT_EQ(
-        kind_lines(m.folder, "operation"),
-        (std::vector<std::string>{
-            "dump,copy,0x7E8,6144,engine-running",
-            "dump,copy,0x7E8,6144,moving", "dump,copy,0x7E8,6144,voltage-low",
-            "dump,copy,0x7E8,6144,voltage-high", "dump,copy,0x7E8,6144,written",
-            "dump,copy,0x7E8,6144,check-failed",
-            "dump,copy,0x7E8,6144,recovery-needed"}));
+    EXPECT_EQ(kind_lines(m.folder, "operation"),
+              (std::vector<std::string>{"dump,copy,0x7E8,6144,engine-running",
+                                        "dump,copy,0x7E8,6144,moving",
+                                        "dump,copy,0x7E8,6144,voltage-low",
+                                        "dump,copy,0x7E8,6144,voltage-high",
+                                        "dump,copy,0x7E8,6144,written",
+                                        "dump,copy,0x7E8,6144,check-failed",
+                                        "dump,copy,0x7E8,6144,recovery-needed",
+                                        "dump,copy,0x7E8,6144,recovered"}));
 }
 
 TEST(RecorderModulesTest, ACloseWritesTheRunLinesStillCarried)

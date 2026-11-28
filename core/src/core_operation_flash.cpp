@@ -45,7 +45,90 @@ bool ranges_are_images(const ecuio_dump_t* d, const plan& p)
     return true;
 }
 
+ecuio_status_t recovery_pins(const ecuio_session* s, const plan& p,
+                             const journal_head& h)
+{
+    if (h.fingerprint != ecuio_sha256::hex(s->conversation->fingerprint)) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "the flash was begun by another plugin: recover the "
+                      "module with the plugin that began it");
+    }
+    if (h.operation != p.id) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "the flash was begun by another plan: recover the "
+                      "module with the plan that began it");
+    }
+    bool same = h.images.size() == p.steps.size();
+    for (size_t i = 0; same && i < p.steps.size(); ++i) {
+        same = h.images[i] == ecuio_sha256::hex(p.steps[i].sha256);
+    }
+    if (!same) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "the flash was begun with other images: recover the "
+                      "module with the images it began with");
+    }
+    const std::vector<sector>& plan_sectors = p.writes.sectors;
+    size_t k = 0;
+    for (const sector& c : h.sectors) {
+        while (k < plan_sectors.size() &&
+               (plan_sectors[k].address != c.address ||
+                plan_sectors[k].bytes != c.bytes)) {
+            ++k;
+        }
+        flash_sector f;
+        uint64_t flat = 0;
+        if (k == plan_sectors.size() || !flash_locate(p, c, &f, &flat)) {
+            return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                          "the journal's sectors aren't this plan's");
+        }
+        ++k;
+    }
+    return ECUIO_OK;
+}
+
 } // namespace
+
+ecuio_status_t flash_recovery_journal(const ecuio_session* s, session_run& o,
+                                      const plan& p, const std::string& folder,
+                                      uint32_t* sectors, uint64_t* bytes)
+{
+    journal_record j;
+    std::string why;
+    const journal_found found = journal_load(folder, p.rx_id, &j, &why);
+    if (found == journal_found::failed) {
+        return refuse(ECUIO_ERR_IN_USE, why);
+    }
+    if (found == journal_found::none) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "the folder holds no unfinished flash of this module: "
+                      "there is nothing to recover");
+    }
+    const ecuio_status_t st = recovery_pins(s, p, j.head);
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    const uint32_t from = p.writes.overwrite_safe ? j.mark.written : 0;
+    o.recover_sectors.assign(j.head.sectors.begin() + from,
+                             j.head.sectors.end());
+    *bytes = 0;
+    for (const sector& c : o.recover_sectors) {
+        *bytes += c.bytes;
+    }
+    *sectors = static_cast<uint32_t>(o.recover_sectors.size());
+    o.recover_before = j;
+    ++j.head.recoveries;
+    o.journal_base = from;
+    o.journal_sectors = static_cast<uint32_t>(j.head.sectors.size());
+    o.attempts = j.head.recoveries;
+    o.copy_pinned = !j.head.copy.empty();
+    o.journal.close(false);
+    if (!o.journal.open(folder, std::move(j.head), &why, j.mark)) {
+        return refuse(
+            o.journal.busy() ? ECUIO_ERR_IN_USE : ECUIO_ERR_LOAD_FAILED, why);
+    }
+    o.recover = true;
+    return ECUIO_OK;
+}
 
 ecuio_status_t flash_fits(const plan& p, uint32_t write_bound)
 {
@@ -132,9 +215,14 @@ ecuio_status_t flash_journal(const ecuio_session* s, session_run& o,
                 std::chrono::system_clock::now().time_since_epoch())
                 .count();
     *sectors = n;
+    o.journal_base = 0;
+    o.journal_sectors = n;
+    o.attempts = 0;
+    o.copy_pinned = copy != nullptr;
     o.journal.close(false);
     if (!o.journal.open(folder, std::move(h), &why)) {
-        return refuse(ECUIO_ERR_LOAD_FAILED, why);
+        return refuse(
+            o.journal.busy() ? ECUIO_ERR_IN_USE : ECUIO_ERR_LOAD_FAILED, why);
     }
     return ECUIO_OK;
 }

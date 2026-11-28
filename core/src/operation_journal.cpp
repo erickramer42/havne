@@ -68,6 +68,10 @@ std::string journal_text(const journal_head& h, const journal_mark& m)
     t += ",\n  \"copy\": ";
     t += h.copy.empty() ? std::string("null") : text(h.copy);
     t += ",\n  \"utc\": " + std::to_string(h.utc);
+    t += ",\n  \"erased\": " + std::to_string(m.erased);
+    if (h.recoveries > 0) {
+        t += ",\n  \"recoveries\": " + std::to_string(h.recoveries);
+    }
     t += ",\n  \"images\": [";
     for (size_t i = 0; i < h.images.size(); ++i) {
         t += (i == 0 ? "" : ", ") + text(h.images[i]);
@@ -83,8 +87,126 @@ std::string journal_text(const journal_head& h, const journal_mark& m)
     return t;
 }
 
-journal_found journal_find(const std::string& folder, uint32_t rx,
-                           std::string* why)
+namespace {
+
+using ecuio_json::Type;
+using ecuio_json::Value;
+
+bool hex_value(const Value* v, size_t most, uint64_t* out)
+{
+    if (v == nullptr || v->type != Type::string || v->text.empty() ||
+        v->text.size() > most) {
+        return false;
+    }
+    uint64_t n = 0;
+    for (const char c : v->text) {
+        const int d = c >= '0' && c <= '9'   ? c - '0'
+                      : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                             : -1;
+        if (d < 0) {
+            return false;
+        }
+        n = (n << 4) | static_cast<uint64_t>(d);
+    }
+    *out = n;
+    return true;
+}
+
+bool whole(const Value* v, uint64_t most, uint64_t* out)
+{
+    if (v == nullptr || v->type != Type::number || !(v->number >= 0) ||
+        v->number > static_cast<double>(most) ||
+        v->number != static_cast<double>(static_cast<uint64_t>(v->number))) {
+        return false;
+    }
+    *out = static_cast<uint64_t>(v->number);
+    return true;
+}
+
+/* written sectors come first: a mark counts them from the start */
+bool sectors_of(const Value* list, journal_record* out)
+{
+    if (list == nullptr || list->type != Type::array ||
+        list->items.size() > ECUIO_PLUGIN_MAX_SECTORS) {
+        return false;
+    }
+    bool gap = false;
+    for (const Value& v : list->items) {
+        sector c;
+        uint64_t bytes = 0;
+        const Value* written =
+            v.type == Type::object ? v.find("written") : nullptr;
+        if (written == nullptr || written->type != Type::boolean ||
+            !hex_value(v.find("address"), 8, &c.address) ||
+            !whole(v.find("bytes"), UINT32_MAX, &bytes) || bytes == 0 ||
+            (written->boolean && gap)) {
+            return false;
+        }
+        c.bytes = bytes;
+        gap = gap || !written->boolean;
+        out->mark.written += written->boolean ? 1u : 0u;
+        out->head.sectors.push_back(c);
+    }
+    return true;
+}
+
+bool images_of(const Value* list, journal_head* h)
+{
+    if (list == nullptr || list->type != Type::array ||
+        list->items.size() > ECUIO_PLUGIN_MAX_STEPS) {
+        return false;
+    }
+    for (const Value& i : list->items) {
+        if (i.type != Type::string || i.text.size() != 64) {
+            return false;
+        }
+        h->images.push_back(i.text);
+    }
+    return true;
+}
+
+bool head_of(const Value& root, uint32_t rx, journal_record* out)
+{
+    const Value* operation = root.find("operation");
+    const Value* plugin = root.find("plugin");
+    const Value* copy = root.find("copy");
+    const Value* recoveries = root.find("recoveries");
+    uint64_t at_rx = 0;
+    uint64_t utc = 0;
+    uint64_t n = 0;
+    if (operation == nullptr || operation->type != Type::string ||
+        plugin == nullptr || plugin->type != Type::string ||
+        plugin->text.size() != 64 || !hex_value(root.find("rx"), 8, &at_rx) ||
+        at_rx != rx || copy == nullptr ||
+        (copy->type != Type::string && copy->type != Type::null) ||
+        !whole(root.find("utc"), INT64_MAX, &utc) ||
+        (recoveries != nullptr && !whole(recoveries, UINT32_MAX, &n))) {
+        return false;
+    }
+    journal_head& h = out->head;
+    h.operation = operation->text;
+    h.fingerprint = plugin->text;
+    h.rx = rx;
+    h.copy = copy->type == Type::string ? copy->text : "";
+    h.utc = static_cast<int64_t>(utc);
+    h.recoveries = static_cast<uint32_t>(n);
+    if (!images_of(root.find("images"), &h) ||
+        !sectors_of(root.find("sectors"), out)) {
+        return false;
+    }
+    const uint64_t all = h.sectors.size();
+    uint64_t erased = all;
+    const Value* e = root.find("erased");
+    if (e != nullptr &&
+        (!whole(e, all, &erased) || erased < out->mark.written)) {
+        return false;
+    }
+    out->mark.erased = static_cast<uint32_t>(erased);
+    return true;
+}
+
+journal_found journal_read(const std::string& folder, uint32_t rx,
+                           journal_record* out, std::string* why)
 {
     std::string bytes;
     std::string read_why;
@@ -98,40 +220,65 @@ journal_found journal_find(const std::string& folder, uint32_t rx,
         *why = "the flash journal " + name + " " + read_why;
         return journal_found::failed;
     }
-    ecuio_json::Value root;
+    const std::string unread =
+        "the flash journal " + name +
+        " isn't one this Havne reads: the module may be mid-flash";
+    Value root;
     ecuio_json::Error error;
     ecuio_json::Limits limits;
     limits.max_bytes = kJournalMax;
     limits.max_depth = 4;
-    const ecuio_json::Value* state = nullptr;
-    const ecuio_json::Value* format = nullptr;
+    const Value* state = nullptr;
+    const Value* format = nullptr;
     if (ecuio_json::parse(bytes.data(), bytes.size(), &root, &error, limits) &&
-        root.type == ecuio_json::Type::object) {
+        root.type == Type::object) {
         state = root.find("state");
         format = root.find("havne_journal");
     }
     const bool known = format != nullptr && state != nullptr &&
-                       format->type == ecuio_json::Type::number &&
-                       format->number == 1 &&
-                       state->type == ecuio_json::Type::string;
+                       format->type == Type::number && format->number == 1 &&
+                       state->type == Type::string;
     if (!known) {
-        *why = "the flash journal " + name +
-               " isn't one this Havne reads: the module may be mid-flash";
+        *why = unread;
         return journal_found::failed;
     }
     if (state->text == "writing") {
+        if (out != nullptr && !head_of(root, rx, out)) {
+            *out = journal_record{};
+            *why = unread;
+            return journal_found::failed;
+        }
+        if (out != nullptr) {
+            out->mark.state = journal_state::writing;
+        }
         *why = "the flash journal " + name +
                " says a flash of this module didn't finish: the module may "
                "be mid-flash";
         return journal_found::unfinished;
     }
     if (state->text != "ready" && state->text != "done") {
-        *why = "the flash journal " + name +
-               " isn't one this Havne reads: the module may be mid-flash";
+        *why = unread;
         return journal_found::failed;
     }
     return journal_found::none;
 }
+
+} // namespace
+
+journal_found journal_find(const std::string& folder, uint32_t rx,
+                           std::string* why)
+{
+    return journal_read(folder, rx, nullptr, why);
+}
+
+journal_found journal_load(const std::string& folder, uint32_t rx,
+                           journal_record* out, std::string* why)
+{
+    *out = journal_record{};
+    return journal_read(folder, rx, out, why);
+}
+
+journal_writer::journal_writer() = default;
 
 journal_writer::~journal_writer()
 {
@@ -156,12 +303,27 @@ bool journal_writer::write(const journal_mark& m, std::string* why)
 }
 
 bool journal_writer::open(const std::string& folder, journal_head head,
-                          std::string* why)
+                          std::string* why, const journal_mark& first)
 {
     try {
+        busy_ = false;
         path_ = journal_path(folder, head.rx);
+        if (claim_ == nullptr) {
+            claim_ = std::make_unique<ecuio_files::file_lock>();
+        }
+        const ecuio_files::lock_got got =
+            ecuio_files::lock_file(path_ + ".lock", 0, claim_.get(), why);
+        if (got != ecuio_files::lock_got::locked) {
+            busy_ = got == ecuio_files::lock_got::busy;
+            *why = busy_ ? "another session is flashing or recovering this "
+                           "module from this folder"
+                         : "the flash journal can't be claimed: " + *why;
+            path_.clear();
+            return false;
+        }
         head_ = std::move(head);
-        if (!write(journal_mark{}, why)) {
+        if (!write(first, why)) {
+            claim_->release();
             *why = "the flash journal can't be written: " + *why;
             return false;
         }
@@ -172,7 +334,12 @@ bool journal_writer::open(const std::string& folder, journal_head head,
         thread_ = std::thread(&journal_writer::loop, this);
         return true;
     } catch (const std::exception&) {
-        ecuio_files::remove_file(path_);
+        if (first.state == journal_state::ready) {
+            ecuio_files::remove_file(path_);
+        }
+        if (claim_ != nullptr) {
+            claim_->release();
+        }
         *why = "the flash journal's writer can't start";
         return false;
     }
@@ -233,6 +400,9 @@ void journal_writer::close(bool remove)
         ecuio_files::remove_file(path_);
     }
     path_.clear();
+    if (claim_ != nullptr) {
+        claim_->release();
+    }
 }
 
 } // namespace ecuio_operation

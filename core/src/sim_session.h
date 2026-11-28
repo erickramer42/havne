@@ -63,6 +63,9 @@ inline void ecuio_sim_session_enter(ecuio_sim_session& s, uint8_t session)
     ecuio_sim_memory_end(s.memory);
     ecuio_sim_kernel_end(s.kernel);
     ecuio_sim_flash_end(s.flash);
+    if (session == 0x01) {
+        ecuio_sim_flash_restart(s.flash);
+    }
 }
 
 /* S3 of silence at the ECU's time now_us leaves the extended session,
@@ -105,6 +108,36 @@ inline bool ecuio_sim_kernel_withholds(const ecuio_sim_session& s,
            s.security.unlocked != 0 && ecuio_sim_memory_asks_code(req, len);
 }
 
+/* S3's lapse and the request heard, then flash='s pending, bootloader and
+ * lock, each a 3-byte refusal */
+inline bool ecuio_sim_session_hears(ecuio_sim_session& s, bool secured,
+                                    int64_t now_us, const uint8_t* req,
+                                    uint32_t len, uint8_t* out, bool* handled)
+{
+    using ecuio_sim_detail::refuse;
+    ecuio_sim_session_lapse(s, now_us);
+    s.heard_us = now_us;
+    uint8_t nrc = 0;
+    if (s.memory.vin == nullptr || len == 0) {
+        return false;
+    }
+    if (ecuio_sim_flash_pending(s.flash, now_us)) {
+        nrc = ECUIO_SIM_NRC_PENDING;
+    } else if (ecuio_sim_flash_withholds(s.flash, req, len)) {
+        nrc = ECUIO_SIM_NRC_NOT_SUPPORTED;
+    } else if (secured && len == 2 && req[0] == 0x27 &&
+               (req[1] & 0x01) != 0 && s.flash.on && s.flash.faults.locked &&
+               (s.extended || s.programming)) {
+        nrc = ECUIO_SIM_NRC_ATTEMPTS;
+    }
+    if (nrc == 0) {
+        return false;
+    }
+    *handled = true;
+    (void)refuse(req[0], nrc, out);
+    return true;
+}
+
 /* A physical request at the ECU's time now_us: S3 lapses the session
  * first, then the request counts as heard. Services 10 and 3E are
  * answered here (handled true; the length, 0 for none): 10 03 enters the
@@ -129,8 +162,10 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
                                          bool* handled)
 {
     using namespace ecuio_sim_detail;
-    ecuio_sim_session_lapse(s, now_us);
-    s.heard_us = now_us;
+    if (ecuio_sim_session_hears(s, has_extended && has_security, now_us, req,
+                                len, out, handled)) {
+        return 3;
+    }
     if (has_extended && has_security && len > 0 && req[0] == 0x27) {
         *handled = true;
         return ecuio_sim_security_answer(

@@ -8,6 +8,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "ecuio/operation.h"
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "conversation_registry.h"
@@ -301,8 +302,13 @@ struct ecuio_session {
      * that sends no request. */
     std::atomic<uint32_t> modules_closed{0};
     std::atomic<uint32_t> modules_no_room{0};
-    /* a flash's modules left part-written: never cleared until close */
+    /* a flash's modules left part-written, or held by a journal at start;
+     * a recovery clears its own */
     std::atomic<uint32_t> part_written{0};
+    /* ecuio_session_journal_folder's, set before start */
+    std::string journal_folder;
+    /* each module's, under support_mutex */
+    ecuio_module_recovery_t recovery[ECUIO_MAX_CHANNELS] = {};
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

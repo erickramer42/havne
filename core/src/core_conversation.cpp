@@ -276,10 +276,10 @@ ecuio_status_t judge(ecuio_session_t* s, ecuio_bound_channel& b, uint8_t level,
 
 } // namespace
 
-ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
-                                         ecuio_bound_channel& b,
-                                         uint32_t channel, uint8_t level,
-                                         uint32_t* out_wait_ms)
+ecuio_status_t ecuio_session_unlock_judge(ecuio_session_t* session,
+                                          ecuio_bound_channel& b,
+                                          uint32_t channel, uint8_t level,
+                                          uint32_t* out_wait_ms)
 {
     uint32_t generation = 0;
     {
@@ -288,15 +288,21 @@ ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
     }
     const ecuio_status_t judged =
         judge(session, b, level, generation, out_wait_ms);
-    if (judged != ECUIO_OK) {
+    if (judged != ECUIO_OK || !session->talk->kept || b.vehicle_known) {
         return judged;
     }
-    if (session->talk->kept && !b.vehicle_known) {
-        const ecuio_status_t first =
-            first_unlock(session, b, channel, level, out_wait_ms);
-        if (first != ECUIO_OK) {
-            return first;
-        }
+    return first_unlock(session, b, channel, level, out_wait_ms);
+}
+
+ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
+                                         ecuio_bound_channel& b,
+                                         uint32_t channel, uint8_t level,
+                                         uint32_t* out_wait_ms)
+{
+    const ecuio_status_t judged =
+        ecuio_session_unlock_judge(session, b, channel, level, out_wait_ms);
+    if (judged != ECUIO_OK) {
+        return judged;
     }
     const ecuio_status_t marked = ecuio_conversation_mark_word(
         session, channel, level, b.vehicle, utc_now());
@@ -403,7 +409,7 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (ecuio_module_part_written(session, channel)) {
-        return ecuio_refuse_part_written();
+        return ecuio_refuse_part_written(session, channel);
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(session, channel);
     if (b == nullptr && ecuio_session_channel_wants_consent(session, channel)) {

@@ -18,6 +18,7 @@
 #include "sim_memory_support.h"
 
 #include "../core/src/operation_session.h"
+#include "../core/src/recovery_open.h"
 
 #include <ecuio/operation.h>
 
@@ -69,6 +70,7 @@ struct Bench {
     uint32_t battery_reads = 0;
     int battery_held = 0; /* serves an ask only after this many tries */
     const char* uri = "j2534://bench";
+    bool journals = false; /* the bench's folder named before start */
     uint32_t write_max = ECUIO_ENGINE_WRITE_MAX;
     std::vector<std::pair<uint32_t, Bytes>> functional; /* to, request */
     std::vector<int64_t> functional_at;
@@ -89,8 +91,13 @@ struct Bench {
                       ECUIO_OK)
                 << ecuio_last_error_detail();
         }
+        if (journals) {
+            ASSERT_EQ(ecuio_session_journal_folder(s, folder.str().c_str()),
+                      ECUIO_OK);
+        }
         ASSERT_EQ(ecuio_conversation_bind(s), ECUIO_OK)
             << ecuio_last_error_detail();
+        ecuio_recovery_open(s);
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
         s->started = true;
         ASSERT_NO_FATAL_FAILURE(engine_talk_test::engine(e.get()));
@@ -284,7 +291,11 @@ struct Bench {
         std::error_code ec;
         for (const auto& entry :
              dump_file_test::fs::directory_iterator(folder.path, ec)) {
-            names.push_back(entry.path().filename().generic_u8string());
+            const std::string name = entry.path().filename().generic_u8string();
+            if (name.size() < 18 ||
+                name.compare(name.size() - 18, 18, ".havnejournal.lock") != 0) {
+                names.push_back(name);
+            }
         }
         std::sort(names.begin(), names.end());
         return names;
