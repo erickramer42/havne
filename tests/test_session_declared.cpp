@@ -251,7 +251,7 @@ TEST(DeclaredSessionTest, TheAttachJudgesEachModulesDeclaration)
     EXPECT_EQ(e.chans[1].session_idle, ECUIO_SESSION_IDLE_DEFAULT);
 
     request_params off;
-    off.session_given = true;
+    off.session = ECUIO_SESSION_DEFAULT;
     ASSERT_NO_FATAL_FAILURE(declare(
         &e, Declaring(ECUIO_CHANNEL_SESSION_EXTENDED), false, off, &ok));
     EXPECT_FALSE(e.chans[1].session_may_declare) << "?session=01";

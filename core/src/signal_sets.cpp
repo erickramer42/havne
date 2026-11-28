@@ -323,6 +323,20 @@ static int check_tables(const ecuio_signal_set_t* set, uint32_t* index)
     return check_chains(set, index);
 }
 
+static int channel_fields(const ecuio_channel_decl_t& d)
+{
+    if (d.flags != 0 || d.reserved[0] != 0 || d.reserved[1] != 0 ||
+        d.reserved[2] != 0) {
+        return ECUIO_VALIDATE_ERR_CHANNEL_RESERVED;
+    }
+    if (d.session != ECUIO_CHANNEL_SESSION_NONE &&
+        d.session != ECUIO_CHANNEL_SESSION_DEFAULT &&
+        d.session != ECUIO_CHANNEL_SESSION_EXTENDED) {
+        return ECUIO_VALIDATE_ERR_CHANNEL_SESSION;
+    }
+    return ECUIO_VALIDATE_OK;
+}
+
 /* The set checks, in order. A code that names one def, channel, entry
  * or program sets *index to it; the others leave it as the caller set
  * it. */
@@ -372,17 +386,10 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
                 *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_ID;
             }
-            const ecuio_channel_decl_t& d = set->channels[i];
-            if (d.flags != 0 || d.reserved[0] != 0 || d.reserved[1] != 0 ||
-                d.reserved[2] != 0) {
+            const int fields = channel_fields(set->channels[i]);
+            if (fields != ECUIO_VALIDATE_OK) {
                 *index = i;
-                return ECUIO_VALIDATE_ERR_CHANNEL_RESERVED;
-            }
-            if (d.session != ECUIO_CHANNEL_SESSION_NONE &&
-                d.session != ECUIO_CHANNEL_SESSION_DEFAULT &&
-                d.session != ECUIO_CHANNEL_SESSION_EXTENDED) {
-                *index = i;
-                return ECUIO_VALIDATE_ERR_CHANNEL_SESSION;
+                return fields;
             }
             for (uint32_t j = 0; j < i; ++j) {
                 if (set->channels[j].rx_id == rx) {

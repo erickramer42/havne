@@ -118,14 +118,6 @@ struct ecuio_session {
     bool consent_applied = false; /* the fingerprint and second above hold */
     /* The link is one no car is on (SocketCAN's vcan), set by attach */
     bool no_car_bus = false;
-    /* Each declared module's parts a consent can name (create's), and a
-     * bit for each channel whose declared session a consent allows */
-    struct declared_print {
-        uint32_t rx = 0;
-        uint8_t fingerprint[32] = {};
-    };
-    std::vector<declared_print> declared_prints;
-    uint32_t declared_allowed = 0;
     /* started's copy for any thread: the conditions' states judge what the
      * session gets only once it runs */
     std::atomic<bool> ran{false};
@@ -164,6 +156,9 @@ struct ecuio_session {
     mutable std::mutex condition_states_mutex;
     std::vector<ecuio_condition_state_t> condition_states;
     uint32_t condition_states_generation = 0;
+    /* A bit for each channel whose declared session a consent allows
+     * (apply's, before start) */
+    uint32_t declared_allowed = 0;
     /* Set with the states: each condition's signal terms' def ids and its
      * join, for the getter's ECUIO_CONDITION_WHY_NOT_RECEIVED (count 0 for
      * one the bind left unavailable), and its terms sampled since the
@@ -221,6 +216,12 @@ struct ecuio_session {
      * afterwards (ecuio_session_get_module) */
     std::vector<uint32_t> module_rx;
     std::vector<uint32_t> module_tx;
+    /* Each declared module's parts a consent can name, create's */
+    struct declared_print {
+        uint32_t rx = 0;
+        uint8_t fingerprint[32] = {};
+    };
+    std::vector<declared_print> declared_prints;
     /* Each module's support, identity (ADR-0021) and diagnostics
      * (ADR-0037), sized with the modules: the count and rx_ids set by
      * attach, the rest by the worker, all under the mutex

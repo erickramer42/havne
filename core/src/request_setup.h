@@ -277,8 +277,7 @@ inline bool ecuio_declare_sessions(ecuio_request_engine* e,
             ch.session_idle = ECUIO_SESSION_IDLE_DEFAULT;
         } else if (declared != ECUIO_CHANNEL_SESSION_EXTENDED) {
             continue;
-        } else if (params.session_given &&
-                   params.session == ECUIO_SESSION_DEFAULT) {
+        } else if (params.session == ECUIO_SESSION_DEFAULT) {
             ch.session_idle = ECUIO_SESSION_IDLE_OFF;
         } else if (standard) {
             ch.session_idle = ECUIO_SESSION_IDLE_STANDARD;

@@ -560,7 +560,7 @@ TEST(SessionControlTest, TheUriTakesTheDefaultOrTheExtendedSessionOnly)
 {
     const char* wanted = nullptr;
     request_params p;
-    EXPECT_EQ(p.session, ECUIO_SESSION_DEFAULT);
+    EXPECT_EQ(p.session, 0) << "not given";
     ASSERT_TRUE(param("session=03", &p, &wanted));
     EXPECT_EQ(wanted, nullptr);
     EXPECT_EQ(p.session, 0x03);
@@ -573,7 +573,7 @@ TEST(SessionControlTest, TheUriTakesTheDefaultOrTheExtendedSessionOnly)
         EXPECT_STREQ(wanted,
                      "01 (the default session) or 03 (the extended one)")
             << bad;
-        EXPECT_EQ(q.session, ECUIO_SESSION_DEFAULT) << bad;
+        EXPECT_EQ(q.session, 0) << bad;
     }
     ASSERT_TRUE(param("keepalive_ms=500", &p, &wanted));
     EXPECT_EQ(p.keepalive_ms, 500u);
