@@ -98,8 +98,8 @@ inline const char* dump_end_note(const ecuio_operation_state_t& s)
 {
     if (s.end == ECUIO_OPERATION_END_FILE &&
         std::strstr(s.words, "exists already") != nullptr) {
-        return "an identical copy, made in the same second, is in the "
-               "folder already";
+        return "a different file already holds this name; nothing was "
+               "replaced";
     }
     return nullptr;
 }
