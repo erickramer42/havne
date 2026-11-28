@@ -57,6 +57,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitFailed = 1;
 constexpr int kExitUsage = 2;
 constexpr int kExitConnect = 3;
+constexpr int kExitNoCopy = 4;
 
 constexpr int kSchema = 1;
 

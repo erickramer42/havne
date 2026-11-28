@@ -87,6 +87,9 @@ int run(int argc, char** argv)
     if (command == "signals") {
         return cmd_signals(argc, argv);
     }
+    if (command == "dump") {
+        return cmd_dump(argc, argv);
+    }
     if (command == "log") {
         return cmd_log(argc, argv);
     }
