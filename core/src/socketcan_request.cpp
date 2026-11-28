@@ -530,34 +530,6 @@ socket_step wait_pass(ecuio_socketcan_transport* t, worker_state& w,
     return socket_step::go;
 }
 
-/* The message's kernel stamp, and the receive queue's drop count */
-uint64_t take_control(struct msghdr& msg, worker_state& w)
-{
-    uint32_t& drops = w.drops;
-    bool& overflow_pending = w.overflow_pending;
-    uint64_t kernel_ns = 0;
-    for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr;
-         c = CMSG_NXTHDR(&msg, c)) {
-        if (c->cmsg_level != SOL_SOCKET) {
-            continue;
-        }
-        if (c->cmsg_type == SCM_TIMESTAMPNS) {
-            struct timespec ts;
-            std::memcpy(&ts, CMSG_DATA(c), sizeof ts);
-            kernel_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000u +
-                        static_cast<uint64_t>(ts.tv_nsec);
-        } else if (c->cmsg_type == SO_RXQ_OVFL) {
-            uint32_t count;
-            std::memcpy(&count, CMSG_DATA(c), sizeof count);
-            if (count != drops) {
-                overflow_pending = true;
-                drops = count;
-            }
-        }
-    }
-    return kernel_ns;
-}
-
 void error_frame(ecuio_socketcan_transport* t, worker_state& w,
                  const frame_in& f)
 {
@@ -696,7 +668,7 @@ void read_pass(ecuio_socketcan_transport* t, worker_state& w, int ready)
             n != static_cast<ssize_t>(CANFD_MTU)) {
             continue;
         }
-        const uint64_t kernel_ns = take_control(msg, w);
+        const uint64_t kernel_ns = take_control(msg, w.drops, w.overflow_pending);
         const int64_t now = now_us(t);
         uint32_t can_id;
         std::memcpy(&can_id, raw, 4);
