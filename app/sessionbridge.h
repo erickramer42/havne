@@ -701,9 +701,11 @@ public:
     QStringList clearTargets() const;
     bool clearFindsNothing() const;
     QVariantMap inspection() const;
-    // Read again: every ECU's diagnostics asked once more
-    // (ecuio_session_read_diagnostics); nothing without a session
+    // Read: each module in turn, its standard codes then its enhanced ones
+    // (UDS 0x19), a result per module as its pass ends; nothing without a
+    // session. readDiagnostics is the same pass.
     Q_INVOKABLE void readDiagnostics();
+    Q_INVOKABLE void readModuleCodes();
     // Clears the codes of every ECU whose read has completed (ADR-0038):
     // saves those reports first, to diagnostics-<stamp>[ <vehicle>].jsonl
     // in the recordings folder (diagnosticsFileText; the vehicle for an
@@ -967,6 +969,9 @@ private:
     // logged once per completed read
     void pollChannelDiagnostics();
     void rebuildDiagnostics();
+    void pollModuleCodes();
+    bool sessionOffered() const;
+    void advanceCodesVisit();
     QVariantMap previewObdbBytes(const QByteArray& bytes,
                                  const QString& refusal, int modelYear,
                                  const QString& name);

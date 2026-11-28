@@ -5,6 +5,7 @@
 #include "bridgetext.h"
 #include "clear_request.h"    /* cli/: one clear request over the ECUs */
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
+#include "enhanced_codes_line.h" /* cli/: and its enhanced_codes line */
 
 #include <QByteArray>
 #include <QCryptographicHash>
@@ -149,17 +150,13 @@ void SessionBridge::rebuildDiagnostics()
 {
     m_diagnostics.clear();
     for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
-        m_diagnostics << diagnosticsEntry(m_diagnosticsShown[c],
-                                          m_signalModel->unitSystem());
+        QVariantMap entry = diagnosticsEntry(m_diagnosticsShown[c],
+                                             m_signalModel->unitSystem());
+        entry[QStringLiteral("enhanced")] = moduleCodesEntry(
+            m_codesShown[c], m_diagnosticsShown[c], sessionOffered());
+        m_diagnostics << entry;
     }
     emit diagnosticsChanged();
-}
-
-void SessionBridge::readDiagnostics()
-{
-    if (m_connected.load(std::memory_order_acquire) && m_session != nullptr) {
-        (void)ecuio_session_read_diagnostics(m_session);
-    }
 }
 
 bool BridgeFormats::clearTarget(const ecuio_channel_diagnostics_t& report)
@@ -271,7 +268,11 @@ QString SessionBridge::clearDiagnostics()
     /* No folder, no file: either way nothing is sent */
     const bool folder = QDir().mkpath(root);
     QSaveFile file(path);
-    const QByteArray text = diagnosticsFileText(reports, n);
+    ecuio_module_codes_t codes[ECUIO_MAX_CHANNELS];
+    for (uint32_t i = 0; i < n; ++i) {
+        codes[i] = m_codesShown[channels[i]];
+    }
+    const QByteArray text = diagnosticsFileText(reports, n, codes);
     if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size() ||
         !file.commit()) {
         return refuse(folder ? file.errorString()
@@ -387,7 +388,8 @@ void SessionBridge::cancelClearMoving()
 
 QByteArray
 BridgeFormats::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
-                                   uint32_t count)
+                                   uint32_t count,
+                                   const ecuio_module_codes_t* codes)
 {
     QByteArray out;
     char buf[8192];
@@ -406,6 +408,16 @@ BridgeFormats::diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
         cli::diagnostics_line(l, reports[i]);
         if (l.finish()) {
             out.append(l.data(), static_cast<qsizetype>(l.size()));
+        }
+        if (codes != nullptr &&
+            (codes[i].flags & ECUIO_MODULE_CODES_COMPLETE) != 0 &&
+            codes[i].read_id != 0) {
+            std::vector<char> big(cli::kEnhancedCodesLineBytes);
+            cli::Line e(big.data(), big.size());
+            cli::enhanced_codes_line(e, codes[i], &reports[i]);
+            if (e.finish()) {
+                out.append(e.data(), static_cast<qsizetype>(e.size()));
+            }
         }
     }
     return out;

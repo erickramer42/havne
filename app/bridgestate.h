@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QString>
 #include <QTimer>
@@ -263,6 +264,26 @@ struct BridgeState
     ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_MAX_CHANNELS] = {};
     uint32_t m_diagnosticsShownCount = 0;
     QVariantList m_diagnostics;
+    // Each module's enhanced codes (UDS 0x19) as last read, the read id
+    // last logged, and the visit one Read makes over the modules
+    ecuio_module_codes_t m_codesShown[ECUIO_MAX_CHANNELS] = {};
+    uint32_t m_codesLogged[ECUIO_MAX_CHANNELS] = {};
+    struct CodesVisit {
+        enum class Step {
+            idle,
+            standard_start,
+            standard_wait,
+            codes_start,
+            codes_wait
+        };
+        std::vector<uint32_t> queue;
+        size_t at = 0;
+        Step step = Step::idle;
+        uint32_t generation = 0;
+        uint32_t read_id = 0;
+        uint32_t not_reached = 0;
+        QElapsedTimer clock;
+    } m_codesVisit;
     QString m_vin;            // the first channel's, this session; never leaves the bridge
     QString m_vehicleLabel;   // the picked vehicle's, for the recording folder
 

@@ -13,6 +13,7 @@ set(APP_BRIDGE_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics_entries.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics_text.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_files.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_module_codes.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_profiles.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recorder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recordings.cpp

@@ -463,7 +463,7 @@ TestCase {
         const card = connectAndRead(page, "mock://demo?diagnose=0")
         verify(find(card, "ecuState").text.indexOf("Not read") === 0)
         verify(!find(card, "milLabel").visible, "no report to show")
-        verify(!find(page, "readAgain").enabled, "nothing to read again")
+        verify(find(page, "readAgain").enabled, "the enhanced read is asked by the caller")
         verify(!find(page, "clearCodes").enabled, "nothing to clear")
     }
 
@@ -540,5 +540,98 @@ TestCase {
         const some = stubEcu("unanswered", "unanswered", false)
         some.lists[1].outcome = "answered"
         compare(page.ecuState(some), "Read")
+    }
+
+    Component {
+        id: sectionComponent
+        EnhancedCodesSection {}
+    }
+
+    function readEnhanced(page) {
+        connectAndRead(page, "mock://demo")
+        const button = find(page, "readAgain")
+        tryVerify(() => button.enabled, 2000)
+        button.clicked()
+        tryVerify(() => Bridge.diagnostics[0].enhanced.codes.length > 0, 4000, "the enhanced codes arrive")
+        return page
+    }
+
+    function stubEnhanced(over) {
+        const e = {asked: true, reading: false, complete: true, outcome: "answered",
+                   nrc: "", extendedOnly: false, sessionOffered: false, codes: [],
+                   titles: [], state: [], cls: [], lamp: [], emissions: [], more: 0}
+        return Object.assign(e, over)
+    }
+
+    function test_enhanced_codes_section() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        readEnhanced(page)
+        compare(find(page, "enhancedHeading").text, "Enhanced codes")
+        verify(find(page, "enhancedCode_P0128-00") !== null)
+        verify(find(page, "enhancedCode_U1123-45") !== null)
+        verify(find(page, "enhancedCode_B1A01-1C") !== null)
+    }
+
+    function test_enhanced_codes_two_part_status() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        readEnhanced(page)
+        compare(find(find(page, "enhancedCode_P0128-00"), "enhancedStatus").text, "Not now, history")
+        compare(find(find(page, "enhancedCode_U1123-45"), "enhancedStatus").text, "Not now, pending")
+        compare(find(find(page, "enhancedCode_B1A01-1C"), "enhancedStatus").text, "Active, stored")
+        compare(find(find(page, "enhancedCode_B1A01-1C"), "enhancedNotes").text, "warning lamp requested")
+    }
+
+    function test_enhanced_codes_emissions_mark() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        readEnhanced(page)
+        compare(find(find(page, "enhancedCode_P0301-00"), "enhancedNotes").text,
+                "also an emissions code (stored)")
+        verify(!find(find(page, "enhancedCode_P0128-00"), "enhancedNotes").visible)
+    }
+
+    function test_enhanced_stored_code_matches_the_standard_section() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        readEnhanced(page)
+        verify(find(page, "codes_stored").text.indexOf("P0301") >= 0)
+        compare(find(find(page, "enhancedCode_P0301-00"), "enhancedStatus").text, "Not now, stored")
+    }
+
+    function test_enhanced_status_words_are_stored_pending_history() {
+        const e = stubEnhanced({codes: ["A", "B", "C", "D"], titles: ["", "", "", ""],
+                                state: ["Not now", "Not now", "Not now", "Active"],
+                                cls: ["Stored", "Pending", "History", ""],
+                                lamp: [false, false, false, false],
+                                emissions: [[], [], [], []]})
+        const s = createTemporaryObject(sectionComponent, testCase.parent,
+                                        {ecu: {enhanced: e}, plainFamily: "x"})
+        compare(s.statusText(0), "Not now, stored")
+        compare(s.statusText(1), "Not now, pending")
+        compare(s.statusText(2), "Not now, history")
+        compare(s.statusText(3), "Active")
+    }
+
+    function test_enhanced_codes_no_response() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const outcomes = {no_response: "No response", not_read: "Not read",
+                          not_opened: "Not read: no room", refused: "Refused (7F 19 11)"}
+        for (const k in outcomes) {
+            const s = createTemporaryObject(sectionComponent, testCase.parent,
+                {ecu: {enhanced: stubEnhanced({outcome: k, nrc: "7F 19 11"})},
+                 plainFamily: page.font.family})
+            compare(find(s, "enhancedOutcome").text, outcomes[k])
+        }
+        const ext = createTemporaryObject(sectionComponent, testCase.parent,
+            {ecu: {enhanced: stubEnhanced({outcome: "refused", nrc: "7F 19 7F", extendedOnly: true})},
+             plainFamily: "x"})
+        compare(find(ext, "enhancedOutcome").text,
+                "Refused (7F 19 7F): the module reads its codes only in its extended session")
+        const hint = createTemporaryObject(sectionComponent, testCase.parent,
+            {ecu: {enhanced: stubEnhanced({outcome: "refused", nrc: "7F 19 7F", extendedOnly: true,
+                                           sessionOffered: true})}, plainFamily: "x"})
+        verify(find(hint, "enhancedOutcome").text.endsWith("connect with ?session=03"))
+        const none = createTemporaryObject(sectionComponent, testCase.parent,
+            {ecu: {enhanced: stubEnhanced({})}, plainFamily: page.font.family})
+        compare(find(none, "enhancedOutcome").text, "None")
+        compare(find(none, "enhancedOutcome").font.family, page.font.family)
     }
 }

@@ -2486,6 +2486,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_replay_end.cpp
         test_bridge_room.cpp
         test_bridge_diagnostics.cpp
+        test_bridge_module_codes.cpp
         test_bridge_signalfiles.cpp
         test_bridge_signalfiles_plugin.cpp
         test_bridge_signalfiles_picks.cpp

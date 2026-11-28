@@ -50,9 +50,12 @@ struct BridgeFormats
     static QString channelClearText(const ecuio_channel_diagnostics_t& diagnostics,
                                     uint32_t units);
     // A clear's saved reports, as havne-cli writes them (ADR-0031 section 3): a
-    // start line, then one diagnostics line per report
-    static QByteArray diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
-                                          uint32_t count);
+    // start line, then one diagnostics line per report, each followed by its
+    // module's enhanced_codes line when codes (parallel to reports) hold a read
+    static QByteArray
+    diagnosticsFileText(const ecuio_channel_diagnostics_t* reports,
+                        uint32_t count,
+                        const ecuio_module_codes_t* codes = nullptr);
     /* The activity log's "Reply timing:" line at a disconnect (ADR-0042);
      * empty when no request was asked */
     static QString timingText(const ecuio_session_timing_t& timing,
@@ -107,4 +110,15 @@ struct BridgeFormats
     // without a session.
     static QVariantMap diagnosticsEntry(const ecuio_channel_diagnostics_t& d,
                                         uint32_t units);
+    // A module's enhanced codes (UDS 0x19) for the page and the log: outcome
+    // ("not_read", "answered", "refused", "no_response", "not_opened"), nrc,
+    // extendedOnly, sessionOffered, and per code (codes, titles, state, cls,
+    // lamp, emissions: the J1979 lists holding it in standard) plus more
+    static QVariantMap
+    moduleCodesEntry(const ecuio_module_codes_t& r,
+                     const ecuio_channel_diagnostics_t& standard,
+                     bool sessionOffered);
+    static QString moduleCodesText(const ecuio_module_codes_t& r,
+                                   const ecuio_channel_diagnostics_t& standard,
+                                   bool sessionOffered);
 };

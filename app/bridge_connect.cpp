@@ -219,6 +219,10 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     for (uint32_t& g : m_diagnosticsGeneration) {
         g = 0;
     }
+    std::fill(std::begin(m_codesShown), std::end(m_codesShown),
+              ecuio_module_codes_t{});
+    std::fill(std::begin(m_codesLogged), std::end(m_codesLogged), 0u);
+    m_codesVisit = CodesVisit{};
     for (bool& asked : m_clearAsked) {
         asked = false;
     }
