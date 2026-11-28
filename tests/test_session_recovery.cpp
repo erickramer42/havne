@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -478,4 +479,61 @@ TEST(SessionRecoveryTest, ACloseBeforeTheRecoveryWritesKeepsTheJournal)
     EXPECT_STREQ(v.words, "the session closed before the recovery began "
                           "writing: the module is still part-written");
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+}
+
+TEST(SessionRecoveryTest, AHostKilledAtEachStepIsRecoveredFromTheJournalItLeft)
+{
+    struct Left {
+        std::string at;
+        std::string journal;
+        bool held;
+        uint32_t erased; /* the sim's sector left erased */
+    };
+    std::vector<Left> left;
+    {
+        Bench b;
+        arm(b);
+        ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+        uint32_t erases = 0;
+        b.script = [&](const Bytes& q, size_t, Answer*) {
+            if (q.size() > 4 && q[0] == 0x31 && q[2] == 0xFF && q[3] == 0x00) {
+                left.push_back({"erase " + std::to_string(erases),
+                                read_journal(b), true, erases});
+                ++erases;
+            } else if (q.size() == 4 && q[0] == 0x31 && q[2] == 0xFF &&
+                       q[3] == 0x01) {
+                left.push_back(
+                    {"check", read_journal(b), true, ECUIO_SIM_FLASH_SECTORS});
+            }
+            return false;
+        };
+        ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+        left.insert(left.begin(), {"opened", read_journal(b), false, 0});
+        ASSERT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_WRITTEN);
+        left.push_back({"done", read_journal(b), false, 0});
+    }
+    ASSERT_EQ(left.size(), 5u);
+    for (const Left& l : left) {
+        SCOPED_TRACE(l.at);
+        Bench b;
+        b.journals = true;
+        put_journal(b, l.journal);
+        ecuio_sim_flash_faults f;
+        f.boot = l.held;
+        f.boot_erased = l.erased;
+        arm(b, f);
+        ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+        const ecuio_module_recovery_t r = recovery_of(b);
+        if (!l.held) {
+            EXPECT_EQ(r.state, ECUIO_RECOVERY_NONE);
+            continue;
+        }
+        EXPECT_EQ(r.state, ECUIO_RECOVERY_NEEDED) << "a blank module is held";
+        EXPECT_EQ(r.flags & ECUIO_RECOVERY_NOTHING_ERASED, 0u);
+        ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = b.until_ended(20000);
+        EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERED) << v.words;
+        EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
+        EXPECT_EQ(recovery_of(b).state, ECUIO_RECOVERY_RECOVERED);
+    }
 }
