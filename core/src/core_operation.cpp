@@ -45,8 +45,8 @@ std::atomic<bool> g_write_class{false};
 constexpr char kClosedWords[] =
     "the session closed before the read ended: nothing was kept";
 constexpr char kClosedFlashWords[] =
-    "the session closed after the flash began writing: flash the module "
-    "again before it runs";
+    "the session closed after the flash began writing: recover the module "
+    "before it runs";
 constexpr char kClosedRecoveryWords[] =
     "the session closed before the recovery began writing: the module is "
     "still part-written";

@@ -128,7 +128,7 @@ TEST(SessionOperationTest, AModuleLostPastTheFloorNeedsTheFlashAgain)
     const ecuio_operation_state_t v = b.until_ended(20000);
     EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED);
     EXPECT_STREQ(v.words, "the flash stopped after it began writing (the "
-                          "module stopped answering): flash the module again "
+                          "module stopped answering): recover the module "
                           "before it runs");
     EXPECT_EQ(b.count(0x11), 0u) << "no reset of a half-written module";
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
@@ -175,7 +175,7 @@ TEST(SessionOperationTest, AFailedCheckEndsInItsOwnWords)
     const ecuio_operation_state_t v = b.until_ended(20000);
     EXPECT_EQ(v.end, ECUIO_OPERATION_END_CHECK_FAILED);
     EXPECT_STREQ(v.words, "the module's own check of what was written "
-                          "failed: flash it again before it runs");
+                          "failed: recover the module before it runs");
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
 }
 

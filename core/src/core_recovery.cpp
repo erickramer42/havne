@@ -116,17 +116,21 @@ ecuio_status_t ecuio_session_get_module_recovery(const ecuio_session_t* session,
                                                  uint32_t channel,
                                                  ecuio_module_recovery_t* out)
 {
+    ecuio_detail_clear();
     if (session == nullptr || out == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (out->struct_size < sizeof *out || channel >= ECUIO_MAX_CHANNELS ||
-        channel >= session->module_rx.size()) {
+    if (out->struct_size < sizeof *out) {
+        ecuio_detail_set("the recovery's struct_size is smaller than the "
+                         "struct");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    {
-        const std::lock_guard<std::mutex> lock(session->support_mutex);
-        *out = session->recovery[channel];
+    const std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= ECUIO_MAX_CHANNELS || channel >= session->module_rx.size()) {
+        ecuio_detail_set("the session has no module %u", channel);
+        return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    *out = session->recovery[channel];
     out->struct_size = sizeof *out;
     return ECUIO_OK;
 }

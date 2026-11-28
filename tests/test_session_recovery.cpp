@@ -5,10 +5,12 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -196,11 +198,17 @@ TEST(SessionRecoveryTest, TheCallsRefuseWhatTheyDontTake)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_session_get_module_recovery(b.s, 1, &r),
               ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), "the session has no module 1");
     r.struct_size = sizeof r - 1;
     r.state = 77;
     EXPECT_EQ(ecuio_session_get_module_recovery(b.s, 0, &r),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(r.state, 77u) << "nothing written";
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the recovery's struct_size is smaller than the struct");
+    r.struct_size = sizeof r;
+    EXPECT_EQ(ecuio_session_get_module_recovery(b.s, 0, &r), ECUIO_OK);
+    EXPECT_STREQ(ecuio_last_error_detail(), "") << "cleared on entry";
 }
 
 namespace {
@@ -648,4 +656,27 @@ TEST(SessionRecoveryTest, ASecondSessionCantWriteAJournalAnotherHolds)
     ASSERT_EQ(recover(b), ECUIO_OK)
         << "a's close lets the claim go: " << ecuio_last_error_detail();
     EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
+}
+
+TEST(SessionRecoveryTest, ACloseAfterTheFlashBeganWritingSaysRecover)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    bool writing = false;
+    b.script = [&](const Bytes& q, size_t, Answer*) {
+        writing = writing || (!q.empty() && q[0] == 0x36);
+        return false;
+    };
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    for (int i = 0; i < 5000 && !writing; ++i) {
+        b.pass();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_TRUE(writing);
+    ASSERT_EQ(ecuio_session_close(b.s), ECUIO_OK);
+    const ecuio_operation_state_t v = b.state();
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED);
+    EXPECT_STREQ(v.words, "the session closed after the flash began "
+                          "writing: recover the module before it runs");
 }

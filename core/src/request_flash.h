@@ -84,16 +84,16 @@ inline void flash_words_of(const session_run& o, uint32_t end, char* out,
     } else if (end == ECUIO_OPERATION_END_CHECK_FAILED) {
         std::snprintf(out, cap,
                       "the module's own check of what was written "
-                      "failed: flash it again before it runs");
+                      "failed: recover the module before it runs");
     } else if (end == ECUIO_OPERATION_END_RECOVERY_NEEDED && f.nrc != 0) {
         std::snprintf(out, cap,
                       "the flash stopped after it began writing (%s, code "
-                      "%02X): flash the module again before it runs",
+                      "%02X): recover the module before it runs",
                       flash_cause(f), f.nrc);
     } else if (end == ECUIO_OPERATION_END_RECOVERY_NEEDED) {
         std::snprintf(out, cap,
-                      "the flash stopped after it began writing (%s): flash "
-                      "the module again before it runs",
+                      "the flash stopped after it began writing (%s): "
+                      "recover the module before it runs",
                       flash_cause(f));
     } else if (end == ECUIO_OPERATION_END_FILE) {
         std::snprintf(out, cap, "%.138s: nothing was written",
