@@ -383,6 +383,7 @@ ECUIO_OBDB_NOTE_CONVERTED = 0
 ECUIO_OBDB_NOTE_FILE = 3
 ECUIO_OBDB_NOTE_SKIPPED = 2
 ECUIO_OPERATION_BATTERY_SUPPORT = 4
+ECUIO_OPERATION_CHECK_DFI_CLAIMED = 0x400
 ECUIO_OPERATION_CHECK_IDENT_UNREAD = 0x200
 ECUIO_OPERATION_CHECK_KMH = 2
 ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE = 64
@@ -440,6 +441,7 @@ ECUIO_PLUGIN_MAX_FIXTURES = 16
 ECUIO_PLUGIN_MAX_IDENTS = 8
 ECUIO_PLUGIN_MAX_LEVELS = 32
 ECUIO_PLUGIN_MAX_OPERATIONS = 8
+ECUIO_PLUGIN_MAX_OPTION = 16
 ECUIO_PLUGIN_MAX_PAGES = 16
 ECUIO_PLUGIN_MAX_SERVICES = 16
 ECUIO_PLUGIN_MAX_STARTS = 8
@@ -1681,7 +1683,9 @@ ecuio_operation_state_t._fields_ = [
     ('pass', c_uint32),
     ('step', c_uint32),
     ('nrc', c_uint8),
-    ('reserved0', (c_uint8 * 3)),
+    ('routine_status', c_uint8),
+    ('routine_status_given', c_uint8),
+    ('reserved0', (c_uint8 * 1)),
     ('bytes_done', c_uint64),
     ('bytes_total', c_uint64),
     ('differ_offset', c_uint64),
@@ -1765,7 +1769,8 @@ ecuio_plugin_operation_step_t._fields_ = [
     ('reserved0', c_uint8),
     ('name', (c_char * 32)),
     ('routine_id', c_uint32),
-    ('reserved', (c_uint32 * 3)),
+    ('option_len', c_uint32),
+    ('reserved', (c_uint32 * 2)),
 ]
 ecuio_plugin_operation_t._fields_ = [
     ('struct_size', c_uint32),
@@ -2352,6 +2357,7 @@ FUNCTIONS = {
     'ecuio_plugin_operation_ident': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_ident_t)]),  # plugin.h
     'ecuio_plugin_operation_kernel': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_kernel_t)]),  # plugin.h
     'ecuio_plugin_operation_step': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_step_t)]),  # plugin.h
+    'ecuio_plugin_operation_step_option': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(c_uint8), c_size_t, POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
     'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
     'ecuio_plugin_publisher': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_publisher_t)]),  # plugin.h

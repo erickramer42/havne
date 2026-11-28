@@ -204,7 +204,10 @@ inline uint32_t checks_of(const session_run& o)
            (v.low_warn ? ECUIO_OPERATION_CHECK_VOLTS_LOW : 0u) |
            (v.high_warn ? ECUIO_OPERATION_CHECK_VOLTS_HIGH : 0u) |
            (v.sagged ? ECUIO_OPERATION_CHECK_VOLTS_SAG : 0u) |
-           (o.r.ident_unread ? ECUIO_OPERATION_CHECK_IDENT_UNREAD : 0u);
+           (o.r.ident_unread ? ECUIO_OPERATION_CHECK_IDENT_UNREAD : 0u) |
+           (o.p->has_kernel && o.p->helper.dfi != 0
+                ? ECUIO_OPERATION_CHECK_DFI_CLAIMED
+                : 0u);
 }
 
 /* The view follows the machine: taken under the lock only when it moved.
@@ -223,10 +226,14 @@ inline void publish(ecuio_session_t* s, session_run& o)
     const uint32_t checks = checks_of(o);
     if (v.phase == phase && v.pass == pass && v.step == step &&
         v.bytes_done == o.r.handed && v.checks == checks &&
-        v.volts_mv == o.v.mv && v.volts_min_mv == o.v.min_mv) {
+        v.volts_mv == o.v.mv && v.volts_min_mv == o.v.min_mv &&
+        v.routine_status_given == uint8_t{o.r.h.status_given} &&
+        v.routine_status == o.r.h.status) {
         return;
     }
     const std::lock_guard<std::mutex> lock(s->support_mutex);
+    v.routine_status = o.r.h.status;
+    v.routine_status_given = o.r.h.status_given ? 1 : 0;
     v.phase = phase;
     v.pass = pass;
     v.step = step;
@@ -538,6 +545,33 @@ inline void log_envelope(ecuio_session_t* s, const session_run& o)
                   static_cast<unsigned>(checks));
 }
 
+inline void log_dfi(ecuio_session_t* s, const session_run& o)
+{
+    if (o.p->has_kernel && o.p->helper.dfi != 0) {
+        if (char* line = log_slot(s)) {
+            std::snprintf(line, sizeof s->run_lines.text[0],
+                          "run helper  dfi %02X: the plugin's claim, unchecked",
+                          static_cast<unsigned>(o.p->helper.dfi));
+        }
+    }
+}
+
+inline void log_status(ecuio_session_t* s, session_run& o)
+{
+    if (o.status_logged == o.r.h.starts) {
+        return;
+    }
+    o.status_logged = o.r.h.starts;
+    if (!o.r.h.status_given) {
+        return;
+    }
+    if (char* line = log_slot(s)) {
+        std::snprintf(line, sizeof s->run_lines.text[0],
+                      "run helper  started, status %02X",
+                      static_cast<unsigned>(o.r.h.status));
+    }
+}
+
 inline void log_sag(ecuio_session_t* s, const session_run& o)
 {
     if (char* line = log_slot(s)) {
@@ -638,6 +672,7 @@ inline void check_step(ecuio_session_t* s, session_run& o,
         o.v.from_ecu = true;
     }
     log_envelope(s, o);
+    log_dfi(s, o);
     if (k.result == check_end::engine_running) {
         stop(o.r, run_end::engine_running);
     } else if (k.result == check_end::moving) {
@@ -781,6 +816,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
             break; /* the leave runs; hold: the ring's room first; done */
         }
     }
+    log_status(s, o);
     if (r.at == run_stage::done) {
         finish(s, o, e, now_us);
     }

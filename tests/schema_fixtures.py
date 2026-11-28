@@ -23,9 +23,12 @@ import glob
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.dont_write_bytecode = True
+from schema_cli import Cli
 
 SKIP = 77
 
@@ -827,38 +830,21 @@ KERNELS = [
     ("a download in the extended session", PACKED5, KR + ["steps", 0, "session"],
      "extended", False),
     ("a download with no sha256", PACKED5, KR + ["steps", 0, "sha256"], DELETE, False),
-    ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "dfi"], "00", False),
+    ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "chunk"], 1024, False),
+    ("a download that is plain", PACKED5, KR + ["steps", 0, "dfi"], "00", True),
+    ("a download that is encrypted", PACKED5, KR + ["steps", 0, "dfi"], "01", True),
+    ("a download's dfi of one digit", PACKED5, KR + ["steps", 0, "dfi"], "1", False),
+    ("a download's dfi in lower case", PACKED5, KR + ["steps", 0, "dfi"], "0a", False),
+    ("a routine's option", PACKED5, KR + ["steps", 1, "option"], "A55A0FF0", True),
+    ("a routine's option of 16 bytes", PACKED5, KR + ["steps", 1, "option"], "00" * 16, True),
+    ("a routine's option of 17 bytes", PACKED5, KR + ["steps", 1, "option"], "00" * 17, False),
+    ("a routine's empty option", PACKED5, KR + ["steps", 1, "option"], "", False),
+    ("a routine's option of an odd digit", PACKED5, KR + ["steps", 1, "option"], "A55", False),
+    ("a routine's option in lower case", PACKED5, KR + ["steps", 1, "option"], "a5", False),
+    ("a routine with a dfi", PACKED5, KR + ["steps", 1, "dfi"], "01", False),
+    ("a download with an option", PACKED5, KR + ["steps", 0, "option"], "A5", False),
     ("a routine of three digits", PACKED5, KR + ["steps", 1, "routine"], "201", False),
 ]
-
-
-class Cli:
-    def __init__(self, exe, scratch):
-        self.exe = exe
-        self.scratch = scratch
-        self.count = 0
-
-    def check(self, kind, doc=None, path=None):
-        """(accepted, the refusal's detail) from signals or plugins check"""
-        if path is None:
-            self.count += 1
-            path = os.path.join(self.scratch, f"case{self.count}.json")
-            with open(path, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(doc, f, ensure_ascii=False, indent=1)
-        word = {"signal-file": "signals", "condition-file": "conditions"}.get(kind, "plugins")
-        r = subprocess.run([self.exe, word, "check", path], capture_output=True, timeout=30)
-        detail = ""
-        for line in r.stdout.decode("utf-8", errors="replace").splitlines():
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if record.get("type") == "error":
-                detail = record.get("detail", "")
-        if r.returncode not in (0, 3):
-            raise RuntimeError(f"havne-cli {word} check exited {r.returncode}: "
-                               f"{r.stderr.decode(errors='replace')}")
-        return r.returncode == 0, detail
 
 
 def main():

@@ -174,4 +174,47 @@ TEST_F(SimMemoryBusTest, AnUploadsBlockLostOnTheBusIsNotHandedOverAgain)
         << "and bytes are still left";
 }
 
+/* A read held 6 s by its 78s, with or without a functional 3E 80 every
+ * 2 s meanwhile: the session after it, as the next read finds it */
+Bytes after_a_long_wait(bool keep)
+{
+    Sim sim("mock://sim?values=canned&faults=pending:4&pending_ms=6000:23");
+    EXPECT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    Fd ecu = vcan_bus::open_isotp(vcan_bus::kRequest, vcan_bus::kReply);
+    Fd bus = vcan_bus::open_raw();
+    EXPECT_TRUE(ecu.ok() && bus.ok());
+    unlock(ecu);
+    Bytes got = ask_on(ecu, read_of(kBase, 4));
+    EXPECT_EQ(got, (Bytes{0x7F, 0x23, 0x78}));
+    for (int i = 0; i < 6 && got.size() == 3 && got[2] == 0x78; ++i) {
+        if (keep) {
+            struct can_frame f;
+            std::memset(&f, 0, sizeof f);
+            f.can_id = vcan_bus::kFunctional;
+            f.can_dlc = 8;
+            f.data[0] = 0x02;
+            f.data[1] = 0x3E;
+            f.data[2] = 0x80;
+            EXPECT_EQ(::write(bus.get(), &f, sizeof f),
+                      static_cast<ssize_t>(sizeof f));
+        }
+        uint8_t buf[4096];
+        const long n = vcan_bus::read_for(ecu.get(), buf, sizeof buf, 2500);
+        got = n > 0 ? Bytes(buf, buf + n) : Bytes{};
+    }
+    EXPECT_EQ(got.size(), 5u) << "the read's own answer, 6 s on";
+    return ask_on(ecu, read_of(kBase, 4));
+}
+
+// S3 runs through a module's 78s: a 3E 80 heard while it is busy holds
+// the session, and the wait alone lets it lapse
+TEST_F(SimMemoryBusTest, AQuietKeepAliveHoldsTheSessionThroughALongWait)
+{
+    const Bytes kept = after_a_long_wait(true);
+    ASSERT_EQ(kept.size(), 5u);
+    EXPECT_EQ(Bytes(kept.begin() + 1, kept.end()), region(kBase, 4));
+    EXPECT_EQ(after_a_long_wait(false), (Bytes{0x7F, 0x23, 0x7F}))
+        << "out of the session once S3 ran out";
+}
+
 } // namespace

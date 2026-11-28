@@ -33,7 +33,8 @@ extern "C" {
  *            [&faults=<f>:<n>[@<reply ID>][,...]][&<timing>]
  *   where <timing> is any of delay=<p50 us>:<p99 us>[@<reply ID>][,...],
  *   fc=<us>[@<reply ID>][,...], cf=<us>[@<reply ID>][,...], seed=<n>,
- *   busy=ignore|21[@<reply ID>][,...] and bus=<kbit/s>
+ *   busy=ignore|21[@<reply ID>][,...], bus=<kbit/s> and
+ *   pending_ms=<ms>[:<service hex>]
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
  * J1979 PID. modules=2: a second module too, on 0x7E1 answering as
@@ -95,6 +96,11 @@ extern "C" {
  * aimed at its reply ID): every nth request it lets through on a gated
  * route, on its own count, it locks again first and withholds that
  * request as the route does while locked.
+ * pending_ms, both: a pending reply's wait, 300 (the default) to 30000,
+ * for one service's replies alone when it names one (the others keep
+ * 300); on a bus the module sends its 7F <service> 78 again every 2 s
+ * meanwhile, as one busy for seconds does; ecuio_sim_ask's replies hold
+ * the first alone.
  * The timing, both: delay is each reply's time from the request to its
  * first frame, a log-normal through its median p50 and its 99th
  * percentile p99 (1 <= p50 <= p99 <= 10000000), drawn on a generator of

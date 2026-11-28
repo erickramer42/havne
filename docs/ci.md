@@ -196,7 +196,9 @@ full commit SHAs with a `# vX.Y.Z` comment, and Dependabot bumps them
 weekly. `codeql.yml` runs CodeQL on pull requests to `main`, pushes to
 `main` and a weekly schedule: C++ from a Windows core-only build
 (core, the J2534 layer and the surrogate; not the app or QML) and the
-workflows. Results land in the repository's code-scanning dashboard,
+workflows; `paths-ignore` doesn't apply to the compiled analysis, so a step
+filters `third_party/wamr` out of the SARIF before `upload-sarif`. Results
+land in the repository's code-scanning dashboard,
 which needs CodeQL's default setup off (Settings to Code security),
 because GitHub refuses advanced-setup uploads while default setup is
 on.

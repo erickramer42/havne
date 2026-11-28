@@ -863,6 +863,12 @@
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         },
+        "dfi": {
+          "title": "Data format identifier",
+          "description": "The helper's data format in the 34, two hex digits, \"00\" (plain) when not given. Any other is the plugin's claim: Havne sends it and can't check the helper's contents.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{2}$"
+        },
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
@@ -895,6 +901,12 @@
           "description": "The routine's id, four hex digits.",
           "type": "string",
           "pattern": "^[0-9A-F]{4}$"
+        },
+        "option": {
+          "title": "Option record",
+          "description": "The bytes after the routine's id in the 31 01, 1 to 16 of them in upper-case hex pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,16}$"
         },
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },

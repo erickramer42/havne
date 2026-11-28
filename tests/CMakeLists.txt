@@ -58,7 +58,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_session_operation_ends.cpp
     test_session_operation_record.cpp test_session_operation_checks.cpp
     test_session_operation_battery.cpp test_session_operation_write.cpp
-    test_session_operation_kernel.cpp test_session_operation_session.cpp)
+    test_session_operation_kernel.cpp test_session_operation_session.cpp
+    test_session_operation_held.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -1313,6 +1314,15 @@ if(TARGET havne-cli)
                         ${_cli_dump_core} $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliDumpTest.AKernelReadWarnsAndKeepsTheCode
                 PROPERTIES TIMEOUT 180)
+        endif()
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliDumpTest.TheKeepAliveHoldsAProgrammingSessionOnVcan
+                COMMAND ${Python3_EXECUTABLE} ${_cli_dump} held
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:cli_dump_fixture>
+                        ${_cli_dump_core})
+            set_tests_properties(
+                CliDumpTest.TheKeepAliveHoldsAProgrammingSessionOnVcan
+                PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK vcan0)
         endif()
         add_test(NAME CliPluginRunTest.AFormat2ConversationPluginReadsSignalsOnly
             COMMAND ${Python3_EXECUTABLE} ${_cli_consent} no-publisher

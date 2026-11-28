@@ -139,6 +139,8 @@ int c_abi_plugin(void)
             const uint8_t* blob = NULL;
             uint64_t blob_bytes = 0;
             uint32_t plans = 7u;
+            uint8_t option[ECUIO_PLUGIN_MAX_OPTION];
+            size_t option_count = 7u;
             memset(&kernel, 0, sizeof kernel);
             kernel.struct_size = sizeof kernel;
             memset(&plan, 0, sizeof plan);
@@ -155,6 +157,15 @@ int c_abi_plugin(void)
                  ECUIO_STEP_ROUTINE == 4u &&
                  ECUIO_OPERATION_KIND_KERNEL_READ == 2u &&
                  ECUIO_PLUGIN_MAX_STARTS == 8u &&
+                 ECUIO_PLUGIN_MAX_OPTION == 16u &&
+                 offsetof(ecuio_plugin_operation_step_t, option_len) == 76u &&
+                 ecuio_plugin_operation_step_option(
+                     plugin, 0, 0, option, sizeof option, &option_count) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 option_count == 7u &&
+                 ecuio_plugin_operation_step_option(plugin, 0, 0, NULL, 1,
+                                                    &option_count) ==
+                     ECUIO_ERR_NULL_ARGUMENT &&
                  ECUIO_STEP_SESSION_PROGRAMMING == 2u &&
                  ECUIO_STEP_SESSION_EXTENDED == 3u &&
                  ECUIO_PLUGIN_MAX_OPERATIONS == 8u &&

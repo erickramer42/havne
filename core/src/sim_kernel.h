@@ -15,6 +15,12 @@ constexpr char ECUIO_SIM_KERNEL_MAGIC[] = "HAVNEKRN";
 constexpr uint32_t ECUIO_SIM_KERNEL_MAGIC_BYTES = 8;
 constexpr uint32_t ECUIO_SIM_KERNEL_HEAD = ECUIO_SIM_KERNEL_MAGIC_BYTES + 4;
 constexpr uint8_t ECUIO_SIM_NRC_PENDING = 0x78;
+/* Made up: dfi 01 is each byte XOR the key, and a start given the option
+ * answers with the status */
+constexpr uint8_t ECUIO_SIM_KERNEL_DFI = 0x01;
+constexpr uint8_t ECUIO_SIM_KERNEL_KEY = 0x5A;
+constexpr uint8_t ECUIO_SIM_KERNEL_OPTION[4] = {0xA5, 0x5A, 0x0F, 0xF0};
+constexpr uint8_t ECUIO_SIM_KERNEL_STATUS = 0x10;
 
 struct ecuio_sim_kernel_faults {
     bool once = false;   /* the helper ends at an upload's 37 */
@@ -27,6 +33,7 @@ struct ecuio_sim_kernel {
     bool on = false;
     ecuio_sim_kernel_faults faults;
     bool downloading = false;
+    uint8_t dfi = 0;
     uint32_t next = 0;
     uint32_t left = 0;
     uint8_t counter = 1;
@@ -50,6 +57,13 @@ inline void ecuio_sim_kernel_end(ecuio_sim_kernel& k)
     k.faults = f;
     k.downloads = downloads;
     k.starts = starts;
+}
+
+inline void ecuio_sim_kernel_scramble(uint8_t* d, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; ++i) {
+        d[i] = static_cast<uint8_t>(d[i] ^ ECUIO_SIM_KERNEL_KEY);
+    }
 }
 
 /* What the start accepts: the magic, the big-endian sum of the rest */
@@ -98,7 +112,7 @@ inline uint32_t open_download(ecuio_sim_kernel& k,
                         s.size <= ECUIO_SIM_KERNEL_RAM_BYTES &&
                         s.address - ECUIO_SIM_KERNEL_RAM_ADDRESS <=
                             ECUIO_SIM_KERNEL_RAM_BYTES - s.size;
-    if (req[1] != 0x00 || !inside) {
+    if ((req[1] != 0x00 && req[1] != ECUIO_SIM_KERNEL_DFI) || !inside) {
         return refuse(0x34, ECUIO_SIM_NRC_RANGE, out);
     }
     if (security.unlocked == 0) {
@@ -109,6 +123,7 @@ inline uint32_t open_download(ecuio_sim_kernel& k,
     }
     ecuio_sim_kernel_end(k);
     k.downloading = true;
+    k.dfi = req[1];
     k.next = static_cast<uint32_t>(s.address);
     k.left = static_cast<uint32_t>(s.size);
     ++k.downloads;
@@ -133,11 +148,14 @@ inline uint32_t next_block(ecuio_sim_kernel& k,
     if (req[1] != k.counter) {
         return refuse(0x36, ECUIO_SIM_NRC_COUNTER, out);
     }
+    const uint8_t key =
+        k.dfi == ECUIO_SIM_KERNEL_DFI ? ECUIO_SIM_KERNEL_KEY : 0;
     for (uint32_t i = 0; i < n; ++i, ++k.got) {
+        const uint8_t b = static_cast<uint8_t>(req[2 + i] ^ key);
         if (k.got < ECUIO_SIM_KERNEL_HEAD) {
-            k.head[k.got] = req[2 + i];
+            k.head[k.got] = b;
         } else {
-            k.sum += req[2 + i];
+            k.sum += b;
         }
     }
     k.next += n;
@@ -184,8 +202,13 @@ inline uint32_t start(ecuio_sim_kernel& k, const ecuio_sim_security& security,
     if (((uint32_t{req[2]} << 8) | req[3]) != ECUIO_SIM_KERNEL_ROUTINE) {
         return refuse(0x31, ECUIO_SIM_NRC_RANGE, out);
     }
-    if (len != 4) {
+    const uint32_t given = sizeof ECUIO_SIM_KERNEL_OPTION;
+    const bool option = len == 4 + given;
+    if (len != 4 && !option) {
         return refuse(0x31, ECUIO_SIM_NRC_LENGTH, out);
+    }
+    if (option && std::memcmp(req + 4, ECUIO_SIM_KERNEL_OPTION, given) != 0) {
+        return refuse(0x31, ECUIO_SIM_NRC_RANGE, out);
     }
     if (security.unlocked == 0) {
         return refuse(0x31, ECUIO_SIM_NRC_DENIED, out);
@@ -205,7 +228,11 @@ inline uint32_t start(ecuio_sim_kernel& k, const ecuio_sim_security& security,
     out[1] = 0x01;
     out[2] = req[2];
     out[3] = req[3];
-    return 4;
+    if (!option) {
+        return 4;
+    }
+    out[4] = ECUIO_SIM_KERNEL_STATUS;
+    return 5;
 }
 
 } // namespace ecuio_sim_kernel_detail

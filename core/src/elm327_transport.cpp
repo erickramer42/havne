@@ -157,14 +157,12 @@ namespace {
 
 /* The start's probe for a session attach set up to listen: its answerers
  * are the range alone (create fixed the modules, so none joins). A
- * refusal leaves every module in range; the setup again restores the
- * header and filter either way. */
+ * refusal (already in the wire log) leaves every module in range; the
+ * setup again restores the header and filter either way. */
 void probe_at_start(ecuio_session_t* session, transport* t)
 {
     ecuio_probe p;
     if (ecuio_start_probe_on().load() && run_probe(t, &p) != ECUIO_OK) {
-        elm327_log_write(t->log, "the start's probe was refused: %s",
-                         ecuio_last_error_detail());
         ecuio_detail_clear();
         return;
     }

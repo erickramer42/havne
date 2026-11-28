@@ -215,11 +215,12 @@ ecuio_status_t helper_fits(const plan& p, uint32_t write_bound)
 {
     const ecuio_operation::kernel& k = p.helper;
     const uint32_t opening = 3u + k.address_bytes + k.size_bytes;
-    const uint32_t need = opening > 4u ? opening : 4u;
+    const uint32_t start = 4u + k.option_len;
+    const uint32_t need = opening > start ? opening : start;
     if (p.has_kernel && write_bound < need) {
-        ecuio_detail_set("the helper's download is asked in %u bytes: this "
-                         "adapter carries no write that long",
-                         need);
+        ecuio_detail_set("the helper's %s is asked in %u bytes: this adapter "
+                         "carries no write that long",
+                         opening >= start ? "download" : "start", need);
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     return ECUIO_OK;
@@ -356,6 +357,7 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
     o.r = ecuio_operation::run{};
     o.out = o.fed = o.orphan = o.word_given = o.closed_sink = false;
     o.checking = false;
+    o.status_logged = 0;
     o.talk_at = channel;
     o.sid = 0;
     o.ends_at = 0;

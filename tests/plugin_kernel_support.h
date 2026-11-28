@@ -38,6 +38,8 @@ struct Kernel {
     std::string download_address = "\"00F00000\"";
     std::string sha; /* the download's sha256, when not the blob's own */
     std::string routine = "\"0201\"";
+    std::string download_extra; /* keys after the download's own */
+    std::string routine_extra;  /* and after the routine's */
     std::string kind = "\"kernel_read\"";
     std::string kernel_extra;
     std::string ranges =
@@ -71,14 +73,14 @@ struct Kernel {
                download_address +
                R"(, "address_bytes": 4, "size_bytes": 4, "file": )"
                R"("kernel.bin", "sha256": ")" +
-               (sha.empty() ? sha_of(blob) : sha) + "\"}";
+               (sha.empty() ? sha_of(blob) : sha) + "\"" + download_extra + "}";
     }
 
     std::string routine_step() const
     {
         return R"({"step": "routine", "name": "start", "session": )"
                R"("programming", "routine": )" +
-               routine + "}";
+               routine + routine_extra + "}";
     }
 
     std::string json() const

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace {
@@ -474,4 +475,56 @@ TEST(OperationRunTest, AKernelReadReadsItsIdentifiersAgainAfterTheLeave)
         return true;
     };
     EXPECT_EQ(d.go(), run_end::no_answer) << "a dump's is still its end";
+}
+
+TEST(OperationRunTest, AHelpersDfiAndStartOptionGoOnTheWire)
+{
+    plan p = kernel_plan();
+    ecuio_operation::kernel& k = p.helper;
+    k.dfi = ECUIO_SIM_KERNEL_DFI;
+    ecuio_sim_kernel_scramble(k.blob.data(), kHelperBytes);
+    static_assert(sizeof ECUIO_SIM_KERNEL_OPTION <= sizeof k.option, "");
+    std::memcpy(k.option, ECUIO_SIM_KERNEL_OPTION,
+                sizeof ECUIO_SIM_KERNEL_OPTION);
+    k.option_len = sizeof ECUIO_SIM_KERNEL_OPTION;
+    KernelDrive d(p);
+    EXPECT_EQ(d.go(), run_end::complete);
+    ASSERT_GE(d.sent.size(), 6u);
+    EXPECT_EQ(d.sent[1][1], ECUIO_SIM_KERNEL_DFI);
+    Bytes start = kStart;
+    start.insert(start.end(), ECUIO_SIM_KERNEL_OPTION,
+                 ECUIO_SIM_KERNEL_OPTION + sizeof ECUIO_SIM_KERNEL_OPTION);
+    EXPECT_EQ(d.sent[5], start);
+    EXPECT_TRUE(d.r.h.status_given);
+    EXPECT_EQ(d.r.h.status, ECUIO_SIM_KERNEL_STATUS);
+    ASSERT_EQ(d.sink.got[0][0].size(), 3000u);
+    EXPECT_EQ(d.sink.got[0][0], d.sink.got[1][0]);
+
+    plan plain = kernel_plan();
+    plain.helper.dfi = ECUIO_SIM_KERNEL_DFI;
+    KernelDrive wrong(plain);
+    EXPECT_EQ(wrong.go(), run_end::refused)
+        << "the module reads the download by the dfi it was given";
+}
+
+TEST(OperationRunTest, TheStartsStatusIsKeptAndNeverJudged)
+{
+    KernelDrive bare(kernel_plan());
+    EXPECT_EQ(bare.go(), run_end::complete);
+    EXPECT_FALSE(bare.r.h.status_given) << "71 01 <rid> carries none";
+    EXPECT_EQ(bare.r.h.status, 0);
+    for (const uint8_t status : {uint8_t{0x00}, uint8_t{0xEE}}) {
+        KernelDrive d(kernel_plan());
+        d.script = [&](const Bytes& q, size_t, Bytes* out, uint32_t*) {
+            if (q[0] != 0x31) {
+                return false;
+            }
+            d.n.ask(q);
+            *out = {0x71, 0x01, 0x02, 0x01, status, 0x99};
+            return true;
+        };
+        EXPECT_EQ(d.go(), run_end::complete) << int{status};
+        EXPECT_TRUE(d.r.h.status_given) << int{status};
+        EXPECT_EQ(d.r.h.status, status) << "the first byte past the id";
+    }
 }
