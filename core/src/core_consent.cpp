@@ -181,6 +181,26 @@ ecuio_session_apply_consent(ecuio_session_t* session,
 }
 
 extern "C" ecuio_status_t
+ecuio_session_declared_prints(const ecuio_session_t* session,
+                              ecuio_declared_print_t* out, uint32_t capacity,
+                              uint32_t* count)
+{
+    if (session == nullptr || count == nullptr ||
+        (out == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const auto& all = session->declared_prints;
+    *count = static_cast<uint32_t>(all.size());
+    for (uint32_t i = 0; i < capacity && i < all.size(); ++i) {
+        ecuio_declared_print_t p{};
+        p.rx_id = all[i].rx;
+        std::memcpy(p.fingerprint, all[i].fingerprint, sizeof p.fingerprint);
+        out[i] = p;
+    }
+    return ECUIO_OK;
+}
+
+extern "C" ecuio_status_t
 ecuio_session_wants_consent(const ecuio_session_t* session, uint32_t* out)
 {
     ecuio_detail_clear();

@@ -806,6 +806,9 @@ class ecuio_consent_store_t(Structure):
 class ecuio_csv_guess_t(Structure):
     pass
 
+class ecuio_declared_print_t(Structure):
+    pass
+
 class ecuio_display_value_t(Structure):
     pass
 
@@ -1364,6 +1367,12 @@ ecuio_csv_guess_t._fields_ = [
     ('map_offset', c_uint32),
     ('map_length', c_uint32),
     ('reserved', (c_uint64 * 3)),
+]
+ecuio_declared_print_t._fields_ = [
+    ('rx_id', c_uint32),
+    ('flags', c_uint32),
+    ('fingerprint', (c_uint8 * 32)),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_display_value_t._fields_ = [
     ('value', c_double),
@@ -2390,6 +2399,7 @@ FUNCTIONS = {
     'ecuio_session_clear_diagnostics_with': (c_int, [POINTER(ecuio_session_t), c_uint32, c_uint32, c_uint32]),  # core.h
     'ecuio_session_close': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_create': (c_int, [c_char_p, POINTER(POINTER(ecuio_session_t))]),  # core.h
+    'ecuio_session_declared_prints': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_declared_print_t), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_session_destroy': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_get_absent_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_awake': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint32)]),  # core.h

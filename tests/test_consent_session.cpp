@@ -478,6 +478,27 @@ TEST(ConsentSessionTest, AConsentToTheDeclaringPluginAllowsItsModulesSession)
     const uint32_t tcm = channel_of(s, 0x7E9);
     ASSERT_LT(tcm, 32u);
 
+    uint32_t count = 99;
+    ASSERT_EQ(ecuio_session_declared_prints(s, nullptr, 0, &count), ECUIO_OK);
+    EXPECT_EQ(count, 1u);
+    ecuio_declared_print_t got[2];
+    std::memset(got, 0xA5, sizeof got);
+    ASSERT_EQ(ecuio_session_declared_prints(s, got, 2, &count), ECUIO_OK);
+    EXPECT_EQ(count, 1u);
+    EXPECT_EQ(got[0].rx_id, 0x7E9u);
+    EXPECT_EQ(got[0].flags, 0u);
+    EXPECT_EQ(std::memcmp(got[0].fingerprint, print.data(), 32), 0);
+    for (const uint32_t x : got[0].reserved) {
+        EXPECT_EQ(x, 0u);
+    }
+    EXPECT_EQ(got[1].rx_id, 0xA5A5A5A5u) << "past the count untouched";
+    EXPECT_EQ(ecuio_session_declared_prints(s, nullptr, 1, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_declared_prints(s, got, 2, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_declared_prints(nullptr, got, 2, &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+
     EXPECT_EQ(ecuio_session_apply_consent(s, store.store, bytes_of(print)),
               ECUIO_ERR_CONSENT_REQUIRED);
     EXPECT_STREQ(ecuio_last_error_detail(),

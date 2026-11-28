@@ -403,6 +403,31 @@ ecuio_status_t ecuio_session_apply_consent(ecuio_session_t* session,
                                            const ecuio_consent_store_t* store,
                                            const uint8_t* fingerprint);
 
+typedef struct ecuio_declared_print {
+    uint32_t rx_id;
+    uint32_t flags; /* zero */
+    uint8_t fingerprint[32];
+    uint32_t reserved[4];
+} ecuio_declared_print_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_declared_print_t) == 56,
+              "ecuio_declared_print_t size is ABI");
+static_assert(offsetof(ecuio_declared_print_t, fingerprint) == 8,
+              "declared print fingerprint offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_declared_print_t) == 56,
+               "ecuio_declared_print_t size is ABI");
+_Static_assert(offsetof(ecuio_declared_print_t, fingerprint) == 8,
+               "declared print fingerprint offset is ABI");
+#endif
+
+/* apply_consent's prints for declared sessions; the serial ports' contract */
+ecuio_status_t ecuio_session_declared_prints(const ecuio_session_t* session,
+                                             ecuio_declared_print_t* out,
+                                             uint32_t capacity,
+                                             uint32_t* count);
+
 /* *out 1 while a module of the session's plugin would bind but for a
  * consent, else 0 */
 ecuio_status_t ecuio_session_wants_consent(const ecuio_session_t* session,

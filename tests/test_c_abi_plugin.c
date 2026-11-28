@@ -199,6 +199,11 @@ int c_abi_plugin(void)
              offsetof(ecuio_consent_record_t, name) == 256u &&
              offsetof(ecuio_consent_record_t, reserved) == 384u &&
              ECUIO_CONSENT_RECORD_FILE == 1u &&
+             sizeof(ecuio_declared_print_t) == 56u &&
+             offsetof(ecuio_declared_print_t, fingerprint) == 8u &&
+             offsetof(ecuio_declared_print_t, reserved) == 40u &&
+             ecuio_session_declared_prints(NULL, NULL, 0u, NULL) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_consent_store_give_file(NULL, "{}", 2u, "a", 1u) ==
                  ECUIO_ERR_NULL_ARGUMENT &&
