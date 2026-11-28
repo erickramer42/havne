@@ -89,6 +89,8 @@ struct ecuio_sim_config {
     bool vin_given = false; /* replay: 09 02 answers it, not the car's */
     ecuio_sim_faults faults;    /* every module's, each on its own count */
     ecuio_sim_aims aimed;       /* faults aimed at one module each */
+    int64_t pending_us = ECUIO_SIM_PENDING_US; /* pending_ms= */
+    uint8_t pending_service = 0;
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     bool sessions = false;      /* mock: sessions=1, the profile's modules */

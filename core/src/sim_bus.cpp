@@ -115,6 +115,7 @@ bool start(ecuio_sim* s, sim_node& n, int64_t now)
         return true;
     }
     r.waiting = false;
+    r.again_us = 0;
     if (!isotp_tx_start(n.tx, on_id(n), r.data, static_cast<uint16_t>(r.len),
                         now, &f)) {
         return true; /* a send under way: dropped, as a busy ECU would */
@@ -128,6 +129,20 @@ bool start(ecuio_sim* s, sim_node& n, int64_t now)
         r.active = true;
         r.held = false;
     }
+    return true;
+}
+
+bool pend(ecuio_sim* s, sim_node& n, int64_t now)
+{
+    sim_sending& r = n.r;
+    const uint8_t wait[3] = {0x7F, r.service, 0x78};
+    isotp_can f;
+    if (isotp_tx_start(n.tx, on_id(n), wait, 3, now, &f) && !send(s, f)) {
+        return false;
+    }
+    r.again_us = now + ECUIO_SIM_PENDING_AGAIN_US < r.start_us
+                     ? now + ECUIO_SIM_PENDING_AGAIN_US
+                     : 0;
     return true;
 }
 
@@ -189,6 +204,7 @@ void yield(ecuio_sim* s)
     for (int i = 0; i < s->node_count; ++i) {
         sim_node& n = s->nodes[i];
         n.r.waiting = false;
+        n.r.again_us = 0;
         n.r.active = false;
         n.tx.state = isotp_tx_state::idle;
     }
@@ -233,19 +249,14 @@ bool send_reply(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
         r.waiting = true;
         r.start_us = now + drawn + ECUIO_SIM_LATE_US;
         return true;
-    case ecuio_sim_fate::pending: {
-        /* 7F <service> 78 now, a Single Frame; the reply itself later,
-         * whole */
-        const uint8_t wait[3] = {0x7F, m.data[0], 0x78};
-        isotp_can f;
-        if (isotp_tx_start(n.tx, on_id(n), wait, 3, now, &f) && !send(s, f)) {
-            return false;
-        }
+    case ecuio_sim_fate::pending:
         r.fate = ecuio_sim_fate::intact;
         r.waiting = true;
-        r.start_us = now + ECUIO_SIM_PENDING_US;
-        return true;
-    }
+        r.start_us = now + ecuio_sim_pending_wait_us(
+                               s->ecu.config.pending_us,
+                               s->ecu.config.pending_service, m.data[0]);
+        r.service = m.data[0];
+        return pend(s, n, now);
     case ecuio_sim_fate::bad_sequence:
     case ecuio_sim_fate::stalled:
     case ecuio_sim_fate::intact:
@@ -411,12 +422,18 @@ void run(ecuio_sim* s)
             sim_node& n = s->nodes[i];
             if (n.r.waiting && now >= n.r.start_us && !start(s, n, now)) {
                 failed = true;
+            } else if (n.r.waiting && n.r.again_us != 0 &&
+                       now >= n.r.again_us && !pend(s, n, now)) {
+                failed = true;
             } else if (!pump(s, n, now)) {
                 failed = true;
             }
             (void)isotp_expire(n.rx, now);
             if (n.r.waiting && n.r.start_us < due) {
                 due = n.r.start_us;
+            }
+            if (n.r.waiting && n.r.again_us != 0 && n.r.again_us < due) {
+                due = n.r.again_us;
             }
             if (n.r.active && n.tx.due_us < due) {
                 due = n.tx.due_us;

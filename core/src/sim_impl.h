@@ -36,6 +36,8 @@ struct sim_sending {
     ecuio_sim_fate fate = ecuio_sim_fate::intact;
     bool waiting = false; /* late or pending: not started yet */
     int64_t start_us = 0;
+    int64_t again_us = 0; /* pending: its next 7F <service> 78, 0 none */
+    uint8_t service = 0;
     bool active = false; /* through the sender, Flow Control or frames due */
     bool held = false;   /* stalled: the last frame put off once */
     /* The ID it goes on: the node's reply ID, or a module's when the

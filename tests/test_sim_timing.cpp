@@ -376,6 +376,41 @@ TEST(SimAskTest, APendingReplyKeepsItsOwnTiming)
     EXPECT_EQ(r[1].delay_us, ECUIO_SIM_PENDING_US);
 }
 
+// An ask's replies hold one 78 however long the wait
+TEST(SimAskTest, APendingReplyWaitsItsPendingMs)
+{
+    Unbound s("mock://sim?faults=pending:1&pending_ms=6000");
+    const std::vector<ecuio_sim_reply_t> r = s.ask(0x7E0, {0x01, 0x0C});
+    ASSERT_EQ(r.size(), 2u);
+    EXPECT_NE(r[0].flags & ECUIO_SIM_REPLY_PENDING, 0u);
+    EXPECT_EQ(r[1].delay_us, 6000 * int64_t{1000});
+    Unbound one("mock://sim?faults=pending:1&pending_ms=6000:1");
+    EXPECT_EQ(one.ask(0x7E0, {0x01, 0x0C}).at(1).delay_us,
+              6000 * int64_t{1000});
+    EXPECT_EQ(one.ask(0x7E0, {0x09, 0x02}).at(1).delay_us,
+              ECUIO_SIM_PENDING_US);
+    for (const char* bad : {"299", "30001", "6s", "", "99999999999", ":1",
+                            "6000:", "6000:100", "6000:0", "6000:g"}) {
+        ecuio_sim_t* sim = nullptr;
+        const std::string uri =
+            std::string("mock://sim?faults=pending:1&pending_ms=") + bad;
+        EXPECT_EQ(ecuio_sim_create_unbound(uri.c_str(), 0, &sim),
+                  ECUIO_ERR_BAD_URI)
+            << bad;
+        EXPECT_EQ(std::string(ecuio_last_error_detail()),
+                  std::string("pending_ms: '") + bad +
+                      "' isn't <ms>[:<service>], the wait 300 to 30000 and "
+                      "the service hex");
+    }
+    for (const char* good : {"300", "30000", "6000:36", "6000:3e"}) {
+        ecuio_sim_t* sim = nullptr;
+        const std::string uri = std::string("mock://sim?pending_ms=") + good;
+        EXPECT_EQ(ecuio_sim_create_unbound(uri.c_str(), 0, &sim), ECUIO_OK)
+            << good;
+        ecuio_sim_destroy(sim);
+    }
+}
+
 // A timing item aimed at a module the car hasn't is refused at create
 // as a fault's is, naming the modules it has
 TEST(SimTest, ATimingsAimNeedsItsModule)
