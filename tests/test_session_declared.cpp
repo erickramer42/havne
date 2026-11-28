@@ -189,6 +189,28 @@ TEST(DeclaredSessionTest, AConversationsSessionIsItsOwn)
     EXPECT_EQ(e.chans[1].session_source, ECUIO_SESSION_SOURCE_CONVERSATION);
 }
 
+TEST(DeclaredSessionTest, AConversationEntersASessionItsSetLeft)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, true));
+    want(&e, kRange | kRead, kRange | kRead);
+    int64_t now = 0;
+    Ecu other;
+    Ecu declared;
+    run(&e, &now, &other, &declared, 20);
+    want(&e, kRange | kRead, kRange);
+    run(&e, &now, &other, &declared, 20);
+    ASSERT_EQ(declared.count({0x10, 0x01}), 1u);
+    ASSERT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_NOT_ASKED);
+
+    declared.heard.clear();
+    EXPECT_TRUE(ecuio_engine_session_enter(&e, 1));
+    run(&e, &now, &other, &declared, 4);
+    EXPECT_EQ(declared.count({0x10, 0x03}), 1u);
+    EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(e.chans[1].session_source, ECUIO_SESSION_SOURCE_CONVERSATION);
+}
+
 namespace {
 
 /* A set of two modules, 7E9 declaring session, one DID on each; obd2's

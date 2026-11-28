@@ -56,8 +56,7 @@ inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
     if (ch.session_source != ECUIO_SESSION_SOURCE_URI) {
         ch.session_source = ECUIO_SESSION_SOURCE_CONVERSATION;
     }
-    if (ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED &&
-        ch.session_entries == 0) {
+    if (ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED) {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
         ++ch.generation;
     }
