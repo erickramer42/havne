@@ -122,3 +122,32 @@ TEST(BridgeTest, AClearsSavedFileHoldsTheEnhancedCodes)
     EXPECT_TRUE(saved.readAll().contains("\"type\":\"enhanced_codes\""));
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+
+TEST(BridgeTest, AClearReadsTheModulesEnhancedCodesAgain)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 enhanced codes: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 1; }, 4000));
+    ASSERT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 2; }, 6000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.diagnostics()
+                  .at(0)
+                  .toMap()
+                  .value("enhanced")
+                  .toMap()
+                  .value("outcome")
+                  .toString(),
+              QStringLiteral("answered"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}

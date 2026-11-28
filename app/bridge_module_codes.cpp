@@ -327,3 +327,21 @@ SessionBridge::clearFileText(const ecuio_channel_diagnostics_t* reports,
     }
     return diagnosticsFileText(reports, n, codes);
 }
+
+void SessionBridge::queueModuleCodes(uint32_t channel)
+{
+    CodesVisit& v = m_codesVisit;
+    if ((m_codesShown[channel].flags & ECUIO_MODULE_CODES_ASKABLE) == 0) {
+        return;
+    }
+    if (v.step == CodesVisit::Step::idle) {
+        v.queue = {channel};
+        v.at = 0;
+        v.not_reached = 0;
+        v.step = CodesVisit::Step::codes_start;
+        advanceCodesVisit();
+    } else if (std::find(v.queue.begin() + static_cast<long>(v.at) + 1,
+                         v.queue.end(), channel) == v.queue.end()) {
+        v.queue.push_back(channel);
+    }
+}

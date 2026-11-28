@@ -127,6 +127,9 @@ void SessionBridge::pollChannelDiagnostics()
             }
             clear_only = s.clear != ECUIO_CLEAR_CLEARED &&
                          s.clear != ECUIO_CLEAR_UNANSWERED;
+            if (!clear_only) {
+                queueModuleCodes(c);
+            }
         }
         if ((s.flags & ECUIO_DIAG_COMPLETE) == 0 ||
             s.generation == m_diagnosticsGeneration[c]) {
