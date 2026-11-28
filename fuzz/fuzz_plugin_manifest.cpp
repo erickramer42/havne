@@ -349,7 +349,15 @@ ecuio_plugin_operation_step_t step_at(const ecuio_plugin_t* a, uint32_t op,
     for (const uint32_t r : s.reserved) {
         check(r == 0);
     }
-    check(is_id(s.name, sizeof s.name) && s.dfi == 0);
+    check(is_id(s.name, sizeof s.name));
+    check(s.dfi == 0 || s.kind == ECUIO_STEP_DOWNLOAD);
+    check(s.option_len <= ECUIO_PLUGIN_MAX_OPTION &&
+          (s.option_len == 0 || s.kind == ECUIO_STEP_ROUTINE));
+    size_t n = 99;
+    uint8_t option[ECUIO_PLUGIN_MAX_OPTION];
+    check(ecuio_plugin_operation_step_option(a, op, i, option, sizeof option,
+                                             &n) == ECUIO_OK &&
+          n == s.option_len);
     return s;
 }
 

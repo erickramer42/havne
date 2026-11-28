@@ -79,6 +79,9 @@ struct kernel {
     uint8_t address_bytes = 4;
     uint8_t size_bytes = 4;
     uint16_t routine = 0;
+    uint8_t dfi = 0;
+    uint8_t option[ECUIO_PLUGIN_MAX_OPTION] = {};
+    uint8_t option_len = 0;
     std::vector<uint8_t> blob;
     uint8_t sha256[32] = {};
 };

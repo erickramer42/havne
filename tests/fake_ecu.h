@@ -276,6 +276,104 @@ inline std::atomic<bool>& pack_first_only()
     return on;
 }
 
+struct ModuleCode {
+    uint32_t code;
+    uint8_t status;
+};
+constexpr ModuleCode kModuleCodes[] = {
+    {0x012800, 0x20}, {0xD12345, 0x24}, {0x9A011C, 0x89},
+    {0x030100, 0x08}, {0x056311, 0x50},
+};
+
+enum class CodesMode : int {
+    normal,
+    refused,
+    none,
+    extended,
+    many,
+    no_count,
+    silent
+};
+
+inline std::atomic<int>& module_codes_mode()
+{
+    static std::atomic<int> mode{0};
+    return mode;
+}
+
+inline CodesMode codes_mode_of(const char* text)
+{
+    static const char* const kNames[] = {
+        "", "refused", "none", "extended", "many", "no-count", "silent"};
+    for (int i = 1; i < 7; ++i) {
+        if (std::strcmp(text, kNames[i]) == 0) {
+            return static_cast<CodesMode>(i);
+        }
+    }
+    return CodesMode::normal;
+}
+
+inline bool answer_codes(const unsigned char* req, size_t req_len,
+                         bool extended, unsigned char* out, size_t* out_len)
+{
+    if (req_len != 3 || req[0] != 0x19 || (req[1] != 0x01 && req[1] != 0x02)) {
+        return false;
+    }
+    const CodesMode mode = static_cast<CodesMode>(module_codes_mode().load());
+    const auto refuse = [&](unsigned char nrc) {
+        out[0] = 0x7F;
+        out[1] = 0x19;
+        out[2] = nrc;
+        *out_len = 3;
+        return true;
+    };
+    if (mode == CodesMode::silent) {
+        return false;
+    }
+    if (mode == CodesMode::refused) {
+        return refuse(0x11);
+    }
+    if (mode == CodesMode::extended && !extended) {
+        return refuse(0x7F);
+    }
+    if (mode == CodesMode::no_count && req[1] == 0x01) {
+        return refuse(0x12);
+    }
+    size_t n = 0;
+    unsigned held = 0;
+    out[n++] = 0x59;
+    out[n++] = req[1];
+    out[n++] = 0xFF;
+    const auto put = [&](uint32_t code, uint8_t status) {
+        if ((status & req[2]) == 0) {
+            return;
+        }
+        ++held;
+        if (req[1] == 0x02) {
+            out[n++] = static_cast<unsigned char>(code >> 16);
+            out[n++] = static_cast<unsigned char>(code >> 8);
+            out[n++] = static_cast<unsigned char>(code);
+            out[n++] = status;
+        }
+    };
+    if (mode == CodesMode::many) {
+        for (uint32_t i = 0; i < 200; ++i) {
+            put(0x010000 + i, 0x08);
+        }
+    } else if (mode != CodesMode::none) {
+        for (const ModuleCode& c : kModuleCodes) {
+            put(c.code, c.status);
+        }
+    }
+    if (req[1] == 0x01) {
+        out[n++] = 0x00;
+        out[n++] = static_cast<unsigned char>(held >> 8);
+        out[n++] = static_cast<unsigned char>(held);
+    }
+    *out_len = n;
+    return true;
+}
+
 /* The ID an ECU answers a request on: 11-bit physical requests 0x7E0 to
  * 0x7E7 get theirs 8 above, the functional 0x7DF is answered by the
  * engine ECU (0x7E8), and a 29-bit 18DA<ecu><tester> request by

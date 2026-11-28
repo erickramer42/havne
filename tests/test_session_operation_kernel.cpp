@@ -3,8 +3,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -211,4 +213,133 @@ TEST(SessionOperationTest, AKernelReadDownloadsStartsCopiesAndLeaves)
         image_at((b.folder.path / names[0]).generic_u8string());
     EXPECT_EQ(image, memory_of(ECUIO_SIM_DEFAULT_VIN, 0x00080000, 4096))
         << "the code region, read through the helper";
+}
+
+TEST(SessionOperationTest, AHelpersDfiIsAClaimAndItsStartsStatusIsShown)
+{
+    Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    ecuio_sim_kernel_scramble(k.blob.data(), 2000);
+    k.download_extra = R"(, "dfi": "01")";
+    k.routine_extra = R"(, "option": "A55A0FF0")";
+    Bench b;
+    b.node.s.kernel.on = true;
+    ASSERT_NO_FATAL_FAILURE(b.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_NE(v.checks & ECUIO_OPERATION_CHECK_DFI_CLAIMED, 0u);
+    EXPECT_EQ(v.routine_status_given, 1);
+    EXPECT_EQ(v.routine_status, ECUIO_SIM_KERNEL_STATUS);
+    const ecuio_run_lines& l = b.s->run_lines;
+    std::vector<std::string> lines(l.text, l.text + l.count);
+    EXPECT_NE(std::find(lines.begin(), lines.end(),
+                        "run helper  dfi 01: the plugin's claim, unchecked"),
+              lines.end());
+    EXPECT_NE(
+        std::find(lines.begin(), lines.end(), "run helper  started, status 10"),
+        lines.end());
+
+    Bench plain;
+    plain.node.s.kernel.on = true;
+    Kernel bare;
+    bare.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(bare.blob.data(), 2000), 2000u);
+    ASSERT_NO_FATAL_FAILURE(plain.start(kernel_made(bare)));
+    ASSERT_EQ(start_kernel(plain), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t w = plain.until_ended();
+    ASSERT_EQ(w.end, ECUIO_OPERATION_END_SAVED) << w.words;
+    EXPECT_EQ(w.checks & ECUIO_OPERATION_CHECK_DFI_CLAIMED, 0u);
+    EXPECT_EQ(w.routine_status_given, 0);
+    EXPECT_EQ(w.routine_status, 0);
+    for (uint32_t i = 0; i < plain.s->run_lines.count; ++i) {
+        EXPECT_EQ(
+            std::string(plain.s->run_lines.text[i]).rfind("run helper", 0),
+            std::string::npos)
+            << plain.s->run_lines.text[i];
+    }
+}
+
+TEST(SessionOperationTest, AStartLongerThanTheAdaptersWritesIsRefused)
+{
+    Kernel k;
+    k.routine_extra = R"(, "option": "00112233445566778899AABBCCDDEEFF")";
+    Bench vcan;
+    vcan.uri = "socketcan://vcan0";
+    vcan.write_max = 19;
+    ASSERT_NO_FATAL_FAILURE(vcan.start(kernel_made(k)));
+    vcan.s->no_car_bus = true;
+    EXPECT_EQ(start_kernel(vcan), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the helper's start is asked in 20 bytes: this adapter "
+                 "carries no write that long");
+}
+
+TEST(SessionOperationTest, EachStartOfAHelperThatEndsShowsAndLogsItsStatus)
+{
+    Kernel k;
+    k.blob.resize(2000);
+    ASSERT_EQ(ecuio_sim_kernel_image(k.blob.data(), 2000), 2000u);
+    k.stays = "false";
+    Bench b;
+    b.node.s.kernel.on = true;
+    b.node.s.kernel.faults.once = true;
+    uint8_t status = 0x10;
+    b.script = [&](const Bytes& q, size_t, Answer* a) {
+        if (q.empty() || q[0] != 0x31) {
+            return false;
+        }
+        Bytes reply = b.node.ask(q);
+        if (reply.size() >= 4 && reply[0] == 0x71) {
+            reply.resize(4);
+            reply.push_back(status);
+            status = 0x20;
+        }
+        a->frames = {reply};
+        return true;
+    };
+    ASSERT_NO_FATAL_FAILURE(b.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended();
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_SAVED) << v.words;
+    EXPECT_EQ(b.node.s.kernel.starts, 2u) << "a start for each pass";
+    EXPECT_EQ(v.routine_status_given, 1);
+    EXPECT_EQ(v.routine_status, 0x20) << "the latest start's";
+    const ecuio_run_lines& l = b.s->run_lines;
+    std::vector<std::string> lines(l.text, l.text + l.count);
+    for (const char* want :
+         {"run helper  started, status 10", "run helper  started, status 20"}) {
+        EXPECT_NE(std::find(lines.begin(), lines.end(), want), lines.end())
+            << want;
+    }
+
+    Bench refused;
+    refused.node.s.kernel.on = true;
+    refused.node.s.kernel.faults.once = true;
+    status = 0x10;
+    size_t uploads = 0;
+    refused.script = [&](const Bytes& q, size_t, Answer* a) {
+        if (!q.empty() && q[0] == 0x35 && ++uploads == 2) {
+            a->frames = {Bytes{0x7F, 0x35, 0x22}};
+            return true;
+        }
+        if (q.empty() || q[0] != 0x31) {
+            return false;
+        }
+        Bytes reply = refused.node.ask(q);
+        if (reply.size() >= 4 && reply[0] == 0x71) {
+            reply.resize(4);
+            reply.push_back(status);
+            status = 0x20;
+        }
+        a->frames = {reply};
+        return true;
+    };
+    ASSERT_NO_FATAL_FAILURE(refused.start(kernel_made(k)));
+    ASSERT_EQ(start_kernel(refused), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t w = refused.until_ended();
+    ASSERT_EQ(w.end, ECUIO_OPERATION_END_REFUSED) << w.words;
+    EXPECT_EQ(w.routine_status, 0x20)
+        << "the second start's, though nothing else moved before the end";
 }

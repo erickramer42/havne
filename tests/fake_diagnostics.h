@@ -11,6 +11,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/signals.h"
+#include "fake_ecu.h"
 
 #include <cmath>
 #include <cstdint>
@@ -89,6 +90,28 @@ inline void expect_report(const ecuio_channel_diagnostics_t& d)
     EXPECT_EQ(freeze_value(d, obd2_def_id(0x0C)), 3000.0)
         << "not the live 2000 rpm: the freeze frame's own";
     EXPECT_EQ(freeze_value(d, obd2_def_id(0x0D)), 80.0);
+}
+
+/* The fake engine ECU's codes under mask, in its order */
+inline void expect_module_codes(const ecuio_module_codes_t& r, uint8_t mask)
+{
+    EXPECT_NE(r.flags & ECUIO_MODULE_CODES_COMPLETE, 0u);
+    EXPECT_EQ(r.mask, mask);
+    EXPECT_EQ(r.count_outcome, ECUIO_DIAG_ANSWERED);
+    EXPECT_EQ(r.list_outcome, ECUIO_DIAG_ANSWERED);
+    std::vector<fake_ecu::ModuleCode> want;
+    for (const fake_ecu::ModuleCode& c : fake_ecu::kModuleCodes) {
+        if ((c.status & mask) != 0) {
+            want.push_back(c);
+        }
+    }
+    EXPECT_EQ(r.count, want.size());
+    ASSERT_EQ(r.held, want.size());
+    EXPECT_EQ(r.reported, want.size());
+    for (size_t i = 0; i < want.size(); ++i) {
+        EXPECT_EQ(r.codes[i].code, want[i].code) << i;
+        EXPECT_EQ(r.codes[i].status, want[i].status) << i;
+    }
 }
 
 /* The fake's report read again after its clear (ADR-0038): the MIL off,

@@ -10,6 +10,7 @@
 #define ECUIO_REQUEST_ENGINE_DIAG_H
 
 #include "request_engine_rotation.h"
+#include "request_engine_services.h"
 
 /* Lists one more diagnostics item on channel ch, unasked; false when
  * the list is full. */
@@ -315,19 +316,39 @@ inline void ecuio_engine_diagnose(ecuio_request_engine* e,
  * on. A channel mid-read, mid-clear, or never asked, is left as it is.
  * A quiet step's item out is no read: that channel starts over at the
  * item's settle, so its reply settles no slot of the new list. */
+inline void ecuio_engine_diagnose_channel_again(ecuio_request_engine* e,
+                                                uint32_t c)
+{
+    if (c >= e->chan_count) {
+        return;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.diag_count == 0 || ch.diag_pending > 0 ||
+        ecuio_engine_clear_on(ch)) {
+        return;
+    }
+    if (ch.diagnosing) {
+        ch.diag_again = ch.diag_again || ch.diag_step;
+        return;
+    }
+    ecuio_engine_diag_restart(ch);
+}
+
+/* bit c: channel c */
+inline void ecuio_engine_diagnose_channels_again(ecuio_request_engine* e,
+                                                 uint32_t channels)
+{
+    for (uint32_t c = 0; c < e->chan_count && c < 32; ++c) {
+        if (((channels >> c) & 1u) != 0) {
+            ecuio_engine_diagnose_channel_again(e, c);
+        }
+    }
+}
+
 inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        ecuio_engine_channel& ch = e->chans[c];
-        if (ch.diag_count == 0 || ch.diag_pending > 0 ||
-            ecuio_engine_clear_on(ch)) {
-            continue;
-        }
-        if (ch.diagnosing) {
-            ch.diag_again = ch.diag_again || ch.diag_step;
-            continue;
-        }
-        ecuio_engine_diag_restart(ch);
+        ecuio_engine_diagnose_channel_again(e, c);
     }
 }
 
@@ -591,6 +612,123 @@ inline void ecuio_engine_judge_settle(ecuio_request_engine* e, uint32_t c,
         0);
 }
 
+inline void ecuio_engine_codes_start(ecuio_engine_channel& ch, uint8_t mask,
+                                     uint32_t read_id)
+{
+    const uint32_t generation = ch.codes.report.generation + 1;
+    ch.codes.report = ecuio_module_codes_t{};
+    ch.codes.report.generation = generation;
+    ch.codes.report.read_id = read_id;
+    ch.codes.report.mask = mask;
+    ch.codes.report.flags = ECUIO_MODULE_CODES_READING;
+    ch.codes.step = ECUIO_CODES_STEP_COUNT;
+    ch.codes.out = false;
+}
+
+/* Taken when the read under way ends */
+inline void ecuio_engine_codes_again(ecuio_engine_channel& ch, uint8_t mask,
+                                     uint32_t read_id)
+{
+    ch.codes.again = true;
+    ch.codes.again_mask = mask;
+    ch.codes.again_id = read_id;
+}
+
+inline void ecuio_engine_read_codes(ecuio_request_engine* e, uint32_t c,
+                                    uint8_t mask, uint32_t read_id)
+{
+    if (c >= e->chan_count) {
+        return;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    mask = mask != 0 ? mask : uint8_t{ECUIO_MODULE_CODES_MASK_DEFAULT};
+    if (ch.codes.step != ECUIO_CODES_STEP_NONE) {
+        ecuio_engine_codes_again(ch, mask, read_id);
+    } else {
+        ecuio_engine_codes_start(ch, mask, read_id);
+        ch.codes.again = false;
+    }
+}
+
+inline void ecuio_engine_codes_again_after_clear(ecuio_engine_channel& ch)
+{
+    const ecuio_module_codes_t& r = ch.codes.report;
+    if (r.read_id != 0 && ch.codes.step == ECUIO_CODES_STEP_NONE &&
+        !ch.codes.again) {
+        ecuio_engine_codes_again(ch, r.mask, r.read_id);
+    }
+}
+
+/* A taken again starts here, so the read before it was COMPLETE for one
+ * publish at least */
+inline bool ecuio_engine_take_codes(ecuio_engine_channel& ch, uint32_t c)
+{
+    if (ch.codes.step == ECUIO_CODES_STEP_NONE) {
+        if (!ch.codes.again) {
+            return false;
+        }
+        ch.codes.again = false;
+        ecuio_engine_codes_start(ch, ch.codes.again_mask, ch.codes.again_id);
+    }
+    ch.once = ecuio_request{};
+    ch.once.bytes[0] = ECUIO_CODES_SERVICE;
+    ch.once.bytes[1] = ch.codes.step == ECUIO_CODES_STEP_COUNT ? 0x01 : 0x02;
+    ch.once.bytes[2] = ch.codes.report.mask;
+    ch.once.len = 3;
+    ch.once.channel = static_cast<uint8_t>(c);
+    ch.codes.out = true;
+    ch.scan_turn = false;
+    return true;
+}
+
+inline void ecuio_engine_codes_settle(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t outcome, uint8_t nrc,
+                                      const uint8_t* data, uint16_t len,
+                                      int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_module_codes_t& r = ch.codes.report;
+    ch.codes.out = false;
+    const bool answered = outcome == ECUIO_DIAG_ANSWERED && data != nullptr;
+    if (ch.codes.step == ECUIO_CODES_STEP_COUNT) {
+        r.count_outcome = outcome;
+        r.count_nrc = nrc;
+        if (answered) {
+            (void)ecuio_diag_take_uds_count(data, len, &r);
+        }
+        ch.codes.step = ECUIO_CODES_STEP_LIST;
+    } else {
+        r.list_outcome = outcome;
+        r.list_nrc = nrc;
+        if (answered) {
+            ecuio_diag_take_uds_list(data, len, &r);
+        }
+        ch.codes.step = ECUIO_CODES_STEP_NONE;
+        r.flags = (r.flags & ~ECUIO_MODULE_CODES_READING) |
+                  ECUIO_MODULE_CODES_COMPLETE;
+        r.settled_us = now_us;
+    }
+    ++r.generation;
+}
+
+/* Module c's read can't open it: COMPLETE, what is left unasked, a read
+ * waiting behind it ended with it */
+inline void ecuio_engine_codes_not_opened(ecuio_engine_channel& ch)
+{
+    if (ch.codes.out || !ecuio_engine_codes_asks(ch)) {
+        return;
+    }
+    if (ch.codes.again) {
+        ch.codes.again = false;
+        ecuio_engine_codes_start(ch, ch.codes.again_mask, ch.codes.again_id);
+    }
+    ecuio_module_codes_t& r = ch.codes.report;
+    ch.codes.step = ECUIO_CODES_STEP_NONE;
+    r.flags = (r.flags & ~ECUIO_MODULE_CODES_READING) |
+              ECUIO_MODULE_CODES_COMPLETE | ECUIO_MODULE_CODES_NOT_OPENED;
+    ++r.generation;
+}
+
 /* Settles the request channel c's clear has out: answered with the
  * reply, refused with its code, or unanswered (ECUIO_DIAG_*). The
  * judgment's request settles the judgment; 04's answer ends the target,
@@ -622,6 +760,7 @@ inline void ecuio_engine_clear_settle(ecuio_request_engine* e, uint32_t c,
     ++d.generation;
     if (read) {
         ecuio_engine_diag_restart(ch);
+        ecuio_engine_codes_again_after_clear(ch);
     }
 }
 

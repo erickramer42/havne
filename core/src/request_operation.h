@@ -91,6 +91,7 @@ inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
             break; /* the leave runs; hold: the ring's room first; done */
         }
     }
+    log_status(s, o);
     if (r.at == run_stage::done) {
         finish(s, o, e, now_us);
     }

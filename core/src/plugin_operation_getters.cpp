@@ -2,6 +2,7 @@
 #include "plugin_loader.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace {
 
@@ -83,10 +84,12 @@ ecuio_status_t ecuio_plugin_operation_step(const ecuio_plugin_t* plugin,
             s.bytes = k.blob.size();
             s.address_bytes = k.address_bytes;
             s.size_bytes = k.size_bytes;
+            s.dfi = k.dfi;
             ecuio_sf::copy_text(s.name, sizeof s.name, k.download_name);
         } else {
             s.kind = ECUIO_STEP_ROUTINE;
             s.routine_id = k.routine;
+            s.option_len = k.option_len;
             ecuio_sf::copy_text(s.name, sizeof s.name, k.routine_name);
         }
         *out = s;
@@ -123,6 +126,29 @@ ecuio_status_t ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin,
     d.did = p->idents[index].did;
     d.role = p->idents[index].role;
     *out = d;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_operation_step_option(const ecuio_plugin_t* plugin,
+                                                  uint32_t operation,
+                                                  uint32_t index, uint8_t* out,
+                                                  size_t capacity,
+                                                  size_t* count)
+{
+    if (plugin == nullptr || count == nullptr ||
+        (out == nullptr && capacity != 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    const size_t lead = p != nullptr && p->has_kernel ? 2u : 0u;
+    if (p == nullptr || index >= p->steps.size() + lead) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const size_t n = lead != 0 && index == 1 ? p->helper.option_len : 0u;
+    if (n != 0 && capacity != 0) {
+        std::memcpy(out, p->helper.option, (std::min)(n, capacity));
+    }
+    *count = n;
     return ECUIO_OK;
 }
 

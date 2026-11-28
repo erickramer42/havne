@@ -8,6 +8,7 @@
 #include "conversation_bind.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
+#include "error_detail.h"
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include <algorithm>
 #include <cstdio>
@@ -253,6 +254,85 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
         return ECUIO_ERR_SESSION_CLOSED;
     }
     session->diag_requests.fetch_add(1);
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_module_codes(const ecuio_session_t* session,
+                                              uint32_t channel,
+                                              ecuio_module_codes_t* out_codes)
+{
+    if (session == nullptr || out_codes == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count ||
+        channel >= session->codes.reports.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_codes = session->codes.reports[channel];
+    if (session->codes.askable) {
+        out_codes->flags |= ECUIO_MODULE_CODES_ASKABLE;
+    }
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_module_codes(ecuio_session_t* session,
+                                               uint32_t channel,
+                                               uint8_t status_mask,
+                                               uint32_t* out_read_id)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    if (!session->codes.askable) {
+        ecuio_detail_set("this session sends no requests: it can't read a "
+                         "module's codes");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t count = 0;
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        count = session->support_count;
+    }
+    if (channel >= count || channel >= ECUIO_MAX_CHANNELS) {
+        ecuio_detail_set("channel %u: the session has %u modules",
+                         static_cast<unsigned>(channel),
+                         static_cast<unsigned>(count));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->codes.mutex);
+    const uint32_t id = ++session->codes.asked[channel];
+    session->codes.mask[channel] = status_mask;
+    if (out_read_id != nullptr) {
+        *out_read_id = id;
+    }
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_diagnostics_channel(ecuio_session_t* session,
+                                                      uint32_t channel)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    uint32_t count = 0;
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        count = session->support_count;
+    }
+    if (channel >= count || channel >= ECUIO_MAX_CHANNELS) {
+        ecuio_detail_set("channel %u: the session has %u modules",
+                         static_cast<unsigned>(channel),
+                         static_cast<unsigned>(count));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    session->codes.diag_channels.fetch_or(1u << channel);
     return ECUIO_OK;
 }
 

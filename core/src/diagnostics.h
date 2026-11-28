@@ -164,4 +164,53 @@ inline void ecuio_diag_take_codes(const uint8_t* data, uint32_t len,
     }
 }
 
+inline bool ecuio_dtc_uds_is_j2012(uint8_t format)
+{
+    return format == ECUIO_DTC_FORMAT_J2012 ||
+           format == ECUIO_DTC_FORMAT_ISO14229 ||
+           format == ECUIO_DTC_FORMAT_J2012_WWH;
+}
+
+/* 59 01 avail format hi lo, whole or not at all */
+inline bool ecuio_diag_take_uds_count(const uint8_t* data, uint32_t len,
+                                      ecuio_module_codes_t* r)
+{
+    if (len < 6) {
+        return false;
+    }
+    r->available = data[2];
+    r->format = data[3];
+    r->count = static_cast<uint16_t>((data[4] << 8) | data[5]);
+    r->flags |= ECUIO_MODULE_CODES_FORMAT;
+    return true;
+}
+
+/* 59 02 avail, then 4 bytes a code; a paged module's 000000 00 is no
+ * code */
+inline void ecuio_diag_take_uds_list(const uint8_t* data, uint32_t len,
+                                     ecuio_module_codes_t* r)
+{
+    r->reported = 0;
+    r->held = 0;
+    if (len < 3) {
+        return;
+    }
+    r->available = data[2];
+    for (uint32_t at = 3; at + 4 <= len; at += 4) {
+        const uint32_t code = (uint32_t{data[at]} << 16) |
+                              (uint32_t{data[at + 1]} << 8) | data[at + 2];
+        const uint8_t status = data[at + 3];
+        if (code == 0 && status == 0) {
+            continue;
+        }
+        if (r->held < ECUIO_MODULE_CODES_MAX) {
+            ecuio_module_code_t& c = r->codes[r->held++];
+            c = ecuio_module_code_t{};
+            c.code = code;
+            c.status = status;
+        }
+        ++r->reported;
+    }
+}
+
 #endif /* ECUIO_DIAGNOSTICS_H */

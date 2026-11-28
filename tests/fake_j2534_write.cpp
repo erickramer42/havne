@@ -83,6 +83,10 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             fake_j2534::read_knob("ECUIO_FAKE_CLEAR_NRC", nb, sizeof(nb))
                 ? static_cast<int>(strtol(nb, nullptr, 0))
                 : 0;
+        fake_ecu::module_codes_mode() = static_cast<int>(
+            fake_j2534::read_knob("ECUIO_FAKE_MODULE_CODES", nb, sizeof(nb))
+                ? fake_ecu::codes_mode_of(nb)
+                : fake_ecu::CodesMode::normal);
         /* PID 0C at 0 rpm: the engine stopped, as a clear needs */
         fake_ecu::diagnostics().engine_off =
             fake_j2534::read_knob("ECUIO_FAKE_ENGINE_OFF", nb, sizeof(nb)) &&
@@ -221,7 +225,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             ((n == 6 && (req[4] == 0x01 || req[4] == 0x09 || req[4] == 0x10 ||
                          req[4] == 0x11 || req[4] == 0x3E)) ||
              (n >= 7 && n <= 11 && req[4] == 0x01) ||
-             (n == 7 && (req[4] == 0x22 || req[4] == 0x02)) ||
+             (n == 7 && (req[4] == 0x22 || req[4] == 0x02 || req[4] == 0x19)) ||
              (n >= 5 && (req[4] == 0x27 || req[4] == 0x23 || req[4] == 0x31 ||
                          (req[4] >= 0x34 && req[4] <= 0x37))) ||
              (n == 5 && (req[4] == 0x03 || req[4] == 0x04 || req[4] == 0x07 ||

@@ -10,6 +10,7 @@
 
 #include "ecuio/core.h"
 
+#include "diagnostics.h"
 #include "dtc_titles_table.h"
 
 #include <cstddef>
@@ -108,6 +109,87 @@ const char* ecuio_dtc_title_source(void)
 const char* ecuio_dtc_title_notice(void)
 {
     return ecuio_dtc::kTitlesNotice;
+}
+
+ecuio_status_t ecuio_dtc_format_uds(uint32_t code, uint8_t format, char* out,
+                                    uint32_t out_cap)
+{
+    if (out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out_cap < ECUIO_DTC_UDS_TEXT_LEN) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    static const char kHex[] = "0123456789ABCDEF";
+    if (ecuio_dtc_uds_is_j2012(format)) {
+        ecuio_dtc_text(static_cast<uint16_t>((code >> 8) & 0xFFFFu), out);
+        out[5] = '-';
+        out[6] = kHex[(code >> 4) & 0xFu];
+        out[7] = kHex[code & 0xFu];
+        out[8] = '\0';
+        return ECUIO_OK;
+    }
+    out[0] = '0';
+    out[1] = 'x';
+    for (int i = 0; i < 6; ++i) {
+        out[2 + i] = kHex[(code >> (4 * (5 - i))) & 0xFu];
+    }
+    out[8] = '\0';
+    return ECUIO_OK;
+}
+
+const char* ecuio_dtc_title_uds(uint32_t code, uint8_t format)
+{
+    return ecuio_dtc_uds_is_j2012(format)
+               ? ecuio_dtc_title(static_cast<uint16_t>((code >> 8) & 0xFFFFu))
+               : "";
+}
+
+const char* ecuio_dtc_status_state(uint8_t status)
+{
+    return (status & ECUIO_DTC_STATUS_TEST_FAILED) != 0 ? "Active" : "Not now";
+}
+
+const char* ecuio_dtc_status_class(uint8_t status)
+{
+    if ((status & ECUIO_DTC_STATUS_CONFIRMED) != 0) {
+        return "Stored";
+    }
+    if ((status & ECUIO_DTC_STATUS_PENDING) != 0) {
+        return "Pending";
+    }
+    if ((status & ECUIO_DTC_STATUS_FAILED_SINCE_CLEAR) != 0) {
+        return "History";
+    }
+    return "";
+}
+
+int ecuio_dtc_status_lamp(uint8_t status)
+{
+    return (status & ECUIO_DTC_STATUS_LAMP) != 0 ? 1 : 0;
+}
+
+uint32_t
+ecuio_module_code_emissions_lists(const ecuio_channel_diagnostics_t* report,
+                                  uint32_t code, uint8_t format)
+{
+    if (report == nullptr || !ecuio_dtc_uds_is_j2012(format)) {
+        return 0;
+    }
+    const uint16_t j1979 = static_cast<uint16_t>((code >> 8) & 0xFFFFu);
+    uint32_t lists = 0;
+    for (uint32_t k = 0; k < ECUIO_DIAG_LISTS; ++k) {
+        const ecuio_dtc_list_t& l = report->lists[k];
+        const uint32_t held =
+            l.held < ECUIO_DIAG_MAX_DTCS ? l.held : ECUIO_DIAG_MAX_DTCS;
+        for (uint32_t i = 0; i < held; ++i) {
+            if (l.codes[i] == j1979) {
+                lists |= 1u << k;
+                break;
+            }
+        }
+    }
+    return lists;
 }
 
 } // extern "C"

@@ -543,6 +543,9 @@ inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
             *out_len = secured;
             return true;
         }
+        if (req_len == 3 && req[0] == 0x19) {
+            return answer_codes(req, req_len, in_extended(rx), out, out_len);
+        }
         if (req_len == 3 && req[0] == 0x22 &&
             static_cast<uint16_t>((req[1] << 8) | req[2]) == kExtDid &&
             in_extended(rx)) {

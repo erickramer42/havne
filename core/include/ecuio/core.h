@@ -1135,6 +1135,13 @@ ecuio_status_t ecuio_session_get_channel_diagnostics(
  * close. */
 ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
 
+/* ecuio_session_read_diagnostics for channel `channel` alone.
+ * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past module_count. */
+ecuio_status_t ecuio_session_read_diagnostics_channel(
+    ecuio_session_t* session,
+    uint32_t channel
+);
+
 /* Clears channel `channel`'s trouble codes (ADR-0038): SAE J1979 Service
  * 04, which on the ECU that obeys it also erases the freeze frame, turns
  * the MIL off and sets the readiness monitors back to incomplete;
@@ -1207,6 +1214,145 @@ ecuio_status_t ecuio_session_clear_diagnostics_set(
     const ecuio_clear_target_t* targets,
     uint32_t count,
     uint32_t flags
+);
+
+/* A module's own trouble codes through UDS 0x19 (19 01, 19 02).
+ * Append-only. */
+#define ECUIO_MODULE_CODES_MAX           128
+#define ECUIO_MODULE_CODES_MASK_DEFAULT  0xAFu
+
+/* flags */
+#define ECUIO_MODULE_CODES_ASKABLE       0x00000001u
+#define ECUIO_MODULE_CODES_READING       0x00000002u
+#define ECUIO_MODULE_CODES_COMPLETE      0x00000004u
+#define ECUIO_MODULE_CODES_FORMAT        0x00000008u /* 19 01 answered: format
+                                                       and count hold it */
+#define ECUIO_MODULE_CODES_NOT_OPENED    0x00000010u
+
+/* statusOfDTC bits */
+#define ECUIO_DTC_STATUS_TEST_FAILED           0x01u
+#define ECUIO_DTC_STATUS_FAILED_THIS_CYCLE     0x02u
+#define ECUIO_DTC_STATUS_PENDING               0x04u
+#define ECUIO_DTC_STATUS_CONFIRMED             0x08u
+#define ECUIO_DTC_STATUS_NOT_DONE_SINCE_CLEAR  0x10u
+#define ECUIO_DTC_STATUS_FAILED_SINCE_CLEAR    0x20u
+#define ECUIO_DTC_STATUS_NOT_DONE_THIS_CYCLE   0x40u
+#define ECUIO_DTC_STATUS_LAMP                  0x80u
+
+/* DTCFormatIdentifier */
+#define ECUIO_DTC_FORMAT_J2012           0x00u
+#define ECUIO_DTC_FORMAT_ISO14229        0x01u
+#define ECUIO_DTC_FORMAT_J1939           0x02u
+#define ECUIO_DTC_FORMAT_ISO11992        0x03u
+#define ECUIO_DTC_FORMAT_J2012_WWH       0x04u
+
+#define ECUIO_DTC_UDS_TEXT_LEN           10
+
+typedef struct ecuio_module_code {
+    uint32_t code;            /* 3 bytes, the first highest: 0x012800 */
+    uint8_t status;
+    uint8_t reserved[3];
+} ecuio_module_code_t;
+
+typedef struct ecuio_module_codes {
+    uint32_t flags;
+    uint32_t rx_id;
+    uint32_t generation;
+    uint32_t read_id;
+    uint8_t mask;
+    uint8_t available;
+    uint8_t format;
+    uint8_t count_outcome;    /* ECUIO_DIAG_UNASKED .. _UNANSWERED */
+    uint8_t count_nrc;
+    uint8_t list_outcome;
+    uint8_t list_nrc;
+    uint8_t reserved0;
+    uint16_t count;
+    uint16_t reported;        /* the fill records left out */
+    uint16_t held;
+    uint16_t reserved1;
+    int64_t settled_us;
+    uint32_t reserved[4];
+    ecuio_module_code_t codes[ECUIO_MODULE_CODES_MAX];
+} ecuio_module_codes_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_module_code_t) == 8, "ecuio_module_code_t size is ABI");
+static_assert(sizeof(ecuio_module_codes_t) == 1080, "ecuio_module_codes_t size is ABI");
+static_assert(offsetof(ecuio_module_codes_t, mask) == 16, "module codes mask offset is ABI");
+static_assert(offsetof(ecuio_module_codes_t, count) == 24, "module codes count offset is ABI");
+static_assert(offsetof(ecuio_module_codes_t, settled_us) == 32, "module codes settled_us offset is ABI");
+static_assert(offsetof(ecuio_module_codes_t, reserved) == 40, "module codes reserved offset is ABI");
+static_assert(offsetof(ecuio_module_codes_t, codes) == 56, "module codes codes offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_module_code_t) == 8, "ecuio_module_code_t size is ABI");
+_Static_assert(sizeof(ecuio_module_codes_t) == 1080, "ecuio_module_codes_t size is ABI");
+_Static_assert(offsetof(ecuio_module_codes_t, mask) == 16, "module codes mask offset is ABI");
+_Static_assert(offsetof(ecuio_module_codes_t, count) == 24, "module codes count offset is ABI");
+_Static_assert(offsetof(ecuio_module_codes_t, settled_us) == 32, "module codes settled_us offset is ABI");
+_Static_assert(offsetof(ecuio_module_codes_t, reserved) == 40, "module codes reserved offset is ABI");
+_Static_assert(offsetof(ecuio_module_codes_t, codes) == 56, "module codes codes offset is ABI");
+#endif
+
+/* "P0128-00" for formats 00, 01 and 04, "0x012800" for any other.
+ * ECUIO_ERR_INVALID_ARGUMENT for an out_cap under ECUIO_DTC_UDS_TEXT_LEN,
+ * out untouched. */
+ecuio_status_t ecuio_dtc_format_uds(
+    uint32_t code,
+    uint8_t format,
+    char* out,
+    uint32_t out_cap
+);
+
+/* ecuio_dtc_title of the first two bytes for formats 00, 01 and 04; ""
+ * for any other. */
+const char* ecuio_dtc_title_uds(
+    uint32_t code,
+    uint8_t format
+);
+
+/* "Active" on bit 0, else "Not now" */
+const char* ecuio_dtc_status_state(
+    uint8_t status
+);
+
+/* "Stored" on bit 3, "Pending" on bit 2, "History" on bit 5, else "" */
+const char* ecuio_dtc_status_class(
+    uint8_t status
+);
+
+int ecuio_dtc_status_lamp(
+    uint8_t status
+);
+
+/* Bit n set when J1979 list n of report holds the code's first two
+ * bytes; 0 for a NULL report or a format other than 00, 01 and 04. */
+uint32_t ecuio_module_code_emissions_lists(
+    const ecuio_channel_diagnostics_t* report,
+    uint32_t code,
+    uint8_t format
+);
+
+/* Reads channel `channel`'s codes: 19 01 then 19 02 under status_mask
+ * (0: ECUIO_MODULE_CODES_MASK_DEFAULT), a closed module opened for the
+ * read. *out_read_id (may be NULL) is the read's id; the report holds it,
+ * or a later read's (whose mask it reads under), with
+ * ECUIO_MODULE_CODES_COMPLETE once it has ended.
+ * Returns at once, from any thread. ECUIO_ERR_INVALID_ARGUMENT, with the
+ * words, for a channel at or past module_count or a session that sends no
+ * requests (no ECUIO_MODULE_CODES_ASKABLE). */
+ecuio_status_t ecuio_session_read_module_codes(
+    ecuio_session_t* session,
+    uint32_t channel,
+    uint8_t status_mask,
+    uint32_t* out_read_id
+);
+
+/* The channel's last codes report, under the identity report's rules */
+ecuio_status_t ecuio_session_get_module_codes(
+    const ecuio_session_t* session,
+    uint32_t channel,
+    ecuio_module_codes_t* out_codes
 );
 
 /*

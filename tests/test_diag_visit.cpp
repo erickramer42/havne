@@ -4,6 +4,7 @@
 //          closes it after, and a clear of one: request_diag_visit.h;
 //          ADR-0065 step 5)
 
+#include "module_codes_support.h"
 #include "test_obd2_support.h"
 
 #include <cstdint>
@@ -548,4 +549,58 @@ TEST_F(DiagVisitTest, AQueuedVisitOwingNothingNowNeverOpens)
     EXPECT_EQ(v.report(2).clear, ECUIO_CLEAR_ENGINE_RUNNING);
     EXPECT_EQ(v.e.chans[2].generation, generation) << "module 2 opened";
     EXPECT_EQ(v.state(2), ECUIO_MODULE_STATE_CLOSED);
+}
+
+TEST_F(DiagVisitTest, AClosedModulesCodesReadOpensItOrEndsUnasked)
+{
+    for (const uint32_t filters : {32u, 1u}) {
+        Visits v;
+        v.respond = [](uint32_t, const Bytes& q) {
+            const Bytes r = module_codes_test::codes_reply(q);
+            return r.empty() ? fake_reply(q) : r;
+        };
+        ASSERT_NO_FATAL_FAILURE(v.make({kRange, 0}, 31, filters));
+        v.until(1000 * kMs);
+        ASSERT_EQ(v.state(1), ECUIO_MODULE_STATE_CLOSED);
+        ecuio_engine_read_codes(&v.e, 1, 0, 1);
+        ecuio_engine_visit_want(&v.e, 1);
+        v.until(3000 * kMs);
+        size_t asked = 0;
+        for (const Sent& s : v.sent) {
+            asked += s.c == 1 && s.bytes[0] == 0x19 ? 1u : 0u;
+        }
+        const ecuio_module_codes_t& r = v.e.chans[1].codes.report;
+        EXPECT_NE(r.flags & ECUIO_MODULE_CODES_COMPLETE, 0u) << filters;
+        EXPECT_EQ(r.flags & ECUIO_MODULE_CODES_READING, 0u) << filters;
+        EXPECT_EQ(v.state(1), ECUIO_MODULE_STATE_CLOSED) << filters;
+        if (filters == 32u) {
+            EXPECT_EQ(asked, 2u);
+            EXPECT_EQ(r.flags & ECUIO_MODULE_CODES_NOT_OPENED, 0u);
+            EXPECT_EQ(r.list_outcome, ECUIO_DIAG_ANSWERED);
+            EXPECT_EQ(r.held, 4u);
+        } else {
+            EXPECT_EQ(v.sent_on(1), 0u);
+            EXPECT_NE(r.flags & ECUIO_MODULE_CODES_NOT_OPENED, 0u);
+            EXPECT_EQ(r.count_outcome, ECUIO_DIAG_UNASKED);
+            EXPECT_EQ(r.list_outcome, ECUIO_DIAG_UNASKED);
+        }
+    }
+}
+
+TEST_F(DiagVisitTest, ARefusedVisitEndsTheReadWaitingBehindItToo)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(v.make({kRange, 0}, 31, 1));
+    v.until(1000 * kMs);
+    ecuio_engine_read_codes(&v.e, 1, 0, 1);
+    ecuio_engine_read_codes(&v.e, 1, 0xFF, 2);
+    ecuio_engine_visit_want(&v.e, 1);
+    v.until(2000 * kMs);
+    const ecuio_module_codes_t& r = v.e.chans[1].codes.report;
+    EXPECT_EQ(r.read_id, 2u);
+    EXPECT_EQ(r.mask, 0xFF);
+    EXPECT_NE(r.flags & ECUIO_MODULE_CODES_NOT_OPENED, 0u);
+    EXPECT_NE(r.flags & ECUIO_MODULE_CODES_COMPLETE, 0u);
+    EXPECT_FALSE(ecuio_engine_codes_asks(v.e.chans[1]));
+    EXPECT_EQ(v.sent_on(1), 0u);
 }

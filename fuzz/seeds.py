@@ -772,6 +772,9 @@ def plan_manifests():
         "packed_kernel_read": kernel,
         "packed_kernel_read_unquiet": f.changed(kernel, kn + ["functional"], f.DELETE),
         "packed_kernel_read_not_staying": f.changed(kernel, kn + ["stays"], False),
+        "packed_kernel_read_dfi_option": f.changed(
+            f.changed(kernel, f.KR + ["steps", 0, "dfi"], "01"),
+            f.KR + ["steps", 1, "option"], "A55A0FF0"),
     }
 
 

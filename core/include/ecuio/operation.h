@@ -122,6 +122,7 @@ extern "C" {
     0x100u /* a dump's warning: under
                                                        11.0 V during it */
 #define ECUIO_OPERATION_CHECK_IDENT_UNREAD 0x200u /* a kernel read's, after */
+#define ECUIO_OPERATION_CHECK_DFI_CLAIMED  0x400u /* the helper isn't plain */
 
 typedef struct ecuio_operation_request {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
@@ -141,7 +142,9 @@ typedef struct ecuio_operation_state {
     uint32_t step;          /* the plan's step under way, or where it ended */
     uint8_t nrc;            /* END_REFUSED, END_UNLOCK_REFUSED: the module's
                                code, 0 for none */
-    uint8_t reserved0[3];   /* zero */
+    uint8_t routine_status; /* the helper's start's status byte */
+    uint8_t routine_status_given; /* 1 when its answer carried one */
+    uint8_t reserved0[1];         /* zero */
     uint64_t bytes_done;    /* handed over so far, both readings counted */
     uint64_t bytes_total;   /* twice the image */
     uint64_t differ_offset; /* END_DIFFER: the first differing byte's place

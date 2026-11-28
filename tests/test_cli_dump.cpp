@@ -80,6 +80,11 @@ TEST(CliDumpLineTest, EachWarningSaysItsReading)
     s.checks = 0;
     EXPECT_EQ(cli::dump_warning_words(ECUIO_OPERATION_CHECK_VOLTS_LOW, s),
               "the battery is low: keep a charger on");
+    EXPECT_EQ(
+        cli::dump_warning_words(ECUIO_OPERATION_CHECK_DFI_CLAIMED, s, 0x10),
+        "the helper is sent in the data format the plugin states (dfi 10); "
+        "Havne cannot check its contents")
+        << "a high nibble is compression: the words name no method";
     for (const cli::DumpWarning& w : cli::kDumpWarnings) {
         EXPECT_FALSE(cli::dump_warning_words(w.bit, s).empty()) << w.word;
     }
@@ -147,7 +152,8 @@ TEST(CliDumpLineTest, ASavedCopyNamesItsFileAndChecksum)
     EXPECT_NE(line.find(R"("end":"saved","words":null)"), std::string::npos);
     EXPECT_NE(line.find(R"("sha256":")" + hash + "\""), std::string::npos);
     EXPECT_NE(line.find(R"("bytes":4096,"verified":true,"nrc":null,)"
-                        R"("differ_offset":null,"volts_mv":null)"),
+                        R"("differ_offset":null,"routine_status":null,)"
+                        R"("volts_mv":null)"),
               std::string::npos);
     EXPECT_EQ(cli::dump_name_hash("short.havnedump"), "");
     EXPECT_EQ(cli::dump_name_hash((name + "x").c_str()), "");
@@ -167,8 +173,25 @@ TEST(CliDumpLineTest, AnEndWithoutACopyNamesNoFile)
     EXPECT_NE(line.find(R"("name":null,"path":null,"sha256":null)"),
               std::string::npos);
     EXPECT_NE(line.find(R"("verified":null,"nrc":"31","differ_offset":77,)"
-                        R"("volts_mv":12500,"volts_min_mv":12400,"rpm":0,)"
-                        R"("kmh":null})"),
+                        R"("routine_status":null,"volts_mv":12500,)"
+                        R"("volts_min_mv":12400,"rpm":0,"kmh":null})"),
+              std::string::npos);
+}
+
+TEST(CliDumpLineTest, TheHelpersStartStatusIsShownWhenGiven)
+{
+    ecuio_operation_state_t s = state();
+    s.end = ECUIO_OPERATION_END_SAVED;
+    s.routine_status = 0x00;
+    s.routine_status_given = 1;
+    EXPECT_NE(dump_text(s, "", 1).find(R"("routine_status":"00",)"),
+              std::string::npos)
+        << "a status of 00 is a status";
+    s.routine_status = 0x10;
+    EXPECT_NE(dump_text(s, "", 1).find(R"("routine_status":"10",)"),
+              std::string::npos);
+    s.routine_status_given = 0;
+    EXPECT_NE(dump_text(s, "", 1).find(R"("routine_status":null,)"),
               std::string::npos);
 }
 

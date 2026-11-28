@@ -85,6 +85,7 @@ struct session_run {
     uint8_t sid = 0;          /* the service of the talk that is out */
     uint32_t ends_at = 0;     /* the report's words_ended at the word */
     uint32_t unlocks = 0;     /* attempts that opened the level */
+    uint32_t status_logged = 0; /* the helper's starts whose status is logged */
     int64_t began_us = 0;
     int64_t entering_us = 0; /* when the entry was first asked; 0 not yet */
     bool quiet_out = false;  /* the machine's functional request is due */

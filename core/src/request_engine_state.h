@@ -166,6 +166,19 @@ constexpr uint8_t ECUIO_CLEAR_STEP_CLEAR = 2;   /* 04, past the judgment */
 constexpr uint8_t ECUIO_CLEAR_STEP_VEHICLE = 3; /* 01 0D, under ALLOW_RUNNING */
 constexpr uint8_t ECUIO_CLEAR_STEP_WAIT = 4;    /* a target: the judgment */
 
+constexpr uint8_t ECUIO_CODES_STEP_NONE = 0;
+constexpr uint8_t ECUIO_CODES_STEP_COUNT = 1; /* 19 01 */
+constexpr uint8_t ECUIO_CODES_STEP_LIST = 2;  /* 19 02 */
+
+struct ecuio_engine_codes {
+    uint8_t step = ECUIO_CODES_STEP_NONE;
+    bool out = false;
+    bool again = false;
+    uint8_t again_mask = 0;
+    uint32_t again_id = 0;
+    ecuio_module_codes_t report = {};
+};
+
 struct ecuio_diag_item {
     uint8_t request[3];
     uint8_t len;     /* 1 to 3 */
@@ -337,6 +350,7 @@ struct ecuio_engine_channel {
     uint8_t clear_step = ECUIO_CLEAR_STEP_NONE;
     uint8_t judge_step = ECUIO_CLEAR_STEP_NONE;
     bool clearing = false; /* the one-shot is the clear's request */
+    ecuio_engine_codes codes;
     /* Packing (ADR-0039 Appendix A): each PID's data length as its own
      * reply showed it (0 not yet, ECUIO_ENGINE_PID_LONG longer than
      * J1979's); the pack out or last sent, and its requests' rows. */
@@ -574,6 +588,12 @@ inline bool ecuio_engine_clear_asks(const ecuio_engine_channel& ch)
 {
     return ch.judge_step != ECUIO_CLEAR_STEP_NONE ||
            ch.clear_step == ECUIO_CLEAR_STEP_CLEAR;
+}
+
+inline bool ecuio_engine_codes_asks(const ecuio_engine_channel& ch)
+{
+    return (ch.codes.step != ECUIO_CODES_STEP_NONE && !ch.codes.out) ||
+           ch.codes.again;
 }
 
 /* Whether request r is asked in the rotation: not dropped by the probe

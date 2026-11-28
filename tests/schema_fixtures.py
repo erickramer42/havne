@@ -23,7 +23,6 @@ import glob
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -827,7 +826,19 @@ KERNELS = [
     ("a download in the extended session", PACKED5, KR + ["steps", 0, "session"],
      "extended", False),
     ("a download with no sha256", PACKED5, KR + ["steps", 0, "sha256"], DELETE, False),
-    ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "dfi"], "00", False),
+    ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "chunk"], 1024, False),
+    ("a download that is plain", PACKED5, KR + ["steps", 0, "dfi"], "00", True),
+    ("a download that is encrypted", PACKED5, KR + ["steps", 0, "dfi"], "01", True),
+    ("a download's dfi of one digit", PACKED5, KR + ["steps", 0, "dfi"], "1", False),
+    ("a download's dfi in lower case", PACKED5, KR + ["steps", 0, "dfi"], "0a", False),
+    ("a routine's option", PACKED5, KR + ["steps", 1, "option"], "A55A0FF0", True),
+    ("a routine's option of 16 bytes", PACKED5, KR + ["steps", 1, "option"], "00" * 16, True),
+    ("a routine's option of 17 bytes", PACKED5, KR + ["steps", 1, "option"], "00" * 17, False),
+    ("a routine's empty option", PACKED5, KR + ["steps", 1, "option"], "", False),
+    ("a routine's option of an odd digit", PACKED5, KR + ["steps", 1, "option"], "A55", False),
+    ("a routine's option in lower case", PACKED5, KR + ["steps", 1, "option"], "a5", False),
+    ("a routine with a dfi", PACKED5, KR + ["steps", 1, "dfi"], "01", False),
+    ("a download with an option", PACKED5, KR + ["steps", 0, "option"], "A5", False),
     ("a routine of three digits", PACKED5, KR + ["steps", 1, "routine"], "201", False),
 ]
 
@@ -877,4 +888,3 @@ FLASHES = [
     ("an image with no sha256", PACKED6, FL + ["steps", 0, "sha256"], DELETE, False),
     ("an image with bytes", PACKED6, FL + ["steps", 0, "bytes"], 512, False),
 ]
-

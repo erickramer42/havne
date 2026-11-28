@@ -45,6 +45,7 @@ int c_abi_diag(void)
     ecuio_inspection_t inspection;
     const uint8_t vin_request[2] = {0x09, 0x02};
     char dtc[6];
+    char uds[ECUIO_DTC_UDS_TEXT_LEN];
 
     if (strcmp(ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_DIAGNOSTICS),
                "Diagnostics") != 0) {
@@ -75,6 +76,12 @@ int c_abi_diag(void)
     if (ecuio_session_get_channel_diagnostics(NULL, 0, &diagnostics) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_diagnostics_channel(NULL, 0) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_module_codes(NULL, 0, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_module_codes(NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus_with(NULL, NULL, 0, 0, 0) !=
             ECUIO_ERR_NULL_ARGUMENT ||
@@ -113,6 +120,18 @@ int c_abi_diag(void)
     if (ecuio_dtc_parse(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_dtc_title(0x0301)[0] == 0 || ecuio_dtc_title_source()[0] == 0 ||
         ecuio_dtc_title_notice()[0] == 0) {
+        return 1;
+    }
+    if (ecuio_dtc_format_uds(0x012800u, ECUIO_DTC_FORMAT_J2012, uds,
+                             sizeof uds) != ECUIO_OK ||
+        strcmp(uds, "P0128-00") != 0 ||
+        ecuio_dtc_title_uds(0x012800u, ECUIO_DTC_FORMAT_J1939)[0] != 0 ||
+        strcmp(ecuio_dtc_status_state(0x01), "Active") != 0 ||
+        strcmp(ecuio_dtc_status_class(0x08), "Stored") != 0 ||
+        ecuio_dtc_status_lamp(ECUIO_DTC_STATUS_LAMP) != 1 ||
+        ecuio_module_code_emissions_lists(NULL, 0x030100u, 0) != 0 ||
+        ECUIO_MODULE_CODES_MASK_DEFAULT != 0xAFu ||
+        ECUIO_MODULE_CODES_NOT_OPENED != 0x10u) {
         return 1;
     }
     if (ecuio_diag_inspect(NULL, 0, 2001, &inspection) != ECUIO_OK ||

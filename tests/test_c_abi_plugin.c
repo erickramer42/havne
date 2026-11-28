@@ -141,6 +141,8 @@ int c_abi_plugin(void)
             const uint8_t* blob = NULL;
             uint64_t blob_bytes = 0;
             uint32_t plans = 7u;
+            uint8_t option[ECUIO_PLUGIN_MAX_OPTION];
+            size_t option_count = 7u;
             memset(&kernel, 0, sizeof kernel);
             memset(&flash, 0, sizeof flash);
             flash.struct_size = sizeof flash;
@@ -165,6 +167,15 @@ int c_abi_plugin(void)
                  ECUIO_PLUGIN_MAX_SECTORS == 64u &&
                  ECUIO_PLUGIN_PASS_MAX == 4u &&
                  ECUIO_OPERATION_FLASH_OVERWRITE_SAFE == 0x1u &&
+                 ECUIO_PLUGIN_MAX_OPTION == 16u &&
+                 offsetof(ecuio_plugin_operation_step_t, option_len) == 76u &&
+                 ecuio_plugin_operation_step_option(
+                     plugin, 0, 0, option, sizeof option, &option_count) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 option_count == 7u &&
+                 ecuio_plugin_operation_step_option(plugin, 0, 0, NULL, 1,
+                                                    &option_count) ==
+                     ECUIO_ERR_NULL_ARGUMENT &&
                  ECUIO_STEP_SESSION_PROGRAMMING == 2u &&
                  ECUIO_STEP_SESSION_EXTENDED == 3u &&
                  ECUIO_PLUGIN_MAX_OPERATIONS == 8u &&

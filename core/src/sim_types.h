@@ -14,6 +14,7 @@
 #include "ecuio/vin.h"
 #include "mock_drive_cycle.h"
 #include "recording_stretch.h"
+#include "sim_codes.h"
 #include "sim_faults.h"
 #include "sim_gateway.h"
 #include "sim_flash.h"
@@ -92,6 +93,7 @@ struct ecuio_sim_config {
     ecuio_sim_aims aimed;       /* faults aimed at one module each */
     int64_t pending_us = ECUIO_SIM_PENDING_US; /* pending_ms= */
     uint8_t pending_service = 0;
+    ecuio_sim_codes_plan codes;       /* codes=, 0x19's answers */
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     bool sessions = false;      /* mock: sessions=1, the profile's modules */

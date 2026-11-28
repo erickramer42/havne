@@ -13,6 +13,7 @@ on:
     branches: [main]
   schedule:
     - cron: '30 2 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -49,9 +50,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # third_party/wamr is built into core but is another project's
-          # code: its alerts are that project's to triage, not listed as
-          # Havne's. third_party/wamr_port.c is Havne's own and is analyzed
+          # paths-ignore doesn't apply to a compiled analysis: the "Drop
+          # third_party/wamr" step filters its results out before the upload.
+          # third_party/wamr_port.c is Havne's own and stays
           config: |
             paths-ignore:
               - third_party/wamr
@@ -63,5 +64,39 @@ jobs:
           cmake --build build-core --config Release
 
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        id: analyze
         with:
+          category: /language:${{ matrix.language }}
+          upload: never
+          output: sarif-results
+
+      - name: Drop third_party/wamr from the results
+        env:
+          SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import glob, json, os
+          for path in glob.glob(os.path.join(os.environ["SARIF_DIR"], "*.sarif")):
+              with open(path, encoding="utf-8") as f:
+                  doc = json.load(f)
+              for run in doc.get("runs", []):
+                  def vendored(r):
+                      return any(
+                          loc.get("physicalLocation", {})
+                          .get("artifactLocation", {})
+                          .get("uri", "")
+                          .startswith("third_party/wamr/")
+                          for loc in r.get("locations", [])
+                      )
+                  kept = [r for r in run.get("results", []) if not vendored(r)]
+                  print(f"{path}: kept {len(kept)} of {len(run.get('results', []))}")
+                  run["results"] = kept
+              with open(path, "w", encoding="utf-8") as f:
+                  json.dump(doc, f)
+          PY
+
+      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          sarif_file: ${{ steps.analyze.outputs.sarif-output }}
           category: /language:${{ matrix.language }}

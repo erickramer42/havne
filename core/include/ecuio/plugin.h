@@ -721,9 +721,11 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
  *     its RAM window, its start routines, whether it "stays" for a second
  *     upload and the "functional" requests (10 82, 3E 80 with "every_ms"),
  *     and its first two steps are "download" (the helper, a "bin" file
- *     pinned by its "sha256", into the window) and "routine" (one of the
- *     start routines), both "programming". The window shares no address
- *     with a range.
+ *     pinned by its "sha256", into the window; "dfi", one hex byte, "00"
+ *     unless given, is the plugin's claim, which core can't check) and
+ *     "routine" (one of the start routines; "option", 1 to
+ *     ECUIO_PLUGIN_MAX_OPTION bytes of hex, follows its id in the 31 01),
+ *     both "programming". The window shares no address with a range.
  *
  * A step kind or a session this Havne doesn't run is refused by its
  * name, so a later Havne's plan never half-loads. Core derives three
@@ -755,6 +757,8 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 
 /* A kernel read's start routines, at most */
 #define ECUIO_PLUGIN_MAX_STARTS 8u
+/* A start routine's option record's bytes, at most */
+#define ECUIO_PLUGIN_MAX_OPTION 16u
 
 /* A flash's sectors and its check's pass bytes, at most */
 #define ECUIO_PLUGIN_MAX_SECTORS 64u
@@ -803,11 +807,13 @@ typedef struct ecuio_plugin_operation_step {
                               upload */
     uint8_t address_bytes; /* the request's address, 1 to 4 bytes */
     uint8_t size_bytes;    /* its size, 1 to 4 bytes */
-    uint8_t dfi;           /* an upload's data format, 00 */
+    uint8_t dfi;           /* a download's data format; an upload's 00 */
     uint8_t reserved0;     /* zero */
     char name[32];
     uint32_t routine_id;  /* a routine's; 0 for any other step */
-    uint32_t reserved[3]; /* zero; ABI growth space */
+    uint32_t option_len;  /* a routine's option record's bytes, 0 for none
+                             (ecuio_plugin_operation_step_option) */
+    uint32_t reserved[2]; /* zero; ABI growth space */
 } ecuio_plugin_operation_step_t;
 
 /* A kernel read's helper: the RAM it is downloaded to, the routines that
@@ -879,6 +885,8 @@ static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
               "ecuio_plugin_operation_ident_t size is ABI");
 static_assert(offsetof(ecuio_plugin_operation_step_t, routine_id) == 72,
               "plugin operation step routine_id offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_step_t, option_len) == 76,
+              "plugin operation step option_len offset is ABI");
 static_assert(sizeof(ecuio_plugin_operation_kernel_t) == 72,
               "ecuio_plugin_operation_kernel_t size is ABI");
 static_assert(offsetof(ecuio_plugin_operation_kernel_t, start) == 28,
@@ -930,6 +938,17 @@ ecuio_status_t
 ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin, uint32_t operation,
                              uint32_t index,
                              ecuio_plugin_operation_ident_t* out);
+
+/* A plan's index-th step's option record, by the serial ports' contract:
+ * *count is its bytes (0 for a step without one), the first capacity
+ * copied. ECUIO_ERR_INVALID_ARGUMENT past either count, *count untouched;
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or count, or a NULL out with
+ * a capacity. */
+ecuio_status_t ecuio_plugin_operation_step_option(const ecuio_plugin_t* plugin,
+                                                  uint32_t operation,
+                                                  uint32_t index, uint8_t* out,
+                                                  size_t capacity,
+                                                  size_t* count);
 
 /* A kernel read's helper and its bytes, which stay the plugin's (valid
  * until ecuio_plugin_free). ECUIO_ERR_INVALID_ARGUMENT for a plan with no

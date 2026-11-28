@@ -204,6 +204,17 @@ inline taken take_faults(const ecuio_uri::param& p, ecuio_sim_config* out,
                : taken::bad;
 }
 
+inline taken take_codes(const ecuio_uri::param& p, ecuio_sim_config* out,
+                        char* why, size_t why_cap)
+{
+    if (!p.is("codes")) {
+        return taken::other;
+    }
+    return ecuio_sim_parse_codes(p.val, p.val_len, &out->codes, why, why_cap)
+               ? taken::ok
+               : taken::bad;
+}
+
 /* delay=, fc=, cf=, seed=, busy= and bus= (sim_timing.h) */
 inline taken take_timing(const ecuio_uri::param& p, ecuio_sim_config* out,
                          char* why, size_t why_cap)
@@ -301,9 +312,9 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
     using reader =
         taken (*)(const ecuio_uri::param&, ecuio_sim_config*, char*, size_t);
     static const reader kReaders[] = {
-        take_mock_shape, take_profile, take_vin,     take_replay_span,
-        take_faults,     take_timing,  take_gateway, take_memory,
-        take_kernel,     take_flash};
+        take_mock_shape, take_profile, take_vin,    take_replay_span,
+        take_faults,     take_codes,   take_timing, take_gateway,
+        take_memory,     take_kernel,  take_flash};
     for (const reader r : kReaders) {
         const taken t = r(p, out, why, why_cap);
         if (t != taken::other) {
@@ -345,13 +356,13 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values",     "modules", "sessions", "profile", "vin",   "faults",
-        "pending_ms", "delay",   "fc",       "cf",      "seed",  "busy",
-        "bus",        "gateway", "behind",   "route",   "gwopt", "sa",
-        "sa_delay",   "mem",     "kernel",   "flash",   nullptr};
+        "values", "modules",    "sessions", "profile", "vin",   "faults",
+        "codes",  "pending_ms", "delay",    "fc",      "cf",    "seed",
+        "busy",   "bus",        "gateway",  "behind",  "route", "gwopt",
+        "sa",     "sa_delay",   "mem",      "kernel",  "flash", nullptr};
     static const char* const kReplayKeys[] = {
-        "loop", "from", "to",   "vin",  "faults", "pending_ms", "delay",
-        "fc",   "cf",   "seed", "busy", "bus",    nullptr};
+        "loop",  "from", "to", "vin",  "faults", "codes", "pending_ms",
+        "delay", "fc",   "cf", "seed", "busy",   "bus",   nullptr};
     static const char* const kGatewayKeys[] = {
         "gateway", "behind", "route", "gwopt", "sa", "sa_delay", nullptr};
     const ecuio_uri::param* p =
@@ -368,16 +379,17 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         return ecuio_sim_uri_result::bad;
     }
     if (p != nullptr) {
-        std::snprintf(why, why_cap,
-                      "the simulated ECU takes no query key '%.*s' for %s, "
-                      "only %s, vin, faults, pending_ms, delay, fc, cf, "
-                      "seed, busy and bus",
-                      static_cast<int>(p->key_len < 40 ? p->key_len : 40),
-                      p->key, replay ? "replay://" : "mock://",
-                      replay ? "loop, from, to"
-                             : "values, modules, sessions, profile, "
-                               "gateway, behind, route, sa, sa_delay, gwopt, "
-                               "mem, kernel, flash");
+        std::snprintf(
+            why, why_cap,
+            "the simulated ECU takes no query key '%.*s' for %s, "
+            "only %s, vin, faults, codes, pending_ms, delay, fc, cf, seed, "
+            "busy and bus",
+            static_cast<int>(p->key_len < 40 ? p->key_len : 40), p->key,
+            replay ? "replay://" : "mock://",
+            replay ? "loop, from, to"
+                   : "values, modules, sessions, profile, "
+                     "gateway, behind, route, sa, sa_delay, gwopt, "
+                     "mem, kernel, flash");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {

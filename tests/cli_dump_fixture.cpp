@@ -18,7 +18,8 @@ bool write_text(const char* path, const std::string& text)
 }
 
 std::string kernel_package(const char* bytes = nullptr,
-                           const char* functional = nullptr)
+                           const char* functional = nullptr,
+                           bool claimed = false)
 {
     kernel_test::Kernel k;
     if (bytes != nullptr) {
@@ -33,6 +34,11 @@ std::string kernel_package(const char* bytes = nullptr,
     }
     k.blob.resize(2000);
     ecuio_sim_kernel_image(k.blob.data(), 2000);
+    if (claimed) {
+        ecuio_sim_kernel_scramble(k.blob.data(), 2000);
+        k.download_extra = R"(, "dfi": "01")";
+        k.routine_extra = R"(, "option": "A55A0FF0")";
+    }
     conversation_test::Made m = session_operation::made();
     m.operations = k.json();
     m.files_extra = R"(, "kernel.bin": {"kind": "bin", "base64": ")" +
@@ -44,18 +50,20 @@ std::string kernel_package(const char* bytes = nullptr,
 
 int main(int argc, char** argv)
 {
-    if (argc != 3 && argc != 5) {
+    if (argc != 4 && argc != 6) {
         std::fprintf(stderr, "usage: cli_dump_fixture <plain.json> "
-                             "<kernel.json> [<long.json> <bare.json>]\n");
+                             "<kernel.json> <claimed.json> "
+                             "[<long.json> <bare.json>]\n");
         return 2;
     }
     const std::string plain =
         session_operation::made({}, session_operation::one_frame_plan()).json();
-    bool ok =
-        write_text(argv[1], plain) && write_text(argv[2], kernel_package());
-    if (argc == 5) {
-        ok = ok && write_text(argv[3], kernel_package("16384")) &&
-             write_text(argv[4],
+    bool ok = write_text(argv[1], plain) &&
+              write_text(argv[2], kernel_package()) &&
+              write_text(argv[3], kernel_package(nullptr, nullptr, true));
+    if (argc == 6) {
+        ok = ok && write_text(argv[4], kernel_package("16384")) &&
+             write_text(argv[5],
                         kernel_package("16384", R"([{"request": "10 82"}])"));
     }
     if (!ok) {

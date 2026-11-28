@@ -320,3 +320,109 @@ TEST(PluginOperationTest, AKeepAlivesTimeGoesWithItsFunctional3E80)
     k.quiet_keepalive = 0x80;
     EXPECT_EQ(ecuio_operation::kernel_fault(p), nullptr);
 }
+
+TEST(PluginOperationTest, AHelpersDfiAndStartOptionReadBack)
+{
+    Kernel k;
+    k.download_extra = R"(, "dfi": "01")";
+    k.routine_extra = R"(, "option": "A55A0FF0")";
+    ecuio_status_t s = ECUIO_ERR_NULL_ARGUMENT;
+    const Plugin p = load_packed(made(k).json(), &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_plugin_operation_step_t st{};
+    st.struct_size = sizeof st;
+    ASSERT_EQ(ecuio_plugin_operation_step(p.get(), 0, 0, &st), ECUIO_OK);
+    EXPECT_EQ(st.dfi, 0x01);
+    EXPECT_EQ(st.option_len, 0u);
+    ASSERT_EQ(ecuio_plugin_operation_step(p.get(), 0, 1, &st), ECUIO_OK);
+    EXPECT_EQ(st.option_len, 4u);
+    EXPECT_EQ(st.dfi, 0);
+    ASSERT_EQ(ecuio_plugin_operation_step(p.get(), 0, 2, &st), ECUIO_OK);
+    EXPECT_EQ(st.dfi, 0) << "the upload stays plain";
+
+    size_t count = 99;
+    EXPECT_EQ(
+        ecuio_plugin_operation_step_option(p.get(), 0, 1, nullptr, 0, &count),
+        ECUIO_OK);
+    EXPECT_EQ(count, 4u);
+    uint8_t got[ECUIO_PLUGIN_MAX_OPTION] = {};
+    count = 0;
+    EXPECT_EQ(ecuio_plugin_operation_step_option(p.get(), 0, 1, got, 2, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 4u) << "all of it counted, the first two copied";
+    EXPECT_EQ(got[0], 0xA5);
+    EXPECT_EQ(got[1], 0x5A);
+    EXPECT_EQ(got[2], 0);
+    ASSERT_EQ(ecuio_plugin_operation_step_option(p.get(), 0, 1, got, sizeof got,
+                                                 &count),
+              ECUIO_OK);
+    EXPECT_EQ(std::vector<uint8_t>(got, got + count),
+              (std::vector<uint8_t>{0xA5, 0x5A, 0x0F, 0xF0}));
+    for (const uint32_t step : {0u, 2u}) {
+        count = 99;
+        EXPECT_EQ(ecuio_plugin_operation_step_option(p.get(), 0, step, got,
+                                                     sizeof got, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, 0u) << step;
+    }
+    EXPECT_EQ(ecuio_plugin_operation_step_option(nullptr, 0, 1, got, sizeof got,
+                                                 &count),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_operation_step_option(p.get(), 0, 1, got, sizeof got,
+                                                 nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_plugin_operation_step_option(p.get(), 0, 1, nullptr, 4, &count),
+        ECUIO_ERR_NULL_ARGUMENT);
+    count = 7;
+    EXPECT_EQ(ecuio_plugin_operation_step_option(p.get(), 0, 3, got, sizeof got,
+                                                 &count),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_plugin_operation_step_option(p.get(), 1, 1, got, sizeof got,
+                                                 &count),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(count, 7u) << "out untouched";
+
+    const Plugin plain = load_packed(made(Kernel()).json(), &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_plugin_operation_step(plain.get(), 0, 1, &st), ECUIO_OK);
+    EXPECT_EQ(st.option_len, 0u);
+    EXPECT_EQ(ecuio_plugin_operation_step_option(plain.get(), 0, 1, got,
+                                                 sizeof got, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "a bare 31 01 <rid>";
+}
+
+TEST(PluginOperationTest, AStartOptionIsOneTo16BytesAndADfiOneByte)
+{
+    Kernel k;
+    k.routine_extra = R"(, "option": "00112233445566778899AABBCCDDEEFF")";
+    ecuio_status_t s = ECUIO_ERR_NULL_ARGUMENT;
+    EXPECT_NE(load_packed(made(k).json(), &s), nullptr) << "16 bytes";
+    EXPECT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    for (const char* option :
+         {R"("")", R"("00112233445566778899AABBCCDDEEFF00")"}) {
+        k.routine_extra = std::string(R"(, "option": )") + option;
+        EXPECT_NE(why(k).find("'start''s option"), std::string::npos)
+            << option << ": " << why(k);
+    }
+    for (const char* option : {R"("A55")", R"("a55a")", R"("A5 5A")"}) {
+        k.routine_extra = std::string(R"(, "option": )") + option;
+        EXPECT_NE(why(k).find("takes pairs of hex digits"), std::string::npos)
+            << option << ": " << why(k);
+    }
+    k = Kernel();
+    k.routine_extra = R"(, "dfi": "01")";
+    EXPECT_EQ(why(k), "unknown key 'dfi' in a routine");
+    k = Kernel();
+    k.download_extra = R"(, "option": "A5")";
+    EXPECT_EQ(why(k), "unknown key 'option' in a download");
+    k = Kernel();
+    k.download_extra = R"(, "dfi": "0101")";
+    EXPECT_NE(why(k).find("'helper''s dfi"), std::string::npos) << why(k);
+    k = Kernel();
+    k.download_extra = R"(, "dfi": "FF")";
+    EXPECT_NE(load_packed(made(k).json(), &s), nullptr)
+        << "any data format is the plugin's claim";
+    EXPECT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+}

@@ -55,8 +55,10 @@ inline bool ecuio_engine_reply_segmented(const ecuio_request_engine* e,
             q.len == 2 && q.bytes[0] == 0x09 && q.bytes[1] == 0x02;
         const bool vin_22 = q.len == 3 && q.bytes[0] == 0x22 &&
                             q.bytes[1] == 0xF1 && q.bytes[2] == 0x90;
+        const bool list =
+            ch.codes.out && ch.codes.step == ECUIO_CODES_STEP_LIST;
         return !ch.talk.out &&
-               (ch.identifying || ch.diagnosing || vin_09 || vin_22);
+               (ch.identifying || ch.diagnosing || list || vin_09 || vin_22);
     }
     if (r < 0 || static_cast<uint32_t>(r) >= e->count) {
         return false;
