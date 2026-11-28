@@ -483,7 +483,9 @@ TEST(OperationRunTest, AHelpersDfiAndStartOptionGoOnTheWire)
     ecuio_operation::kernel& k = p.helper;
     k.dfi = ECUIO_SIM_KERNEL_DFI;
     ecuio_sim_kernel_scramble(k.blob.data(), kHelperBytes);
-    std::memcpy(k.option, ECUIO_SIM_KERNEL_OPTION, sizeof k.option);
+    static_assert(sizeof ECUIO_SIM_KERNEL_OPTION <= sizeof k.option, "");
+    std::memcpy(k.option, ECUIO_SIM_KERNEL_OPTION,
+                sizeof ECUIO_SIM_KERNEL_OPTION);
     k.option_len = sizeof ECUIO_SIM_KERNEL_OPTION;
     KernelDrive d(p);
     EXPECT_EQ(d.go(), run_end::complete);
