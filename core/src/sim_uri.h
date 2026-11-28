@@ -300,7 +300,7 @@ inline taken take_flash(const ecuio_uri::param& p, ecuio_sim_config* out,
     }
     std::snprintf(why, why_cap,
                   "flash takes 1, or counter, general, volts, check, erase, "
-                  "silent, boot[:<sectors>], locked and pending:<ms>, "
+                  "silent, boot[:<sector>], locked and pending:<ms>, "
                   "comma-separated");
     return taken::bad;
 }

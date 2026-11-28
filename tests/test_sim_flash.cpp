@@ -254,18 +254,18 @@ TEST(SimFlashTest, TheUrisFlashKeyTakesItsWords)
     EXPECT_EQ(ecuio_sim_parse_uri("mock://sim?flash=burn", &c, why, sizeof why),
               ecuio_sim_uri_result::bad);
     EXPECT_STREQ(why, "flash takes 1, or counter, general, volts, check, "
-                      "erase, silent, boot[:<sectors>], locked and "
+                      "erase, silent, boot[:<sector>], locked and "
                       "pending:<ms>, comma-separated");
     ASSERT_EQ(ecuio_sim_parse_uri("mock://sim?flash=boot:3,locked,pending:250",
                                   &c, why, sizeof why),
               ecuio_sim_uri_result::ok)
         << why;
     EXPECT_TRUE(c.flash_faults.boot);
-    EXPECT_EQ(c.flash_faults.boot_written, 3u);
+    EXPECT_EQ(c.flash_faults.boot_erased, 3u);
     EXPECT_TRUE(c.flash_faults.locked);
     EXPECT_EQ(c.flash_faults.pending_ms, 250u);
     for (const char* bad :
-         {"mock://sim?flash=boot:0", "mock://sim?flash=boot:65",
+         {"mock://sim?flash=boot:17", "mock://sim?flash=boot:-1",
           "mock://sim?flash=pending", "mock://sim?flash=pending:600001",
           "mock://sim?flash=boot:x"}) {
         EXPECT_EQ(ecuio_sim_parse_uri(bad, &c, why, sizeof why),
@@ -281,7 +281,7 @@ TEST(SimFlashTest, APartWrittenModuleAnswersAsItsBootloaderUntilChecked)
 {
     ecuio_sim_flash_faults f;
     f.boot = true;
-    f.boot_written = 1;
+    f.boot_erased = 1;
     Node n;
     ASSERT_TRUE(ecuio_sim_flash_arm(n.s.flash, n.s.memory, f));
     EXPECT_EQ(n.ask({0x01, 0x00}), (Bytes{0x7F, 0x01, 0x11}));
@@ -291,7 +291,10 @@ TEST(SimFlashTest, APartWrittenModuleAnswersAsItsBootloaderUntilChecked)
     ASSERT_EQ(n.ask({0x10, 0x02}), kProgramming);
     n.unlock();
     EXPECT_EQ(read_back(n, kCode, 4)[0], ecuio_sim_memory_fill(kCode))
-        << "the first sector is written";
+        << "the first sector is kept";
+    EXPECT_EQ(read_back(n, kCode + 2 * kSector, 4)[0],
+              ecuio_sim_memory_fill(kCode + 2 * kSector))
+        << "and the third";
     EXPECT_EQ(read_back(n, kCode + kSector, 4),
               (Bytes{0xFF, 0xFF, 0xFF, 0xFF}));
     EXPECT_EQ(n.ask(kCheck), (Bytes{0x71, 0x01, 0xFF, 0x01, 0x01}));

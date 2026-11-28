@@ -32,8 +32,8 @@ struct ecuio_sim_flash_faults {
     bool check = false;   /* the check answers its failed status */
     bool erase = false;   /* an erase answers 7F 31 22 */
     bool silent = false;  /* nothing answers after the second 36 */
-    bool boot = false;    /* starts part-written: boot_written sectors */
-    uint32_t boot_written = 0;
+    bool boot = false;    /* starts part-written, sector boot_erased erased */
+    uint32_t boot_erased = 0; /* ECUIO_SIM_FLASH_SECTORS: none */
     bool locked = false;     /* a seed asks answer 7F 27 36 */
     uint32_t pending_ms = 0; /* each request answers 78 alone this long */
 };
@@ -80,9 +80,8 @@ inline bool ecuio_sim_flash_arm(ecuio_sim_flash& f, ecuio_sim_memory& m,
         m.code[i] = ecuio_sim_memory_fill(ECUIO_SIM_MEMORY_CODE_ADDRESS + i);
     }
     f.boot = faults.boot;
-    for (uint32_t i = faults.boot ? faults.boot_written
-                                  : ECUIO_SIM_FLASH_SECTORS;
-         i < ECUIO_SIM_FLASH_SECTORS; ++i) {
+    const uint32_t i = faults.boot_erased;
+    if (faults.boot && i < ECUIO_SIM_FLASH_SECTORS) {
         f.sectors[i] = ecuio_sim_sector::erased;
         std::memset(m.code.data() + size_t{i} * ECUIO_SIM_FLASH_SECTOR_BYTES,
                     0xFF, ECUIO_SIM_FLASH_SECTOR_BYTES);
@@ -356,7 +355,7 @@ inline uint32_t ecuio_sim_flash_answer(ecuio_sim_flash& f, ecuio_sim_memory& m,
 namespace ecuio_sim_flash_detail {
 
 inline bool number_after(const char* text, size_t n, const char* name,
-                         uint32_t most, uint32_t* out)
+                         uint32_t least, uint32_t most, uint32_t* out)
 {
     const size_t k = std::strlen(name);
     if (n <= k + 1 || std::memcmp(text, name, k) != 0 || text[k] != ':') {
@@ -369,7 +368,7 @@ inline bool number_after(const char* text, size_t n, const char* name,
         }
         v = v * 10 + static_cast<uint64_t>(text[i] - '0');
     }
-    if (v < 1 || v > most) {
+    if (v < least || v > most) {
         return false;
     }
     *out = static_cast<uint32_t>(v);
@@ -392,13 +391,13 @@ inline bool word(const char* text, size_t n, ecuio_sim_flash_faults* out)
             return true;
         }
     }
-    if (number_after(text, n, "boot", ECUIO_SIM_FLASH_SECTORS,
-                     &out->boot_written)) {
+    if (number_after(text, n, "boot", 0, ECUIO_SIM_FLASH_SECTORS,
+                     &out->boot_erased)) {
         out->boot = true;
         return true;
     }
     return is("1") ||
-           number_after(text, n, "pending", ECUIO_SIM_FLASH_PENDING_MOST_MS,
+           number_after(text, n, "pending", 1, ECUIO_SIM_FLASH_PENDING_MOST_MS,
                         &out->pending_ms);
 }
 
