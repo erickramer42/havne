@@ -170,8 +170,8 @@ TEST(SimEcuTest, AnAimsRefusalsNameTheirCause)
 {
     const std::string shape =
         "faults: 'late:3@' isn't <fault>:<n>[@<reply ID>], the fault one of "
-        "silent, late, pending, bad_sequence, stalled or relock, n from 1 to "
-        "10000 and the reply ID 11-bit hex";
+        "silent, late, pending, bad_sequence, stalled, relock, sessionlost or "
+        "sessionrefused, n from 1 to 10000 and the reply ID 11-bit hex";
     EXPECT_EQ(refusal("mock://sim?faults=late:3@"), shape);
     for (const char* bad :
          {"mock://sim?faults=late:3@800", "mock://sim?faults=late:3@7EG",
@@ -471,6 +471,40 @@ TEST(SimAskTest, ADeclaredModulesDidsAnswerOnlyInItsSession)
         EXPECT_EQ(reply(u.ask(0x700, {0x10, 0x03})), (Bytes{0x7F, 0x10, 0x12}))
             << "the undeclared module has no session";
     }
+}
+
+// sessionrefused answers a module's Nth 10 03 7F 10 22; sessionlost
+// leaves its session before the Nth request heard in it; each on the
+// module it is aimed at alone
+TEST(SimAskTest, TheSessionFaultsStrikeTheirModule)
+{
+    const auto reply = [](const std::vector<ecuio_sim_reply_t>& r) {
+        return r.size() == 1 ? Bytes(r[0].data, r[0].data + r[0].length)
+                             : Bytes{};
+    };
+    const Bytes entered = {0x50, 0x03, 0x00, 0x32, 0x01, 0xF4};
+    Modules m("sim-car-faults", 2, 1);
+    {
+        Unbound u("mock://ask?profile=sim-car-faults&sessions=1&"
+                  "faults=sessionrefused:2@741");
+        ASSERT_NE(u.sim, nullptr);
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), entered);
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), (Bytes{0x7F, 0x10, 0x22}));
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), entered);
+        EXPECT_EQ(reply(u.ask(0x700, {0x10, 0x03})), entered);
+        EXPECT_EQ(reply(u.ask(0x700, {0x10, 0x03})), entered)
+            << "aimed at 741 alone";
+    }
+    Unbound u("mock://ask?profile=sim-car-faults&faults=sessionlost:3@741");
+    ASSERT_NE(u.sim, nullptr);
+    EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), entered);
+    EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})).size(), 4u);
+    EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})).size(), 4u);
+    EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})),
+              (Bytes{0x7F, 0x22, 0x31}))
+        << "the third request in its session finds it lost";
+    EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})), entered);
+    EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})).size(), 4u);
 }
 
 // The aim is judged after the profile (its modules are known only then)

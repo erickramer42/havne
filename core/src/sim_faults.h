@@ -26,6 +26,8 @@ struct ecuio_sim_faults {
     /* The gateway's alone: every nth request it lets through on a gated
      * route, it locks again first (sim_gateway_route.h) */
     uint32_t relock = 0;
+    uint32_t session_lost = 0;    /* leaves its session before the request */
+    uint32_t session_refused = 0; /* 10 03 answered 7F 10 22 */
 };
 
 constexpr uint32_t ECUIO_SIM_FAULT_MAX = 10000;
@@ -60,7 +62,9 @@ enum class ecuio_sim_fault_kind : uint8_t {
     bad_sequence,
     stalled,
     pending,
-    relock
+    relock,
+    session_lost,
+    session_refused
 };
 
 /* One fault aimed at one module by its reply ID (faults=late:3@7EA) */
@@ -83,6 +87,8 @@ struct ecuio_sim_aims {
 struct ecuio_sim_counts {
     uint32_t singles = 0;
     uint32_t segmented = 0;
+    uint32_t in_session = 0; /* requests heard in its session */
+    uint32_t entries = 0;    /* 10 03 heard */
 };
 
 inline const char* ecuio_sim_fault_name(ecuio_sim_fault_kind k)
@@ -98,6 +104,10 @@ inline const char* ecuio_sim_fault_name(ecuio_sim_fault_kind k)
         return "stalled";
     case ecuio_sim_fault_kind::pending:
         return "pending";
+    case ecuio_sim_fault_kind::session_lost:
+        return "sessionlost";
+    case ecuio_sim_fault_kind::session_refused:
+        return "sessionrefused";
     case ecuio_sim_fault_kind::relock:
         break;
     }
@@ -118,6 +128,10 @@ inline uint32_t& ecuio_sim_fault_slot(ecuio_sim_faults& f,
         return f.stalled;
     case ecuio_sim_fault_kind::pending:
         return f.pending;
+    case ecuio_sim_fault_kind::session_lost:
+        return f.session_lost;
+    case ecuio_sim_fault_kind::session_refused:
+        return f.session_refused;
     case ecuio_sim_fault_kind::relock:
         break;
     }
@@ -142,7 +156,8 @@ namespace ecuio_sim_fault_detail {
 
 inline bool kind_of(const char* s, size_t n, ecuio_sim_fault_kind* k)
 {
-    for (uint8_t i = 0; i <= static_cast<uint8_t>(ecuio_sim_fault_kind::relock);
+    for (uint8_t i = 0;
+         i <= static_cast<uint8_t>(ecuio_sim_fault_kind::session_refused);
          ++i) {
         const auto kind = static_cast<ecuio_sim_fault_kind>(i);
         const char* name = ecuio_sim_fault_name(kind);
@@ -236,8 +251,8 @@ inline bool ecuio_sim_parse_faults(const char* text, size_t len,
             std::snprintf(why, why_cap,
                           "faults: '%.*s' isn't <fault>:<n>[@<reply ID>], the "
                           "fault one of silent, late, pending, bad_sequence, "
-                          "stalled or relock, n from 1 to %u and the reply ID "
-                          "11-bit hex",
+                          "stalled, relock, sessionlost or sessionrefused, n "
+                          "from 1 to %u and the reply ID 11-bit hex",
                           static_cast<int>(item_len < 40 ? item_len : 40), item,
                           ECUIO_SIM_FAULT_MAX);
             return false;

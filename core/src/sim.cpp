@@ -87,6 +87,15 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
             return 0;
         }
     } else if (s->ecu.recording == nullptr) {
+        if (has_extended && len == 2 && req[0] == 0x10 && req[1] == 0x03 &&
+            n.faults.session_refused != 0 &&
+            ++n.counts.entries % n.faults.session_refused == 0) {
+            return ecuio_sim_detail::refuse(0x10, 0x22, out);
+        }
+        if (n.session.extended && n.faults.session_lost != 0 &&
+            ++n.counts.in_session % n.faults.session_lost == 0) {
+            ecuio_sim_session_enter(n.session, 0x01);
+        }
         bool handled = false;
         const uint32_t m =
             ecuio_sim_session_answer(n.session, has_extended, engine,
