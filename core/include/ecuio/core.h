@@ -662,14 +662,14 @@ typedef struct ecuio_channel_support {
     uint16_t session_lost;    /* each time the session was entered again
                                  (a 7E or 7F, a timeout, S3, a link
                                  recovery), saturating at 65535 */
-    uint32_t open_reasons;    /* ECUIO_MODULE_REASON_*: what wants the
+    uint16_t open_reasons;    /* ECUIO_MODULE_REASON_*: what wants the
                                  module, whether it holds a filter or not;
                                  0 with ECUIO_SUPPORT_CLOSED, and on a
                                  session that sends no request (every
                                  module open) */
     uint8_t session_source;   /* ECUIO_SESSION_SOURCE_* */
     uint8_t session_idle;     /* ECUIO_SESSION_IDLE_* */
-    uint8_t reserved[2];      /* zero */
+    uint32_t reserved[1];     /* zero */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
@@ -681,9 +681,11 @@ static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support
 static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, session_source) == 148,
+static_assert(offsetof(ecuio_channel_support_t, session_source) == 146,
               "support session source offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 150,
+static_assert(offsetof(ecuio_channel_support_t, session_idle) == 147,
+              "support session idle offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 148,
               "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
@@ -694,9 +696,11 @@ _Static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "suppor
 _Static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, session_source) == 148,
+_Static_assert(offsetof(ecuio_channel_support_t, session_source) == 146,
                "support session source offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 150,
+_Static_assert(offsetof(ecuio_channel_support_t, session_idle) == 147,
+               "support session idle offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 148,
                "support reserved offset is ABI");
 #endif
 

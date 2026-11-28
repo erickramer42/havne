@@ -1223,10 +1223,10 @@ ecuio_channel_support_t._fields_ = [
     ('session_nrc', c_uint8),
     ('session_entries', c_uint16),
     ('session_lost', c_uint16),
-    ('open_reasons', c_uint32),
+    ('open_reasons', c_uint16),
     ('session_source', c_uint8),
     ('session_idle', c_uint8),
-    ('reserved', (c_uint8 * 2)),
+    ('reserved', (c_uint32 * 1)),
 ]
 ecuio_check_finding_t._fields_ = [
     ('kind', c_uint32),
