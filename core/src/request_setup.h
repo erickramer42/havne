@@ -25,6 +25,7 @@
 #include "obd2_rates.h"
 #include "pid_support.h"
 #include "request_engine.h"
+#include "request_module_codes.h"
 #include "request_modules.h"
 #include "request_params.h"
 #include "session.h"
@@ -378,6 +379,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     e->pack = params.pack && *probe;
     e->pack_frames = params.pack_frames;
     const bool requests = e->count > 0 || e->scan_count > 0;
+    session->codes.askable = requests;
     *identify = params.identify && !params.has_poll && requests;
     if (*identify) {
         ecuio_engine_identify(e);
@@ -562,9 +564,14 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
                                     ecuio_request_engine* e, uint32_t& seen)
 {
     const uint32_t asked = session->diag_requests.load();
-    if (asked != seen) {
+    const uint32_t channels = session->codes.diag_channels.exchange(0);
+    const bool moved = asked != seen;
+    if (moved) {
         seen = asked;
         ecuio_engine_diagnose_again(e);
+    }
+    ecuio_engine_diagnose_channels_again(e, channels);
+    if (moved || channels != 0) {
         ecuio_engine_visit_closed(e);
     }
 }

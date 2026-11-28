@@ -40,11 +40,11 @@ extern "C" {
 #include "ecuio/profile.h"
 #include "ecuio/conditions.h"
 #include "ecuio/vin.h"
-#include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
 
 /* C++ headers (namespaced classes and inline functions): must stay
  * outside the extern "C" block above. */
+#include "fake_diagnostics.h"
 #include "error_detail.h" /* core/src: a refused vendor call's words */
 #include "link_health.h"  /* core/src: the workers' link-health rules */
 #include "replay_faults.h" /* core/src: ?faults= and its draws */

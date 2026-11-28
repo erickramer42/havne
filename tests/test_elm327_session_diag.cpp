@@ -485,3 +485,58 @@ TEST_F(Elm327SessionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
     EXPECT_EQ(fake_count("1003"), 1u);
     EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
 }
+
+namespace {
+
+struct CodesModeArm {
+    explicit CodesModeArm(fake_ecu::CodesMode m)
+    {
+        fake_ecu::module_codes_mode() = static_cast<int>(m);
+    }
+    ~CodesModeArm() { fake_ecu::module_codes_mode() = 0; }
+    CodesModeArm(const CodesModeArm&) = delete;
+    CodesModeArm& operator=(const CodesModeArm&) = delete;
+};
+
+bool codes_read(ecuio_session_t* s, uint32_t id, ecuio_module_codes_t* r)
+{
+    return wait_for(
+        [&] {
+            return ecuio_session_get_module_codes(s, 0, r) == ECUIO_OK &&
+                   r->read_id >= id &&
+                   (r->flags & ECUIO_MODULE_CODES_COMPLETE) != 0;
+        },
+        8000);
+}
+
+} // namespace
+
+TEST_F(Elm327SessionTest, AModulesCodesAreReadThroughTheFakeElm327)
+{
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    uint32_t id = 0;
+    ASSERT_EQ(ecuio_session_read_module_codes(s.s, 0, 0, &id), ECUIO_OK);
+    ecuio_module_codes_t r{};
+    ASSERT_TRUE(codes_read(s.s, id, &r));
+    fake_diagnostics::expect_module_codes(r, 0xAF);
+    EXPECT_EQ(fake_count("1901AF"), 1u);
+    EXPECT_EQ(fake_count("1902AF"), 1u);
+}
+
+TEST_F(Elm327SessionTest, ALongListIsCutAtTheCap)
+{
+    CodesModeArm many(fake_ecu::CodesMode::many);
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0&diagnose=0")), ECUIO_OK);
+    s.start();
+    uint32_t id = 0;
+    ASSERT_EQ(ecuio_session_read_module_codes(s.s, 0, 0, &id), ECUIO_OK);
+    ecuio_module_codes_t r{};
+    ASSERT_TRUE(codes_read(s.s, id, &r));
+    EXPECT_EQ(r.list_outcome, ECUIO_DIAG_ANSWERED);
+    EXPECT_EQ(r.count, 200u);
+    EXPECT_EQ(r.reported, 200u);
+    EXPECT_EQ(r.held, ECUIO_MODULE_CODES_MAX);
+}

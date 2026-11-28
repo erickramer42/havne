@@ -100,7 +100,7 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
     /* Taken before a probe started the walk: it goes first, so its reply
      * settles it and no other request's reply does. */
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-        ch.sessioning || ch.talk.out) {
+        ch.codes.out || ch.sessioning || ch.talk.out) {
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }
@@ -292,8 +292,15 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
     ecuio_engine_channel& ch = e->chans[c];
     const bool once_turn = ch.requests == 0 || ch.scan_turn ||
                            (e->scan_first && ch.scan_pending > 0);
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST && once_turn &&
+        ecuio_engine_take_codes(ch, c)) {
+        return ECUIO_ENGINE_ONCE; /* a count and its list, no clear between */
+    }
     if (ecuio_engine_clear_asks(ch) && once_turn) {
         ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (once_turn && ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.ident_pending > 0 && once_turn && ecuio_engine_take_ident(e, c)) {
@@ -328,7 +335,8 @@ inline bool ecuio_engine_closing_owes(const ecuio_request_engine* e,
                                       const ecuio_engine_channel& ch)
 {
     return ecuio_engine_clear_on(ch) || ch.diag_pending > 0 || ch.diagnosing ||
-           ch.clearing || ch.sessioning || ecuio_engine_closing_leaves(e, ch);
+           ch.clearing || ecuio_engine_codes_asks(ch) || ch.codes.out ||
+           ch.sessioning || ecuio_engine_closing_leaves(e, ch);
 }
 
 /* When closing module ch next sends: its floor while it owes something
@@ -348,8 +356,10 @@ inline int64_t ecuio_engine_closing_next_us(const ecuio_request_engine* e,
  * waiting on the judgment sends nothing) */
 inline bool ecuio_engine_visit_sends(const ecuio_engine_channel& ch)
 {
-    return ecuio_engine_clear_asks(ch) || ch.clearing || ch.ident_pending > 0 ||
-           ch.identifying || ch.diag_pending > 0 || ch.diagnosing;
+    return ecuio_engine_clear_asks(ch) || ch.clearing ||
+           ecuio_engine_codes_asks(ch) || ch.codes.out ||
+           ch.ident_pending > 0 || ch.identifying || ch.diag_pending > 0 ||
+           ch.diagnosing;
 }
 
 /* Whether visiting module ch still owes its pass: what it sends, and a
@@ -388,11 +398,18 @@ inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
     if (ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
         return ECUIO_ENGINE_NONE;
     }
-    if (ch.identifying || ch.diagnosing || ch.clearing) {
+    if (ch.identifying || ch.diagnosing || ch.clearing || ch.codes.out) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST &&
+        ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ecuio_engine_clear_asks(ch)) {
         ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.ident_pending > 0 && ecuio_engine_take_ident(e, c)) {
@@ -419,11 +436,18 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
         ch.outstanding != ECUIO_ENGINE_NONE || now_us < ch.next_send_us) {
         return ECUIO_ENGINE_NONE;
     }
-    if (ch.diagnosing || ch.clearing || ch.sessioning) {
+    if (ch.diagnosing || ch.clearing || ch.codes.out || ch.sessioning) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST &&
+        ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ecuio_engine_clear_asks(ch)) {
         ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ch.diag_pending > 0) {
@@ -566,7 +590,7 @@ inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
         return ECUIO_ENGINE_NONE;
     }
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-        ch.sessioning || ch.talk.out ||
+        ch.codes.out || ch.sessioning || ch.talk.out ||
         ecuio_engine_session_entry_due(e, c, now_us) ||
         ecuio_engine_keepalive_due(e, c, now_us)) {
         return ECUIO_ENGINE_ONCE;
@@ -580,9 +604,10 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 {
     return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
            ch.diag_pending > 0 || ecuio_engine_clear_asks(ch) ||
-           ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-           ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
-           ch.talk.offered || ch.talk.out;
+           ecuio_engine_codes_asks(ch) || ch.identifying || ch.diagnosing ||
+           ch.scanning || ch.clearing || ch.codes.out || ch.sessioning ||
+           ch.session_step == ECUIO_SESSION_STATE_ENTERING || ch.talk.offered ||
+           ch.talk.out;
 }
 
 /* The channels with a request out (a pending wait's too): the slots taken */
@@ -637,7 +662,8 @@ inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
 {
     return ch.requests > 0 || items || ch.scan_pending > 0 ||
            ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
-           ch.talk.offered || ecuio_engine_clear_asks(ch);
+           ch.talk.offered || ecuio_engine_clear_asks(ch) ||
+           ecuio_engine_codes_asks(ch);
 }
 
 /* The same under an operation's hold: a talk offered, or a one-shot taken
@@ -645,7 +671,7 @@ inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
 inline bool ecuio_engine_hold_asks(const ecuio_engine_channel& ch)
 {
     return ch.talk.offered || ch.talk.out || ch.identifying || ch.diagnosing ||
-           ch.scanning || ch.clearing || ch.sessioning;
+           ch.scanning || ch.clearing || ch.codes.out || ch.sessioning;
 }
 
 /* next_event_us's moment for open module ch: its reply's deadline, else

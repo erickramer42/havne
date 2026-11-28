@@ -416,7 +416,7 @@ inline bool j2534_hold_session_due(const ecuio_request_engine* e, uint32_t c,
         return true;
     }
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-        ch.talk.out) {
+        ch.codes.out || ch.talk.out) {
         return false;
     }
     return ecuio_engine_session_next_us(e, ch) <= now_us;

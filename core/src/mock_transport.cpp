@@ -44,9 +44,11 @@ struct ecuio_mock_transport {
     ecuio_frame_t reply{}; /* the worker's, for each PID's reply */
     /* The simulated ECU's diagnostics (mock_ecu.h): an engine asking
      * only the list, read once at attach and again on each Read again
-     * or clear; nullptr under ?diagnose=0. Attach's, then the worker's
-     * alone. */
+     * or clear, and the codes of 0x19 on request; it asks no list under
+     * ?diagnose=0. Attach's, then the worker's alone. */
     std::unique_ptr<ecuio_request_engine> diag;
+    bool diagnose = true;
+    uint32_t codes_published = 0;
     ecuio_mock_ecu ecu;          /* car's engine, cleared or not */
     int64_t diag_now_us = 0;     /* the engine's clock (mock_ecu.h) */
     uint32_t diag_seen = 0;      /* ecuio_take_diag_request's count */
@@ -175,6 +177,59 @@ void read_diagnostics(ecuio_mock_transport* t)
                               t->diag_published);
 }
 
+/* The engine ECU's read on the engine; every other module, which the
+ * mock doesn't simulate, ends its read at once with no answer */
+void read_codes(ecuio_mock_transport* t)
+{
+    ecuio_take_codes_requests(t->session, t->diag.get());
+    if (ecuio_engine_codes_asks(t->diag->chans[0])) {
+        ecuio_mock_ecu_read(t->diag.get(), &t->ecu, &t->diag_now_us);
+    }
+    ecuio_publish_module_codes(t->session, *t->diag, 0, ECUIO_MOCK_ECU_RX_ID,
+                               t->codes_published);
+    ecuio_session_t* s = t->session;
+    for (uint32_t c = 1; c < t->channels; ++c) {
+        uint32_t id = 0;
+        uint8_t mask = 0;
+        {
+            std::lock_guard<std::mutex> lock(s->codes.mutex);
+            if (s->codes.asked[c] == s->codes.taken[c]) {
+                continue;
+            }
+            id = s->codes.taken[c] = s->codes.asked[c];
+            mask = s->codes.mask[c];
+        }
+        std::lock_guard<std::mutex> lock(s->support_mutex);
+        if (c >= s->codes.reports.size()) {
+            continue;
+        }
+        ecuio_module_codes_t& r = s->codes.reports[c];
+        const uint32_t generation = r.generation + 3;
+        r = ecuio_module_codes_t{};
+        r.rx_id = t->rx_ids[c];
+        r.generation = generation;
+        r.read_id = id;
+        r.mask = mask != 0 ? mask : uint8_t{ECUIO_MODULE_CODES_MASK_DEFAULT};
+        r.count_outcome = ECUIO_DIAG_UNANSWERED;
+        r.list_outcome = ECUIO_DIAG_UNANSWERED;
+        r.flags = ECUIO_MODULE_CODES_COMPLETE;
+    }
+}
+
+bool start_diagnostics(ecuio_mock_transport* impl, ecuio_session_t* session)
+{
+    impl->ecu.engine = &impl->car.car;
+    if (!ecuio_engine_init(impl->diag.get(), 1)) {
+        return false;
+    }
+    if (impl->diagnose) {
+        ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
+        read_diagnostics(impl);
+    }
+    session->codes.askable = true;
+    return true;
+}
+
 void mock_worker(ecuio_mock_transport* t)
 {
     const auto interval = std::chrono::milliseconds(t->interval_ms);
@@ -225,6 +280,7 @@ void mock_worker(ecuio_mock_transport* t)
             if (t->diag->chans[0].diag.generation != before) {
                 read_diagnostics(t);
             }
+            read_codes(t);
         }
         due += interval;
         const auto now = std::chrono::steady_clock::now();
@@ -361,9 +417,8 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
     std::unique_ptr<ecuio_request_engine> probe; /* attach's alone */
     try {
         impl = new ecuio_mock_transport();
-        if (params.diagnose) {
-            impl->diag.reset(new ecuio_request_engine());
-        }
+        impl->diag.reset(new ecuio_request_engine());
+        impl->diagnose = params.diagnose;
         if (reads_pids(session->active_signal_set)) {
             probe.reset(new ecuio_request_engine());
         }
@@ -401,13 +456,8 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
             return walked;
         }
     }
-    if (impl->diag) {
-        impl->ecu.engine = &impl->car.car;
-        if (!ecuio_engine_init(impl->diag.get(), 1)) {
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
-        ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
-        read_diagnostics(impl);
+    if (!start_diagnostics(impl, session)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     /* The session takes the transport last, so a refusal above frees it
      * here and leaves the session with none */

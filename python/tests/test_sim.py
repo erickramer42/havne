@@ -27,6 +27,17 @@ def test_the_engine_ecu_answers_a_script_s_requests():
         assert sim.stats.requests >= 4
 
 
+def test_each_module_answers_its_own_codes():
+    with havne.Sim.unbound("mock://sim?modules=2&codes=refused@7E9") as sim:
+        (codes,) = sim.ask(b"\x19\x02\xaf")
+        assert codes.id == 0x7E8
+        assert codes.data[:3] == b"\x59\x02\xff"
+        assert len(codes.data) == 3 + 4 * 4
+        assert b"\x03\x01\x00\x08" in codes.data   # P0301-00, stored in J1979 too
+        (refused,) = sim.ask(b"\x19\x02\xaf", to=0x7E1)
+        assert refused.data == b"\x7f\x19\x11"
+
+
 def test_each_reply_carries_its_module_s_timing():
     with havne.Sim.unbound("mock://sim?delay=2000:2000&fc=4000&cf=5000") as sim:
         (rpm,) = sim.ask(bytes([0x01, 0x0C]))

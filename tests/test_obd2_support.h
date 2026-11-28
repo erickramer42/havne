@@ -315,6 +315,7 @@ inline std::vector<SentRequest> drive(ecuio_request_engine* e, int64_t* now,
     for (int step = 0; step < 1000; ++step) {
         if (!ch.walking && ch.ident_pending == 0 && ch.diag_pending == 0 &&
             ch.scan_pending == 0 && !ecuio_engine_clear_on(ch) &&
+            !ecuio_engine_codes_asks(ch) &&
             ch.outstanding == ECUIO_ENGINE_NONE) {
             return sent;
         }

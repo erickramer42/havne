@@ -89,6 +89,22 @@ static_assert(
     "a clear reads the engine and vehicle speeds, then sends 04, "
     "which nothing else may");
 
+constexpr uint8_t ECUIO_CODES_SERVICE = 0x19;
+
+constexpr bool ecuio_engine_codes_request_allowed(uint8_t sid, uint8_t sub)
+{
+    return sid == ECUIO_CODES_SERVICE && (sub == 0x01 || sub == 0x02);
+}
+static_assert(ecuio_engine_codes_request_allowed(0x19, 0x01) &&
+                  ecuio_engine_codes_request_allowed(0x19, 0x02) &&
+                  !ecuio_engine_codes_request_allowed(0x19, 0x03) &&
+                  !ecuio_engine_codes_request_allowed(0x19, 0x04) &&
+                  !ecuio_engine_codes_request_allowed(0x19, 0x06) &&
+                  !ecuio_engine_codes_request_allowed(0x14, 0x01) &&
+                  !ecuio_engine_codes_request_allowed(0x04, 0x00) &&
+                  !ecuio_engine_service_allowed(ECUIO_CODES_SERVICE),
+              "the codes read sends 19 01 and 19 02 alone, outside the table");
+
 /* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
  * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,

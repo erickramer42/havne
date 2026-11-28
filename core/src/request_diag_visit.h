@@ -42,7 +42,8 @@ inline void ecuio_engine_visit_want(ecuio_request_engine* e, uint32_t c)
 inline void ecuio_engine_visit_closed(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        if (e->chans[c].diag_pending > 0) {
+        if (e->chans[c].diag_pending > 0 ||
+            ecuio_engine_codes_asks(e->chans[c])) {
             ecuio_engine_visit_want(e, c);
         }
     }
@@ -81,6 +82,7 @@ inline void ecuio_engine_visit_refused(ecuio_request_engine* e, uint32_t c)
     if (ch.diag_pending > 0) {
         ecuio_engine_visit_not_opened(e, c);
     }
+    ecuio_engine_codes_not_opened(ch);
 }
 
 /* Each clear target that isn't open is visited for its clear: the visit
@@ -156,7 +158,8 @@ inline void ecuio_engine_visits_step(ecuio_request_engine* e)
         }
         ecuio_engine_channel& ch = e->chans[c];
         if (ecuio_engine_module_hears(ch) ||
-            (ch.diag_pending == 0 && !ecuio_engine_clear_on(ch))) {
+            (ch.diag_pending == 0 && !ecuio_engine_clear_on(ch) &&
+             !ecuio_engine_codes_asks(ch))) {
             continue; /* open meanwhile, or owing nothing now */
         }
         if (e->filters_most != 0 &&

@@ -87,7 +87,7 @@ struct ecuio_engine_turns {
 inline bool ecuio_engine_turn_walking(const ecuio_engine_channel& ch)
 {
     return ch.walking && !ch.identifying && !ch.diagnosing && !ch.scanning &&
-           !ch.clearing && !ch.sessioning && !ch.talk.out;
+           !ch.clearing && !ch.codes.out && !ch.sessioning && !ch.talk.out;
 }
 
 /* When channel ch next has something to ask but its keep-alive, by its

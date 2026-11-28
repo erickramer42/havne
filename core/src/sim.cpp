@@ -95,6 +95,23 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
             return m;
         }
     }
+    if (len > 0 && req[0] == ECUIO_CODES_SERVICE) {
+        if (functional) {
+            return 0;
+        }
+        const ecuio_sim_codes_form form =
+            ecuio_sim_codes_form_of(s->ecu.config.codes, n.reply_id);
+        const bool engine_codes = n.role == sim_role::engine;
+        const bool module_codes = n.role == sim_role::module && !n.from_set;
+        return ecuio_sim_codes_answer(
+            form, engine_codes ? ECUIO_MOCK_CODES : ECUIO_SIM_MODULE_CODES,
+            engine_codes
+                ? uint32_t{sizeof ECUIO_MOCK_CODES / sizeof ECUIO_MOCK_CODES[0]}
+            : module_codes ? uint32_t{sizeof ECUIO_SIM_MODULE_CODES /
+                                      sizeof ECUIO_SIM_MODULE_CODES[0]}
+                           : 0u,
+            n.session.extended, req, len, out);
+    }
     if (n.from_set &&
         (n.role != sim_role::engine || (len > 0 && req[0] == 0x22))) {
         const ecuio_sim* self = s;
