@@ -37,6 +37,7 @@ struct request_params {
     uint8_t pack_frames = 0; /* ?packframes=; 0 = no limit */
     bool scan_first = false; /* ?scan=first: the DID scan before the rotation */
     uint8_t session = ECUIO_SESSION_DEFAULT; /* ?session=03 (ADR-0060) */
+    bool session_given = false;
     uint32_t keepalive_ms = 0; /* ?keepalive_ms=; 0 = the engine's default */
     /* ?gap=: the floor between requests on a channel; -1 the transport's */
     int64_t gap_us = -1;
@@ -205,6 +206,7 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
             *wanted = "01 (the default session) or 03 (the extended one)";
         } else {
             p->session = static_cast<uint8_t>(v);
+            p->session_given = true;
         }
         return true;
     }

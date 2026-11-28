@@ -10,6 +10,7 @@
 #define ECUIO_REQUEST_MODULES_H
 
 #include "ecuio/core.h"
+#include "consent_gate.h"
 #include "conversation_bind.h"
 #include "request_engine.h"
 #include "session.h"
@@ -185,6 +186,10 @@ inline uint32_t ecuio_take_modules(ecuio_session_t* session,
                                    ecuio_modules_seen& seen, int64_t now_us)
 {
     const uint32_t asked = session->focus_generation.load();
+    for (uint32_t c = 0; !seen.taken && c < e->chan_count; ++c) {
+        ecuio_engine_session_allow(e, c,
+                                   ecuio_declared_session_allowed(session, c));
+    }
     if (!seen.taken || asked != seen.generation) {
         seen.taken = true;
         seen.generation = asked;

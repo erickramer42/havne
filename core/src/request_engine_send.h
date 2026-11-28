@@ -16,6 +16,7 @@
 #include "request_engine_walk.h"
 #include "request_engine_diag.h"
 #include "request_engine_session.h"
+#include "request_engine_declared.h"
 #include "request_engine_quiet.h"
 
 /* The longest talk channel c of the engine takes: the transport's bound,
@@ -114,7 +115,8 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
         return true;
     }
     /* ADR-0060: the entry first; while 10 03 is due nothing else goes */
-    if (ecuio_engine_session_entry_due(e, c, now_us)) {
+    if (ecuio_engine_session_entry_due(e, c, now_us) ||
+        ecuio_engine_declared_leave_due(e, c)) {
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }

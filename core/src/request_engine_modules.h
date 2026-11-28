@@ -15,6 +15,7 @@
 #ifndef ECUIO_REQUEST_ENGINE_MODULES_H
 #define ECUIO_REQUEST_ENGINE_MODULES_H
 
+#include "request_engine_declared.h"
 #include "request_engine_reply.h"
 
 #include <cstdint>
@@ -246,6 +247,7 @@ inline void ecuio_engine_modules_apply(ecuio_request_engine* e,
         ecuio_engine_module_wait(e, c);
     }
     ecuio_engine_modules_fill(e);
+    ecuio_engine_sessions_follow(e);
     for (uint32_t c = 0; c < n; ++c) {
         const bool moved =
             ecuio_engine_module_view(e->chans[c], !first_take) != view[c];
@@ -282,6 +284,7 @@ inline void ecuio_engine_module_want(ecuio_request_engine* e, uint32_t c,
         ++ch.generation;
     }
     ecuio_engine_module_reopen(e, c);
+    ecuio_engine_session_follow(e, c);
 }
 
 #endif

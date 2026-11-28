@@ -24,6 +24,7 @@
 #include "request_engine_walk.h"
 #include "request_engine_diag.h"
 #include "request_engine_session.h"
+#include "request_engine_declared.h"
 #include "request_engine_quiet.h"
 #include "request_engine_send.h"
 #include "request_engine_reply.h"

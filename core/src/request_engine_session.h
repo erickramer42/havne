@@ -31,6 +31,7 @@ inline bool ecuio_engine_session(ecuio_request_engine* e, uint8_t sub,
                           : keepalive_us;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         e->chans[c].session_asked = sub;
+        e->chans[c].session_source = ECUIO_SESSION_SOURCE_URI;
         ecuio_engine_session_step(e->chans[c], ECUIO_SESSION_STATE_ENTERING);
     }
     return true;
@@ -51,6 +52,9 @@ inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.session_asked == 0) {
         ch.session_asked = ECUIO_SESSION_EXTENDED;
+    }
+    if (ch.session_source != ECUIO_SESSION_SOURCE_URI) {
+        ch.session_source = ECUIO_SESSION_SOURCE_CONVERSATION;
     }
     if (ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED &&
         ch.session_entries == 0) {

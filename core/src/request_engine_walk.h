@@ -216,6 +216,8 @@ inline void ecuio_engine_support(const ecuio_request_engine* e, uint32_t c,
     out->session_nrc = ch.session_nrc;
     out->session_entries = ch.session_entries;
     out->session_lost = ch.session_lost;
+    out->session_source = ch.session_source;
+    out->session_idle = ecuio_engine_session_idle(ch);
     if (extended) {
         out->flags |= ECUIO_SUPPORT_EXTENDED;
     }

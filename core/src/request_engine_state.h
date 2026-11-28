@@ -361,6 +361,13 @@ struct ecuio_engine_channel {
      * request whose 7E or 7F made the last re-entry (len 0: none), until
      * it answers; refused_own once its loss was given back. */
     uint8_t session_asked = 0;
+    uint8_t session_source = ECUIO_SESSION_SOURCE_NONE;
+    /* Attach's judgment of its set's declaration (may_declare), the
+     * consent's at start (declared, in force when wanted), else why not
+     * (ECUIO_SESSION_IDLE_*) */
+    bool session_may_declare = false;
+    bool session_declared = false;
+    uint8_t session_idle = ECUIO_SESSION_IDLE_NONE;
     uint8_t session_step = ECUIO_SESSION_STATE_NOT_ASKED;
     uint8_t session_nrc = 0;
     bool sessioning = false;
@@ -416,6 +423,17 @@ inline bool ecuio_engine_module_hears(const ecuio_engine_channel& ch)
 inline uint8_t ecuio_engine_session_sub(const ecuio_engine_channel& ch)
 {
     return ch.handed ? ECUIO_SESSION_EXTENDED : ch.session_asked;
+}
+
+/* Why channel ch's declared session isn't in force now */
+inline uint8_t ecuio_engine_session_idle(const ecuio_engine_channel& ch)
+{
+    if (!ch.session_declared) {
+        return ch.session_idle;
+    }
+    return ch.session_source == ECUIO_SESSION_SOURCE_NONE
+               ? uint8_t{ECUIO_SESSION_IDLE_NOT_READ}
+               : uint8_t{ECUIO_SESSION_IDLE_NONE};
 }
 
 /* Sets channel ch's session step. A key's window lasts only while the

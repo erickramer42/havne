@@ -153,7 +153,12 @@ typedef char abi_support_session_nrc_check[(offsetof(ecuio_channel_support_t, se
 typedef char abi_support_session_entries_check[(offsetof(ecuio_channel_support_t, session_entries) == 140) ? 1 : -1];
 typedef char abi_support_session_lost_check[(offsetof(ecuio_channel_support_t, session_lost) == 142) ? 1 : -1];
 typedef char abi_support_reasons_check[(offsetof(ecuio_channel_support_t, open_reasons) == 144) ? 1 : -1];
-typedef char abi_support_reserved_check[(offsetof(ecuio_channel_support_t, reserved) == 148) ? 1 : -1];
+typedef char abi_support_source_check
+    [(offsetof(ecuio_channel_support_t, session_source) == 148) ? 1 : -1];
+typedef char abi_support_idle_check
+    [(offsetof(ecuio_channel_support_t, session_idle) == 149) ? 1 : -1];
+typedef char abi_support_reserved_check
+    [(offsetof(ecuio_channel_support_t, reserved) == 150) ? 1 : -1];
 typedef char abi_identity_item_check[(sizeof(ecuio_identity_item_t) == 72) ? 1 : -1];
 typedef char abi_identity_size_check[(sizeof(ecuio_channel_identity_t) == 1184) ? 1 : -1];
 typedef char abi_identity_list_check[(offsetof(ecuio_channel_identity_t, list) == 32) ? 1 : -1];

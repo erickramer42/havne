@@ -253,6 +253,51 @@ inline void ecuio_setup_channels(ecuio_request_engine* e,
     }
 }
 
+/* Each channel's declared session; false for ?keepalive_ms= with none */
+inline bool ecuio_declare_sessions(ecuio_request_engine* e,
+                                   const ecuio_signal_set_t* set,
+                                   const uint32_t* rx_ids, uint32_t chan_count,
+                                   const request_params& params)
+{
+    bool any = params.session == ECUIO_SESSION_EXTENDED;
+    for (uint32_t c = 0; set != nullptr && c < chan_count; ++c) {
+        uint8_t declared = ECUIO_CHANNEL_SESSION_NONE;
+        for (uint32_t k = 0; k < set->channel_count; ++k) {
+            if (set->channels[k].rx_id == rx_ids[c]) {
+                declared = set->channels[k].session;
+            }
+        }
+        bool standard = false;
+        for (uint32_t r = 0; r < e->count && !standard; ++r) {
+            standard =
+                e->requests[r].channel == c && e->requests[r].bytes[0] == 0x01;
+        }
+        ecuio_engine_channel& ch = e->chans[c];
+        if (declared == ECUIO_CHANNEL_SESSION_DEFAULT) {
+            ch.session_idle = ECUIO_SESSION_IDLE_DEFAULT;
+        } else if (declared != ECUIO_CHANNEL_SESSION_EXTENDED) {
+            continue;
+        } else if (params.session_given &&
+                   params.session == ECUIO_SESSION_DEFAULT) {
+            ch.session_idle = ECUIO_SESSION_IDLE_OFF;
+        } else if (standard) {
+            ch.session_idle = ECUIO_SESSION_IDLE_STANDARD;
+        } else {
+            ch.session_may_declare = !ch.functional;
+            any = any || ch.session_may_declare;
+        }
+    }
+    if (params.keepalive_ms == 0) {
+        return true;
+    }
+    const int64_t us = static_cast<int64_t>(params.keepalive_ms) * 1000;
+    e->keepalive_us =
+        us < ECUIO_ENGINE_KEEPALIVE_MIN_US   ? ECUIO_ENGINE_KEEPALIVE_MIN_US
+        : us > ECUIO_ENGINE_KEEPALIVE_MAX_US ? ECUIO_ENGINE_KEEPALIVE_MAX_US
+                                             : us;
+    return any;
+}
+
 inline ecuio_status_t
 ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      const request_params& params, const uint32_t* rx_ids,
@@ -325,11 +370,6 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                          "profile that reads DIDs");
         return ECUIO_ERR_BAD_URI;
     }
-    if (params.keepalive_ms != 0 && params.session != ECUIO_SESSION_EXTENDED) {
-        ecuio_detail_set("?keepalive_ms= keeps the extended session alive: "
-                         "it needs ?session=03");
-        return ECUIO_ERR_BAD_URI;
-    }
     if (!ecuio_pack_frames_fit(params)) {
         return ECUIO_ERR_BAD_URI;
     }
@@ -372,6 +412,12 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
             }
             (void)ecuio_engine_scan_add(e, c, s.did);
         }
+    }
+    if (!ecuio_declare_sessions(e, set, rx_ids, chan_count, params)) {
+        ecuio_detail_set("?keepalive_ms= keeps the extended session alive: "
+                         "it needs ?session=03 or a module whose signals "
+                         "declare it");
+        return ECUIO_ERR_BAD_URI;
     }
     *probe = params.probe && !params.has_poll;
     /* Packing needs the bitmaps: it packs only the PIDs they list */

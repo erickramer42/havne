@@ -267,7 +267,7 @@ TEST_F(Elm327SessionTest, TheSessionKeysAreRefusedWhereTheyCannotApply)
          "DIDs"},
         {"?profile=uds-generic&did=1E1C&keepalive_ms=1000",
          "?keepalive_ms= keeps the extended session alive: it needs "
-         "?session=03"},
+         "?session=03 or a module whose signals declare it"},
         {"?profile=uds-generic&did=1E1C&session=02",
          "?session= needs 01 (the default session) or 03 (the extended one), "
          "not '02'"},

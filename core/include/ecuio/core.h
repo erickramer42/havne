@@ -577,6 +577,23 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_SESSION_LOSSES_MAX         3u
 #define ECUIO_SESSION_LOSS_WINDOW_MS     60000u
 
+/* session_source: who asked the channel's session; append-only */
+#define ECUIO_SESSION_SOURCE_NONE         0u
+#define ECUIO_SESSION_SOURCE_URI          1u /* ?session=03 */
+#define ECUIO_SESSION_SOURCE_SET          2u /* its signals declare it */
+#define ECUIO_SESSION_SOURCE_CONVERSATION 3u /* a bound plugin's begin */
+
+/* session_idle: why a module's declared session isn't in force;
+ * append-only */
+#define ECUIO_SESSION_IDLE_NONE        0u /* in force, or none declared */
+#define ECUIO_SESSION_IDLE_NOT_ALLOWED 1u /* no consent to its part */
+#define ECUIO_SESSION_IDLE_DEFAULT     2u /* a part declares default */
+#define ECUIO_SESSION_IDLE_STANDARD    3u /* standard signals read there */
+#define ECUIO_SESSION_IDLE_OFF         4u /* ?session=01 */
+#define ECUIO_SESSION_IDLE_NOT_READ    5u /* no signal on it is read */
+#define ECUIO_SESSION_IDLE_OBD_ITEM    6u /* left for an OBD item */
+#define ECUIO_SESSION_IDLE_RETRY       7u /* a clear's re-entry waits */
+
 /* reason: why a request left the rotation */
 #define ECUIO_DROP_BITMAP                1u   /* its PID's bit is clear */
 #define ECUIO_DROP_NOT_SUPPORTED         2u   /* 7F <service> 12 or 31 */
@@ -650,7 +667,9 @@ typedef struct ecuio_channel_support {
                                  0 with ECUIO_SUPPORT_CLOSED, and on a
                                  session that sends no request (every
                                  module open) */
-    uint32_t reserved[1];     /* zero; ABI growth space */
+    uint8_t session_source;   /* ECUIO_SESSION_SOURCE_* */
+    uint8_t session_idle;     /* ECUIO_SESSION_IDLE_* */
+    uint8_t reserved[2];      /* zero */
 } ecuio_channel_support_t;
 
 #if defined(__cplusplus)
@@ -662,7 +681,10 @@ static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "support
 static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
 static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
-static_assert(offsetof(ecuio_channel_support_t, reserved) == 148, "support reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, session_source) == 148,
+              "support session source offset is ABI");
+static_assert(offsetof(ecuio_channel_support_t, reserved) == 150,
+              "support reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_dropped_request_t) == 8, "ecuio_dropped_request_t size is ABI");
 _Static_assert(sizeof(ecuio_channel_support_t) == 152, "ecuio_channel_support_t size is ABI");
@@ -672,7 +694,10 @@ _Static_assert(offsetof(ecuio_channel_support_t, pids_supported) == 132, "suppor
 _Static_assert(offsetof(ecuio_channel_support_t, session_asked) == 136, "support session offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, session_entries) == 140, "support session counts offset is ABI");
 _Static_assert(offsetof(ecuio_channel_support_t, open_reasons) == 144, "support open_reasons offset is ABI");
-_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 148, "support reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, session_source) == 148,
+               "support session source offset is ABI");
+_Static_assert(offsetof(ecuio_channel_support_t, reserved) == 150,
+               "support reserved offset is ABI");
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index

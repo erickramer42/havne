@@ -29,4 +29,13 @@ inline bool ecuio_plugin_code_may_run(const ecuio_session_t* session)
            g_ecuio_conversation_door.load(std::memory_order_relaxed);
 }
 
+/* Whether session may hold channel's declared session */
+inline bool ecuio_declared_session_allowed(const ecuio_session_t* session,
+                                           uint32_t channel)
+{
+    return session->no_car_bus ||
+           g_ecuio_conversation_door.load(std::memory_order_relaxed) ||
+           (channel < 32 && ((session->declared_allowed >> channel) & 1u) != 0);
+}
+
 #endif /* ECUIO_CONSENT_GATE_H */
