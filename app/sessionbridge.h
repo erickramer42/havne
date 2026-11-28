@@ -970,6 +970,9 @@ private:
     void pollChannelDiagnostics();
     void rebuildDiagnostics();
     void pollModuleCodes();
+    void resetModuleCodes();
+    QByteArray clearFileText(const ecuio_channel_diagnostics_t* reports,
+                             const uint32_t* channels, uint32_t n) const;
     bool sessionOffered() const;
     void advanceCodesVisit();
     QVariantMap previewObdbBytes(const QByteArray& bytes,

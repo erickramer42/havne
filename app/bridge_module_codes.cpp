@@ -308,3 +308,22 @@ bool SessionBridge::sessionOffered() const
            uri.contains(QLatin1String("profile=uds-generic")) &&
            !uri.contains(QLatin1String("session="));
 }
+
+void SessionBridge::resetModuleCodes()
+{
+    std::fill(std::begin(m_codesShown), std::end(m_codesShown),
+              ecuio_module_codes_t{});
+    std::fill(std::begin(m_codesLogged), std::end(m_codesLogged), 0u);
+    m_codesVisit = CodesVisit{};
+}
+
+QByteArray
+SessionBridge::clearFileText(const ecuio_channel_diagnostics_t* reports,
+                             const uint32_t* channels, uint32_t n) const
+{
+    ecuio_module_codes_t codes[ECUIO_MAX_CHANNELS];
+    for (uint32_t i = 0; i < n; ++i) {
+        codes[i] = m_codesShown[channels[i]];
+    }
+    return diagnosticsFileText(reports, n, codes);
+}

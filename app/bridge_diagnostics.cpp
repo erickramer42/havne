@@ -268,11 +268,7 @@ QString SessionBridge::clearDiagnostics()
     /* No folder, no file: either way nothing is sent */
     const bool folder = QDir().mkpath(root);
     QSaveFile file(path);
-    ecuio_module_codes_t codes[ECUIO_MAX_CHANNELS];
-    for (uint32_t i = 0; i < n; ++i) {
-        codes[i] = m_codesShown[channels[i]];
-    }
-    const QByteArray text = diagnosticsFileText(reports, n, codes);
+    const QByteArray text = clearFileText(reports, channels, n);
     if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size() ||
         !file.commit()) {
         return refuse(folder ? file.errorString()

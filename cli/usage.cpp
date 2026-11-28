@@ -198,6 +198,28 @@ void usage_plugins(FILE* to)
         "         merge did; --out writes the merged set's text.\n");
 }
 
+// health's paragraph
+void usage_health(FILE* to)
+{
+    std::fprintf(
+        to,
+        "health   writes a car's health as one scrubbed file, JSON or a\n"
+        "         text for a person: the vehicle from its VIN (model year,\n"
+        "         make, check digit; never the VIN), the inspection's\n"
+        "         verdict, each ECU's readiness, trouble codes with their\n"
+        "         titles, freeze frame, values since the codes were "
+        "cleared\n"
+        "         and identification by name only, then the profile's\n"
+        "         ranked values. From a session it reads only (Services 01,\n"
+        "         02, 03, 07, 09 and 0A, never a clear), parked or driving,\n"
+        "         until every report it asks is in and the values have\n"
+        "         come, or --seconds (30); from a recording, its replies\n"
+        "         and values from --from to --to seconds. --baseline names\n"
+        "         the vehicle's baseline recording, by its start and length,\n"
+        "         never its folder. The file is checked for the car's\n"
+        "         identity before it's written.\n");
+}
+
 } // namespace
 
 void usage(FILE* to)
@@ -400,22 +422,10 @@ void usage(FILE* to)
         "         interval that gives no fewer rows than every sweep (the\n"
         "         recording is slower than it) says so with\n"
         "         no_fewer_than_sweep, and export on stderr too; export's\n"
-        "         --rows <ms> sizes the sweep first for it, a pass more.\n"
-        "health   writes a car's health as one scrubbed file, JSON or a\n"
-        "         text for a person: the vehicle from its VIN (model year,\n"
-        "         make, check digit; never the VIN), the inspection's\n"
-        "         verdict, each ECU's readiness, trouble codes with their\n"
-        "         titles, freeze frame, values since the codes were "
-        "cleared\n"
-        "         and identification by name only, then the profile's\n"
-        "         ranked values. From a session it reads only (Services 01,\n"
-        "         02, 03, 07, 09 and 0A, never a clear), parked or driving,\n"
-        "         until every report it asks is in and the values have\n"
-        "         come, or --seconds (30); from a recording, its replies\n"
-        "         and values from --from to --to seconds. --baseline names\n"
-        "         the vehicle's baseline recording, by its start and length,\n"
-        "         never its folder. The file is checked for the car's\n"
-        "         identity before it's written.\n"
+        "         --rows <ms> sizes the sweep first for it, a pass more.\n");
+    usage_health(to);
+    std::fprintf(
+        to,
         "import   reads a candump -L log (one bus: --interface names it\n"
         "         when the log has several) into a recording's folder that\n"
         "         view --frames, info and replay:// read. import csv reads\n"
