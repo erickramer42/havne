@@ -360,6 +360,7 @@ struct ecuio_engine_channel {
      * the channel's last request, which S3 runs from. session_refused: the
      * request whose 7E or 7F made the last re-entry (len 0: none), until
      * it answers; refused_own once its loss was given back. */
+    uint8_t session_asked = 0;
     uint8_t session_step = ECUIO_SESSION_STATE_NOT_ASKED;
     uint8_t session_nrc = 0;
     bool sessioning = false;
@@ -408,6 +409,13 @@ inline bool ecuio_engine_module_open(const ecuio_engine_channel& ch)
 inline bool ecuio_engine_module_hears(const ecuio_engine_channel& ch)
 {
     return ch.module_state <= ECUIO_MODULE_STATE_CLOSING;
+}
+
+/* The session channel ch is in or asks: a run's hand-over holds the
+ * extended one, 0 for none */
+inline uint8_t ecuio_engine_session_sub(const ecuio_engine_channel& ch)
+{
+    return ch.handed ? ECUIO_SESSION_EXTENDED : ch.session_asked;
 }
 
 /* Sets channel ch's session step. A key's window lasts only while the
@@ -505,9 +513,6 @@ struct ecuio_request_engine {
     /* The focus's minimum time between sweeps, 0 for none (ADR-0056
      * section 4); only a focus sets it */
     int64_t min_sweep_us = 0;
-    /* The session every channel enters (ADR-0060): 0 for none, the
-     * default; set only by ecuio_engine_session */
-    uint8_t session = 0;
     int64_t keepalive_us = ECUIO_ENGINE_KEEPALIVE_US;
     /* Reply timing (ADR-0042): the driver's, NULL for none. Before each
      * frame it hands over, a driver whose frames carry stamps of their

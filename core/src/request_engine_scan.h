@@ -272,7 +272,7 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
         }
         /* ADR-0060: a link that went quiet may have outlasted S3, and an
          * unanswered 10 03 is asked again; a refusal stands */
-        if (e->session != 0 &&
+        if (ch.session_asked != 0 &&
             (ch.session_step == ECUIO_SESSION_STATE_ENTERED ||
              ch.session_step == ECUIO_SESSION_STATE_UNANSWERED)) {
             if (ch.session_step == ECUIO_SESSION_STATE_ENTERED) {

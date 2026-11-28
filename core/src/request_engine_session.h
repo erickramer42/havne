@@ -24,13 +24,13 @@ inline bool ecuio_engine_session(ecuio_request_engine* e, uint8_t sub,
         !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL, sub)) {
         return false;
     }
-    e->session = sub;
     e->keepalive_us = keepalive_us < ECUIO_ENGINE_KEEPALIVE_MIN_US
                           ? ECUIO_ENGINE_KEEPALIVE_MIN_US
                       : keepalive_us > ECUIO_ENGINE_KEEPALIVE_MAX_US
                           ? ECUIO_ENGINE_KEEPALIVE_MAX_US
                           : keepalive_us;
     for (uint32_t c = 0; c < e->chan_count; ++c) {
+        e->chans[c].session_asked = sub;
         ecuio_engine_session_step(e->chans[c], ECUIO_SESSION_STATE_ENTERING);
     }
     return true;
@@ -49,8 +49,8 @@ inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
         return false;
     }
     ecuio_engine_channel& ch = e->chans[c];
-    if (e->session == 0) {
-        e->session = ECUIO_SESSION_EXTENDED;
+    if (ch.session_asked == 0) {
+        ch.session_asked = ECUIO_SESSION_EXTENDED;
     }
     if (ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED &&
         ch.session_entries == 0) {
@@ -70,9 +70,6 @@ inline void ecuio_engine_session_handed(ecuio_request_engine* e, uint32_t c,
                                         int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (e->session == 0) {
-        e->session = ECUIO_SESSION_EXTENDED;
-    }
     if (!ch.handed) {
         ch.handed_prior = ch.session_step;
     }
@@ -101,10 +98,10 @@ inline void ecuio_engine_session_returned(ecuio_request_engine* e, uint32_t c)
 }
 
 /* Whether channel c has a session to enter or keep */
-inline bool ecuio_engine_session_live(const ecuio_request_engine* e,
+inline bool ecuio_engine_session_live(const ecuio_request_engine*,
                                       const ecuio_engine_channel& ch)
 {
-    return e->session != 0 &&
+    return ecuio_engine_session_sub(ch) != 0 &&
            (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
             ch.session_step == ECUIO_SESSION_STATE_ENTERED);
 }
@@ -246,7 +243,8 @@ inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
         ++ch.generation;
     }
     return ch.session_step == ECUIO_SESSION_STATE_ENTERING &&
-           ecuio_engine_session_fill(e, c, ECUIO_SESSION_CONTROL, e->session);
+           ecuio_engine_session_fill(e, c, ECUIO_SESSION_CONTROL,
+                                     ch.session_asked);
 }
 
 /* Channel c's keep-alive, when due at now_us: 3E 00 once entered with
@@ -257,7 +255,8 @@ inline bool ecuio_engine_keepalive_due(ecuio_request_engine* e, uint32_t c,
                                        int64_t now_us)
 {
     const ecuio_engine_channel& ch = e->chans[c];
-    return e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
+    return ecuio_engine_session_sub(ch) != 0 &&
+           ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
            now_us - ch.last_sent_us >= e->keepalive_us &&
            ecuio_engine_session_fill(e, c, ECUIO_TESTER_PRESENT, 0x00);
 }
@@ -338,8 +337,9 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
                                          int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (e->session == 0 || ch.session_step != ECUIO_SESSION_STATE_ENTERED ||
-        ch.handed || ch.sessioning || ch.clearing || out == ECUIO_ENGINE_PACK ||
+    if (ch.session_asked == 0 ||
+        ch.session_step != ECUIO_SESSION_STATE_ENTERED || ch.handed ||
+        ch.sessioning || ch.clearing || out == ECUIO_ENGINE_PACK ||
         (code != ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION &&
          code != ECUIO_NRC_NOT_IN_ACTIVE_SESSION)) {
         return false;
@@ -406,7 +406,8 @@ inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
                                        ecuio_request* out)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (e->session == 0 || (ch.session_entries == 0 && !ch.handed) ||
+    if (ecuio_engine_session_sub(ch) == 0 ||
+        (ch.session_entries == 0 && !ch.handed) ||
         !ecuio_engine_module_hears(ch) ||
         !ecuio_engine_session_request_allowed(ECUIO_SESSION_CONTROL,
                                               ECUIO_SESSION_DEFAULT)) {

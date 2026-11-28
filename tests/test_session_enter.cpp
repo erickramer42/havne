@@ -282,7 +282,7 @@ TEST(SessionControlTest, AFunctionalChannelIsNeverEnteredAlone)
     e.chans[1].functional = true;
     EXPECT_FALSE(ecuio_engine_session_enter(&e, 1));
     EXPECT_FALSE(ecuio_engine_session_enter(&e, 2));
-    EXPECT_EQ(e.session, 0);
+    EXPECT_EQ(e.chans[1].session_asked, 0);
     EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_NOT_ASKED);
     EXPECT_FALSE(ecuio_engine_functional_session(&e));
     EXPECT_TRUE(ecuio_engine_session_enter(&e, 0));
@@ -319,4 +319,28 @@ TEST(SessionControlTest, ASessionEnteredAloneIsEnteredAgainWhenLost)
     ASSERT_EQ(ecu.heard.size(), 2u);
     EXPECT_EQ(ecu.heard[0], (Bytes{0x10, 0x03}));
     EXPECT_EQ(ecu.heard[1], (Bytes{0x22, 0x1E, 0x1C}));
+}
+
+/* Each channel asks its own session: a conversation's on one channel
+ * never reaches another channel's reopen */
+TEST(SessionControlTest, EachChannelAsksItsOwnSession)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, 2));
+    ASSERT_TRUE(ecuio_engine_session_enter(&e, 1));
+    int64_t now = 0;
+    ecuio_engine_module_want(&e, 0, 0);
+    (void)ecuio_engine_modules_settle(&e, now);
+    ASSERT_EQ(e.chans[0].module_state, ECUIO_MODULE_STATE_CLOSED);
+    ecuio_engine_module_want(&e, 0, ECUIO_ENGINE_REASON_READ);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_NOT_ASKED);
+    Ecu other;
+    Ecu bound;
+    for (int i = 0; i < 20; ++i) {
+        step(&e, 0, &now, &other);
+        step(&e, 1, &now, &bound);
+    }
+    EXPECT_EQ(count_of(other.heard, {0x10, 0x03}), 0u);
+    EXPECT_GE(count_of(other.heard, {0x22, 0x1E, 0x1C}), 1u);
+    EXPECT_EQ(count_of(bound.heard, {0x10, 0x03}), 1u);
 }

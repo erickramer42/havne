@@ -284,7 +284,7 @@ inline void ecuio_engine_quiet_heard(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_forget_ran_out(e, c);
     const bool lapsed = ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
                         silent_us >= ECUIO_ENGINE_S3_US;
-    if (e->session != 0 &&
+    if (ch.session_asked != 0 &&
         (ch.session_step == ECUIO_SESSION_STATE_UNANSWERED || lapsed)) {
         if (lapsed) {
             ecuio_engine_count16(ch.session_lost); /* as rescan counts it */

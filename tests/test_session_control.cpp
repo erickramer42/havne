@@ -157,10 +157,10 @@ TEST(SessionControlTest, OnlyTheExtendedSessionIsEntered)
     EXPECT_FALSE(ecuio_engine_session(&e, 0x02, ECUIO_ENGINE_KEEPALIVE_US));
     EXPECT_FALSE(ecuio_engine_session(&e, 0x01, ECUIO_ENGINE_KEEPALIVE_US));
     EXPECT_FALSE(ecuio_engine_session(&e, 0x04, ECUIO_ENGINE_KEEPALIVE_US));
-    EXPECT_EQ(e.session, 0);
+    EXPECT_EQ(e.chans[0].session_asked, 0);
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_NOT_ASKED);
     EXPECT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
-    EXPECT_EQ(e.session, 0x03);
+    EXPECT_EQ(e.chans[0].session_asked, 0x03);
 }
 
 /* The engine's own check, whatever reached its state: a session the
@@ -169,7 +169,7 @@ TEST(SessionControlTest, TheEngineNeverSendsASessionItsListRefuses)
 {
     static ecuio_request_engine e;
     uds_engine(&e);
-    e.session = 0x02; /* past ecuio_engine_session, as a bad caller might */
+    e.chans[0].session_asked = 0x02; /* as a bad caller might */
     e.chans[0].session_step = ECUIO_SESSION_STATE_ENTERING;
     Ecu ecu;
     int64_t now = 0;

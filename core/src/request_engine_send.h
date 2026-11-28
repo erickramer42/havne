@@ -316,10 +316,11 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
 }
 
 /* Whether closing module ch, in its session, still owes its 10 01 */
-inline bool ecuio_engine_closing_leaves(const ecuio_request_engine* e,
+inline bool ecuio_engine_closing_leaves(const ecuio_request_engine*,
                                         const ecuio_engine_channel& ch)
 {
-    return e->session != 0 && ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+    return ecuio_engine_session_sub(ch) != 0 &&
+           ch.session_step == ECUIO_SESSION_STATE_ENTERED;
 }
 
 /* Whether closing module ch has what it began still to send: a clear's

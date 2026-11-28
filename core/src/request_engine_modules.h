@@ -64,7 +64,7 @@ inline uint32_t ecuio_engine_modules_settle(ecuio_request_engine* e,
         ch.quiet_settled = false;
         ch.heard = false;
         ch.check_due = false;
-        if (e->session != 0) {
+        if (ecuio_engine_session_sub(ch) != 0) {
             ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
         }
         ++ch.generation;
@@ -94,7 +94,7 @@ inline void ecuio_engine_module_reopen(ecuio_request_engine* e, uint32_t c)
             ++ch.ident_pending;
         }
     }
-    if (e->session != 0 && (ch.reasons & ECUIO_ENGINE_REASON_READ) != 0 &&
+    if (ch.session_asked != 0 && (ch.reasons & ECUIO_ENGINE_REASON_READ) != 0 &&
         ch.session_step == ECUIO_SESSION_STATE_NOT_ASKED) {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
     }
