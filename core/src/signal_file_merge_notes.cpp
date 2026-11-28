@@ -200,6 +200,71 @@ std::string merger::beside_words(const note& n, const note_counts& counts) const
     return out;
 }
 
+uint8_t merger::session_of(size_t module) const
+{
+    const struct module& m = modules_[module];
+    if (m.said_default != ECUIO_SIGNAL_PART_NONE) {
+        return ECUIO_CHANNEL_SESSION_DEFAULT;
+    }
+    return m.said_extended.empty() ? ECUIO_CHANNEL_SESSION_NONE
+                                   : ECUIO_CHANNEL_SESSION_EXTENDED;
+}
+
+/* A note for each part whose extended session a module won't be read in:
+ * another part's default, or the set's standard signals read there */
+void merger::settle_sessions()
+{
+    for (size_t m = 0; m < modules_.size(); ++m) {
+        const struct module& mod = modules_[m];
+        if (mod.said_extended.empty()) {
+            continue;
+        }
+        bool standard = base_ && m == 0;
+        std::vector<uint32_t> signals(parts_.size(), 0);
+        for (const size_t i : alive()) {
+            const item& it = items_[i];
+            if (it.module != m || it.computed) {
+                continue;
+            }
+            ++signals[it.part];
+            standard =
+                standard ||
+                (it.def.mux_offset == 0 && it.def.mux_length >= 1 &&
+                 (it.def.mux_key >> (8 * (it.def.mux_length - 1))) == 0x41u);
+        }
+        const bool overruled = mod.said_default != ECUIO_SIGNAL_PART_NONE;
+        if (!overruled && !standard) {
+            continue;
+        }
+        for (const uint32_t p : mod.said_extended) {
+            note n;
+            n.kind = overruled ? ECUIO_NOTE_SESSION_OVERRULED
+                               : ECUIO_NOTE_SESSION_STANDARD;
+            n.part = p;
+            n.other_part =
+                overruled ? mod.said_default : ECUIO_SIGNAL_PART_NONE;
+            n.module = m;
+            n.count = signals[p];
+            notes_.push_back(std::move(n));
+        }
+    }
+}
+
+std::string merger::session_words(const note& n) const
+{
+    char rx[16];
+    std::snprintf(rx, sizeof rx, "%X",
+                  static_cast<unsigned>(ids_.addr(n.module).rx));
+    std::string out =
+        module_label(n.module) + " (" + rx + ") is read in the default session";
+    out += n.kind == ECUIO_NOTE_SESSION_OVERRULED
+               ? " (" + q(part_name(n.other_part)) + " says so)"
+               : std::string(": the standard signals are read from it");
+    return out + "; " + counted(n.count, " signal", " signals") + " of " +
+           q(part_name(n.part)) + " on it " + (n.count == 1 ? "asks" : "ask") +
+           " the extended session";
+}
+
 std::string merger::sentence(const note& n, const note_counts& counts) const
 {
     switch (n.kind) {
@@ -219,6 +284,9 @@ std::string merger::sentence(const note& n, const note_counts& counts) const
         return "ecu " + q(n.key) + " of " + q(part_name(n.part)) +
                " is left out with its " +
                counted(n.count, " signal", " signals") + n.text;
+    case ECUIO_NOTE_SESSION_OVERRULED:
+    case ECUIO_NOTE_SESSION_STANDARD:
+        return session_words(n);
     case ECUIO_NOTE_PART_LEFT_OUT:
         return q(part_name(n.part)) + " is left out with its " +
                counted(n.count, " signal", " signals") + n.text;
@@ -262,6 +330,9 @@ void merger::give_notes(ecuio_signal_file& f) const
         out.count = n.count;
         if (n.other != kNone) {
             out.other_part = items_[n.other].part;
+        }
+        if (n.other_part != ECUIO_SIGNAL_PART_NONE) {
+            out.other_part = n.other_part;
         }
         if (stands != kNone) {
             out.def = def_at[stands];

@@ -298,6 +298,10 @@ const char* note_kind_word(uint32_t kind)
         return "part_left_out";
     case ECUIO_NOTE_SIGNAL_LEFT_OUT:
         return "signal_left_out";
+    case ECUIO_NOTE_SESSION_OVERRULED:
+        return "session_overruled";
+    case ECUIO_NOTE_SESSION_STANDARD:
+        return "session_standard";
     default:
         return "other";
     }

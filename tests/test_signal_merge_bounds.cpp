@@ -446,3 +446,108 @@ TEST(MergeTest, TheTablesBoundsAreRefusedNamingTheirCounts)
     EXPECT_EQ(four.words,
               "the parts' signals replaced 18000 keys, more than 16384");
 }
+
+namespace {
+
+ecuio_signal_note_t note_at(const ecuio_signal_file_t* f, uint32_t index)
+{
+    ecuio_signal_note_t n{};
+    n.struct_size = sizeof n;
+    EXPECT_EQ(ecuio_signal_file_note(f, index, &n), ECUIO_OK);
+    return n;
+}
+
+const char* const kTcmExtended =
+    R"([{"id":"tcm","rx":"7E9","name":"Transmission","session":"extended"}])";
+const char* const kTcmDefault =
+    R"([{"id":"tcm","rx":"7E9","session":"default"}])";
+const char* const kTcm = R"([{"id":"tcm","rx":"7E9"}])";
+
+} // namespace
+
+TEST(MergeTest, AnExplicitDefaultFromAnyPartWins)
+{
+    File asks = load(doc("Asks", num("a", "D100") + "," + num("b", "D101"), "",
+                         3, kTcmExtended));
+    File keeps = load(doc("Keeps", num("c", "D200"), "", 3, kTcmDefault));
+    ASSERT_NE(asks, nullptr) << ecuio_last_error_detail();
+    ASSERT_NE(keeps, nullptr) << ecuio_last_error_detail();
+    for (const bool asks_first : {true, false}) {
+        SCOPED_TRACE(asks_first ? "asks first" : "keeps first");
+        const Merged m = asks_first ? merge({asks.get(), keeps.get()})
+                                    : merge({keeps.get(), asks.get()});
+        ASSERT_EQ(m.status, ECUIO_OK) << m.words;
+        const ecuio_signal_file_t* f = m.file.get();
+        EXPECT_EQ(ecuio_signal_file_set(f)->channels[0].session,
+                  ECUIO_CHANNEL_SESSION_DEFAULT);
+        EXPECT_EQ(module_at(f, 0).session, ECUIO_CHANNEL_SESSION_DEFAULT);
+        ASSERT_EQ(ecuio_signal_file_note_count(f), 1u);
+        const ecuio_signal_note_t n = note_at(f, 0);
+        EXPECT_EQ(n.kind, ECUIO_NOTE_SESSION_OVERRULED);
+        EXPECT_EQ(n.part, asks_first ? 0u : 1u);
+        EXPECT_EQ(n.other_part, asks_first ? 1u : 0u);
+        EXPECT_EQ(n.count, 2u);
+        EXPECT_EQ(n.def, UINT32_MAX);
+        EXPECT_STREQ(n.text, "Transmission (7E9) is read in the default "
+                             "session ('Keeps' says so); 2 signals of 'Asks' "
+                             "on it ask the extended session");
+    }
+}
+
+TEST(MergeTest, APartWithNoSessionOverrulesNothing)
+{
+    File asks = load(doc("Asks", num("a", "D100"), "", 3, kTcmExtended));
+    File silent = load(doc("Silent", num("c", "D200"), "", 3, kTcm));
+    ASSERT_NE(asks, nullptr) << ecuio_last_error_detail();
+    ASSERT_NE(silent, nullptr) << ecuio_last_error_detail();
+    for (const Merged& m : {merge({asks.get(), silent.get()}),
+                            merge({silent.get(), asks.get()})}) {
+        ASSERT_EQ(m.status, ECUIO_OK) << m.words;
+        EXPECT_EQ(module_at(m.file.get(), 0).session,
+                  ECUIO_CHANNEL_SESSION_EXTENDED);
+        EXPECT_EQ(ecuio_signal_file_note_count(m.file.get()), 0u);
+    }
+    const Merged none = merge({silent.get()});
+    ASSERT_EQ(none.status, ECUIO_OK) << none.words;
+    EXPECT_EQ(module_at(none.file.get(), 0).session,
+              ECUIO_CHANNEL_SESSION_NONE);
+}
+
+TEST(MergeTest, AModuleTheStandardSignalsReadHasANoteForItsSession)
+{
+    File engine =
+        load(doc("Engine", num("a", "D100"), "", 3,
+                 R"([{"id":"pcm","rx":"7E8","session":"extended"}])"));
+    ASSERT_NE(engine, nullptr) << ecuio_last_error_detail();
+    const Merged with_base = merge({engine.get()}, ECUIO_MERGE_BASE_OBD2);
+    ASSERT_EQ(with_base.status, ECUIO_OK) << with_base.words;
+    const ecuio_signal_file_t* f = with_base.file.get();
+    EXPECT_EQ(module_at(f, 0).session, ECUIO_CHANNEL_SESSION_EXTENDED)
+        << "the declaration stands: the attach judges it";
+    ASSERT_EQ(ecuio_signal_file_note_count(f), 1u);
+    const ecuio_signal_note_t n = note_at(f, 0);
+    EXPECT_EQ(n.kind, ECUIO_NOTE_SESSION_STANDARD);
+    EXPECT_EQ(n.part, 0u);
+    EXPECT_EQ(n.other_part, ECUIO_SIGNAL_PART_NONE);
+    EXPECT_EQ(n.count, 1u);
+    EXPECT_STREQ(n.text, "PCM (7E8) is read in the default session: the "
+                         "standard signals are read from it; 1 signal of "
+                         "'Engine' on it asks the extended session");
+
+    const Merged alone = merge({engine.get()});
+    ASSERT_EQ(alone.status, ECUIO_OK) << alone.words;
+    EXPECT_EQ(ecuio_signal_file_note_count(alone.file.get()), 0u)
+        << "no standard signal is read without obd2";
+
+    File pid = load(
+        doc("Pid",
+            R"({"key":"p","name":"P","read":{"service":"01","number":"0C"},)"
+            R"("field":{"byte":0}})",
+            "", 3, R"([{"id":"tcm","rx":"7E9","session":"extended"}])"));
+    ASSERT_NE(pid, nullptr) << ecuio_last_error_detail();
+    const Merged own = merge({pid.get()});
+    ASSERT_EQ(own.status, ECUIO_OK) << own.words;
+    ASSERT_EQ(ecuio_signal_file_note_count(own.file.get()), 1u)
+        << "a part's own Service 01 signal is a standard one";
+    EXPECT_EQ(note_at(own.file.get(), 0).kind, ECUIO_NOTE_SESSION_STANDARD);
+}

@@ -124,6 +124,10 @@ QString kindName(uint32_t kind)
         return QStringLiteral("partLeftOut");
     case ECUIO_NOTE_SIGNAL_LEFT_OUT:
         return QStringLiteral("signalLeftOut");
+    case ECUIO_NOTE_SESSION_OVERRULED:
+        return QStringLiteral("sessionOverruled");
+    case ECUIO_NOTE_SESSION_STANDARD:
+        return QStringLiteral("sessionStandard");
     default:
         return QStringLiteral("other");
     }

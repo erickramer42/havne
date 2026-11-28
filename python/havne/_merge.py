@@ -34,6 +34,8 @@ _KINDS = {
     e.ECUIO_NOTE_MODULE_LEFT_OUT: "module_left_out",
     e.ECUIO_NOTE_PART_LEFT_OUT: "part_left_out",
     e.ECUIO_NOTE_SIGNAL_LEFT_OUT: "signal_left_out",
+    e.ECUIO_NOTE_SESSION_OVERRULED: "session_overruled",
+    e.ECUIO_NOTE_SESSION_STANDARD: "session_standard",
 }
 
 _BASES = {None: 0, "obd2": e.ECUIO_MERGE_BASE_OBD2, "modules": e.ECUIO_MERGE_BASE_MODULES}

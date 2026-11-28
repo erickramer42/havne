@@ -144,6 +144,7 @@ std::string merger::compose()
     }
     settle_expressions();
     check_bounds();
+    settle_sessions();
     return write();
 }
 
@@ -217,6 +218,15 @@ void merger::join_module(uint32_t p, const ecuio_ecus::ecu& e,
     }
     if (have.name.empty() && name != nullptr) {
         have.name = name->text;
+    }
+    if (const Value* session = entry.find("session")) {
+        if (session->text == "default") {
+            if (have.said_default == ECUIO_SIGNAL_PART_NONE) {
+                have.said_default = p;
+            }
+        } else {
+            have.said_extended.push_back(p);
+        }
     }
     pt.module_of[e.id] = m;
 }
@@ -352,6 +362,13 @@ Value merger::written_ecus() const
         }
         add(entry, "rx", text_value(hex(ids_.addr(m).rx)));
         add(entry, "tx", text_value(hex(ids_.addr(m).tx)));
+        const uint8_t session = session_of(m);
+        if (session != ECUIO_CHANNEL_SESSION_NONE) {
+            add(entry, "session",
+                text_value(session == ECUIO_CHANNEL_SESSION_DEFAULT
+                               ? "default"
+                               : "extended"));
+        }
         if (modules_[m].part != ECUIO_SIGNAL_PART_NONE) {
             add(entry, "part", whole_value(modules_[m].part));
         }

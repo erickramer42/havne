@@ -1454,6 +1454,12 @@ ecuio_status_t ecuio_signal_file_needs(const ecuio_signal_file_t* file,
 #define ECUIO_NOTE_PART_LEFT_OUT 7u
 /* A signal isn't in the set */
 #define ECUIO_NOTE_SIGNAL_LEFT_OUT 8u
+/* A module part asks the extended session of is read in the default
+ * session another part declares: part asked, other_part said default */
+#define ECUIO_NOTE_SESSION_OVERRULED 9u
+/* A module part asks the extended session of is read in the default
+ * session: the set's standard signals are read from it */
+#define ECUIO_NOTE_SESSION_STANDARD 10u
 
 /* A note's room for its sentence: its bytes, the NUL, the rest zero */
 #define ECUIO_NOTE_TEXT_LEN 384u
@@ -1473,7 +1479,9 @@ typedef struct ecuio_signal_note {
     uint32_t def;         /* the def the note is about, its place in the
                              set: the signal that stands where the note's
                              was; UINT32_MAX for what isn't in the set */
-    uint32_t count;       /* a left-out module's or part's signals; else 0 */
+    uint32_t count;       /* a left-out module's or part's signals, or the
+                             part's on a module whose session it asked;
+                             else 0 */
     uint32_t base_def;    /* BESIDE_BASE: the obd2 def the note's signal is
                              read beside, its place in the set; else
                              UINT32_MAX */

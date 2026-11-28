@@ -55,6 +55,12 @@ ColumnLayout {
             return one ? qsTr("1 plugin left out") : qsTr("%1 plugins left out").arg(count(n))
         case "signalLeftOut":
             return one ? qsTr("1 signal left out") : qsTr("%1 signals left out").arg(count(n))
+        case "sessionOverruled":
+            return one ? qsTr("1 extended session another plugin's default overrules")
+                       : qsTr("%1 extended sessions another plugin's default overrules").arg(count(n))
+        case "sessionStandard":
+            return one ? qsTr("1 extended session the standard signals keep out")
+                       : qsTr("%1 extended sessions the standard signals keep out").arg(count(n))
         }
         return one ? qsTr("1 note") : qsTr("%1 notes").arg(count(n))
     }

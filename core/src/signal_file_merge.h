@@ -101,6 +101,8 @@ struct module {
     std::string name; /* the earliest part's that gives one */
     uint32_t part = ECUIO_SIGNAL_PART_NONE; /* whose id stands */
     bool made_up = false; /* its id is "obd2", for want of any part's */
+    uint32_t said_default = ECUIO_SIGNAL_PART_NONE; /* the first part's */
+    std::vector<uint32_t> said_extended;
 };
 
 /* One signal of the merged list */
@@ -131,6 +133,8 @@ struct note {
     size_t item = kNone;  /* the signal it is about */
     size_t other = kNone; /* the signal it took the place or a key of */
     uint32_t part = ECUIO_SIGNAL_PART_NONE;
+    uint32_t other_part = ECUIO_SIGNAL_PART_NONE;
+    size_t module = kNone;
     uint32_t count = 0;
     std::string key;  /* the key replaced or taken, or a module's id as
                          its part has it */
@@ -158,6 +162,8 @@ private:
     void leave_module_out(uint32_t p, const ecuio_ecus::ecu& e,
                           const std::string& why);
     void check_bounds() const;
+    void settle_sessions();
+    uint8_t session_of(size_t module) const;
     void check_requests() const;
     std::string write() const;
     ecuio_json::Value written_parts() const;
@@ -183,6 +189,7 @@ private:
     std::string sentence(const note& n, const note_counts& counts) const;
     std::string replaced_words(const note& n, const note_counts& counts) const;
     std::string beside_words(const note& n, const note_counts& counts) const;
+    std::string session_words(const note& n) const;
     std::string named(size_t item) const;
     std::string part_name(uint32_t part) const;
     std::string module_label(size_t module) const;

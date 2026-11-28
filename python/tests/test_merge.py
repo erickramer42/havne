@@ -54,6 +54,18 @@ def test_a_module_says_the_session_it_declares():
     assert [x.session for x in havne.SignalFile(text).modules()] == [None, "extended", "default"]
 
 
+def test_an_explicit_default_wins_with_a_note():
+    def part(name, session, key, did):
+        return havne.SignalFile(json.dumps({
+            "havne_signals": 3, "name": name, "source": {"name": "t"},
+            "ecus": [{"id": "tcm", "rx": "7E9", "session": session}],
+            "signals": [{"key": key, "name": "A", "read": {"service": "22", "number": did},
+                         "field": {"byte": 0}}]}))
+    m = havne.SignalFile.merge([part("Asks", "extended", "a", "D100"), part("Keeps", "default", "b", "D200")])
+    assert [x.session for x in m.modules()] == ["default"]
+    assert [n.kind for n in m.notes()] == ["session_overruled"]
+
+
 def test_modules_reads_obd2s_modules_and_none_of_its_signals():
     trans = havne.SignalFile(path=TRANS)
     m = havne.SignalFile.merge([trans], base="modules")
