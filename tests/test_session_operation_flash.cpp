@@ -109,6 +109,13 @@ TEST(SessionOperationTest, AFlashErasesWritesChecksAndResets)
     Bench b;
     arm(b);
     ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    std::vector<ecuio_operation::journal_found> at_erase;
+    b.script = [&](const Bytes& q, size_t, Answer*) {
+        if (q.size() > 4 && q[0] == 0x31 && q[2] == 0xFF && q[3] == 0x00) {
+            at_erase.push_back(journal_of(b));
+        }
+        return false;
+    };
     ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
     EXPECT_EQ(b.state().sectors, 2u);
     EXPECT_EQ(b.state().bytes_total, 2u * kSector);
@@ -127,6 +134,12 @@ TEST(SessionOperationTest, AFlashErasesWritesChecksAndResets)
     ASSERT_FALSE(b.sent.empty());
     EXPECT_EQ(b.sent.back(), (Bytes{0x11, 0x01})) << "the flash's leave";
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::none);
+    EXPECT_EQ(at_erase, (std::vector<ecuio_operation::journal_found>{
+                            ecuio_operation::journal_found::unfinished,
+                            ecuio_operation::journal_found::unfinished}))
+        << "on the disk before each erase reaches the module";
+    EXPECT_EQ(b.s->operation->journal.posted(), 4u)
+        << "the start of writing, each sector's end, the end: never a block";
 }
 
 TEST(SessionOperationTest, AFlashAgainstACopyWritesOnlyTheSectorThatDiffers)
@@ -302,4 +315,26 @@ TEST(SessionOperationTest, AJournalThatCantBeWrittenRefusesTheStart)
     ASSERT_EQ(ecuio_session_operation_cancel(b.s), ECUIO_OK);
     EXPECT_EQ(b.until_ended().end, ECUIO_OPERATION_END_CANCELED);
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::none);
+}
+
+TEST(SessionOperationTest, AJournalThatFailsPastTheFloorLeavesItUnfinished)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    bool struck = false;
+    b.script = [&](const Bytes& q, size_t, Answer*) {
+        if (!struck && q[0] == 0x34) {
+            struck = true;
+            ecuio_operation::journal_test_fail_at = 1;
+        }
+        return false;
+    };
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_WRITTEN)
+        << "past the floor the write goes on: " << v.words;
+    EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished)
+        << "the journal says what it last could";
 }
