@@ -53,8 +53,7 @@ int main(int argc, char** argv)
     if (argc != 4 && argc != 6) {
         std::fprintf(stderr, "usage: cli_dump_fixture <plain.json> "
                              "<kernel.json> <claimed.json> "
-                             "[<long.json> <bare.json>]
-");
+                             "[<long.json> <bare.json>]\n");
         return 2;
     }
     const std::string plain =
