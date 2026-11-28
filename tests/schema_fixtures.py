@@ -723,7 +723,7 @@ OPERATIONS = [
     ("an operation id of 31 characters", PACKED4, OP + ["id"], "c" * 31, True),
     ("an operation id of 32 characters", PACKED4, OP + ["id"], "c" * 32, False),
     ("an operation id ending in a hyphen", PACKED4, OP + ["id"], "copy-", False),
-    ("an operation kind this Havne doesn't run", PACKED4, OP + ["kind"], "flash", False),
+    ("an operation kind this Havne doesn't run", PACKED4, OP + ["kind"], "restore", False),
     ("an operation with no kind", PACKED4, OP + ["kind"], DELETE, False),
     ("an operation with no title", PACKED4, OP + ["title"], DELETE, False),
     ("an empty operation title", PACKED4, OP + ["title"], "", False),
@@ -829,6 +829,53 @@ KERNELS = [
     ("a download with no sha256", PACKED5, KR + ["steps", 0, "sha256"], DELETE, False),
     ("a download key it doesn't take", PACKED5, KR + ["steps", 0, "dfi"], "00", False),
     ("a routine of three digits", PACKED5, KR + ["steps", 1, "routine"], "201", False),
+]
+
+
+# A flash: a made-up image written to the sim's code region in two sectors.
+# The rules only the loader holds (the sectors covering each image whole,
+# the images apart, the image's SHA-256) are PluginOperationTest's.
+IMAGE = bytes((i * 13 + 5) % 256 for i in range(512))
+FLASH_STEP = {"step": "download", "name": "code", "session": "programming",
+              "address": "00080000", "address_bytes": 4, "size_bytes": 4,
+              "file": "code.bin", "sha256": hashlib.sha256(IMAGE).hexdigest()}
+PACKED6 = changed(PACKED4, ["files", "code.bin"],
+                  {"kind": "bin", "base64": base64.b64encode(IMAGE).decode()})
+PACKED6["operations"] = [{
+    "id": "flash-code", "kind": "flash", "title": "The code", "ecu": "pcm", "level": "01",
+    "flash": {"erase": "FF00", "check": "FF01", "pass": "00",
+              "sectors": [{"address": "00080000", "bytes": 256},
+                          {"address": "00080100", "bytes": 256}]},
+    "steps": [FLASH_STEP],
+    "leave": "reset",
+}]
+FL = OPS + [0]
+FF = FL + ["flash"]
+FLASHES = [
+    ("a flash", PACKED6, [], None, True),
+    ("a flash with no flash", PACKED6, FF, DELETE, False),
+    ("a dump with a flash", PACKED6, FL + ["kind"], "dump", False),
+    ("a flash key it doesn't take", PACKED6, FF + ["ram"], [], False),
+    ("a flash that is overwrite safe", PACKED6, FF + ["overwrite_safe"], True, True),
+    ("a flash's overwrite_safe that is a word", PACKED6, FF + ["overwrite_safe"], "yes",
+     False),
+    ("a flash with no erase", PACKED6, FF + ["erase"], DELETE, False),
+    ("a flash's check of three digits", PACKED6, FF + ["check"], "F01", False),
+    ("a flash's pass of four bytes", PACKED6, FF + ["pass"], "00000000", True),
+    ("a flash's pass of five bytes", PACKED6, FF + ["pass"], "0000000000", False),
+    ("a flash's pass in lower case", PACKED6, FF + ["pass"], "0a", False),
+    ("a flash of no sectors", PACKED6, FF + ["sectors"], [], False),
+    ("a sector of no bytes", PACKED6, FF + ["sectors", 0, "bytes"], 0, False),
+    ("a sector key it doesn't take", PACKED6, FF + ["sectors", 0, "erase"], True, False),
+    ("a flash with identifiers", PACKED6, FL + ["ident"], [], False),
+    ("a flash left by 10 01", PACKED6, FL + ["leave"], "default", False),
+    ("a flash with no leave", PACKED6, FL + ["leave"], DELETE, True),
+    ("a flash's read", PACKED6, FL + ["steps", 0], dict(READ), False),
+    ("an image in the extended session", PACKED6, FL + ["steps", 0, "session"],
+     "extended", False),
+    ("an image with a dfi", PACKED6, FL + ["steps", 0, "dfi"], "11", True),
+    ("an image with no sha256", PACKED6, FL + ["steps", 0, "sha256"], DELETE, False),
+    ("an image with bytes", PACKED6, FL + ["steps", 0, "bytes"], 512, False),
 ]
 
 
@@ -963,7 +1010,8 @@ def main():
 
         # Edge cases: one verdict from both
         cases = (list(CASES) + FORMAT2 + FORMAT3 + MERGED_SET + CONDITION_CASES +
-                 CONVERSATION + PAGES + PUBLISHER + OPERATIONS + KERNELS)
+                 CONVERSATION + PAGES + PUBLISHER + OPERATIONS + KERNELS +
+                 FLASHES)
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

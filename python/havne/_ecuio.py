@@ -390,7 +390,9 @@ ECUIO_OPERATION_END_SESSION_LOST = 8
 ECUIO_OPERATION_END_UNLOCK_REFUSED = 7
 ECUIO_OPERATION_END_VOLTAGE_HIGH = 15
 ECUIO_OPERATION_END_VOLTAGE_LOW = 14
+ECUIO_OPERATION_FLASH_OVERWRITE_SAFE = 1
 ECUIO_OPERATION_KIND_DUMP = 1
+ECUIO_OPERATION_KIND_FLASH = 3
 ECUIO_OPERATION_KIND_KERNEL_READ = 2
 ECUIO_OPERATION_LEAVE_DEFAULT = 1
 ECUIO_OPERATION_LEAVE_RESET = 2
@@ -420,6 +422,7 @@ ECUIO_PLUGIN_MAX_IDENTS = 8
 ECUIO_PLUGIN_MAX_LEVELS = 32
 ECUIO_PLUGIN_MAX_OPERATIONS = 8
 ECUIO_PLUGIN_MAX_PAGES = 16
+ECUIO_PLUGIN_MAX_SECTORS = 64
 ECUIO_PLUGIN_MAX_SERVICES = 16
 ECUIO_PLUGIN_MAX_STARTS = 8
 ECUIO_PLUGIN_MAX_STEPS = 64
@@ -430,6 +433,7 @@ ECUIO_PLUGIN_PACKAGE_MAX = 0x1000000
 ECUIO_PLUGIN_PAGE_DESKTOP = 2
 ECUIO_PLUGIN_PAGE_MAX_BYTES = 0x141e0
 ECUIO_PLUGIN_PAGE_PHONE = 1
+ECUIO_PLUGIN_PASS_MAX = 4
 ECUIO_PLUGIN_PATH_MAX = 127
 ECUIO_PLUGIN_PUBLISHER_CONTACT_MAX = 255
 ECUIO_PLUGIN_PUBLISHER_LICENSE_MAX = 63
@@ -905,10 +909,16 @@ class ecuio_plugin_fingerprint_t(Structure):
 class ecuio_plugin_info_t(Structure):
     pass
 
+class ecuio_plugin_operation_flash_t(Structure):
+    pass
+
 class ecuio_plugin_operation_ident_t(Structure):
     pass
 
 class ecuio_plugin_operation_kernel_t(Structure):
+    pass
+
+class ecuio_plugin_operation_sector_t(Structure):
     pass
 
 class ecuio_plugin_operation_step_t(Structure):
@@ -1677,6 +1687,17 @@ ecuio_plugin_info_t._fields_ = [
     ('page_count', c_uint32),
     ('reserved', (c_uint32 * 1)),
 ]
+ecuio_plugin_operation_flash_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('erase_routine', c_uint16),
+    ('check_routine', c_uint16),
+    ('pass_len', c_uint8),
+    ('pass', (c_uint8 * 4)),
+    ('reserved0', (c_uint8 * 3)),
+    ('sector_count', c_uint32),
+    ('reserved', (c_uint32 * 8)),
+]
 ecuio_plugin_operation_ident_t._fields_ = [
     ('struct_size', c_uint32),
     ('flags', c_uint32),
@@ -1696,6 +1717,13 @@ ecuio_plugin_operation_kernel_t._fields_ = [
     ('reserved0', c_uint16),
     ('keepalive_ms', c_uint32),
     ('stays', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_plugin_operation_sector_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('address', c_uint64),
+    ('bytes', c_uint64),
     ('reserved', (c_uint32 * 4)),
 ]
 ecuio_plugin_operation_step_t._fields_ = [
@@ -2290,9 +2318,12 @@ FUNCTIONS = {
     'ecuio_plugin_operation': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_t)]),  # plugin.h
     'ecuio_plugin_operation_blob': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(POINTER(c_uint8)), POINTER(c_uint64)]),  # plugin.h
     'ecuio_plugin_operation_count': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint32)]),  # plugin.h
+    'ecuio_plugin_operation_flash': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_flash_t)]),  # plugin.h
     'ecuio_plugin_operation_ident': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_ident_t)]),  # plugin.h
     'ecuio_plugin_operation_kernel': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_operation_kernel_t)]),  # plugin.h
+    'ecuio_plugin_operation_sector': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_sector_t)]),  # plugin.h
     'ecuio_plugin_operation_step': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(ecuio_plugin_operation_step_t)]),  # plugin.h
+    'ecuio_plugin_operation_step_blob': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_uint32, POINTER(POINTER(c_uint8)), POINTER(c_uint64)]),  # plugin.h
     'ecuio_plugin_page': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_page_t)]),  # plugin.h
     'ecuio_plugin_page_text': (c_char_p, [POINTER(ecuio_plugin_t), c_uint32]),  # plugin.h
     'ecuio_plugin_publisher': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_publisher_t)]),  # plugin.h

@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
   "title": "Havne plugin manifest",
   "description": "A Havne plugin's manifest (formats 1 to 3, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. Format 3 adds the publisher, which a plugin with the conversation tier names. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp, core/src/plugin_publisher.cpp, core/src/plugin_operations.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; the publisher's texts with no control character (the terms keep line feeds and tabs) and no character that shows as nothing or moves the text around it; an operation's ECU one of the conversation's, its level one the conversation's security declares for that ECU, and service 22 declared for its identifiers; an operation's id, an identifier's DID and a step's name given once each; an operation's steps in one session, and \"leave\" only on a programming one; a step's address and its range's end within its address bytes and its size within its size bytes; no two steps sharing an address, and at most 64 MiB of memory in one operation; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
+  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp, core/src/plugin_publisher.cpp, core/src/plugin_operations.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest; the publisher's texts with no control character (the terms keep line feeds and tabs) and no character that shows as nothing or moves the text around it; an operation's ECU one of the conversation's, its level one the conversation's security declares for that ECU, and service 22 declared for its identifiers; an operation's id, an identifier's DID and a step's name given once each; an operation's steps in one session, and \"leave\" only on a programming one; a step's address and its range's end within its address bytes and its size within its size bytes; no two steps sharing an address, and at most 64 MiB of memory in one operation; a flash's images sharing no address, its sectors covering each image whole in the order of their addresses, its erase and check two routines, and each image's file a binary file pinned by its SHA-256; a page named once and by no variant, its file at most 82,400 bytes as read and as core writes it, a packed one a member of \"files\" (64 data and binary files beside the pages), and its page and cells the layout file's rules (havne-cli layout check, ADR-0057).",
   "type": "object",
   "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
   "properties": {
@@ -384,8 +384,8 @@
         },
         "kind": {
           "title": "Kind",
-          "description": "What the plan does: \"dump\" copies a module's memory to a file; \"kernel_read\" does so through a helper it first downloads to the module's RAM and starts.",
-          "enum": ["dump", "kernel_read"]
+          "description": "What the plan does: \"dump\" copies a module's memory to a file; \"kernel_read\" does so through a helper it first downloads to the module's RAM and starts; \"flash\" erases the module's memory sector by sector and writes its images there.",
+          "enum": ["dump", "kernel_read", "flash"]
         },
         "title": {
           "title": "Title",
@@ -413,6 +413,7 @@
           "items": { "$ref": "#/$defs/operationIdent" }
         },
         "kernel": { "$ref": "#/$defs/operationKernel" },
+        "flash": { "$ref": "#/$defs/operationFlash" },
         "steps": {
           "title": "Steps",
           "description": "The plan's steps in order, 1 to 64, each name once, no two sharing an address, 64 MiB of memory in all; a kernel read's first two are its helper's download and routine.",
@@ -448,11 +449,30 @@
               }
             }
           },
-          "else": {
+          "else": { "properties": { "kernel": false } }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "flash" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["flash"],
             "properties": {
-              "kernel": false,
-              "steps": { "items": { "$ref": "#/$defs/operationStep" } }
+              "ident": false,
+              "leave": { "const": "reset" },
+              "steps": { "items": { "$ref": "#/$defs/operationImage" } }
             }
+          },
+          "else": { "properties": { "flash": false } }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "dump" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": { "steps": { "items": { "$ref": "#/$defs/operationStep" } } }
           }
         }
       ]
@@ -807,6 +827,133 @@
           "else": { "properties": { "every_ms": false } }
         }
       ]
+    },
+    "operationFlash": {
+      "title": "Flash",
+      "description": "A flash's routines and its sectors: each sector is erased by the erase routine (31 01) and written whole, and the check routine (31 01) answers the pass bytes after its routine when the module takes what was written. The sectors cover every image whole, none sharing an address, in the order of their addresses.",
+      "type": "object",
+      "required": ["erase", "check", "pass", "sectors"],
+      "properties": {
+        "erase": {
+          "title": "Erase",
+          "description": "The erase routine's id, four hex digits.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{4}$"
+        },
+        "check": {
+          "title": "Check",
+          "description": "The check routine's id, four hex digits, not the erase's.",
+          "type": "string",
+          "pattern": "^[0-9A-F]{4}$"
+        },
+        "pass": {
+          "title": "Pass",
+          "description": "The bytes a passing check answers after 71 01 and its routine, 1 to 4 in hex pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "sectors": {
+          "title": "Sectors",
+          "description": "The module's sectors under the images, 1 to 64.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/operationSector" }
+        },
+        "overwrite_safe": {
+          "title": "Overwrite safe",
+          "description": "Whether a sector may be written again without its erase (false when left out).",
+          "type": "boolean"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationSector": {
+      "title": "Sector",
+      "description": "A sector of a flash: erased and written whole.",
+      "type": "object",
+      "required": ["address", "bytes"],
+      "properties": {
+        "address": {
+          "title": "Address",
+          "description": "The sector's first address, 2 to 8 hex digits in pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "description": "The sector's length, 1 byte to 64 MiB.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "operationImage": {
+      "title": "Image",
+      "description": "A flash's image written to the module (services 34, 36 and 37): its bytes a binary file of the package, pinned by their SHA-256, its length the file's.",
+      "type": "object",
+      "required": ["step", "name", "session", "address", "address_bytes", "size_bytes", "file", "sha256"],
+      "properties": {
+        "step": { "title": "Step", "description": "The step's kind.", "const": "download" },
+        "name": {
+          "title": "Name",
+          "description": "The step's name, 1 to 31 of a-z, 0-9 and -, a letter or digit at each end; once among the steps.",
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$"
+        },
+        "session": {
+          "title": "Session",
+          "description": "The diagnostic session a flash runs in.",
+          "enum": ["programming"]
+        },
+        "address": {
+          "title": "Address",
+          "description": "Where the image goes, 2 to 8 hex digits in pairs.",
+          "type": "string",
+          "pattern": "^(?:[0-9A-F]{2}){1,4}$"
+        },
+        "address_bytes": {
+          "title": "Address bytes",
+          "description": "How many bytes the request's address takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "size_bytes": {
+          "title": "Size bytes",
+          "description": "How many bytes the request's size takes, 1 to 4.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
+        "dfi": {
+          "title": "Data format",
+          "description": "The download's data format identifier, two hex digits (00, plain, when left out).",
+          "$ref": "#/$defs/hexByte"
+        },
+        "file": {
+          "title": "File",
+          "description": "The image's path in the package.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 127
+        },
+        "sha256": {
+          "title": "SHA-256",
+          "description": "The image's SHA-256, 64 lower-case hex digits.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
     },
     "operationDownload": {
       "title": "Download",

@@ -215,6 +215,8 @@ private:
     void read_conversation(const Value& root, ecuio_plugin& p);
     static void read_operations(const Value& root, ecuio_plugin& p);
     void read_blobs(const Value& root, ecuio_plugin& p);
+    void read_blob(const Value& file, const std::string& path,
+                   const uint8_t* sha256, std::vector<uint8_t>& blob);
     void packed_binary(const Value& file, const std::string& path,
                        const char* kind, std::vector<uint8_t>* out);
     void check_binaries() const;

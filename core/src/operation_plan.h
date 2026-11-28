@@ -52,6 +52,9 @@ struct step {
     uint8_t size_bytes = 2;    /* its size, 1 to 4 bytes */
     uint8_t dfi = 0;           /* an upload's data format: 00 alone */
     std::string name;
+    std::string file; /* a flash download's image */
+    uint8_t sha256[32] = {};
+    std::vector<uint8_t> blob;
 };
 
 /* An identification DID read before the first byte and after the last */
@@ -80,6 +83,19 @@ struct kernel {
     uint8_t sha256[32] = {};
 };
 
+struct sector {
+    uint64_t address = 0;
+    uint64_t bytes = 0;
+};
+
+struct flash {
+    uint16_t erase = 0;
+    uint16_t check = 0;
+    std::vector<uint8_t> pass;
+    std::vector<sector> sectors;
+    bool overwrite_safe = false;
+};
+
 struct plan {
     std::string id;
     std::string title;
@@ -93,6 +109,8 @@ struct plan {
     bool has_kernel = false;
     kernel helper;
     uint32_t leave = 0; /* a programming plan's ECUIO_OPERATION_LEAVE_* */
+    bool has_flash = false;
+    flash writes;
 };
 
 /* The most an unsigned value of n bytes (1 to 4) holds */
@@ -229,6 +247,60 @@ inline const char* kernel_fault(const plan& p)
         return "a keep-alive's every_ms goes with a functional 3E 80";
     }
     return nullptr;
+}
+
+/* Why a flash can't run as declared, or nullptr, once its images are read */
+inline const char* flash_fault(const plan& p)
+{
+    const flash& f = p.writes;
+    if (f.erase == f.check) {
+        return "its erase and its check are one routine";
+    }
+    for (size_t i = 0; i < p.steps.size(); ++i) {
+        const step& s = p.steps[i];
+        if (s.bytes < 1 || s.bytes > ECUIO_DUMP_IMAGE_MAX) {
+            return "an image is 1 byte to the image's bound";
+        }
+        if (s.address + s.bytes - 1 > most_of(s.address_bytes) ||
+            s.bytes > most_of(s.size_bytes)) {
+            return "an image doesn't fit its address_bytes and size_bytes";
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (overlap(p.steps[j], s)) {
+                return "two of its downloads share an address";
+            }
+        }
+    }
+    if (image_bytes(p) > ECUIO_DUMP_IMAGE_MAX) {
+        return "its images add to more than a copy holds";
+    }
+    for (size_t i = 1; i < f.sectors.size(); ++i) {
+        const sector& a = f.sectors[i - 1];
+        if (a.address + a.bytes > f.sectors[i].address) {
+            return "its sectors are in the order of their addresses, none "
+                   "sharing one";
+        }
+    }
+    for (const step& s : p.steps) {
+        uint64_t covered = 0;
+        for (const sector& c : f.sectors) {
+            const bool inside =
+                c.address >= s.address && c.address - s.address < s.bytes;
+            if (inside && c.bytes > s.bytes - (c.address - s.address)) {
+                return "a sector runs past the end of its download";
+            }
+            covered += inside ? c.bytes : 0;
+        }
+        if (covered != s.bytes) {
+            return "its sectors don't cover each download whole";
+        }
+    }
+    uint64_t sectors = 0;
+    for (const sector& c : f.sectors) {
+        sectors += c.bytes;
+    }
+    return sectors == image_bytes(p) ? nullptr
+                                     : "a sector lies outside every download";
 }
 
 /* Whether every request of the step fits one CAN frame's 7 bytes, which

@@ -305,6 +305,18 @@ typedef char abi_plugin_kernel_keepalive_check
     [(offsetof(ecuio_plugin_operation_kernel_t, keepalive_ms) == 48) ? 1 : -1];
 typedef char abi_plugin_kernel_stays_check
     [(offsetof(ecuio_plugin_operation_kernel_t, stays) == 52) ? 1 : -1];
+typedef char abi_plugin_flash_size_check
+    [(sizeof(ecuio_plugin_operation_flash_t) == 56) ? 1 : -1];
+typedef char abi_plugin_flash_routines_check
+    [(offsetof(ecuio_plugin_operation_flash_t, check_routine) == 10) ? 1 : -1];
+typedef char abi_plugin_flash_pass_check
+    [(offsetof(ecuio_plugin_operation_flash_t, pass) == 13) ? 1 : -1];
+typedef char abi_plugin_flash_sectors_check
+    [(offsetof(ecuio_plugin_operation_flash_t, sector_count) == 20) ? 1 : -1];
+typedef char abi_plugin_sector_size_check
+    [(sizeof(ecuio_plugin_operation_sector_t) == 40) ? 1 : -1];
+typedef char abi_plugin_sector_bytes_check
+    [(offsetof(ecuio_plugin_operation_sector_t, bytes) == 16) ? 1 : -1];
 typedef char abi_plugin_ident_size_check
     [(sizeof(ecuio_plugin_operation_ident_t) == 32) ? 1 : -1];
 typedef char abi_plugin_ident_role_check

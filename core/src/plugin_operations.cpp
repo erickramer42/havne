@@ -244,6 +244,86 @@ int hex_digit(char c)
                                     : -1;
 }
 
+void read_sha(const Value& sha, const std::string& what, uint8_t* out)
+{
+    const std::string& t = text_of(sha, 64, 64, what + "'s sha256");
+    for (size_t i = 0; i < 32; ++i) {
+        const int hi = hex_digit(t[2 * i]);
+        const int lo = hex_digit(t[2 * i + 1]);
+        if (hi < 0 || lo < 0) {
+            refuse(sha, what + "'s sha256 takes 64 of 0-9 and a-f");
+        }
+        out[i] = static_cast<uint8_t>(hi * 16 + lo);
+    }
+}
+
+void read_flash(const Value& v, ecuio_operation::flash& f)
+{
+    expect(v, Type::object, "the flash");
+    only_keys(v, {"erase", "check", "pass", "sectors", "overwrite_safe"},
+              "the flash");
+    f.erase = static_cast<uint16_t>(
+        hex_of(required(v, "erase", "the flash"), 2, 2, "the flash's erase"));
+    f.check = static_cast<uint16_t>(
+        hex_of(required(v, "check", "the flash"), 2, 2, "the flash's check"));
+    const Value& pass = required(v, "pass", "the flash");
+    const uint64_t bytes =
+        hex_of(pass, 1, ECUIO_PLUGIN_PASS_MAX, "the flash's pass");
+    for (size_t i = pass.text.size() / 2; i > 0; --i) {
+        f.pass.push_back(static_cast<uint8_t>(bytes >> (8 * (i - 1))));
+    }
+    const Value& list = required(v, "sectors", "the flash");
+    expect(list, Type::array, "the flash's sectors");
+    if (list.items.empty() || list.items.size() > ECUIO_PLUGIN_MAX_SECTORS) {
+        refuse(list, "the flash's sectors lists 1 to " +
+                         std::to_string(ECUIO_PLUGIN_MAX_SECTORS));
+    }
+    for (const Value& s : list.items) {
+        expect(s, Type::object, "a sector");
+        only_keys(s, {"address", "bytes"}, "a sector");
+        ecuio_operation::sector c;
+        c.address = hex_of(required(s, "address", "a sector"), 1, 4,
+                           "a sector's address");
+        c.bytes = static_cast<uint64_t>(
+            whole_of(required(s, "bytes", "a sector"), 1, ECUIO_DUMP_IMAGE_MAX,
+                     "a sector's bytes"));
+        f.sectors.push_back(c);
+    }
+    if (const Value* safe = v.find("overwrite_safe")) {
+        expect(*safe, Type::boolean, "the flash's overwrite_safe");
+        f.overwrite_safe = safe->boolean;
+    }
+}
+
+step read_flash_step(const Value& v)
+{
+    expect(v, Type::object, "a step");
+    only_keys(v,
+              {"step", "name", "session", "address", "address_bytes",
+               "size_bytes", "dfi", "file", "sha256"},
+              "a flash's step");
+    (void)word_of(required(v, "step", "a step"), {"download"}, "step",
+                  " isn't one a flash runs: \"download\"");
+    step s;
+    s.kind = ECUIO_STEP_DOWNLOAD;
+    s.session = ECUIO_STEP_SESSION_PROGRAMMING;
+    s.name = id_of(required(v, "name", "a step"), "a step's name");
+    const std::string what = "step " + q(s.name);
+    (void)word_of(required(v, "session", what), {"programming"},
+                  what + "'s session", " isn't a flash's: \"programming\"");
+    s.address = hex_of(required(v, "address", what), 1, 4, what + "'s address");
+    s.address_bytes = static_cast<uint8_t>(whole_of(
+        required(v, "address_bytes", what), 1, 4, what + "'s address_bytes"));
+    s.size_bytes = static_cast<uint8_t>(whole_of(
+        required(v, "size_bytes", what), 1, 4, what + "'s size_bytes"));
+    if (const Value* dfi = v.find("dfi")) {
+        s.dfi = static_cast<uint8_t>(hex_of(*dfi, 1, 1, what + "'s dfi"));
+    }
+    s.file = path_of(required(v, "file", what), what + "'s file");
+    read_sha(required(v, "sha256", what), what, s.sha256);
+    return s;
+}
+
 void read_download(const Value& v, const std::string& what,
                    ecuio_operation::kernel& k)
 {
@@ -257,16 +337,7 @@ void read_download(const Value& v, const std::string& what,
     k.size_bytes = static_cast<uint8_t>(whole_of(
         required(v, "size_bytes", what), 1, 4, what + "'s size_bytes"));
     k.file = path_of(required(v, "file", what), what + "'s file");
-    const Value& sha = required(v, "sha256", what);
-    const std::string& t = text_of(sha, 64, 64, what + "'s sha256");
-    for (size_t i = 0; i < 32; ++i) {
-        const int hi = hex_digit(t[2 * i]);
-        const int lo = hex_digit(t[2 * i + 1]);
-        if (hi < 0 || lo < 0) {
-            refuse(sha, what + "'s sha256 takes 64 of 0-9 and a-f");
-        }
-        k.sha256[i] = static_cast<uint8_t>(hi * 16 + lo);
-    }
+    read_sha(required(v, "sha256", what), what, k.sha256);
 }
 
 /* The helper's two steps, the download then its routine, both in the
@@ -315,6 +386,16 @@ void read_steps(const Value& list, plan& out)
     }
     uint32_t at = 0;
     for (const Value& v : list.items) {
+        if (out.has_flash) {
+            step s = read_flash_step(v);
+            for (const step& known : out.steps) {
+                if (known.name == s.name) {
+                    refuse(v, "step " + q(s.name) + " is given twice");
+                }
+            }
+            out.steps.push_back(std::move(s));
+            continue;
+        }
         if (read_kernel_step(v, out, at++)) {
             continue;
         }
@@ -389,6 +470,17 @@ void read_leave(const Value& op, plan& out)
 {
     const std::string what = "operation " + q(out.id);
     const Value* leave = op.find("leave");
+    if (out.has_flash) {
+        if (leave != nullptr &&
+            word_of(*leave, {"default", "reset"}, what + "'s leave",
+                    " isn't one of \"default\" (10 01) and \"reset\" "
+                    "(11 01)") != ECUIO_OPERATION_LEAVE_RESET) {
+            refuse(*leave, what + " is a flash, which ends with \"reset\" "
+                                  "(11 01)");
+        }
+        out.leave = ECUIO_OPERATION_LEAVE_RESET;
+        return;
+    }
     if (!ecuio_operation::programming_of(out)) {
         if (leave != nullptr) {
             refuse(*leave, what + "'s steps are in the extended session, "
@@ -409,28 +501,44 @@ plan read_operation(const Value& op, const conversation& c)
     expect(op, Type::object, "an operation");
     only_keys(op,
               {"id", "kind", "title", "ecu", "level", "ident", "kernel",
-               "steps", "leave"},
+               "flash", "steps", "leave"},
               "an operation");
     plan out;
     out.id = id_of(required(op, "id", "an operation"), "an operation's id");
     const std::string what = "operation " + q(out.id);
-    static_assert(ECUIO_OPERATION_KIND_KERNEL_READ == 2,
+    static_assert(ECUIO_OPERATION_KIND_KERNEL_READ == 2 &&
+                      ECUIO_OPERATION_KIND_FLASH == 3,
                   "the words' order is the kinds'");
-    out.kind = word_of(required(op, "kind", what), {"dump", "kernel_read"},
-                       what + "'s kind",
-                       " isn't one this Havne runs: \"dump\" and "
-                       "\"kernel_read\"");
+    out.kind = word_of(required(op, "kind", what),
+                       {"dump", "kernel_read", "flash"}, what + "'s kind",
+                       " isn't one this Havne runs: \"dump\", "
+                       "\"kernel_read\" and \"flash\"");
     const Value* kernel = op.find("kernel");
     out.has_kernel = out.kind == ECUIO_OPERATION_KIND_KERNEL_READ;
     if (out.has_kernel) {
         read_kernel(required(op, "kernel", what), out.helper);
     } else if (kernel != nullptr) {
-        refuse(*kernel, what + " is a dump, which takes no \"kernel\"");
+        refuse(*kernel,
+               what +
+                   (out.kind == ECUIO_OPERATION_KIND_FLASH ? " is a flash"
+                                                           : " is a dump") +
+                   ", which takes no \"kernel\"");
+    }
+    const Value* flash = op.find("flash");
+    out.has_flash = out.kind == ECUIO_OPERATION_KIND_FLASH;
+    if (out.has_flash) {
+        read_flash(required(op, "flash", what), out.writes);
+    } else if (flash != nullptr) {
+        refuse(*flash, what + " isn't a flash, which alone takes \"flash\"");
     }
     out.title =
         plain_of(required(op, "title", what), 1, 63, what + "'s title", false);
     read_target(op, c, out);
     if (const Value* list = op.find("ident")) {
+        if (out.has_flash) {
+            refuse(*list, what + " is a flash: this Havne reads no "
+                                 "identifiers around one");
+        }
         read_ident(*list, c, out);
     }
     read_steps(required(op, "steps", what), out);
@@ -487,44 +595,55 @@ void loader::read_operations(const Value& root, ecuio_plugin& p)
 
 constexpr size_t kBinaryMax = size_t{1} << 20;
 
-/* Each kernel read's helper: its bytes, their SHA-256 against the
- * manifest's, and the window they go to */
+void loader::read_blob(const Value& file, const std::string& path,
+                       const uint8_t* sha256, std::vector<uint8_t>& blob)
+{
+    const std::string name = "file " + q(path);
+    if (packed()) {
+        packed_binary(file, path, "bin", &blob);
+    } else {
+        const char* bytes = nullptr;
+        size_t length = 0;
+        read_folder_file(file, name, path, &bytes, &length);
+        if (length > kBinaryMax) {
+            refuse(file, name + " is over 1 MiB");
+        }
+        total_ += length;
+        if (total_ > ECUIO_PLUGIN_PACKAGE_MAX) {
+            refuse(file, "the package is over 16 MiB");
+        }
+        blob.assign(bytes, bytes + length);
+    }
+    uint8_t have[32];
+    ecuio_sha256::hasher h;
+    h.add(blob.data(), blob.size());
+    h.finish(have);
+    if (std::memcmp(have, sha256, sizeof have) != 0) {
+        refuse(file, name + " has SHA-256 " + ecuio_sha256::hex(have) +
+                         ", and the manifest says " +
+                         ecuio_sha256::hex(sha256));
+    }
+}
+
 void loader::read_blobs(const Value& root, ecuio_plugin& p)
 {
     for (size_t i = 0; i < p.operations.size(); ++i) {
         plan& op = p.operations[i];
-        if (!op.has_kernel) {
-            continue;
-        }
         const Value& at = root.find("operations")->items[i];
-        const Value& file = *at.find("steps")->items[0].find("file");
-        const std::string name = "file " + q(op.helper.file);
-        std::vector<uint8_t>& blob = op.helper.blob;
-        if (packed()) {
-            packed_binary(file, op.helper.file, "bin", &blob);
-        } else {
-            const char* bytes = nullptr;
-            size_t length = 0;
-            read_folder_file(file, name, op.helper.file, &bytes, &length);
-            if (length > kBinaryMax) {
-                refuse(file, name + " is over 1 MiB");
-            }
-            total_ += length;
-            if (total_ > ECUIO_PLUGIN_PACKAGE_MAX) {
-                refuse(file, "the package is over 16 MiB");
-            }
-            blob.assign(bytes, bytes + length);
+        const Value& steps = *at.find("steps");
+        if (op.has_kernel) {
+            read_blob(*steps.items[0].find("file"), op.helper.file,
+                      op.helper.sha256, op.helper.blob);
         }
-        uint8_t have[32];
-        ecuio_sha256::hasher h;
-        h.add(blob.data(), blob.size());
-        h.finish(have);
-        if (std::memcmp(have, op.helper.sha256, sizeof have) != 0) {
-            refuse(file, name + " has SHA-256 " + ecuio_sha256::hex(have) +
-                             ", and the manifest says " +
-                             ecuio_sha256::hex(op.helper.sha256));
+        for (size_t s = 0; op.has_flash && s < op.steps.size(); ++s) {
+            step& d = op.steps[s];
+            read_blob(*steps.items[s].find("file"), d.file, d.sha256, d.blob);
+            d.bytes = d.blob.size();
         }
-        if (const char* fault = ecuio_operation::kernel_fault(op)) {
+        const char* fault = op.has_kernel  ? ecuio_operation::kernel_fault(op)
+                            : op.has_flash ? ecuio_operation::flash_fault(op)
+                                           : nullptr;
+        if (fault != nullptr) {
             refuse(at, "operation " + q(op.id) + ": " + fault);
         }
     }

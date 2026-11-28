@@ -740,6 +740,8 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 #define ECUIO_OPERATION_KIND_DUMP 1u
 /* a dump through a helper the plan downloads to RAM and starts */
 #define ECUIO_OPERATION_KIND_KERNEL_READ 2u
+/* the module's memory erased and written, sector by sector */
+#define ECUIO_OPERATION_KIND_FLASH 3u
 
 /* ecuio_plugin_operation_t.op_class: derived by core, never declared */
 #define ECUIO_OPERATION_CLASS_READ  1u /* every step only reads */
@@ -753,6 +755,13 @@ ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
 
 /* A kernel read's start routines, at most */
 #define ECUIO_PLUGIN_MAX_STARTS 8u
+
+/* A flash's sectors and its check's pass bytes, at most */
+#define ECUIO_PLUGIN_MAX_SECTORS 64u
+#define ECUIO_PLUGIN_PASS_MAX    4u
+
+/* ecuio_plugin_operation_flash_t.flags */
+#define ECUIO_OPERATION_FLASH_OVERWRITE_SAFE 0x1u
 
 /* ecuio_plugin_operation_step_t.session: the session's own byte */
 #define ECUIO_STEP_SESSION_PROGRAMMING 2u
@@ -819,6 +828,29 @@ typedef struct ecuio_plugin_operation_kernel {
     uint32_t reserved[4];    /* zero; ABI growth space */
 } ecuio_plugin_operation_kernel_t;
 
+/* A flash: its erase and check routines, the bytes a passing check
+ * answers after 71 01 <routine>, and its sectors. POD, 56 bytes. */
+typedef struct ecuio_plugin_operation_flash {
+    uint32_t struct_size;
+    uint32_t flags; /* ECUIO_OPERATION_FLASH_* */
+    uint16_t erase_routine;
+    uint16_t check_routine;
+    uint8_t pass_len;
+    uint8_t pass[ECUIO_PLUGIN_PASS_MAX];
+    uint8_t reserved0[3]; /* zero */
+    uint32_t sector_count;
+    uint32_t reserved[8]; /* zero; ABI growth space */
+} ecuio_plugin_operation_flash_t;
+
+/* One sector of a flash: erased and written whole. POD, 40 bytes. */
+typedef struct ecuio_plugin_operation_sector {
+    uint32_t struct_size;
+    uint32_t flags; /* zero */
+    uint64_t address;
+    uint64_t bytes;
+    uint32_t reserved[4]; /* zero; ABI growth space */
+} ecuio_plugin_operation_sector_t;
+
 /* One identification DID of a plan. POD, 32 bytes. */
 typedef struct ecuio_plugin_operation_ident {
     uint32_t struct_size;
@@ -853,6 +885,16 @@ static_assert(offsetof(ecuio_plugin_operation_kernel_t, start) == 28,
               "plugin operation kernel start offset is ABI");
 static_assert(offsetof(ecuio_plugin_operation_kernel_t, keepalive_ms) == 48,
               "plugin operation kernel keepalive_ms offset is ABI");
+static_assert(sizeof(ecuio_plugin_operation_flash_t) == 56,
+              "ecuio_plugin_operation_flash_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_flash_t, pass) == 13,
+              "plugin operation flash pass offset is ABI");
+static_assert(offsetof(ecuio_plugin_operation_flash_t, sector_count) == 20,
+              "plugin operation flash sector_count offset is ABI");
+static_assert(sizeof(ecuio_plugin_operation_sector_t) == 40,
+              "ecuio_plugin_operation_sector_t size is ABI");
+static_assert(offsetof(ecuio_plugin_operation_sector_t, bytes) == 16,
+              "plugin operation sector bytes offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_plugin_operation_t) == 160,
                "ecuio_plugin_operation_t size is ABI");
@@ -862,6 +904,10 @@ _Static_assert(sizeof(ecuio_plugin_operation_ident_t) == 32,
                "ecuio_plugin_operation_ident_t size is ABI");
 _Static_assert(sizeof(ecuio_plugin_operation_kernel_t) == 72,
                "ecuio_plugin_operation_kernel_t size is ABI");
+_Static_assert(sizeof(ecuio_plugin_operation_flash_t) == 56,
+               "ecuio_plugin_operation_flash_t size is ABI");
+_Static_assert(sizeof(ecuio_plugin_operation_sector_t) == 40,
+               "ecuio_plugin_operation_sector_t size is ABI");
 #endif
 
 /* How many plans plugin has: 0 without the tier. ECUIO_ERR_NULL_ARGUMENT
@@ -896,6 +942,24 @@ ecuio_status_t ecuio_plugin_operation_blob(const ecuio_plugin_t* plugin,
                                            uint32_t operation,
                                            const uint8_t** bytes,
                                            uint64_t* length);
+
+/* A flash's routines and its index-th sector, as the getters above;
+ * ECUIO_ERR_INVALID_ARGUMENT for a plan that is no flash */
+ecuio_status_t
+ecuio_plugin_operation_flash(const ecuio_plugin_t* plugin, uint32_t operation,
+                             ecuio_plugin_operation_flash_t* out);
+ecuio_status_t
+ecuio_plugin_operation_sector(const ecuio_plugin_t* plugin, uint32_t operation,
+                              uint32_t index,
+                              ecuio_plugin_operation_sector_t* out);
+
+/* A flash download step's image, the plugin's as the helper's bytes are;
+ * ECUIO_ERR_INVALID_ARGUMENT for any other step */
+ecuio_status_t ecuio_plugin_operation_step_blob(const ecuio_plugin_t* plugin,
+                                                uint32_t operation,
+                                                uint32_t index,
+                                                const uint8_t** bytes,
+                                                uint64_t* length);
 
 /*
  * Making and changing a packed plugin (ADR-0064): a signal file wrapped

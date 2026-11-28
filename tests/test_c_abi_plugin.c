@@ -136,10 +136,16 @@ int c_abi_plugin(void)
             ecuio_plugin_operation_step_t step;
             ecuio_plugin_operation_ident_t ident;
             ecuio_plugin_operation_kernel_t kernel;
+            ecuio_plugin_operation_flash_t flash;
+            ecuio_plugin_operation_sector_t sector;
             const uint8_t* blob = NULL;
             uint64_t blob_bytes = 0;
             uint32_t plans = 7u;
             memset(&kernel, 0, sizeof kernel);
+            memset(&flash, 0, sizeof flash);
+            flash.struct_size = sizeof flash;
+            memset(&sector, 0, sizeof sector);
+            sector.struct_size = sizeof sector;
             kernel.struct_size = sizeof kernel;
             memset(&plan, 0, sizeof plan);
             plan.struct_size = sizeof plan;
@@ -155,6 +161,10 @@ int c_abi_plugin(void)
                  ECUIO_STEP_ROUTINE == 4u &&
                  ECUIO_OPERATION_KIND_KERNEL_READ == 2u &&
                  ECUIO_PLUGIN_MAX_STARTS == 8u &&
+                 ECUIO_OPERATION_KIND_FLASH == 3u &&
+                 ECUIO_PLUGIN_MAX_SECTORS == 64u &&
+                 ECUIO_PLUGIN_PASS_MAX == 4u &&
+                 ECUIO_OPERATION_FLASH_OVERWRITE_SAFE == 0x1u &&
                  ECUIO_STEP_SESSION_PROGRAMMING == 2u &&
                  ECUIO_STEP_SESSION_EXTENDED == 3u &&
                  ECUIO_PLUGIN_MAX_OPERATIONS == 8u &&
@@ -175,6 +185,15 @@ int c_abi_plugin(void)
                  ecuio_plugin_operation_blob(plugin, 0, &blob, &blob_bytes) ==
                      ECUIO_ERR_INVALID_ARGUMENT &&
                  ecuio_plugin_operation_kernel(NULL, 0, &kernel) ==
+                     ECUIO_ERR_NULL_ARGUMENT &&
+                 ecuio_plugin_operation_flash(plugin, 0, &flash) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_sector(plugin, 0, 0, &sector) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_step_blob(plugin, 0, 0, &blob,
+                                                  &blob_bytes) ==
+                     ECUIO_ERR_INVALID_ARGUMENT &&
+                 ecuio_plugin_operation_flash(NULL, 0, &flash) ==
                      ECUIO_ERR_NULL_ARGUMENT &&
                  ecuio_plugin_operation(plugin, 0, NULL) ==
                      ECUIO_ERR_NULL_ARGUMENT;

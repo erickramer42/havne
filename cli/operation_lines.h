@@ -30,6 +30,7 @@ inline const char* operation_kind_word(uint32_t kind)
 {
     return kind == ECUIO_OPERATION_KIND_DUMP          ? "dump"
            : kind == ECUIO_OPERATION_KIND_KERNEL_READ ? "kernel_read"
+           : kind == ECUIO_OPERATION_KIND_FLASH       ? "flash"
                                                       : "unknown";
 }
 
@@ -94,6 +95,10 @@ inline void operation_services(Line& l, const ecuio_plugin_t* p,
             routines = routines || s.kind == ECUIO_STEP_ROUTINE;
         }
     }
+    ecuio_plugin_operation_flash_t f{};
+    f.struct_size = sizeof f;
+    routines =
+        routines || ecuio_plugin_operation_flash(p, operation, &f) == ECUIO_OK;
     const bool transfers = uploads || downloads;
     bool first = true;
     const auto service = [&](const char* sid, const char* name) {

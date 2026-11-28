@@ -393,9 +393,10 @@ TEST(PluginOperationTest, EachOperationRuleRefusesInItsWords)
     EXPECT_EQ(why(op), "an operation's id 'Dump' takes a-z, 0-9 and -, a "
                        "letter or digit at each end");
     op = Op();
-    op.kind = "\"flash\"";
-    EXPECT_EQ(why(op), "operation 'dump-calibration''s kind 'flash' isn't "
-                       "one this Havne runs: \"dump\" and \"kernel_read\"");
+    op.kind = "\"restore\"";
+    EXPECT_EQ(why(op), "operation 'dump-calibration''s kind 'restore' isn't "
+                       "one this Havne runs: \"dump\", \"kernel_read\" and "
+                       "\"flash\"");
     op = Op();
     op.title = "\"\"";
     EXPECT_NE(why(op).find("title"), std::string::npos);

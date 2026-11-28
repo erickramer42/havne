@@ -1,6 +1,8 @@
 #include "operation_plan.h"
 #include "plugin_loader.h"
 
+#include <algorithm>
+
 namespace {
 
 using ecuio_operation::plan;
@@ -167,6 +169,70 @@ ecuio_status_t ecuio_plugin_operation_blob(const ecuio_plugin_t* plugin,
     }
     *bytes = p->helper.blob.data();
     *length = p->helper.blob.size();
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_operation_flash(const ecuio_plugin_t* plugin,
+                                            uint32_t operation,
+                                            ecuio_plugin_operation_flash_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    if (p == nullptr || !p->has_flash ||
+        out->struct_size < sizeof(ecuio_plugin_operation_flash_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const ecuio_operation::flash& from = p->writes;
+    ecuio_plugin_operation_flash_t f{};
+    f.struct_size = sizeof f;
+    f.flags = from.overwrite_safe ? ECUIO_OPERATION_FLASH_OVERWRITE_SAFE : 0u;
+    f.erase_routine = from.erase;
+    f.check_routine = from.check;
+    f.pass_len = static_cast<uint8_t>(from.pass.size());
+    std::copy(from.pass.begin(), from.pass.end(), f.pass);
+    f.sector_count = static_cast<uint32_t>(from.sectors.size());
+    *out = f;
+    return ECUIO_OK;
+}
+
+ecuio_status_t
+ecuio_plugin_operation_sector(const ecuio_plugin_t* plugin, uint32_t operation,
+                              uint32_t index,
+                              ecuio_plugin_operation_sector_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    if (p == nullptr || !p->has_flash || index >= p->writes.sectors.size() ||
+        out->struct_size < sizeof(ecuio_plugin_operation_sector_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    ecuio_plugin_operation_sector_t s{};
+    s.struct_size = sizeof s;
+    s.address = p->writes.sectors[index].address;
+    s.bytes = p->writes.sectors[index].bytes;
+    *out = s;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_operation_step_blob(const ecuio_plugin_t* plugin,
+                                                uint32_t operation,
+                                                uint32_t index,
+                                                const uint8_t** bytes,
+                                                uint64_t* length)
+{
+    if (plugin == nullptr || bytes == nullptr || length == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    if (p == nullptr || !p->has_flash || index >= p->steps.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *bytes = p->steps[index].blob.data();
+    *length = p->steps[index].blob.size();
     return ECUIO_OK;
 }
 
