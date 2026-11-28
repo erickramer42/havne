@@ -140,6 +140,9 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_session_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, now_us);
     } else if (once && ch.clearing) {
         ecuio_engine_clear_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0);
+    } else if (once && ch.codes.out) {
+        ecuio_engine_codes_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0,
+                                  now_us);
     } else if (once && ch.identifying) {
         ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_UNANSWERED, 0,
                                   nullptr, 0);
@@ -182,6 +185,9 @@ inline void ecuio_engine_once_answered(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.clearing) {
         ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
+    } else if (ch.codes.out) {
+        ecuio_engine_codes_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len,
+                                  now_us);
     } else if (ch.identifying) {
         ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_ANSWERED, 0, data, len);
     } else if (ch.diagnosing) {
@@ -277,8 +283,8 @@ inline void ecuio_engine_mark_stray(ecuio_engine_channel& ch, int32_t out,
                                     uint16_t len)
 {
     if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
-        !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.sessioning &&
-        !ch.talk.out && len >= 2 &&
+        !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.codes.out &&
+        !ch.sessioning && !ch.talk.out && len >= 2 &&
         data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
         ch.walk_stray = true; /* another PID's answer, not the bitmap's */
     }
@@ -314,6 +320,9 @@ inline void ecuio_engine_once_refused(ecuio_request_engine* e, uint32_t c,
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.clearing) {
         ecuio_engine_clear_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
+    } else if (ch.codes.out) {
+        ecuio_engine_codes_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0,
+                                  now_us);
     } else if (ch.identifying) {
         ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_REFUSED, code, nullptr,
                                   0);
@@ -409,9 +418,12 @@ inline ecuio_reply ecuio_engine_take_reply(ecuio_request_engine* e, uint32_t c,
         return reply;
     }
     const ecuio_request& r = ecuio_engine_request_of(e, c, out);
-    if (len >= r.len && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
-        (r.len < 2 || data[1] == r.bytes[1]) &&
-        (r.len < 3 || data[2] == r.bytes[2])) {
+    /* 59 01 and 59 02 carry the availability mask where the mask went */
+    const uint8_t echo =
+        out == ECUIO_ENGINE_ONCE && ch.codes.out ? uint8_t{2} : r.len;
+    if (len >= echo && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
+        (echo < 2 || data[1] == r.bytes[1]) &&
+        (echo < 3 || data[2] == r.bytes[2])) {
         return ecuio_engine_take_positive(e, c, out, r, data, len, now_us);
     }
     ecuio_engine_mark_stray(ch, out, r, data, len);

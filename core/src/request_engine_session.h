@@ -392,6 +392,7 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
     }
     ch.identifying = false; /* the item is still unasked */
     ch.diagnosing = false;
+    ch.codes.out = false;
     if (ch.talk.out) { /* not asked again: its unlock went with the session */
         ecuio_talk_settle(ch.talk, ch.key, ecuio_talk_end::refused, code,
                           now_us);
