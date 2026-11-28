@@ -168,10 +168,12 @@ TEST(BridgeTest, AReadPressedWhileAVisitRunsIsDropped)
     EXPECT_FALSE(bridge.readingCodes());
     bridge.readModuleCodes();
     EXPECT_TRUE(bridge.readingCodes());
-    bridge.readModuleCodes();
+    bridge.readModuleCodesForTesting({0, 5});
     ASSERT_TRUE(spinUntil([&]() { return !bridge.readingCodes(); }, 6000));
     spinLoop(400);
     EXPECT_EQ(lines().size(), 1) << "the second press made no second read";
+    EXPECT_TRUE(log.filter(QStringLiteral("not reached")).isEmpty())
+        << "and did not replace the visit";
     EXPECT_GE(changes, 2);
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
