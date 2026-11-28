@@ -1,8 +1,7 @@
 #ifndef ECUIO_REQUEST_FLASH_H
 #define ECUIO_REQUEST_FLASH_H
 
-/* request_operation.h's flash half, included by it after the helpers it
- * shares (enter, own_leave, take_settled, battery_step, check_step) */
+#include "request_operation_steps.h"
 
 namespace ecuio_operation {
 
