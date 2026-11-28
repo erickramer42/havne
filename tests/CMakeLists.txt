@@ -179,6 +179,7 @@ add_executable(test_obd2 test_obd2.cpp
     test_dtc_uds.cpp
     test_module_codes.cpp
     test_diagnostics_channel.cpp
+    test_sim_codes.cpp
     test_obd2_clear.cpp
     test_obd2_packing.cpp
     test_obd2_pid_support.cpp
