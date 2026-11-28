@@ -383,7 +383,7 @@ Page {
                     id: readAgain
                     objectName: "readAgain"
                     visible: Bridge.connected
-                    enabled: root.canReadAgain && !root.clearing && !root.confirming
+                    enabled: root.canReadAgain && !root.clearing && !root.confirming && !Bridge.readingCodes
                     text: qsTr("Read")
                     Layout.row: 0
                     Layout.column: actions.twoRows ? 0 : 1

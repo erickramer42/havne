@@ -181,20 +181,30 @@ void SessionBridge::readDiagnostics()
 
 void SessionBridge::readModuleCodes()
 {
+    std::vector<uint32_t> all;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        all.push_back(c);
+    }
+    readModuleCodesForTesting(std::move(all));
+}
+
+void SessionBridge::readModuleCodesForTesting(std::vector<uint32_t> channels)
+{
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
-        m_codesVisit.step != CodesVisit::Step::idle) {
+        m_codesVisit.step != CodesVisit::Step::idle || channels.empty()) {
         return;
     }
-    m_codesVisit.queue.clear();
-    for (uint32_t c = 0; c < m_channelCount; ++c) {
-        m_codesVisit.queue.push_back(c);
-    }
+    m_codesVisit.queue = std::move(channels);
     m_codesVisit.at = 0;
     m_codesVisit.not_reached = 0;
-    m_codesVisit.step = m_codesVisit.queue.empty()
-                            ? CodesVisit::Step::idle
-                            : CodesVisit::Step::standard_start;
+    m_codesVisit.step = CodesVisit::Step::standard_start;
+    emit readingCodesChanged();
     advanceCodesVisit();
+}
+
+bool SessionBridge::readingCodes() const
+{
+    return m_codesVisit.step != CodesVisit::Step::idle;
 }
 
 /* One module's pass at a time: its standard codes to their end where the
@@ -204,12 +214,16 @@ void SessionBridge::advanceCodesVisit()
 {
     using Step = CodesVisit::Step;
     CodesVisit& v = m_codesVisit;
-    const auto next = [&v]() {
+    const auto next = [&v, this]() {
         v.step = ++v.at < v.queue.size() ? Step::standard_start : Step::idle;
+        if (v.step == Step::idle) {
+            emit readingCodesChanged();
+        }
     };
     while (v.step != Step::idle) {
         if (m_session == nullptr) {
             v.step = Step::idle;
+            emit readingCodesChanged();
             return;
         }
         const uint32_t c = v.queue[v.at];
@@ -315,6 +329,7 @@ void SessionBridge::resetModuleCodes()
               ecuio_module_codes_t{});
     std::fill(std::begin(m_codesLogged), std::end(m_codesLogged), 0u);
     m_codesVisit = CodesVisit{};
+    emit readingCodesChanged();
 }
 
 QByteArray
@@ -339,6 +354,7 @@ void SessionBridge::queueModuleCodes(uint32_t channel)
         v.at = 0;
         v.not_reached = 0;
         v.step = CodesVisit::Step::codes_start;
+        emit readingCodesChanged();
         advanceCodesVisit();
     } else if (std::find(v.queue.begin() + static_cast<long>(v.at) + 1,
                          v.queue.end(), channel) == v.queue.end()) {
