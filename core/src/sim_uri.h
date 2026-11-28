@@ -185,10 +185,16 @@ inline taken take_replay_span(const ecuio_uri::param& p, ecuio_sim_config* out,
     return taken::other;
 }
 
-/* faults= */
+/* faults= and pending_ms= */
 inline taken take_faults(const ecuio_uri::param& p, ecuio_sim_config* out,
                          char* why, size_t why_cap)
 {
+    if (p.is("pending_ms")) {
+        return ecuio_sim_parse_pending_ms(p.val, p.val_len, &out->pending_us,
+                                          &out->pending_service, why, why_cap)
+                   ? taken::ok
+                   : taken::bad;
+    }
     if (!p.is("faults")) {
         return taken::other;
     }
@@ -323,11 +329,12 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     }
     const bool replay = out->source == ecuio_sim_source::replay;
     static const char* const kMockKeys[] = {
-        "values", "modules", "sessions", "profile",  "vin", "faults",  "delay",
-        "fc",     "cf",      "seed",     "busy",     "bus", "gateway", "behind",
-        "route",  "gwopt",   "sa",       "sa_delay", "mem", "kernel",  nullptr};
+        "values",     "modules", "sessions", "profile", "vin",   "faults",
+        "pending_ms", "delay",   "fc",       "cf",      "seed",  "busy",
+        "bus",        "gateway", "behind",   "route",   "gwopt", "sa",
+        "sa_delay",   "mem",     "kernel",   nullptr};
     static const char* const kReplayKeys[] = {
-        "loop", "from", "to",   "vin",  "faults", "delay",
+        "loop", "from", "to",   "vin",  "faults", "pending_ms", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
     static const char* const kGatewayKeys[] = {
         "gateway", "behind", "route", "gwopt", "sa", "sa_delay", nullptr};
@@ -347,8 +354,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
     if (p != nullptr) {
         std::snprintf(why, why_cap,
                       "the simulated ECU takes no query key '%.*s' for %s, "
-                      "only %s, vin, faults, delay, fc, cf, seed, busy and "
-                      "bus",
+                      "only %s, vin, faults, pending_ms, delay, fc, cf, "
+                      "seed, busy and bus",
                       static_cast<int>(p->key_len < 40 ? p->key_len : 40),
                       p->key, replay ? "replay://" : "mock://",
                       replay ? "loop, from, to"

@@ -635,6 +635,54 @@ TEST_F(SimBusTest, AResponsePendingIsWaitedFor)
     EXPECT_EQ(e, ECUIO_OK);
 }
 
+/* Past P2*, a 78 again every 2 s until the reply */
+TEST_F(SimBusTest, ALongPendingSaysItsWaitAgainUntilItsReply)
+{
+    vcan_bus::Fd bus = vcan_bus::open_raw();
+    ASSERT_TRUE(bus.ok());
+    Sim sim("mock://sim?values=canned&faults=pending:1&pending_ms=4500",
+            ECUIO_SIM_ALLOW_DESK_BUS);
+    ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+    struct can_frame q;
+    std::memset(&q, 0, sizeof q);
+    q.can_id = 0x7E0;
+    q.can_dlc = 8;
+    q.data[0] = 0x02;
+    q.data[1] = 0x01;
+    q.data[2] = 0x0D;
+    const auto asked = std::chrono::steady_clock::now();
+    ASSERT_EQ(::write(bus.get(), &q, sizeof q), static_cast<ssize_t>(sizeof q));
+    std::vector<int64_t> waits;
+    int64_t reply_ms = -1;
+    while (reply_ms < 0) {
+        struct can_frame f;
+        ASSERT_EQ(vcan_bus::read_for(bus.get(), &f, sizeof f, 3000),
+                  static_cast<long>(sizeof f))
+            << "after " << waits.size() << " waits";
+        if ((f.can_id & CAN_SFF_MASK) != 0x7E8u) {
+            continue;
+        }
+        const int64_t ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - asked)
+                .count();
+        if (f.data[0] == 0x03 && f.data[1] == 0x7F && f.data[2] == 0x01 &&
+            f.data[3] == 0x78) {
+            waits.push_back(ms);
+        } else {
+            EXPECT_EQ(f.data[1], 0x41);
+            reply_ms = ms;
+        }
+    }
+    ASSERT_EQ(waits.size(), 3u) << "at 0, 2 and 4 s";
+    EXPECT_LT(waits[0], 500);
+    for (size_t i = 1; i < waits.size(); ++i) {
+        EXPECT_NEAR(waits[i] - waits[i - 1], 2000, 300) << i;
+    }
+    EXPECT_NEAR(reply_ms, 4500, 300);
+    EXPECT_EQ(sim.stats().pending, 1u);
+}
+
 /* pending on the second module: its own replies, counted apart, are put
  * off and still arrive */
 TEST_F(SimBusTest, TheSecondModulesPendingRepliesArrive)

@@ -211,25 +211,98 @@ def kernel_case(cli, kernel, dll, lib_path, d):
     return None
 
 
-def fixtures(writer, d):
+HELD_SIM = ("mock://sim?values=parked&kernel=1&mem=block:82"
+            "&faults=pending:80&pending_ms=6000:36")
+
+
+class BusSim:
+    """havne-cli sim on a vcan interface, its newest counts kept"""
+
+    def __init__(self, cli, uri, iface):
+        self.p = subprocess.Popen([cli, "sim", uri, "--on", iface,
+                                   "--seconds", "600"],
+                                  stdout=subprocess.PIPE, text=True)
+        self.stats = {}
+        for line in self.p.stdout:
+            j = json.loads(line)
+            if j["type"] == "error":
+                raise SystemExit(f"FAIL  sim: {j!r}")
+            if j["type"] == "sim":
+                break
+        threading.Thread(target=self.read, daemon=True).start()
+
+    def read(self):
+        for line in self.p.stdout:
+            j = json.loads(line)
+            if j["type"] in ("sim_stats", "end"):
+                self.stats = j
+
+    def end(self):
+        self.p.terminate()
+        self.p.wait(timeout=10)
+
+
+def held_run(cli, package, iface, d, out):
+    sim = BusSim(cli, HELD_SIM, iface)
+    try:
+        uri = (f"socketcan://{iface}?profile=plugin.talker.base"
+               "&identify=0&diagnose=0")
+        code, text, err = run(cli, dump_args(uri, package, d, ["--parked"],
+                                             out))
+    finally:
+        sim.end()
+    return code, of_type(rows_of(text), "dump"), err, sim.stats
+
+
+def held_case(cli, long_read, bare, lib_path, d):
+    """A programming session over an upload whose blocks wait 6 s each
+    now and then, past the module's S3: kept by the 3E 80 alone, and
+    lost without it"""
+    iface = os.environ.get("ECUIO_VCAN_IF", "vcan0")
+    if not os.path.exists(f"/sys/class/net/{iface}"):
+        if os.environ.get("ECUIO_VCAN_REQUIRED") == "1":
+            return f"no {iface}"
+        print(f"skipped: no {iface}")
+        sys.exit(77)
+    code, dumps, err, stats = held_run(cli, long_read, iface, d, "held")
+    if code != 0 or len(dumps) != 1 or dumps[0].get("end") != "saved" \
+            or dumps[0].get("bytes") != 16384 or stats.get("pending", 0) < 2:
+        return f"held: exit {code} {dumps!r} {stats!r} {err!r}"
+    why = read_back(lib_path, dumps[0]["path"])
+    if why:
+        return why
+    code, dumps, err, stats = held_run(cli, bare, iface, d, "bare")
+    folder = os.path.join(d, "bare")
+    left = os.listdir(folder) if os.path.isdir(folder) else []
+    if code != 4 or len(dumps) != 1 or dumps[0].get("end") == "saved" \
+            or left:
+        return f"bare: exit {code} {dumps!r} {left!r} {stats!r} {err!r}"
+    return None
+
+
+def fixtures(writer, d, held=False):
     plain = os.path.join(d, "plain.json")
     kernel = os.path.join(d, "kernel.json")
-    done = subprocess.run([writer, plain, kernel], capture_output=True)
+    more = [os.path.join(d, "long.json"), os.path.join(d, "bare.json")] \
+        if held else []
+    done = subprocess.run([writer, plain, kernel] + more, capture_output=True)
     if done.returncode != 0:
         raise SystemExit(f"FAIL  the fixture writer: {done.stderr!r}")
-    return plain, kernel
+    return [plain, kernel] + more
 
 
 def main(argv):
     if len(argv) < 4:
-        print("usage: cli_dump.py saved|refusals|abort|before|kernel <havne-cli> "
-              "<cli_dump_fixture> [<shared core>|-] [<fake_j2534.dll>]")
+        print("usage: cli_dump.py saved|refusals|abort|before|kernel|held "
+              "<havne-cli> <cli_dump_fixture> [<shared core>|-] "
+              "[<fake_j2534.dll>]")
         return 2
     case, cli, writer = argv[1], argv[2], argv[3]
     lib_path = argv[4] if len(argv) > 4 else "-"
     with tempfile.TemporaryDirectory(prefix="havne-cli-dump-") as d:
-        plain, kernel = fixtures(writer, d)
-        for package in (plain, kernel):
+        packages = fixtures(writer, d, case == "held")
+        plain, kernel = packages[0], packages[1]
+        for package in packages:
             consent(cli, package, os.path.join(d, "consent.json"))
         if case == "saved":
             why = saved_case(cli, plain, lib_path, d)
@@ -248,6 +321,8 @@ def main(argv):
             why = before_case(cli, plain, d)
         elif case == "kernel" and len(argv) > 5:
             why = kernel_case(cli, kernel, argv[5], lib_path, d)
+        elif case == "held":
+            why = held_case(cli, packages[2], packages[3], lib_path, d)
         else:
             print(f"FAIL  unknown case {case}")
             return 2
