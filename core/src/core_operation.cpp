@@ -527,6 +527,30 @@ ecuio_status_t judge_hold(const ecuio_session_t* s, const plan& p,
     return ECUIO_OK;
 }
 
+/* The attempt's mark; a recovery's attempt is counted only with it, so a
+ * refused mark puts the journal back as it was */
+ecuio_status_t mark_word(ecuio_session_t* s, session_run& o, const plan& p,
+                         ecuio_bound_channel& b, uint32_t channel,
+                         const char* folder)
+{
+    const ecuio_status_t st =
+        ecuio_session_unlock_mark(s, b, channel, p.level, nullptr);
+    if (st == ECUIO_OK || !o.recover) {
+        if (st != ECUIO_OK) {
+            o.journal.close(p.has_flash);
+        }
+        return st;
+    }
+    o.journal.close(false);
+    std::string why;
+    if (o.journal.open(folder, o.recover_before.head, &why,
+                       o.recover_before.mark)) {
+        o.journal.close(false);
+    }
+    o.attempts = o.recover_before.head.recoveries;
+    return st;
+}
+
 ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
                      const char* folder, const char* copy)
 {
@@ -569,6 +593,9 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     }
     bool open = false;
     st = judge_level(*p, report, q.flags, &open);
+    if (st == ECUIO_OK && recover && !open) {
+        st = ecuio_session_unlock_judge(s, *b, channel, p->level, nullptr);
+    }
     if (st != ECUIO_OK) {
         return st;
     }
@@ -589,19 +616,14 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     }
     std::unique_ptr<dump_sink> sink;
     st = open_files(s, *o, *p, *b, folder, copy, recover, &sink);
+    st = st == ECUIO_OK && !open ? mark_word(s, *o, *p, *b, channel, folder)
+                                 : st;
     if (st != ECUIO_OK) {
         return st;
     }
     if (recover && channel < ECUIO_MAX_CHANNELS) {
         const std::lock_guard<std::mutex> lock(s->support_mutex);
         s->recovery[channel].attempts = o->attempts;
-    }
-    if (!open) {
-        st = ecuio_session_unlock_mark(s, *b, channel, p->level, nullptr);
-        if (st != ECUIO_OK) {
-            o->journal.close(p->has_flash && !o->recover);
-            return st; /* the sink's end removes the unfinished file */
-        }
     }
     claim.on = false;
     arm(s, *o, *p, std::move(sink), channel, q.operation, !open, write, checks,

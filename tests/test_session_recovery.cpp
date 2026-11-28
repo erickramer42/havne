@@ -1,6 +1,7 @@
 #include "session_flash_support.h"
 
 #include "../core/src/operation_journal.h"
+#include "../core/src/security_store.h"
 
 #include <gtest/gtest.h>
 
@@ -241,14 +242,14 @@ ecuio_operation::journal_record silent_record(const Flash& f = sim_flash())
  * a bench's end closes the consent door every bench shares. */
 void reconnect(Bench& b, const ecuio_operation::journal_record& j,
                uint32_t erased, ecuio_sim_flash_faults faults = {},
-               const Flash& f = sim_flash())
+               const Flash& f = sim_flash(), const char* store = nullptr)
 {
     b.journals = true;
     put_journal(b, j.head, j.mark);
     faults.boot = true;
     faults.boot_erased = erased;
     arm(b, faults);
-    b.start(flash_made(f));
+    b.start(flash_made(f), ECUIO_ENGINE_PDU_MAX, store);
 }
 
 ecuio_status_t recover(Bench& b, const char* copy = nullptr)
@@ -411,6 +412,10 @@ TEST(SessionRecoveryTest,
     EXPECT_EQ(r.attempts, 1u);
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
     EXPECT_EQ(start(b), ECUIO_ERR_IN_USE) << "still held";
+    EXPECT_EQ(recover(b), ECUIO_ERR_TOO_SOON) << "the lockout's delay runs";
+    EXPECT_EQ(recovery_of(b).attempts, 1u) << "a refused start counts none";
+    EXPECT_NE(read_journal(b).find("\"recoveries\": 1,"), std::string::npos)
+        << read_journal(b);
 
     ecuio_operation::journal_record again;
     std::string why;
@@ -581,5 +586,23 @@ TEST(SessionRecoveryTest,
         ECUIO_OK)
         << "the same folder, written another way: "
         << ecuio_last_error_detail();
+    EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
+}
+
+TEST(SessionRecoveryTest, AMarkThatCantBeSavedCountsNoAttempt)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    Bench b;
+    const std::string store = b.folder.str() + "/security.json";
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0, {}, sim_flash(), store.c_str()));
+    const std::string before = read_journal(b);
+    ecuio_security::store_test_fail_at = 1;
+    EXPECT_EQ(recover(b), ECUIO_ERR_LOAD_FAILED) << ecuio_last_error_detail();
+    ecuio_security::store_test_fail_at = 0;
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+    EXPECT_EQ(read_journal(b), before) << "put back as it was";
+    EXPECT_EQ(recovery_of(b).attempts, 0u);
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(recovery_of(b).attempts, 1u);
     EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
 }

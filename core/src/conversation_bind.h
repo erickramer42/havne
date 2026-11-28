@@ -178,4 +178,10 @@ ecuio_status_t ecuio_session_unlock_mark(ecuio_session_t* session,
                                          uint32_t channel, uint8_t level,
                                          uint32_t* out_wait_ms);
 
+/* ecuio_session_unlock_mark's refusals alone: nothing saved */
+ecuio_status_t ecuio_session_unlock_judge(ecuio_session_t* session,
+                                          ecuio_bound_channel& b,
+                                          uint32_t channel, uint8_t level,
+                                          uint32_t* out_wait_ms);
+
 #endif /* ECUIO_CONVERSATION_BIND_H */

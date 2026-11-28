@@ -58,6 +58,7 @@ struct session_run {
     std::unique_ptr<dump_sink> sink;
     std::vector<uint8_t> current; /* a flash's copy to judge sectors by */
     std::vector<sector> recover_sectors;
+    journal_record recover_before; /* put back when the start fails */
     journal_writer journal; /* a flash's */
     uint32_t channel = 0;   /* the plan's module among the session's */
     uint32_t operation = 0; /* its index, for the view */

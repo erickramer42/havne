@@ -115,6 +115,7 @@ ecuio_status_t flash_recovery_journal(const ecuio_session* s, session_run& o,
         *bytes += c.bytes;
     }
     *sectors = static_cast<uint32_t>(o.recover_sectors.size());
+    o.recover_before = j;
     ++j.head.recoveries;
     o.journal_base = from;
     o.journal_sectors = static_cast<uint32_t>(j.head.sectors.size());
