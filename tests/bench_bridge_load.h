@@ -299,22 +299,29 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
         runs[2].workerRate, runs[6].workerRate, runs[8].workerRate};
     std::vector<double> recordedRates = {
         runs[4].workerRate, runs[7].workerRate, runs[9].workerRate};
-    const std::vector<double> rawRates = {
+    std::vector<double> rawRates = {
         runs[3].workerRate, runs[10].workerRate, runs[11].workerRate};
     const double recordedFloor = bench_judge::minRecordedLoopShare();
     // A miss may be a runner busy for the whole first block: a second block
-    // of three pairs, judged with the first over all six, is an independent
+    // of three triples, judged with the first over all six, is an independent
     // sample, and a regression misses in both
-    if (!bench_judge::recordedShareHolds(
-            bench_judge::recordedShare(recordedRates, unrecordedRates),
-            recordedFloor)) {
+    auto sharesHold = [&] {
+        return bench_judge::recordedShareHolds(
+                   bench_judge::recordedShare(recordedRates, unrecordedRates),
+                   recordedFloor) &&
+               bench_judge::best(unrecordedRates) / bench_judge::best(rawRates) >=
+                   kMinDecodingShare;
+    };
+    if (!sharesHold()) {
         for (int k = 0; k < 3; ++k) {
-            for (const bool rec : {false, true}) {
-                LoadRun r = runs[rec ? 4 : 2];
-                r.label = rec ? "full speed, looping 3 s, recorded, retry"
-                              : "full speed, looping 3 s, retry";
+            for (const int kind : {0, 1, 2}) {
+                LoadRun r = runs[kind == 1 ? 4 : kind == 2 ? 3 : 2];
+                r.label = kind == 1   ? "full speed, looping 3 s, recorded, retry"
+                          : kind == 2 ? "full speed, looping 3 s, raw, retry"
+                                      : "full speed, looping 3 s, retry";
                 replayFixture(r);
-                (rec ? recordedRates : unrecordedRates).push_back(r.workerRate);
+                (kind == 1 ? recordedRates : kind == 2 ? rawRates : unrecordedRates)
+                    .push_back(r.workerRate);
                 runs.push_back(r);
             }
         }
@@ -384,9 +391,9 @@ bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
         bench_judge::best(unrecordedRates) / bench_judge::best(rawRates);
     std::printf(
         "\nDecode, 1000 defs against 9: %.3f against %.3f us a frame (%.2fx). "
-        "Looping, obd2 against raw, the best of %zu against the best of 3: "
+        "Looping, obd2 against raw, the best of %zu against the best of %zu: "
         "%.0f against %.0f frames/s (%.2f).\n",
-        decode1000, decode9, decodeRatio, unrecordedRates.size(),
+        decode1000, decode9, decodeRatio, unrecordedRates.size(), rawRates.size(),
         bench_judge::best(unrecordedRates), bench_judge::best(rawRates),
         decodingShare);
     char bound[160];

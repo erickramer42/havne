@@ -49,6 +49,9 @@ constexpr int64_t ECUIO_SIM_STALLED_US = 160000;
  * (ATST19, 100 ms), well inside P2* (5 s), so only a tester that keeps
  * waiting after the 78 gets it */
 constexpr int64_t ECUIO_SIM_PENDING_US = 300000;
+/* Inside the tester's P2* (5 s) */
+constexpr int64_t ECUIO_SIM_PENDING_AGAIN_US = 2000000;
+constexpr int64_t ECUIO_SIM_PENDING_MOST_MS = 30000;
 
 /* A fault by its name in faults= */
 enum class ecuio_sim_fault_kind : uint8_t {
@@ -256,6 +259,49 @@ inline bool ecuio_sim_parse_faults(const char* text, size_t len,
         return false;
     }
     return true;
+}
+
+inline bool ecuio_sim_parse_pending_ms(const char* text, size_t len,
+                                       int64_t* us, uint8_t* service, char* why,
+                                       size_t why_cap)
+{
+    size_t at = 0;
+    int64_t ms = 0;
+    for (; at < len && text[at] != ':'; ++at) {
+        ms = text[at] >= '0' && text[at] <= '9' &&
+                     ms <= ECUIO_SIM_PENDING_MOST_MS
+                 ? ms * 10 + (text[at] - '0')
+                 : ECUIO_SIM_PENDING_MOST_MS + 1;
+    }
+    uint32_t sid = 0;
+    const size_t digits = at < len ? len - at - 1 : 0;
+    for (size_t i = at + 1; i < len; ++i) {
+        const int v = ecuio_sim_fault_detail::hex_digit(text[i]);
+        sid = v < 0 ? 0x100u : sid * 16 + static_cast<uint32_t>(v);
+    }
+    if (at == 0 || ms < ECUIO_SIM_PENDING_US / 1000 ||
+        ms > ECUIO_SIM_PENDING_MOST_MS ||
+        (at < len && (digits == 0 || digits > 2 || sid == 0 || sid > 0xFF))) {
+        std::snprintf(why, why_cap,
+                      "pending_ms: '%.*s' isn't <ms>[:<service>], the wait "
+                      "%lld to %lld and the service hex",
+                      static_cast<int>(len < 40 ? len : 40), text,
+                      static_cast<long long>(ECUIO_SIM_PENDING_US / 1000),
+                      static_cast<long long>(ECUIO_SIM_PENDING_MOST_MS));
+        return false;
+    }
+    *us = ms * 1000;
+    *service = static_cast<uint8_t>(sid);
+    return true;
+}
+
+inline int64_t ecuio_sim_pending_wait_us(int64_t pending_us,
+                                         uint8_t pending_service,
+                                         uint8_t service)
+{
+    return pending_service == 0 || pending_service == service
+               ? pending_us
+               : ECUIO_SIM_PENDING_US;
 }
 
 /* Whether every aim names a reply ID one of a sim's ECUs answers on

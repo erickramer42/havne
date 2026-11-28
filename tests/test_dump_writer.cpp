@@ -577,6 +577,55 @@ TEST(DumpWriterTest, ASealNeverReplacesAFile)
     EXPECT_NE(bytes, "mine");
 }
 
+/* Two equal reads in one UTC second are one file: the second seal finds
+ * its own bytes under its name and keeps that file */
+TEST(DumpWriterTest, ASecondEqualCopyKeepsTheFirstFile)
+{
+    Fed first;
+    ASSERT_EQ(first.open(), ECUIO_OK);
+    first.both_passes();
+    ASSERT_EQ(first.sealed(), sink_state::saved);
+    const std::string name = first.sink.name();
+    const std::string bytes = read_bytes(first.f.at(name));
+
+    Fed again;
+    again.f.put(name, bytes);
+    ASSERT_EQ(again.open(), ECUIO_OK);
+    again.both_passes();
+    EXPECT_EQ(again.sealed(), sink_state::saved) << again.sink.words();
+    EXPECT_EQ(again.sink.name(), name);
+    EXPECT_EQ(names_in(again.f.str()), std::vector<std::string>{name});
+    EXPECT_EQ(read_bytes(again.f.at(name)), bytes);
+    again.sink.close();
+    EXPECT_EQ(names_in(again.f.str()), std::vector<std::string>{name})
+        << "a close keeps the file the seal found";
+}
+
+/* A file under the name that differs from the copy by a byte, or is its
+ * bytes and one more, or but its last, is another file: the seal fails
+ * and leaves it */
+TEST(DumpWriterTest, AnotherFileUnderTheNameIsNotTheCopy)
+{
+    Fed first;
+    ASSERT_EQ(first.open(), ECUIO_OK);
+    first.both_passes();
+    ASSERT_EQ(first.sealed(), sink_state::saved);
+    const std::string name = first.sink.name();
+    const std::string bytes = read_bytes(first.f.at(name));
+    std::string changed = bytes;
+    changed[changed.size() / 2] ^= 0x01;
+    for (const std::string& there :
+         {changed, bytes + '\0', bytes.substr(0, bytes.size() - 1)}) {
+        Fed again;
+        again.f.put(name, there);
+        ASSERT_EQ(again.open(), ECUIO_OK);
+        again.both_passes();
+        EXPECT_EQ(again.sealed(), sink_state::failed) << there.size();
+        EXPECT_EQ(names_in(again.f.str()), std::vector<std::string>{name});
+        EXPECT_EQ(read_bytes(again.f.at(name)), there);
+    }
+}
+
 /* An open that fails, for want of a folder or of memory at any
  * allocation, leaves nothing and starts no writer */
 TEST(DumpWriterTest, AnOpenThatFailsLeavesNothing)

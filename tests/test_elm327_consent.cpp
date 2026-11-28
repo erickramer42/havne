@@ -200,3 +200,63 @@ TEST_F(Elm327SessionTest, AConsentAfterAPassiveSetupProbesAtStart)
               std::string::npos)
         << log;
 }
+
+static size_t count_of(const std::string& text, const std::string& what)
+{
+    size_t n = 0;
+    for (size_t at = text.find(what); at != std::string::npos;
+         at = text.find(what, at + what.size())) {
+        ++n;
+    }
+    return n;
+}
+
+/* The start's probe refused (the functional header answered '?'): one
+ * line, the refusal's words */
+TEST_F(Elm327SessionTest, ARefusedStartProbeWritesOneLine)
+{
+    Registered r(made3(true));
+    ASSERT_NE(r.plugin, nullptr);
+    const LogDir logs("elm327-probe-refused");
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri(std::string("?profile=") + r.name +
+                               "&identify=0&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_NO_FATAL_FAILURE(
+            give_and_apply("elm327-probe-refused.json", r.plugin.get(), s.s));
+        set_knobs([](fake_elm327::knobs& k) { k.refuse = "ATSH7DF"; });
+        s.start();
+        ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    }
+    const std::string log = logs.only_log();
+    EXPECT_EQ(count_of(log, "ATSH7DF with '?'"), 1u) << log;
+    EXPECT_EQ(count_of(log, "refused"), 0u) << log;
+}
+
+/* The probe switched off: no probe at start and no probe line */
+TEST_F(Elm327SessionTest, NoProbeLineWhenTheStartProbeIsOff)
+{
+    Registered r(made3(true));
+    ASSERT_NE(r.plugin, nullptr);
+    const LogDir logs("elm327-probe-off");
+    ecuio_set_start_probe(0);
+    {
+        Session s;
+        ASSERT_EQ(s.create(uri(std::string("?profile=") + r.name +
+                               "&identify=0&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_NO_FATAL_FAILURE(
+            give_and_apply("elm327-probe-off.json", r.plugin.get(), s.s));
+        s.start();
+        ASSERT_TRUE(wait_for([] { return fake_count("1003") > 0; }, 5000));
+        EXPECT_EQ(fake_count(kProbeCommand), 0u);
+        ASSERT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    }
+    ecuio_set_start_probe(1);
+    const std::string log = logs.only_log();
+    EXPECT_EQ(log.find("emissions probe"), std::string::npos) << log;
+    EXPECT_EQ(log.find("start's probe"), std::string::npos) << log;
+}

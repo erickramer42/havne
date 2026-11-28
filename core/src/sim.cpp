@@ -450,7 +450,9 @@ void ask_send(ecuio_sim* sim, sim_node& node, const uint8_t* request,
         const uint8_t wait[3] = {0x7F, request[0], 0x78};
         put_reply(replies, capacity, n, node, ECUIO_SIM_REPLY_PENDING, 0, wait,
                   sizeof wait);
-        delay = ECUIO_SIM_PENDING_US; /* its own timing, the draw unused */
+        delay = ecuio_sim_pending_wait_us(sim->ecu.config.pending_us,
+                                          sim->ecu.config.pending_service,
+                                          request[0]);
         break;
     }
     case ecuio_sim_fate::late:
