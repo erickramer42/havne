@@ -15,6 +15,7 @@
 #include "scrub.h"           /* segment_reply_id */
 
 #include "ecuio/core.h"
+#include "ecuio/signals.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -25,6 +26,27 @@
 #include <vector>
 
 namespace ecuio_frame_reassembly {
+
+/* A message a text or hex def applies to, tried on the caller's probe frame */
+inline bool text_message(ecuio_frame_t& probe,
+                         const std::vector<const ecuio_signal_def_t*>& text,
+                         uint32_t id, uint32_t flags, const uint8_t* data,
+                         size_t n)
+{
+    if (text.empty() || n > ECUIO_FRAME_DATA_MAX) {
+        return false;
+    }
+    probe.arbitration_id = id;
+    probe.flags = flags;
+    probe.data_length = static_cast<uint16_t>(n);
+    std::memcpy(probe.data, data, n);
+    for (const ecuio_signal_def_t* d : text) {
+        if (ecuio_def_applies_to_frame(d, &probe) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /* A frame by its place and time: a recording's row and host_us, or a
  * frame in memory and its timestamp_us */
