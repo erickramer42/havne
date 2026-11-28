@@ -226,8 +226,6 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
-    /* a flash's modules left part-written: never cleared until close */
-    std::atomic<uint32_t> part_written{0};
     /* ecuio_session_clear_diagnostics_set's request, from any thread,
      * under clear_mutex: its targets and flags, the requests made, and
      * the last one the worker has seen to its end
@@ -290,6 +288,8 @@ struct ecuio_session {
      * that sends no request. */
     std::atomic<uint32_t> modules_closed{0};
     std::atomic<uint32_t> modules_no_room{0};
+    /* a flash's modules left part-written: never cleared until close */
+    std::atomic<uint32_t> part_written{0};
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),
