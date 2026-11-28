@@ -11,6 +11,17 @@ inline bool ecuio_engine_declared_wanted(const ecuio_engine_channel& ch)
            (ch.reasons & ECUIO_ENGINE_REASON_READ) != 0;
 }
 
+inline void ecuio_engine_declared_let_go(ecuio_engine_channel& ch)
+{
+    if (ch.session_source == ECUIO_SESSION_SOURCE_SET) {
+        ch.session_asked = 0;
+        ch.session_source = ECUIO_SESSION_SOURCE_NONE;
+        ch.obd_out = false;
+        ch.retry_us = 0;
+        ch.reentry = ECUIO_ENGINE_REENTRY_NONE;
+    }
+}
+
 /* Channel c's declared session follows what is read on it: asked when a
  * signal on it is, given up when none is (an entered one leaves by
  * ecuio_engine_declared_leave_due). A refusal stands; the URI's session
@@ -32,8 +43,7 @@ inline void ecuio_engine_session_follow(ecuio_request_engine* e, uint32_t c)
                !ch.sessioning &&
                (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
                 ch.session_step == ECUIO_SESSION_STATE_UNANSWERED)) {
-        ch.session_asked = 0;
-        ch.session_source = ECUIO_SESSION_SOURCE_NONE;
+        ecuio_engine_declared_let_go(ch);
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
         ++ch.generation;
     }
@@ -64,14 +74,6 @@ inline void ecuio_engine_session_allow(ecuio_request_engine* e, uint32_t c,
     ++ch.generation;
 }
 
-inline void ecuio_engine_declared_let_go(ecuio_engine_channel& ch)
-{
-    if (ch.session_source == ECUIO_SESSION_SOURCE_SET) {
-        ch.session_asked = 0;
-        ch.session_source = ECUIO_SESSION_SOURCE_NONE;
-    }
-}
-
 inline void ecuio_engine_sessions_follow(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
@@ -94,6 +96,50 @@ inline bool ecuio_engine_declared_leave_due(ecuio_request_engine* e, uint32_t c)
     ch.sessioning = true;
     ++ch.generation;
     return true;
+}
+
+/* Held module c's 10 01 ahead of a front end's OBD item or a clear's
+ * step, into the one-shot; true when it went there */
+inline bool ecuio_engine_obd_leave_due(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (e->operation_hold || !ecuio_engine_obd_in_session(ch) ||
+        ecuio_engine_obd_waits(ch) || !ecuio_engine_obd_work(ch) ||
+        !ecuio_engine_session_leave(e, c, &ch.once)) {
+        return false;
+    }
+    ch.obd_out = true;
+    ch.sessioning = true;
+    ++ch.generation;
+    return true;
+}
+
+/* Channel c's pass out over (no OBD item or clear step left), or a
+ * clear's retry due: entered again while a signal on it is read, else let
+ * go */
+inline void ecuio_engine_obd_return(ecuio_request_engine* e, uint32_t c,
+                                    int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.sessioning || ecuio_engine_obd_work(ch)) {
+        return;
+    }
+    ch.obd_leave = false;
+    const bool wanted = ecuio_engine_declared_wanted(ch);
+    if (ch.session_source != ECUIO_SESSION_SOURCE_SET ||
+        (!ch.obd_out &&
+         (ch.retry_us == 0 || (wanted && now_us < ch.retry_us)))) {
+        return;
+    }
+    ch.obd_out = false;
+    ch.retry_us = 0;
+    if (wanted) {
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ENTERING);
+    } else {
+        ecuio_engine_declared_let_go(ch);
+        ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
+    }
+    ++ch.generation;
 }
 
 #endif

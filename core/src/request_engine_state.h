@@ -101,6 +101,11 @@ static_assert(ECUIO_ENGINE_S3_US - ECUIO_ENGINE_S3_MARGIN_US <
 constexpr int64_t ECUIO_ENGINE_LOSS_WINDOW_US =
     int64_t{ECUIO_SESSION_LOSS_WINDOW_MS} * 1000;
 
+constexpr int64_t ECUIO_ENGINE_REENTRY_RETRY_US = 2000000;
+constexpr uint8_t ECUIO_ENGINE_REENTRY_NONE = 0;
+constexpr uint8_t ECUIO_ENGINE_REENTRY_CLEAR = 1;
+constexpr uint8_t ECUIO_ENGINE_REENTRY_RETRIED = 2;
+
 /* A count that stops at the ABI's 65535 */
 inline void ecuio_engine_count16(uint16_t& n)
 {
@@ -373,6 +378,9 @@ struct ecuio_engine_channel {
     bool sessioning = false;
     bool session_fresh = false;
     bool refused_own = false;
+    bool obd_leave = false; /* OBD items that go outside the session */
+    bool obd_out = false;   /* left the declared session for OBD items */
+    uint8_t reentry = ECUIO_ENGINE_REENTRY_NONE;
     /* The channel's requests go to a functional address (0x7DF,
      * 0x18DB33F1), which every module hears: it sends nothing while any
      * channel's window is open, and never a seed, a key or a talk longer
@@ -387,6 +395,7 @@ struct ecuio_engine_channel {
     uint32_t refused_losses = 0;  /* 7E or 7F re-entries in this window */
     int64_t loss_window_us = 0;   /* when that window started */
     int64_t last_sent_us = 0;
+    int64_t retry_us = 0; /* a clear's refused re-entry is asked again then */
     /* The key's window (request_talk.h): while it is open the channel
      * sends only a key */
     ecuio_key_window key;
@@ -423,17 +432,6 @@ inline bool ecuio_engine_module_hears(const ecuio_engine_channel& ch)
 inline uint8_t ecuio_engine_session_sub(const ecuio_engine_channel& ch)
 {
     return ch.handed ? ECUIO_SESSION_EXTENDED : ch.session_asked;
-}
-
-/* Why channel ch's declared session isn't in force now */
-inline uint8_t ecuio_engine_session_idle(const ecuio_engine_channel& ch)
-{
-    if (!ch.session_declared) {
-        return ch.session_idle;
-    }
-    return ch.session_source == ECUIO_SESSION_SOURCE_NONE
-               ? uint8_t{ECUIO_SESSION_IDLE_NOT_READ}
-               : uint8_t{ECUIO_SESSION_IDLE_NONE};
 }
 
 /* Sets channel ch's session step. A key's window lasts only while the
@@ -596,6 +594,91 @@ inline bool ecuio_engine_clear_asks(const ecuio_engine_channel& ch)
 {
     return ch.judge_step != ECUIO_CLEAR_STEP_NONE ||
            ch.clear_step == ECUIO_CLEAR_STEP_CLEAR;
+}
+
+inline bool ecuio_engine_obd_service(uint8_t sid)
+{
+    return sid >= 0x01 && sid <= 0x0A;
+}
+
+/* Whether channel ch has an identification item unasked of OBD's
+ * services (obd) or of another */
+inline bool ecuio_engine_ident_unasked(const ecuio_engine_channel& ch, bool obd)
+{
+    for (uint32_t i = 0; i < ch.ident_count; ++i) {
+        if (ch.ident[i].outcome == ECUIO_IDENTITY_UNASKED &&
+            ecuio_engine_obd_service(ch.ident[i].request[0]) == obd) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether channel ch has an OBD-service item unsettled or a clear's step
+ * on it */
+inline bool ecuio_engine_obd_work(const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_clear_on(ch) || ch.clearing || ch.diag_pending > 0 ||
+           ch.diagnosing ||
+           (ch.identifying &&
+            ecuio_engine_obd_service(ch.ident[ch.ident_index].request[0])) ||
+           ecuio_engine_ident_unasked(ch, true);
+}
+
+inline bool ecuio_engine_obd_in_session(const ecuio_engine_channel& ch)
+{
+    return ch.session_source == ECUIO_SESSION_SOURCE_SET && !ch.handed &&
+           ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+}
+
+/* Whether channel ch's OBD items go outside its declared session: an
+ * open's, a front end's or a clear's. Core's own re-asks wait in it for
+ * its next pass out. */
+inline bool ecuio_engine_obd_forced(const ecuio_engine_channel& ch)
+{
+    return ch.obd_leave || ecuio_engine_clear_on(ch);
+}
+
+inline bool ecuio_engine_obd_waits(const ecuio_engine_channel& ch)
+{
+    return ecuio_engine_obd_in_session(ch) && !ecuio_engine_obd_forced(ch);
+}
+
+/* Whether channel ch's rows wait, neither asked nor dropped, while it is
+ * out of its declared session for OBD items or a clear's re-entry */
+inline bool ecuio_engine_obd_holds(const ecuio_engine_channel& ch)
+{
+    return ch.session_source == ECUIO_SESSION_SOURCE_SET && !ch.handed &&
+           (ch.obd_out || ch.retry_us != 0 ||
+            (ch.session_step == ECUIO_SESSION_STATE_ENTERING &&
+             ecuio_engine_obd_forced(ch) && ecuio_engine_obd_work(ch)));
+}
+
+inline bool ecuio_engine_ident_due(const ecuio_engine_channel& ch)
+{
+    return ch.ident_pending > 0 && (!ecuio_engine_obd_waits(ch) ||
+                                    ecuio_engine_ident_unasked(ch, false));
+}
+
+inline bool ecuio_engine_diag_due(const ecuio_engine_channel& ch)
+{
+    return ch.diag_pending > 0 && !ecuio_engine_obd_waits(ch);
+}
+
+/* Why channel ch's declared session isn't in force now */
+inline uint8_t ecuio_engine_session_idle(const ecuio_engine_channel& ch)
+{
+    if (!ch.session_declared) {
+        return ch.session_idle;
+    }
+    if (ch.session_source == ECUIO_SESSION_SOURCE_NONE) {
+        return uint8_t{ECUIO_SESSION_IDLE_NOT_READ};
+    }
+    if (ch.retry_us != 0) {
+        return uint8_t{ECUIO_SESSION_IDLE_RETRY};
+    }
+    return ecuio_engine_obd_holds(ch) ? uint8_t{ECUIO_SESSION_IDLE_OBD_ITEM}
+                                      : uint8_t{ECUIO_SESSION_IDLE_NONE};
 }
 
 /* Whether request r is asked in the rotation: not dropped by the probe

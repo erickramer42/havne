@@ -176,6 +176,7 @@ inline void ecuio_engine_diag_take_freeze(ecuio_request_engine* e, uint32_t c,
 inline void ecuio_engine_diag_list(ecuio_engine_channel& ch)
 {
     ch.diag.flags |= ECUIO_DIAG_ASKED;
+    ch.obd_leave = true;
     for (const auto& q : ECUIO_DIAG_FIRST) {
         ecuio_engine_diag_push(ch, q[0], q[1], q[2], q[3]);
     }
@@ -319,7 +320,8 @@ inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
-        if (ch.diag_count == 0 || ch.diag_pending > 0 ||
+        if (ch.diag_count == 0 ||
+            (ch.diag_pending > 0 && !ecuio_engine_obd_waits(ch)) ||
             ecuio_engine_clear_on(ch)) {
             continue;
         }

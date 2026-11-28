@@ -94,6 +94,7 @@ inline void ecuio_engine_module_reopen(ecuio_request_engine* e, uint32_t c)
         if (ch.ident[i].outcome == ECUIO_IDENTITY_UNANSWERED) {
             ch.ident[i].outcome = ECUIO_IDENTITY_UNASKED;
             ++ch.ident_pending;
+            ch.obd_leave = true; /* an open's items go before its entry */
         }
     }
     if (ch.session_asked != 0 && (ch.reasons & ECUIO_ENGINE_REASON_READ) != 0 &&

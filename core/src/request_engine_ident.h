@@ -136,16 +136,19 @@ inline void ecuio_engine_identify(ecuio_request_engine* e)
         }
         ch.ident_count = ECUIO_IDENT_COUNT;
         ch.ident_pending = ECUIO_IDENT_COUNT;
+        ch.obd_leave = true;
     }
 }
 
-/* The next unasked item of channel c, in list order; -1 when none. */
+/* The next unasked item of channel c, in list order, but OBD's services
+ * when skip_obd; -1 when none. */
 inline int32_t ecuio_engine_ident_next(const ecuio_request_engine* e,
-                                       uint32_t c)
+                                       uint32_t c, bool skip_obd = false)
 {
     const ecuio_engine_channel& ch = e->chans[c];
     for (uint32_t i = 0; i < ch.ident_count; ++i) {
-        if (ch.ident[i].outcome == ECUIO_IDENTITY_UNASKED) {
+        if (ch.ident[i].outcome == ECUIO_IDENTITY_UNASKED &&
+            !(skip_obd && ecuio_engine_obd_service(ch.ident[i].request[0]))) {
             return static_cast<int32_t>(i);
         }
     }

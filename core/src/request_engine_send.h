@@ -114,9 +114,11 @@ inline bool ecuio_engine_due_lead(ecuio_request_engine* e, uint32_t c,
         *r = ECUIO_ENGINE_NONE; /* nothing but the key, not yet offered */
         return true;
     }
+    ecuio_engine_obd_return(e, c, now_us);
     /* ADR-0060: the entry first; while 10 03 is due nothing else goes */
     if (ecuio_engine_session_entry_due(e, c, now_us) ||
-        ecuio_engine_declared_leave_due(e, c)) {
+        ecuio_engine_declared_leave_due(e, c) ||
+        ecuio_engine_obd_leave_due(e, c)) {
         *r = ECUIO_ENGINE_ONCE;
         return true;
     }
@@ -162,6 +164,9 @@ inline void ecuio_engine_take_clear(ecuio_engine_channel& ch, uint32_t c)
     } else {
         ch.once.bytes[0] = ECUIO_CLEAR_SERVICE;
         ch.once.len = 1;
+        if (ch.obd_out) {
+            ch.reentry = ECUIO_ENGINE_REENTRY_CLEAR;
+        }
     }
     ch.once.channel = static_cast<uint8_t>(c);
     ch.clearing = true;
@@ -185,16 +190,19 @@ inline void ecuio_engine_take_ident_at(ecuio_request_engine* e, uint32_t c,
     ch.scan_turn = false;
 }
 
-/* The next identification item into channel c's one-shot: false when
- * none was unasked */
-inline bool ecuio_engine_take_ident(ecuio_request_engine* e, uint32_t c)
+/* The next identification item into channel c's one-shot, but OBD's
+ * services when skip_obd: false when none was unasked */
+inline bool ecuio_engine_take_ident(ecuio_request_engine* e, uint32_t c,
+                                    bool skip_obd = false)
 {
-    const int32_t i = ecuio_engine_ident_next(e, c);
+    const int32_t i = ecuio_engine_ident_next(e, c, skip_obd);
     if (i >= 0) {
         ecuio_engine_take_ident_at(e, c, static_cast<uint32_t>(i));
         return true;
     }
-    e->chans[c].ident_pending = 0; /* the count had drifted; none unasked */
+    if (!skip_obd) {
+        e->chans[c].ident_pending = 0; /* the count had drifted */
+    }
     return false;
 }
 
@@ -298,13 +306,16 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
     }
-    if (ch.ident_pending > 0 && once_turn && ecuio_engine_take_ident(e, c)) {
+    const bool waits = ecuio_engine_obd_waits(ch);
+    if (ch.ident_pending > 0 && once_turn &&
+        ecuio_engine_take_ident(e, c, waits)) {
         return ECUIO_ENGINE_ONCE;
     }
-    if (ch.diag_pending > 0 && once_turn) {
+    if (ecuio_engine_diag_due(ch) && once_turn) {
         ecuio_engine_diag_skip_unsupported(e, c);
     }
-    if (ch.diag_pending > 0 && once_turn && ecuio_engine_take_diag(e, c)) {
+    if (ecuio_engine_diag_due(ch) && once_turn &&
+        ecuio_engine_take_diag(e, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (once_turn && ecuio_talk_turn(ch.talk, false, ch.scan_pending > 0)) {
@@ -410,6 +421,19 @@ inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
     return ECUIO_ENGINE_NONE;
 }
 
+/* Closing module c's 10 01 into the one-shot, when it owes one */
+inline bool ecuio_engine_closing_leave(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (!ecuio_engine_closing_leaves(e, ch) ||
+        !ecuio_engine_session_leave(e, c, &ch.once)) {
+        return false;
+    }
+    ecuio_engine_declared_let_go(ch);
+    ch.sessioning = true;
+    return true;
+}
+
 /* due for a module that isn't open: a closing one finishes what it began
  * (a one-shot already in, a clear's next step, the diagnostics read's
  * next item), then leaves its session (10 01); nothing else, and nothing
@@ -425,6 +449,10 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
     if (ch.diagnosing || ch.clearing || ch.sessioning) {
         return ECUIO_ENGINE_ONCE;
     }
+    if (ch.session_source == ECUIO_SESSION_SOURCE_SET &&
+        ecuio_engine_closing_leave(e, c)) {
+        return ECUIO_ENGINE_ONCE; /* ahead of its clear and its read */
+    }
     if (ecuio_engine_clear_asks(ch)) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
@@ -435,13 +463,8 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
     if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
         return ECUIO_ENGINE_ONCE;
     }
-    if (ecuio_engine_closing_leaves(e, ch) &&
-        ecuio_engine_session_leave(e, c, &ch.once)) {
-        ecuio_engine_declared_let_go(ch);
-        ch.sessioning = true;
-        return ECUIO_ENGINE_ONCE;
-    }
-    return ECUIO_ENGINE_NONE;
+    return ecuio_engine_closing_leave(e, c) ? ECUIO_ENGINE_ONCE
+                                            : ECUIO_ENGINE_NONE;
 }
 
 /* The driver's check (ecuio_engine_ask_check), once: its row, else
@@ -493,6 +516,26 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
     return asked;
 }
 
+/* due for open module c out of its declared session: a clear's
+ * request, identification and diagnostics items alone, its rows waiting */
+inline int32_t ecuio_engine_due_obd(ecuio_request_engine* e, uint32_t c)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ecuio_engine_clear_asks(ch)) {
+        ecuio_engine_take_clear(ch, c);
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.ident_pending > 0 && ecuio_engine_take_ident(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.diag_pending > 0) {
+        ecuio_engine_diag_skip_unsupported(e, c);
+    }
+    return ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)
+               ? ECUIO_ENGINE_ONCE
+               : ECUIO_ENGINE_NONE;
+}
+
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
  * in the one-shot (its write failed), then for a key, and nothing more
@@ -530,6 +573,9 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     const bool held = ecuio_engine_quiet_held(e, e->chans[c]);
     if (held) {
         ecuio_engine_quiet_settle(e, c);
+    }
+    if (ecuio_engine_obd_holds(e->chans[c])) {
+        return ecuio_engine_due_obd(e, c);
     }
     r = ecuio_engine_due_once(e, c);
     if (r != ECUIO_ENGINE_NONE) {
@@ -582,8 +628,8 @@ inline int32_t ecuio_engine_due_session(ecuio_request_engine* e, uint32_t c,
  * focus's wait between sweeps doesn't hold back. */
 inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
 {
-    return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
-           ch.diag_pending > 0 || ecuio_engine_clear_asks(ch) ||
+    return ch.walking || ch.scan_pending > 0 || ecuio_engine_ident_due(ch) ||
+           ecuio_engine_diag_due(ch) || ecuio_engine_clear_asks(ch) ||
            ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
            ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
            ch.talk.offered || ch.talk.out;
@@ -640,8 +686,8 @@ inline int64_t ecuio_engine_limited_in_us(const ecuio_request_engine* e,
 inline bool ecuio_engine_asks_more(const ecuio_engine_channel& ch, bool items)
 {
     return ch.requests > 0 || items || ch.scan_pending > 0 ||
-           ch.ident_pending > 0 || ch.diag_pending > 0 || ch.walking ||
-           ch.talk.offered || ecuio_engine_clear_asks(ch);
+           ecuio_engine_ident_due(ch) || ecuio_engine_diag_due(ch) ||
+           ch.walking || ch.talk.offered || ecuio_engine_clear_asks(ch);
 }
 
 /* The same under an operation's hold: a talk offered, or a one-shot taken
@@ -650,6 +696,17 @@ inline bool ecuio_engine_hold_asks(const ecuio_engine_channel& ch)
 {
     return ch.talk.offered || ch.talk.out || ch.identifying || ch.diagnosing ||
            ch.scanning || ch.clearing || ch.sessioning;
+}
+
+/* When open module ch out of its declared session next sends: an item or
+ * its return at its floor, else a clear's retry */
+inline int64_t ecuio_engine_obd_at_us(const ecuio_engine_channel& ch)
+{
+    if (ecuio_engine_clear_asks(ch) || ch.ident_pending > 0 ||
+        ch.diag_pending > 0 || (ch.obd_out && !ecuio_engine_obd_work(ch))) {
+        return ch.next_send_us;
+    }
+    return ch.retry_us != 0 ? ch.retry_us : INT64_MAX;
 }
 
 /* next_event_us's moment for open module ch: its reply's deadline, else
@@ -662,6 +719,9 @@ inline int64_t ecuio_engine_open_at_us(const ecuio_request_engine* e,
     if (ch.outstanding != ECUIO_ENGINE_NONE) {
         return window && ch.deadline_us == INT64_MAX ? ch.key.until_us
                                                      : ch.deadline_us;
+    }
+    if (ecuio_engine_obd_holds(ch) && !e->operation_hold) {
+        return ecuio_engine_obd_at_us(ch);
     }
     int64_t at = ch.next_send_us;
     if (e->min_sweep_us > 0 && !ecuio_engine_once_waiting(ch) &&

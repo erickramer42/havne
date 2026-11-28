@@ -246,6 +246,7 @@ inline bool ecuio_engine_session_entry_due(ecuio_request_engine* e, uint32_t c,
         ++ch.generation;
     }
     return ch.session_step == ECUIO_SESSION_STATE_ENTERING &&
+           !ecuio_engine_obd_holds(ch) &&
            ecuio_engine_session_fill(e, c, ECUIO_SESSION_CONTROL,
                                      ch.session_asked);
 }
@@ -262,6 +263,36 @@ inline bool ecuio_engine_keepalive_due(ecuio_request_engine* e, uint32_t c,
            ch.session_step == ECUIO_SESSION_STATE_ENTERED &&
            now_us - ch.last_sent_us >= e->keepalive_us &&
            ecuio_engine_session_fill(e, c, ECUIO_TESTER_PRESENT, 0x00);
+}
+
+/* A loss of channel ch's session at now_us, counted in ADR-0060's window:
+ * true when it is the ECUIO_SESSION_LOSSES_MAX-th there */
+inline bool ecuio_engine_loss_abandons(ecuio_engine_channel& ch, int64_t now_us)
+{
+    if (ch.refused_losses == 0 ||
+        now_us - ch.loss_window_us >= ECUIO_ENGINE_LOSS_WINDOW_US) {
+        ch.refused_losses = 0;
+        ch.loss_window_us = now_us;
+    }
+    return ++ch.refused_losses >= ECUIO_SESSION_LOSSES_MAX;
+}
+
+/* A clear's re-entry refused or unanswered: asked once
+ * more after ECUIO_ENGINE_REENTRY_RETRY_US, and each refusal after that a
+ * loss in the window */
+inline void ecuio_engine_reentry_refused(ecuio_engine_channel& ch,
+                                         int64_t now_us)
+{
+    if (ch.reentry == ECUIO_ENGINE_REENTRY_RETRIED) {
+        if (ecuio_engine_loss_abandons(ch, now_us)) {
+            ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ABANDONED);
+            ch.reentry = ECUIO_ENGINE_REENTRY_NONE;
+            return;
+        }
+        ecuio_engine_count16(ch.session_lost);
+    }
+    ch.reentry = ECUIO_ENGINE_REENTRY_RETRIED;
+    ch.retry_us = now_us + ECUIO_ENGINE_REENTRY_RETRY_US;
 }
 
 /* Settles channel c's session request: a positive reply to 10 xx enters
@@ -297,11 +328,16 @@ inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
         ch.session_fresh = true;
         ch.last_sent_us = now_us;
         ecuio_engine_count16(ch.session_entries);
+        ch.reentry = ECUIO_ENGINE_REENTRY_NONE;
     } else if (outcome == ECUIO_DIAG_REFUSED) {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_REFUSED);
         ch.session_nrc = nrc;
     } else {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_UNANSWERED);
+    }
+    if (outcome != ECUIO_DIAG_ANSWERED &&
+        ch.reentry != ECUIO_ENGINE_REENTRY_NONE) {
+        ecuio_engine_reentry_refused(ch, now_us);
     }
     ++ch.generation;
 }
@@ -362,12 +398,7 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
         }
         return false;
     }
-    if (ch.refused_losses == 0 ||
-        now_us - ch.loss_window_us >= ECUIO_ENGINE_LOSS_WINDOW_US) {
-        ch.refused_losses = 0;
-        ch.loss_window_us = now_us;
-    }
-    if (++ch.refused_losses >= ECUIO_SESSION_LOSSES_MAX) {
+    if (ecuio_engine_loss_abandons(ch, now_us)) {
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_ABANDONED);
         ch.session_nrc = code;
         ++ch.generation;
