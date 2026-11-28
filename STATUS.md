@@ -121,13 +121,16 @@ an issue is resolved it is removed, and its number is not reused.
     delivered 55% of the second module's replies (596 of 1,082 on the
     bus), against 76% on 2026-11-11
     ([2026-11-18-pacing-car](docs/bench-sessions/2026-11-18-pacing-car.md)).
-    **A hold is built, to confirm on the car:** with two or more modules
+    **The hold, confirmed on the car:** with two or more modules
     through the VX, no other module is asked while one module's reply
     comes in segments, and the modules waiting share the bus by signal
     (`?hold=0` switches it off,
     [ADR-0065](docs/adr/0065-car-sized-profile.md)'s appendix). The fake
-    DLL and the pacing model show it losing no reply; no car run has yet.
-    The issue closes after the car run.
+    DLL and the pacing model show it losing no reply, and on the car
+    with the hold on, 0 of 46,005 second-module replies were lost across
+    three modules in 5 minutes, against 29-33% with `?hold=0`
+    ([2026-11-22-car-gate](docs/bench-sessions/2026-11-22-car-gate.md),
+    BENCH prep #35).
 - **#43. On a phone with gesture navigation, leaving the drive view
     takes three back swipes.** The view hides Android's bars, and
     Android spends the first swipe from the edge showing them; the
@@ -181,7 +184,7 @@ For people who want a log or a warning to start from the car's own state. A feat
   - signal files in format 2: functions, comparisons, `if`, `all`, `any` and chains of computed signals up to 8 deep ([ADR-0062](docs/adr/0062-computed-grammar.md));
   - a request budget of 1024 and a default pick of ranked signals, so an OBDb import of a whole car's set keeps its signals ([ADR-0051](docs/adr/0051-signal-files.md), [ADR-0056](docs/adr/0056-analysis-log.md)).
 - **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
-- **Left for a v0.9.x patch:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063).
+- **Left for v0.9.3:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063).
 
 ### v0.9.0: the whole car
 
@@ -207,7 +210,7 @@ The conversation tier is v0.9.1's; v0.9.0 ships what is built.
   - the whole car's read: a vehicle's plugins merged into one set, modules opened by what is picked, the bridge and the store for it, a faster default, sessions a plugin declares, and the simulated car's last step;
   - the conversation tier after security access's attempts and their store: a conversation over the ops table, a plugin's module bound to its session, behind the consent gate (built: the fingerprint, the publisher block, the consent store, `havne-cli plugins consent` and `stream --unlock`, the app's consent screen and unlock dialog, Python's `ConsentStore` and `unlock()`);
   - the safety gates (built: gate 1's dump and its file, and gate 2's light envelope for a dump, with no front end to start one yet), then the flash mechanics, the multi-step plan and a second simulated bootloader, each step proven on the simulated ECU before a car (the owner's go at each).
-- **The release gate:** the consent gate is in: a conversation-tier plugin is data only until a person has consented to its version, pinned by tests. The running app's consent-then-unlock flow over a plugin that unlocks has not been looked at.
+- **The release gate:** the consent gate is in: a conversation-tier plugin is data only until a person has consented to its version, on an ELM327, J2534 or SocketCAN car link (a vcan link asks none), pinned by tests. The running app's consent-then-unlock flow over a plugin that unlocks has not been looked at.
 
 ### The iPhone and Mac downloads
 
