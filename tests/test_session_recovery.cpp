@@ -606,3 +606,26 @@ TEST(SessionRecoveryTest, AMarkThatCantBeSavedCountsNoAttempt)
     EXPECT_EQ(recovery_of(b).attempts, 1u);
     EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
 }
+
+TEST(SessionRecoveryTest, ARecoveryWhoseJournalCantCloseSaysSo)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+    b.script = [&](const Bytes& q, size_t, Answer*) {
+        if (q.size() == 4 && q[0] == 0x31 && q[2] == 0xFF && q[3] == 0x01) {
+            ecuio_operation::journal_test_fail_at = 1;
+        }
+        return false;
+    };
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_RECOVERED);
+    EXPECT_EQ(std::string(v.words).rfind(
+                  "recovered and checked, but the flash journal can't be "
+                  "written: ",
+                  0),
+              0u)
+        << v.words;
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+}

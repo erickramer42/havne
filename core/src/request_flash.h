@@ -68,6 +68,11 @@ inline void flash_words_of(const session_run& o, uint32_t end, char* out,
                       "written and checked, but %.70s: the next flash of this "
                       "module is refused while it says writing",
                       o.journal.words());
+    } else if (end == ECUIO_OPERATION_END_RECOVERED && o.journal.failed()) {
+        std::snprintf(out, cap,
+                      "recovered and checked, but %.70s: the next connect "
+                      "holds this module while it says writing",
+                      o.journal.words());
     } else if (end == ECUIO_OPERATION_END_WRITTEN ||
                end == ECUIO_OPERATION_END_RECOVERED) {
         std::snprintf(out, cap, "%s", "");
