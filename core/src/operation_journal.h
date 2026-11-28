@@ -7,10 +7,15 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace ecuio_files {
+class file_lock;
+}
 
 namespace ecuio_operation {
 
@@ -62,7 +67,7 @@ inline std::atomic<int> journal_test_fail_at{0};
 class journal_writer
 {
 public:
-    journal_writer() = default;
+    journal_writer();
     journal_writer(const journal_writer&) = delete;
     journal_writer& operator=(const journal_writer&) = delete;
     ~journal_writer();
@@ -76,6 +81,8 @@ public:
         return flushed_.load(std::memory_order_acquire);
     }
     bool failed() const { return failed_.load(std::memory_order_acquire); }
+    /* open refused: another writer holds the journal's claim */
+    bool busy() const { return busy_; }
     const char* words() const { return words_; }
     void close(bool remove);
     bool is_open() const { return thread_.joinable(); }
@@ -93,6 +100,8 @@ private:
     std::atomic<uint32_t> posted_{0};
     std::atomic<uint32_t> flushed_{0};
     std::atomic<bool> failed_{false};
+    bool busy_ = false;
+    std::unique_ptr<ecuio_files::file_lock> claim_;
     char words_[160] = {};
     std::thread thread_;
 };

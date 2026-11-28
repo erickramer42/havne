@@ -123,7 +123,8 @@ ecuio_status_t flash_recovery_journal(const ecuio_session* s, session_run& o,
     o.copy_pinned = !j.head.copy.empty();
     o.journal.close(false);
     if (!o.journal.open(folder, std::move(j.head), &why, j.mark)) {
-        return refuse(ECUIO_ERR_LOAD_FAILED, why);
+        return refuse(
+            o.journal.busy() ? ECUIO_ERR_IN_USE : ECUIO_ERR_LOAD_FAILED, why);
     }
     o.recover = true;
     return ECUIO_OK;
@@ -220,7 +221,8 @@ ecuio_status_t flash_journal(const ecuio_session* s, session_run& o,
     o.copy_pinned = copy != nullptr;
     o.journal.close(false);
     if (!o.journal.open(folder, std::move(h), &why)) {
-        return refuse(ECUIO_ERR_LOAD_FAILED, why);
+        return refuse(
+            o.journal.busy() ? ECUIO_ERR_IN_USE : ECUIO_ERR_LOAD_FAILED, why);
     }
     return ECUIO_OK;
 }

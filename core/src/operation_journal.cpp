@@ -278,6 +278,8 @@ journal_found journal_load(const std::string& folder, uint32_t rx,
     return journal_read(folder, rx, out, why);
 }
 
+journal_writer::journal_writer() = default;
+
 journal_writer::~journal_writer()
 {
     try {
@@ -304,9 +306,24 @@ bool journal_writer::open(const std::string& folder, journal_head head,
                           std::string* why, const journal_mark& first)
 {
     try {
+        busy_ = false;
         path_ = journal_path(folder, head.rx);
+        if (claim_ == nullptr) {
+            claim_ = std::make_unique<ecuio_files::file_lock>();
+        }
+        const ecuio_files::lock_got got =
+            ecuio_files::lock_file(path_ + ".lock", 0, claim_.get(), why);
+        if (got != ecuio_files::lock_got::locked) {
+            busy_ = got == ecuio_files::lock_got::busy;
+            *why = busy_ ? "another session is flashing or recovering this "
+                           "module from this folder"
+                         : "the flash journal can't be claimed: " + *why;
+            path_.clear();
+            return false;
+        }
         head_ = std::move(head);
         if (!write(first, why)) {
+            claim_->release();
             *why = "the flash journal can't be written: " + *why;
             return false;
         }
@@ -319,6 +336,9 @@ bool journal_writer::open(const std::string& folder, journal_head head,
     } catch (const std::exception&) {
         if (first.state == journal_state::ready) {
             ecuio_files::remove_file(path_);
+        }
+        if (claim_ != nullptr) {
+            claim_->release();
         }
         *why = "the flash journal's writer can't start";
         return false;
@@ -380,6 +400,9 @@ void journal_writer::close(bool remove)
         ecuio_files::remove_file(path_);
     }
     path_.clear();
+    if (claim_ != nullptr) {
+        claim_->release();
+    }
 }
 
 } // namespace ecuio_operation

@@ -629,3 +629,23 @@ TEST(SessionRecoveryTest, ARecoveryWhoseJournalCantCloseSaysSo)
         << v.words;
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
 }
+
+TEST(SessionRecoveryTest, ASecondSessionCantWriteAJournalAnotherHolds)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    Bench a;
+    ASSERT_NO_FATAL_FAILURE(reconnect(a, j, 0));
+    Bench b;
+    b.folder.path = a.folder.path;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+    ASSERT_EQ(recover(a), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(recover(b), ECUIO_ERR_IN_USE);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "another session is flashing or recovering this module "
+                 "from this folder");
+    EXPECT_EQ(recovery_of(b).attempts, 0u);
+    ASSERT_EQ(ecuio_session_close(a.s), ECUIO_OK);
+    ASSERT_EQ(recover(b), ECUIO_OK)
+        << "a's close lets the claim go: " << ecuio_last_error_detail();
+    EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
+}

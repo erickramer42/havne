@@ -291,7 +291,11 @@ struct Bench {
         std::error_code ec;
         for (const auto& entry :
              dump_file_test::fs::directory_iterator(folder.path, ec)) {
-            names.push_back(entry.path().filename().generic_u8string());
+            const std::string name = entry.path().filename().generic_u8string();
+            if (name.size() < 18 ||
+                name.compare(name.size() - 18, 18, ".havnejournal.lock") != 0) {
+                names.push_back(name);
+            }
         }
         std::sort(names.begin(), names.end());
         return names;
