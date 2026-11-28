@@ -7,6 +7,7 @@
 #include "conversation_bind.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
+#include "error_detail.h"
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include <algorithm>
 #include <cstdio>
@@ -252,6 +253,30 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
         return ECUIO_ERR_SESSION_CLOSED;
     }
     session->diag_requests.fetch_add(1);
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_diagnostics_channel(ecuio_session_t* session,
+                                                      uint32_t channel)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    uint32_t count = 0;
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        count = session->support_count;
+    }
+    if (channel >= count || channel >= ECUIO_MAX_CHANNELS) {
+        ecuio_detail_set("channel %u: the session has %u modules",
+                         static_cast<unsigned>(channel),
+                         static_cast<unsigned>(count));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    session->diag_channel_requests.fetch_or(1u << channel);
     return ECUIO_OK;
 }
 

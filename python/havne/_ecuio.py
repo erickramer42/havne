@@ -2439,6 +2439,7 @@ FUNCTIONS = {
     'ecuio_session_operation_cancel': (c_int, [POINTER(ecuio_session_t)]),  # operation.h
     'ecuio_session_operation_start': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_request_t), c_char_p]),  # operation.h
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h
+    'ecuio_session_read_diagnostics_channel': (c_int, [POINTER(ecuio_session_t), c_uint32]),  # core.h
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h
     'ecuio_session_security_store': (c_int, [POINTER(ecuio_session_t), c_char_p, c_char_p]),  # core.h

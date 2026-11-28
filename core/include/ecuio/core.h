@@ -1135,6 +1135,13 @@ ecuio_status_t ecuio_session_get_channel_diagnostics(
  * close. */
 ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
 
+/* ecuio_session_read_diagnostics for channel `channel` alone.
+ * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past module_count. */
+ecuio_status_t ecuio_session_read_diagnostics_channel(
+    ecuio_session_t* session,
+    uint32_t channel
+);
+
 /* Clears channel `channel`'s trouble codes (ADR-0038): SAE J1979 Service
  * 04, which on the ECU that obeys it also erases the freeze frame, turns
  * the MIL off and sets the readiness monitors back to incomplete;

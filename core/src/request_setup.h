@@ -562,9 +562,14 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
                                     ecuio_request_engine* e, uint32_t& seen)
 {
     const uint32_t asked = session->diag_requests.load();
-    if (asked != seen) {
+    const uint32_t channels = session->diag_channel_requests.exchange(0);
+    const bool moved = asked != seen;
+    if (moved) {
         seen = asked;
         ecuio_engine_diagnose_again(e);
+    }
+    ecuio_engine_diagnose_channels_again(e, channels);
+    if (moved || channels != 0) {
         ecuio_engine_visit_closed(e);
     }
 }

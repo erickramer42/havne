@@ -316,19 +316,39 @@ inline void ecuio_engine_diagnose(ecuio_request_engine* e,
  * on. A channel mid-read, mid-clear, or never asked, is left as it is.
  * A quiet step's item out is no read: that channel starts over at the
  * item's settle, so its reply settles no slot of the new list. */
+inline void ecuio_engine_diagnose_channel_again(ecuio_request_engine* e,
+                                                uint32_t c)
+{
+    if (c >= e->chan_count) {
+        return;
+    }
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.diag_count == 0 || ch.diag_pending > 0 ||
+        ecuio_engine_clear_on(ch)) {
+        return;
+    }
+    if (ch.diagnosing) {
+        ch.diag_again = ch.diag_again || ch.diag_step;
+        return;
+    }
+    ecuio_engine_diag_restart(ch);
+}
+
+/* bit c: channel c */
+inline void ecuio_engine_diagnose_channels_again(ecuio_request_engine* e,
+                                                 uint32_t channels)
+{
+    for (uint32_t c = 0; c < e->chan_count && c < 32; ++c) {
+        if (((channels >> c) & 1u) != 0) {
+            ecuio_engine_diagnose_channel_again(e, c);
+        }
+    }
+}
+
 inline void ecuio_engine_diagnose_again(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
-        ecuio_engine_channel& ch = e->chans[c];
-        if (ch.diag_count == 0 || ch.diag_pending > 0 ||
-            ecuio_engine_clear_on(ch)) {
-            continue;
-        }
-        if (ch.diagnosing) {
-            ch.diag_again = ch.diag_again || ch.diag_step;
-            continue;
-        }
-        ecuio_engine_diag_restart(ch);
+        ecuio_engine_diagnose_channel_again(e, c);
     }
 }
 

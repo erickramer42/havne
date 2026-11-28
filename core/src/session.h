@@ -226,6 +226,7 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
+    std::atomic<uint32_t> diag_channel_requests{0}; /* bit c: channel c */
     /* ecuio_session_clear_diagnostics_set's request, from any thread,
      * under clear_mutex: its targets and flags, the requests made, and
      * the last one the worker has seen to its end
