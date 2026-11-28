@@ -171,6 +171,7 @@ ECUIO_CONSENT_LINE_STABILITY = 11
 ECUIO_CONSENT_LINE_WARRANTY = 17
 ECUIO_CONSENT_LINE_WARRANTY_READ = 18
 ECUIO_CONSENT_LINE_WRITE_ON_ASK = 6
+ECUIO_CONSENT_RECORD_FILE = 1
 ECUIO_CONSENT_SET_CONVERSATION = 1
 ECUIO_CONSENT_SET_READ = 2
 ECUIO_CONSENT_SET_WRITE = 4
@@ -1352,6 +1353,7 @@ ecuio_consent_record_t._fields_ = [
     ('fingerprint', (c_uint8 * 32)),
     ('terms_sha256', (c_uint8 * 32)),
     ('publisher', (c_char * 128)),
+    ('name', (c_char * 128)),
     ('reserved', (c_uint32 * 8)),
 ]
 ecuio_csv_guess_t._fields_ = [
@@ -2253,6 +2255,7 @@ FUNCTIONS = {
     'ecuio_consent_store_find': (c_int, [POINTER(ecuio_consent_store_t), POINTER(c_uint8), POINTER(ecuio_consent_record_t)]),  # plugin.h
     'ecuio_consent_store_get': (c_int, [POINTER(ecuio_consent_store_t), c_uint32, POINTER(ecuio_consent_record_t)]),  # plugin.h
     'ecuio_consent_store_give': (c_int, [POINTER(ecuio_consent_store_t), POINTER(ecuio_plugin_t), c_uint64]),  # plugin.h
+    'ecuio_consent_store_give_file': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, c_size_t, c_char_p, c_uint64]),  # plugin.h
     'ecuio_consent_store_latest': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(ecuio_consent_record_t)]),  # plugin.h
     'ecuio_consent_store_open': (c_int, [c_char_p, POINTER(POINTER(ecuio_consent_store_t))]),  # plugin.h
     'ecuio_consent_store_withdraw': (c_int, [POINTER(ecuio_consent_store_t), c_char_p, POINTER(c_uint8)]),  # plugin.h

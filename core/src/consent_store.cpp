@@ -75,9 +75,28 @@ void digest_of(const Value& v, const char* what, uint8_t out[32])
     }
 }
 
+record file_record_of(const Value& v)
+{
+    only_keys(v, {"file", "fingerprint", "given_utc"}, "a file's record");
+    record r;
+    r.file = true;
+    r.name = ecuio_plugin_loader::plain_of(*v.find("file"), 1,
+                                           ECUIO_PLUGIN_PUBLISHER_NAME_MAX,
+                                           "a record's file name", false);
+    digest_of(needed(v, "fingerprint", "a record needs \"fingerprint\""),
+              "a record's fingerprint", r.fingerprint);
+    r.given_utc =
+        whole_of(needed(v, "given_utc", "a record needs \"given_utc\""), 1,
+                 kStoreMaxUtc, "a record's given_utc");
+    return r;
+}
+
 record record_of(const Value& v)
 {
     expect(v, Type::object, "a record");
+    if (v.find("file") != nullptr) {
+        return file_record_of(v);
+    }
     only_keys(
         v, {"id", "version", "fingerprint", "terms", "publisher", "given_utc"},
         "a record");
@@ -314,6 +333,14 @@ std::string store_text(const std::vector<record>& records)
     for (const record& r : records) {
         Value entry;
         entry.type = Type::object;
+        if (r.file) {
+            entry.members.push_back(member("file", string_of(r.name)));
+            entry.members.push_back(member(
+                "fingerprint", string_of(ecuio_sha256::hex(r.fingerprint))));
+            entry.members.push_back(member("given_utc", number(r.given_utc)));
+            list.items.push_back(std::move(entry));
+            continue;
+        }
         entry.members.push_back(member("id", string_of(r.id)));
         entry.members.push_back(member("version", string_of(r.version)));
         entry.members.push_back(
@@ -329,6 +356,32 @@ std::string store_text(const std::vector<record>& records)
     root.members.push_back(member(kFormatKey, number(kStoreFormat)));
     root.members.push_back(member("entries", std::move(list)));
     return ecuio_json::write(root);
+}
+
+store_io record_judged(const record& r, std::string* why)
+{
+    try {
+        const std::string text = store_text({r});
+        Value root;
+        ecuio_json::Error error;
+        if (!ecuio_json::parse(text.data(), text.size(), &root, &error)) {
+            if (error.out_of_memory) {
+                return store_io::out_of_memory;
+            }
+            *why = "the name isn't UTF-8 text";
+            return store_io::refused;
+        }
+        std::vector<record> list;
+        try {
+            read_root(root, list);
+        } catch (const ecuio_sf::refused& e) {
+            *why = e.words;
+            return store_io::refused;
+        }
+        return store_io::ok;
+    } catch (const std::bad_alloc&) {
+        return store_io::out_of_memory;
+    }
 }
 
 store_io store_load(const std::string& path, store* out, std::string* why)

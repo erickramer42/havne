@@ -52,6 +52,8 @@ struct record {
     uint8_t terms_sha256[32] = {};
     std::string publisher; /* the publisher's name */
     int64_t given_utc = 0; /* 1 to kStoreMaxUtc */
+    bool file = false;     /* a signal file's: name and fingerprint only */
+    std::string name;
 };
 
 struct store {
@@ -75,6 +77,9 @@ store_io store_read(const char* bytes, size_t size, std::vector<record>* out,
 
 /* The records' text, which store_read reads back. Throws bad_alloc. */
 std::string store_text(const std::vector<record>& records);
+
+/* r as store_read reads it back, the words without a line or column */
+store_io record_judged(const record& r, std::string* why);
 
 /* The file at path into *out, emptied first; no such file is ok and
  * empty */

@@ -33,10 +33,16 @@ void check_records(const std::vector<record>& list)
     check(list.size() <= kStoreMaxEntries);
     for (size_t k = 0; k < list.size(); ++k) {
         const record& r = list[k];
-        check(!r.id.empty() && r.id.size() <= 31);
-        check(!r.version.empty() && r.version.size() <= 15);
-        check(!r.publisher.empty() && r.publisher.size() <= 127);
-        for (const char c : r.publisher) {
+        const std::string& plain = r.file ? r.name : r.publisher;
+        if (r.file) {
+            check(r.id.empty() && r.version.empty() && r.publisher.empty());
+        } else {
+            check(!r.id.empty() && r.id.size() <= 31);
+            check(!r.version.empty() && r.version.size() <= 15);
+            check(r.name.empty());
+        }
+        check(!plain.empty() && plain.size() <= 127);
+        for (const char c : plain) {
             check(static_cast<unsigned char>(c) >= 0x20 && c != 0x7F);
         }
         check(r.given_utc >= 1 && r.given_utc <= kStoreMaxUtc);
@@ -75,6 +81,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         const record& b = back[k];
         check(a.id == b.id && a.version == b.version &&
               a.publisher == b.publisher && a.given_utc == b.given_utc &&
+              a.file == b.file && a.name == b.name &&
               memcmp(a.fingerprint, b.fingerprint, 32) == 0 &&
               memcmp(a.terms_sha256, b.terms_sha256, 32) == 0);
     }

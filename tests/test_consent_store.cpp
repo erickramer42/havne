@@ -10,6 +10,7 @@
 
 #include "consent_store.h"
 #include "folder_files.h"
+#include "sha256.h"
 #include "partial_left.h"
 #include "security_store_support.h" /* Folder: a folder for the case */
 
@@ -145,6 +146,21 @@ std::string record_text(const std::string& fingerprint,
            fingerprint + R"(", "terms": ")" + std::string(64, 'b') +
            R"(", "publisher": ")" + publisher +
            R"(", "given_utc": 1795132800)" + extra + "}";
+}
+
+const std::string kOwnFile =
+    R"({"havne_signals": 1, "name": "Own", "source": {"name": "t"},)"
+    R"( "ecus": [{"id": "tcm", "rx": "7E9", "session": "extended"}],)"
+    R"( "signals": [{"key": "a", "name": "A", "read": {"service": "22",)"
+    R"( "number": "D100"}, "field": {"byte": 0}}]})";
+
+std::string digest_of(const std::string& bytes)
+{
+    uint8_t d[32];
+    ecuio_sha256::hasher h;
+    h.add(bytes.data(), bytes.size());
+    h.finish(d);
+    return std::string(reinterpret_cast<const char*>(d), 32);
 }
 
 std::string store_with(const std::string& records)
@@ -287,6 +303,153 @@ TEST(ConsentStoreTest, AWithdrawTakesOneOrEveryRecordOfAnId)
 
     const Store again = open_store(path_in(f));
     EXPECT_EQ(count_of(again.get()), 1u);
+}
+
+TEST(ConsentStoreTest, AnOwnFilesConsentIsARecordOfItsBytes)
+{
+    Folder f;
+    const std::string print = digest_of(kOwnFile);
+    const Plugin p = plugin("1.0.0");
+    {
+        const Store s = open_store(path_in(f));
+        ASSERT_EQ(ecuio_consent_store_give_file(s.get(), kOwnFile.data(),
+                                                kOwnFile.size(), "My car.json",
+                                                kUtc),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_EQ(ecuio_consent_store_give(s.get(), p.get(), kUtc + 5),
+                  ECUIO_OK);
+    }
+    const Store s = open_store(path_in(f));
+    ASSERT_EQ(count_of(s.get()), 2u);
+    ecuio_consent_record_t r = blank();
+    ASSERT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print), &r), ECUIO_OK);
+    EXPECT_EQ(r.flags, ECUIO_CONSENT_RECORD_FILE);
+    EXPECT_EQ(r.given_utc, kUtc);
+    EXPECT_STREQ(r.name, "My car.json");
+    EXPECT_STREQ(r.id, "");
+    EXPECT_STREQ(r.version, "");
+    EXPECT_STREQ(r.publisher, "");
+    for (const uint8_t x : r.terms_sha256) {
+        EXPECT_EQ(x, 0u);
+    }
+    for (const uint32_t x : r.reserved) {
+        EXPECT_EQ(x, 0u);
+    }
+    r = blank();
+    ASSERT_EQ(ecuio_consent_store_get(s.get(), 1, &r), ECUIO_OK);
+    EXPECT_STREQ(r.name, "My car.json") << "listed, older than the plugin";
+    r = blank();
+    ASSERT_EQ(
+        ecuio_consent_store_find(s.get(), bytes_of(print_of(p.get())), &r),
+        ECUIO_OK);
+    EXPECT_EQ(r.flags, 0u);
+    EXPECT_STREQ(r.name, "");
+
+    ASSERT_EQ(ecuio_consent_store_give_file(s.get(), kOwnFile.data(),
+                                            kOwnFile.size(), "Renamed.json",
+                                            kUtc + 60),
+              ECUIO_OK);
+    r = blank();
+    ASSERT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print), &r), ECUIO_OK);
+    EXPECT_EQ(r.given_utc, kUtc) << "the first second stands";
+    EXPECT_STREQ(r.name, "My car.json");
+    EXPECT_EQ(ecuio_consent_store_latest(s.get(), "", &r),
+              ECUIO_ERR_CONSENT_REQUIRED)
+        << "a file's record is no plugin's";
+
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), "talker", bytes_of(print)),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), "", nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), nullptr, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ASSERT_EQ(ecuio_consent_store_withdraw(s.get(), nullptr, bytes_of(print)),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_consent_store_find(s.get(), bytes_of(print), &r),
+              ECUIO_ERR_CONSENT_REQUIRED);
+    EXPECT_EQ(count_of(s.get()), 1u);
+    EXPECT_EQ(count_of(open_store(path_in(f)).get()), 1u);
+}
+
+TEST(ConsentStoreTest, AGiveFileIsRefusedWhatItCantKeep)
+{
+    Folder f;
+    const Store s = open_store(path_in(f));
+    const auto refusal = [&](const std::string& bytes, const char* name,
+                             uint64_t utc = kUtc) {
+        EXPECT_EQ(ecuio_consent_store_give_file(s.get(), bytes.data(),
+                                                bytes.size(), name, utc),
+                  ECUIO_ERR_INVALID_ARGUMENT)
+            << name;
+        return std::string(ecuio_last_error_detail());
+    };
+    const std::string unread = refusal("not json", "a.json");
+    EXPECT_EQ(unread.rfind("the file doesn't read as a signal file (line 1", 0),
+              0u)
+        << unread;
+    std::string silent = kOwnFile;
+    silent.replace(silent.find(R"(, "session": "extended")"),
+                   std::string(R"(, "session": "extended")").size(), "");
+    EXPECT_EQ(refusal(silent, "a.json"),
+              "the file declares no module's session, so there is nothing "
+              "to consent to");
+
+    ecuio_signal_file_t* own = nullptr;
+    ecuio_signal_file_t* other = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(kOwnFile.data(), kOwnFile.size(), &own),
+              ECUIO_OK);
+    std::string second = silent;
+    second.replace(second.find("D100"), 4, "D200");
+    second.replace(second.find(R"("key": "a")"), 10, R"("key": "b")");
+    second.replace(second.find(R"("name": "Own")"), 13, R"("name": "Other")");
+    ASSERT_EQ(ecuio_signal_file_load(second.data(), second.size(), &other),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_file_t* parts[] = {own, other};
+    ecuio_signal_file_t* merged = nullptr;
+    ASSERT_EQ(ecuio_signal_file_merge(parts, 2, nullptr, &merged), ECUIO_OK)
+        << ecuio_last_error_detail();
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(merged, &length);
+    EXPECT_EQ(refusal(std::string(text, length), "a.json"),
+              "the file is a merged set: a consent goes to the parts that "
+              "declare its sessions");
+    ecuio_signal_file_free(merged);
+    ecuio_signal_file_free(other);
+    ecuio_signal_file_free(own);
+
+    EXPECT_EQ(refusal(kOwnFile, ""),
+              "a record's file name is 0 bytes; it takes 1 to 127");
+    EXPECT_NE(refusal(kOwnFile, "a\tb").find("control character"),
+              std::string::npos);
+    EXPECT_EQ(refusal(kOwnFile, std::string(128, 'n').c_str()),
+              "a record's file name is 128 bytes; it takes 1 to 127");
+    EXPECT_EQ(refusal(kOwnFile, "\xC3"), "the name isn't UTF-8 text");
+    EXPECT_EQ(refusal(kOwnFile, "a.json", 0),
+              "the second is outside 1970 to 9999");
+    EXPECT_EQ(
+        ecuio_consent_store_give_file(s.get(), kOwnFile.data(), kOwnFile.size(),
+                                      std::string(127, 'n').c_str(), kUtc),
+        ECUIO_OK)
+        << "127 bytes is the bound";
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), nullptr,
+                                           bytes_of(digest_of(kOwnFile))),
+              ECUIO_OK);
+
+    EXPECT_EQ(ecuio_consent_store_give_file(nullptr, kOwnFile.data(),
+                                            kOwnFile.size(), "a.json", kUtc),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_consent_store_give_file(s.get(), nullptr, 4, "a.json", kUtc),
+        ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_consent_store_give_file(s.get(), kOwnFile.data(),
+                                            kOwnFile.size(), nullptr, kUtc),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(
+        ecuio_consent_store_give_file(s.get(), nullptr, 0, "a.json", kUtc),
+        ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(count_of(s.get()), 0u);
 }
 
 TEST(ConsentStoreTest, AFileThatDoesntReadIsRefusedInWordsThatNameNoPath)
@@ -625,16 +788,21 @@ TEST(ConsentStoreTest, OutOfMemoryAnywhereIsAnsweredNotThrown)
         fail_new_on_this_thread(n);
         ecuio_status_t open = ecuio_consent_store_open(path.c_str(), &s);
         ecuio_status_t give = ECUIO_ERR_OUT_OF_MEMORY;
+        ecuio_status_t file = ECUIO_ERR_OUT_OF_MEMORY;
         ecuio_status_t take = ECUIO_ERR_OUT_OF_MEMORY;
         if (open == ECUIO_OK) {
             give = ecuio_consent_store_give(s, v2.get(), kUtc);
             if (give == ECUIO_OK) {
+                file = ecuio_consent_store_give_file(
+                    s, kOwnFile.data(), kOwnFile.size(), "Own.json", kUtc);
+            }
+            if (file == ECUIO_OK) {
                 take =
                     ecuio_consent_store_withdraw(s, "talker", bytes_of(print1));
             }
         }
         fail_new_on_this_thread(0);
-        for (const ecuio_status_t st : {open, give, take}) {
+        for (const ecuio_status_t st : {open, give, file, take}) {
             ASSERT_TRUE(st == ECUIO_OK || st == ECUIO_ERR_OUT_OF_MEMORY)
                 << n << ": " << st;
         }

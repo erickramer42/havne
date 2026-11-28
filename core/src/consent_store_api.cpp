@@ -15,6 +15,8 @@
 #include "error_detail.h"
 #include "path_registry.h"
 #include "plugin_loader.h"
+#include "sha256.h"
+#include "signal_file_build.h"
 
 #include <algorithm>
 #include <cstring>
@@ -54,6 +56,8 @@ void fill(const record& r, ecuio_consent_record_t* out)
     std::memcpy(f.fingerprint, r.fingerprint, sizeof f.fingerprint);
     std::memcpy(f.terms_sha256, r.terms_sha256, sizeof f.terms_sha256);
     copy_text(f.publisher, sizeof f.publisher, r.publisher);
+    copy_text(f.name, sizeof f.name, r.name);
+    f.flags = r.file ? ECUIO_CONSENT_RECORD_FILE : 0u;
     *out = f;
 }
 
@@ -198,7 +202,7 @@ ecuio_status_t ecuio_consent_store_latest(const ecuio_consent_store_t* store,
     refresh_quietly(o);
     try {
         for (const record* r : newest_first(o.store)) {
-            if (r->id == id) {
+            if (!r->file && r->id == id) {
                 fill(*r, out);
                 return ECUIO_OK;
             }
@@ -246,6 +250,77 @@ ecuio_status_t ecuio_consent_store_get(const ecuio_consent_store_t* store,
     return ECUIO_OK;
 }
 
+} // extern "C"
+
+namespace {
+
+/* Under the owner's mutex, refreshed; a fingerprint given keeps its first */
+ecuio_status_t add_record(consent_owner& o, record r)
+{
+    if (ecuio_consent::store_find(o.store, r.fingerprint) != nullptr) {
+        return ECUIO_OK;
+    }
+    if (o.store.records.size() >= ecuio_consent::kStoreMaxEntries) {
+        ecuio_detail_set("the consent store holds %u consents and has no "
+                         "room: withdraw one first",
+                         static_cast<unsigned>(o.store.records.size()));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    ecuio_consent::store next = o.store;
+    next.records.push_back(std::move(r));
+    std::string why;
+    const store_io io = ecuio_consent::store_save(o.path, &next, &why);
+    if (io != store_io::ok && next.on_disk == o.store.on_disk) {
+        return refused(io, why);
+    }
+    o.store = std::move(next);
+    return io == store_io::ok ? ECUIO_OK : refused(io, why);
+}
+
+bool utc_ok(uint64_t utc)
+{
+    if (utc < 1 || utc > static_cast<uint64_t>(ecuio_consent::kStoreMaxUtc)) {
+        ecuio_detail_set("the second is outside 1970 to 9999");
+        return false;
+    }
+    return true;
+}
+
+ecuio_status_t own_declaring(const char* bytes, size_t length)
+{
+    ecuio_signal_file_t* f = nullptr;
+    const ecuio_status_t loaded = ecuio_signal_file_load(bytes, length, &f);
+    if (loaded != ECUIO_OK) {
+        if (loaded == ECUIO_ERR_INVALID_ARGUMENT) {
+            const std::string words = ecuio_last_error_detail();
+            ecuio_detail_set("the file doesn't read as a signal file (%s)",
+                             words.c_str());
+        }
+        return loaded;
+    }
+    const bool merged = !f->parts.empty();
+    bool declares = false;
+    for (const ecuio_channel_decl_t& c : f->channels) {
+        declares = declares || c.session == ECUIO_CHANNEL_SESSION_EXTENDED;
+    }
+    ecuio_signal_file_free(f);
+    if (merged) {
+        ecuio_detail_set("the file is a merged set: a consent goes to the "
+                         "parts that declare its sessions");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (!declares) {
+        ecuio_detail_set("the file declares no module's session, so there "
+                         "is nothing to consent to");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return ECUIO_OK;
+}
+
+} // namespace
+
+extern "C" {
+
 ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
                                         const ecuio_plugin_t* plugin,
                                         uint64_t utc)
@@ -259,8 +334,7 @@ ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
                          "be given to it: it reads signals only");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    if (utc < 1 || utc > static_cast<uint64_t>(ecuio_consent::kStoreMaxUtc)) {
-        ecuio_detail_set("the second is outside 1970 to 9999");
+    if (!utc_ok(utc)) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     consent_owner& o = *store->ref.get();
@@ -269,17 +343,7 @@ ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
     if (fresh != ECUIO_OK) {
         return fresh;
     }
-    if (ecuio_consent::store_find(o.store, plugin->fingerprint) != nullptr) {
-        return ECUIO_OK; /* given already: the first second stands */
-    }
-    if (o.store.records.size() >= ecuio_consent::kStoreMaxEntries) {
-        ecuio_detail_set("the consent store holds %u consents and has no "
-                         "room: withdraw one first",
-                         static_cast<unsigned>(o.store.records.size()));
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
     try {
-        ecuio_consent::store next = o.store;
         record r;
         r.id = plugin->id;
         r.version = plugin->version;
@@ -287,14 +351,52 @@ ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
         std::memcpy(r.terms_sha256, plugin->publisher->terms_sha256, 32);
         r.publisher = plugin->publisher->name;
         r.given_utc = static_cast<int64_t>(utc);
-        next.records.push_back(std::move(r));
+        return add_record(o, std::move(r));
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_consent_store_give_file(ecuio_consent_store_t* store,
+                                             const char* bytes, size_t length,
+                                             const char* name, uint64_t utc)
+{
+    ecuio_detail_clear();
+    if (store == nullptr || name == nullptr ||
+        (bytes == nullptr && length > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (!utc_ok(utc)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    try {
+        record r;
+        r.file = true;
+        r.name = name;
+        ecuio_sha256::hasher h;
+        h.add(bytes, length);
+        h.finish(r.fingerprint);
+        r.given_utc = static_cast<int64_t>(utc);
         std::string why;
-        const store_io io = ecuio_consent::store_save(o.path, &next, &why);
-        if (io != store_io::ok && next.on_disk == o.store.on_disk) {
-            return refused(io, why);
+        const store_io judged = ecuio_consent::record_judged(r, &why);
+        if (judged == store_io::out_of_memory) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
         }
-        o.store = std::move(next); /* the new file stands */
-        return io == store_io::ok ? ECUIO_OK : refused(io, why);
+        if (judged != store_io::ok) {
+            ecuio_detail_set("%s", why.c_str());
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        const ecuio_status_t own = own_declaring(bytes, length);
+        if (own != ECUIO_OK) {
+            return own;
+        }
+        consent_owner& o = *store->ref.get();
+        const std::lock_guard<std::mutex> hold(o.mutex);
+        const ecuio_status_t fresh = refresh(o);
+        if (fresh != ECUIO_OK) {
+            return fresh;
+        }
+        return add_record(o, std::move(r));
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -305,7 +407,7 @@ ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
                                             const uint8_t* fingerprint)
 {
     ecuio_detail_clear();
-    if (store == nullptr || id == nullptr) {
+    if (store == nullptr || (id == nullptr && fingerprint == nullptr)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     consent_owner& o = *store->ref.get();
@@ -317,7 +419,7 @@ ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
     try {
         ecuio_consent::store next = o.store;
         const auto gone = [&](const record& r) {
-            return r.id == id &&
+            return (id == nullptr || (!r.file && r.id == id)) &&
                    (fingerprint == nullptr ||
                     std::memcmp(r.fingerprint, fingerprint, 32) == 0);
         };

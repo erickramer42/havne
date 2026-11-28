@@ -35,8 +35,8 @@
 # vehicles, addresses, levels and seconds made up, and a store of as
 # many of the longest entry as one holds, and of one more.
 # fuzz_consent_store's are stores with no record, one, two of one id,
-# a record at each bound, a fingerprint twice, and as many of the longest
-# record as one holds and one more.
+# a record at each bound, a fingerprint twice, an own file's record, and
+# as many of the longest record as one holds and one more.
 # fuzz_dump_file's are dump files (seeds_dump.py's dump_seeds()): one range, as many as a
 # file holds, a record at its bounds, each behind the byte that parses it
 # from memory and the bytes that put it on the disk under each name, and
@@ -736,6 +736,8 @@ def main(argv):
         "versions": [record, dict(record, version="1.1.0", fingerprint="c" * 64)],
         "widest": [widest],
         "twice": [record, record],
+        "file": [record, {"file": "My car.json", "fingerprint": "d" * 64,
+                          "given_utc": 1795132900}],
         "full": longest[:256],
         "past_full": longest,
     }.items():

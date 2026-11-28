@@ -219,20 +219,23 @@ ecuio_status_t ecuio_plugin_terms(const ecuio_plugin_t* plugin, char* buf,
  */
 typedef struct ecuio_consent_store ecuio_consent_store_t; /* opaque */
 
+#define ECUIO_CONSENT_RECORD_FILE 0x1u /* an own file's: name, fingerprint */
+
 typedef struct ecuio_consent_record {
     uint32_t struct_size;     /* the caller's sizeof, at least this one's */
-    uint32_t flags;           /* zero */
+    uint32_t flags;           /* ECUIO_CONSENT_RECORD_* */
     uint64_t given_utc;       /* the second consent was given */
     char id[32];              /* the plugin's id */
     char version[16];         /* its X.Y.Z */
-    uint8_t fingerprint[32];  /* ecuio_plugin_fingerprint's */
+    uint8_t fingerprint[32];  /* a plugin's, or an own file's SHA-256 */
     uint8_t terms_sha256[32]; /* the terms consented to */
     char publisher[128];      /* the publisher's name */
+    char name[128];           /* the own file's */
     uint32_t reserved[8];     /* zero; ABI growth space */
 } ecuio_consent_record_t;
 
 #if defined(__cplusplus)
-static_assert(sizeof(ecuio_consent_record_t) == 288,
+static_assert(sizeof(ecuio_consent_record_t) == 416,
               "ecuio_consent_record_t size is ABI");
 static_assert(offsetof(ecuio_consent_record_t, given_utc) == 8,
               "consent record given_utc offset is ABI");
@@ -240,11 +243,15 @@ static_assert(offsetof(ecuio_consent_record_t, fingerprint) == 64,
               "consent record fingerprint offset is ABI");
 static_assert(offsetof(ecuio_consent_record_t, publisher) == 128,
               "consent record publisher offset is ABI");
+static_assert(offsetof(ecuio_consent_record_t, name) == 256,
+              "consent record name offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(sizeof(ecuio_consent_record_t) == 288,
+_Static_assert(sizeof(ecuio_consent_record_t) == 416,
                "ecuio_consent_record_t size is ABI");
 _Static_assert(offsetof(ecuio_consent_record_t, publisher) == 128,
                "consent record publisher offset is ABI");
+_Static_assert(offsetof(ecuio_consent_record_t, name) == 256,
+               "consent record name offset is ABI");
 #endif
 
 /* The store at path (UTF-8), read here. ECUIO_ERR_NULL_ARGUMENT for a
@@ -269,8 +276,7 @@ ecuio_status_t ecuio_consent_store_close(ecuio_consent_store_t* store);
 ecuio_status_t ecuio_consent_store_find(const ecuio_consent_store_t* store,
                                         const uint8_t* fingerprint,
                                         ecuio_consent_record_t* out);
-/* The newest record of the plugin id (a version change's screen reads
- * it): ECUIO_ERR_CONSENT_REQUIRED for none */
+/* The newest plugin record of id: ECUIO_ERR_CONSENT_REQUIRED for none */
 ecuio_status_t ecuio_consent_store_latest(const ecuio_consent_store_t* store,
                                           const char* id,
                                           ecuio_consent_record_t* out);
@@ -290,10 +296,11 @@ ecuio_status_t ecuio_consent_store_get(const ecuio_consent_store_t* store,
 ecuio_status_t ecuio_consent_store_give(ecuio_consent_store_t* store,
                                         const ecuio_plugin_t* plugin,
                                         uint64_t utc);
-/* Withdraws the consent to fingerprint, or with fingerprint NULL every
- * consent to the plugin id, saved before it returns.
- * ECUIO_ERR_INVALID_ARGUMENT for none held; ECUIO_ERR_LOAD_FAILED as
- * give's. */
+/* Keyed by the SHA-256 of bytes: an own file only, declaring a session */
+ecuio_status_t ecuio_consent_store_give_file(ecuio_consent_store_t* store,
+                                             const char* bytes, size_t length,
+                                             const char* name, uint64_t utc);
+/* fingerprint NULL: every record of id; id NULL: fingerprint's, any kind */
 ecuio_status_t ecuio_consent_store_withdraw(ecuio_consent_store_t* store,
                                             const char* id,
                                             const uint8_t* fingerprint);

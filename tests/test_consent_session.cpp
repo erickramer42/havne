@@ -508,7 +508,7 @@ TEST(ConsentSessionTest, AConsentToTheDeclaringPluginAllowsItsModulesSession)
     EXPECT_FALSE(s->consent_applied) << "no conversation was consented to";
 }
 
-TEST(ConsentSessionTest, AnOwnFilesDeclarationIsNamedByItsBytes)
+TEST(ConsentSessionTest, AConsentToAnOwnFilesBytesAllowsItsModulesSession)
 {
     const std::string text =
         R"({"havne_signals": 1, "name": "Own declared", "source": {"name": "t"},)"
@@ -529,6 +529,19 @@ TEST(ConsentSessionTest, AnOwnFilesDeclarationIsNamedByItsBytes)
     EXPECT_EQ(s->declared_prints[0].rx, 0x7E9u);
     EXPECT_EQ(ecuio_sha256::hex(s->declared_prints[0].fingerprint),
               ecuio_sha256::hex_of(text.data(), text.size()));
+
+    Store store("consent-session-own.json");
+    ASSERT_EQ(ecuio_consent_store_give_file(store.store, text.data(),
+                                            text.size(), "Own.json", kUtc),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_apply_consent(s, store.store,
+                                          s->declared_prints[0].fingerprint),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const uint32_t tcm = channel_of(s, 0x7E9);
+    ASSERT_LT(tcm, 32u);
+    EXPECT_EQ(s->declared_allowed, 1u << tcm);
     ecuio_session_destroy(s);
     EXPECT_EQ(ecuio_profile_unregister("user.own-declared"), ECUIO_OK);
     ecuio_signal_file_free(f);

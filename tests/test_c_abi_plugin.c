@@ -191,13 +191,17 @@ int c_abi_plugin(void)
                      ECUIO_ERR_NULL_ARGUMENT;
         }
         /* The consent store's record, and its calls' NULL refusals */
-        ok = ok && sizeof(ecuio_consent_record_t) == 288u &&
+        ok = ok && sizeof(ecuio_consent_record_t) == 416u &&
              offsetof(ecuio_consent_record_t, given_utc) == 8u &&
              offsetof(ecuio_consent_record_t, id) == 16u &&
              offsetof(ecuio_consent_record_t, fingerprint) == 64u &&
              offsetof(ecuio_consent_record_t, publisher) == 128u &&
-             offsetof(ecuio_consent_record_t, reserved) == 256u &&
+             offsetof(ecuio_consent_record_t, name) == 256u &&
+             offsetof(ecuio_consent_record_t, reserved) == 384u &&
+             ECUIO_CONSENT_RECORD_FILE == 1u &&
              ecuio_consent_store_open(NULL, NULL) == ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_consent_store_give_file(NULL, "{}", 2u, "a", 1u) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_consent_store_close(NULL) == ECUIO_ERR_NULL_ARGUMENT &&
              ecuio_session_wants_consent(NULL, NULL) ==
                  ECUIO_ERR_NULL_ARGUMENT &&
