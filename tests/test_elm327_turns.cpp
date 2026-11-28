@@ -170,8 +170,9 @@ TEST(Elm327TurnsTest, TheWalkEndsWithSixChannelsOneSilent)
 {
     Fake fake(40, "7E9:D801=01;7EB:D803=03;7EC:D804=04;7ED:D805=05", 0x7EA);
     static const ecuio_channel_decl_t kChannels[] = {
-        {0x7E9u, 0x7E1u, 0, 0}, {0x7EAu, 0x7E2u, 0, 0}, {0x7EBu, 0x7E3u, 0, 0},
-        {0x7ECu, 0x7E4u, 0, 0}, {0x7EDu, 0x7E5u, 0, 0}, {0x7E8u, 0x7E0u, 0, 0}};
+        {0x7E9u, 0x7E1u, 0, 0, {}}, {0x7EAu, 0x7E2u, 0, 0, {}},
+        {0x7EBu, 0x7E3u, 0, 0, {}}, {0x7ECu, 0x7E4u, 0, 0, {}},
+        {0x7EDu, 0x7E5u, 0, 0, {}}, {0x7E8u, 0x7E0u, 0, 0, {}}};
     static ecuio_signal_def_t defs[9];
     defs[0] = def_of(1, 0x7E9u, 0x62D801u, 3);
     defs[1] = def_of(2, 0x7EAu, 0x62D802u, 3);

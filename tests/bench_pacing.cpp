@@ -120,7 +120,7 @@ public:
         const uint16_t text[4] = {0, 10, 16, 0};
         for (uint32_t m = 0; m < 4; ++m) {
             const uint32_t rx = 0x7E8 + m;
-            m_channels[m] = ecuio_channel_decl_t{rx, rx - 8, 0, 0};
+            m_channels[m] = ecuio_channel_decl_t{rx, rx - 8, 0, 0, {}};
             for (uint32_t k = 0; k < rows[m]; ++k) {
                 const bool word = text[m] == 0 || (mixed && m == 1 && k < 10);
                 m_defs.push_back(did_def(rx, k, word ? 0 : text[m], m == 3));

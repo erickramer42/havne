@@ -400,7 +400,7 @@ namespace {
 void register_run_time(const char* name, ecuio_signal_def_t* def,
                        ecuio_signal_set_t* set, uint16_t start_byte)
 {
-    static const ecuio_channel_decl_t kEngine[] = {{0x7E8u, 0x7E0u, 0, 0}};
+    static const ecuio_channel_decl_t kEngine[] = {{0x7E8u, 0x7E0u, 0, 0, {}}};
     *def = ecuio_signal_def_t{};
     def->id = 1;
     def->message_id = 0x7E8u;

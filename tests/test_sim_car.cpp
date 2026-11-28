@@ -319,11 +319,11 @@ TEST(SimAskTest, ARequestIdThatIsAReplyIdIsRefused)
         const char* why;
     };
     const Shape shapes[] = {
-        {{{0x740, 0x700, 0, 0}, {0x741, 0x740, 0, 0}},
+        {{{0x740, 0x700, 0, 0, {}}, {0x741, 0x740, 0, 0, {}}},
          "profile 'sim-car-crossed': channel 1's request ID 0x740 is "
          "channel 0's reply ID: the simulated ECU would take its requests "
          "for another node's replies"},
-        {{{0x740, 0x700, 0, 0}, {0x741, 0x741, 0, 0}},
+        {{{0x740, 0x700, 0, 0, {}}, {0x741, 0x741, 0, 0, {}}},
          "profile 'sim-car-crossed': channel 1's request ID 0x741 is "
          "channel 1's reply ID: the simulated ECU would take its requests "
          "for another node's replies"},

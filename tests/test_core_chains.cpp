@@ -463,8 +463,8 @@ TEST(CoreTest, TheMockRefusesInWordsASetThatOverfillsItsEngineEcu)
     static_assert(kOwn + 1 <= ECUIO_MODULE_MAX_REQUESTS &&
                       kOwn + 1 + kStray > ECUIO_MODULE_MAX_REQUESTS,
                   "the engine ECU's own fit, and not with the stray ones");
-    static ecuio_channel_decl_t other_first[2] = {{0x7E9, 0x7E1, 0, 0},
-                                                  {0x7E8, 0x7E0, 0, 0}};
+    static ecuio_channel_decl_t other_first[2] = {{0x7E9, 0x7E1, 0, 0, {}},
+                                                  {0x7E8, 0x7E0, 0, 0, {}}};
     static ecuio_signal_def_t defs[kOwn + kStray + 1];
     for (uint32_t i = 0; i < kOwn + kStray; ++i) {
         defs[i] = obd2->defs[0];

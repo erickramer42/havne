@@ -69,8 +69,8 @@ ecuio_computed_t reads(std::vector<uint16_t> ids)
 }
 
 /* Engine at 7E8 (asked on 7E0), body at 7EA */
-const ecuio_channel_decl_t kTwo[] = {{0x7E8, 0x7E0, 0, 0},
-                                     {0x7EA, 0x7E2, 0, 0}};
+const ecuio_channel_decl_t kTwo[] = {{0x7E8, 0x7E0, 0, 0, {}},
+                                     {0x7EA, 0x7E2, 0, 0, {}}};
 
 struct Set {
     std::vector<ecuio_signal_def_t> defs;

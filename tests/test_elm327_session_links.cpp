@@ -712,8 +712,8 @@ TEST_F(Elm327SessionTest, AFilterOverASetPastAModulesMostIsABadUri)
     static_assert(kEach <= ECUIO_MODULE_MAX_REQUESTS &&
                       2 * kEach > ECUIO_MODULE_MAX_REQUESTS,
                   "one module fits, both on one ECU don't");
-    static ecuio_channel_decl_t channels[2] = {{0x7E8, 0x7E0, 0, 0},
-                                               {0x7E9, 0x7E1, 0, 0}};
+    static ecuio_channel_decl_t channels[2] = {{0x7E8, 0x7E0, 0, 0, {}},
+                                               {0x7E9, 0x7E1, 0, 0, {}}};
     static ecuio_signal_def_t defs[2 * kEach];
     for (uint32_t i = 0; i < 2 * kEach; ++i) {
         defs[i] = car_sized::set()->defs[0];

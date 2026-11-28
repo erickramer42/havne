@@ -204,16 +204,16 @@ TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
         return s;
     };
 
-    const ecuio_channel_decl_t dup[] = { {0x7E8u, 0x7E0u, 0, 0},
-                                         {0x7E8u, 0x7E2u, 0, 0} };
+    const ecuio_channel_decl_t dup[] = {{0x7E8u, 0x7E0u, 0, 0, {}},
+                                        {0x7E8u, 0x7E2u, 0, 0, {}}};
     const ecuio_signal_set_t s_dup = set_with(dup, 2u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_dup, nullptr), ECUIO_VALIDATE_ERR_DUPLICATE_RX);
 
-    const ecuio_channel_decl_t zero_rx[] = { {0u, 0x7E0u, 0, 0} };
+    const ecuio_channel_decl_t zero_rx[] = {{0u, 0x7E0u, 0, 0, {}}};
     const ecuio_signal_set_t s_zero = set_with(zero_rx, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_zero, nullptr), ECUIO_VALIDATE_ERR_CHANNEL_ID);
 
-    const ecuio_channel_decl_t legal[] = { {0x7E8u, 0x7E0u, 0, 0} };
+    const ecuio_channel_decl_t legal[] = {{0x7E8u, 0x7E0u, 0, 0, {}}};
     const ecuio_signal_set_t s_ok = set_with(legal, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_ok, nullptr), ECUIO_VALIDATE_OK);
 }

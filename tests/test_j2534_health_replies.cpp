@@ -351,8 +351,8 @@ TEST_F(J2534HealthTest, ACloseOnADeadLinkEndsPromptly)
  * profile, static storage (the registry keeps the pointer). */
 TEST_F(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
 {
-    static const ecuio_channel_decl_t kChannels[] = {{0x7E8u, 0x7E0u, 0, 0},
-                                                     {0x7E9u, 0x7E1u, 0, 0}};
+    static const ecuio_channel_decl_t kChannels[] = {
+        {0x7E8u, 0x7E0u, 0, 0, {}}, {0x7E9u, 0x7E1u, 0, 0, {}}};
     static ecuio_signal_def_t defs[2] = {};
     for (int i = 0; i < 2; ++i) {
         defs[i].id = static_cast<uint16_t>(1 + i);

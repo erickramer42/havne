@@ -417,8 +417,8 @@ struct TwoModules {
             did_word(3, 0x7EA, 0xD200, "Module A"),
             did_word(4, 0x7EA, 0xD201, "Module B"),
         };
-        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
-                                                        {0x7EA, 0x7E2, 0, 0}};
+        static const ecuio_channel_decl_t channels[] = {
+            {0x7E8, 0x7E0, 0, 0, {}}, {0x7EA, 0x7E2, 0, 0, {}}};
         static ecuio_signal_set_t set{};
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.count = 4;
@@ -449,8 +449,8 @@ struct TwoModulesOneLong {
         defs[1].kind = ECUIO_VALUE_TEXT;
         defs[1].bit_length = 0;
         defs[1].byte_length = 16;
-        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
-                                                        {0x7EA, 0x7E2, 0, 0}};
+        static const ecuio_channel_decl_t channels[] = {
+            {0x7E8, 0x7E0, 0, 0, {}}, {0x7EA, 0x7E2, 0, 0, {}}};
         static ecuio_signal_set_t set{};
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.count = 4;
@@ -484,7 +484,7 @@ struct OneDid {
             m_def.bit_length = 0;
             m_def.byte_length = bytes;
         }
-        m_channel = ecuio_channel_decl_t{rx, tx, 0, 0};
+        m_channel = ecuio_channel_decl_t{rx, tx, 0, 0, {}};
         m_set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         m_set.count = 1;
         m_set.defs = &m_def;
@@ -517,8 +517,8 @@ struct TwoDids {
         defs[0].bit_length = 0;
         defs[0].byte_length = 10;
         defs[1].bit_length = 8;
-        static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
-                                                        {0x7E9, 0x7E1, 0, 0}};
+        static const ecuio_channel_decl_t channels[] = {
+            {0x7E8, 0x7E0, 0, 0, {}}, {0x7E9, 0x7E1, 0, 0, {}}};
         static ecuio_signal_set_t set{};
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.count = 2;
@@ -837,8 +837,9 @@ struct SixModules {
             did_word(6, 0x7ED, 0xD200, "Module 5"),
         };
         static const ecuio_channel_decl_t channels[] = {
-            {0x7E8, 0x7E0, 0, 0}, {0x7E9, 0x7E1, 0, 0}, {0x7EA, 0x7E2, 0, 0},
-            {0x7EB, 0x7E3, 0, 0}, {0x7EC, 0x7E4, 0, 0}, {0x7ED, 0x7E5, 0, 0}};
+            {0x7E8, 0x7E0, 0, 0, {}}, {0x7E9, 0x7E1, 0, 0, {}},
+            {0x7EA, 0x7E2, 0, 0, {}}, {0x7EB, 0x7E3, 0, 0, {}},
+            {0x7EC, 0x7E4, 0, 0, {}}, {0x7ED, 0x7E5, 0, 0, {}}};
         static ecuio_signal_set_t set{};
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.count = 6;

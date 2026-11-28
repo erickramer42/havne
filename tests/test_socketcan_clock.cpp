@@ -322,8 +322,8 @@ TEST(SimTest, TheProfileIsLookedUpBeforeTheInterface)
     wide_def.bit_length = 8;
     wide_def.scale = 1.0;
     std::snprintf(wide_def.name, sizeof wide_def.name, "Wide");
-    static const ecuio_channel_decl_t wide_channel = {0x18DAF110u,
-                                                      0x18DA10F1u, 0, 0};
+    static const ecuio_channel_decl_t wide_channel = {
+        0x18DAF110u, 0x18DA10F1u, 0, 0, {}};
     static ecuio_signal_set_t wide{};
     wide.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     wide.count = 1;

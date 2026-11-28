@@ -375,7 +375,7 @@ uint8_t obd2_group(const ecuio_signal_def_t& d)
  * 0x7E0 (request). The transport filters and addresses from this list;
  * ?filter= and ?txid= override it. */
 const ecuio_channel_decl_t kObd2Channels[] = {
-    { ECUIO_OBD2_ECU_ARB_ID, ECUIO_OBD2_TESTER_ARB_ID, 0, 0 },
+    {ECUIO_OBD2_ECU_ARB_ID, ECUIO_OBD2_TESTER_ARB_ID, 0, 0, {}},
 };
 
 /* Boost is MAP (PID 0B) minus baro (PID 33): below zero a vacuum. Baro

@@ -157,9 +157,9 @@ TEST_F(J2534QueryParamTest, Wide29BitChannelSetsConnectFlag)
 TEST_F(J2534QueryParamTest, ProfileChannelWidthDecidesConnectFlag)
 {
     static const ecuio_channel_decl_t kWide[] = {
-        {0x18DAF110u, 0x18DA10F1u, 0, 0}};
+        {0x18DAF110u, 0x18DA10F1u, 0, 0, {}}};
     static const ecuio_channel_decl_t kMixed[] = {
-        {0x7E8u, 0x7E0u, 0, 0}, {0x18DAF110u, 0x18DA10F1u, 0, 0}};
+        {0x7E8u, 0x7E0u, 0, 0, {}}, {0x18DAF110u, 0x18DA10F1u, 0, 0, {}}};
     static ecuio_signal_set_t wide = {};
     wide.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     wide.channel_count = 1;

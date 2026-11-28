@@ -44,7 +44,7 @@ void long_reply_cb(const ecuio_frame_t* frame, void* user_data)
  * TRUNCATED. Through the surrogate each crosses the pipe whole. */
 TEST_F(J2534HealthTest, LongRepliesArriveWhole)
 {
-    static const ecuio_channel_decl_t kChannel[] = {{0x7E8u, 0x7E0u, 0, 0}};
+    static const ecuio_channel_decl_t kChannel[] = {{0x7E8u, 0x7E0u, 0, 0, {}}};
     static ecuio_signal_def_t defs[3] = {};
     for (int i = 0; i < 3; ++i) {
         defs[i].id = static_cast<uint16_t>(1 + i);

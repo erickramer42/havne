@@ -259,7 +259,7 @@ TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
 {
     /* No defs: decodes nothing, may still declare channels (a filtered
      * log-only profile). count > 0 with no defs stays an error. */
-    static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u, 0, 0}};
+    static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u, 0, 0, {}}};
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
@@ -296,9 +296,9 @@ TEST(SignalsTest, SetValidationNamesTheFailingElement)
     for (int i = 0; i < 3; ++i) {
         std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %d", i);
     }
-    ecuio_channel_decl_t channels[3] = {{0x7E8u, 0x7E0u, 0, 0},
-                                        {0x7E9u, 0x7E1u, 0, 0},
-                                        {0x7EAu, 0x7E2u, 0, 0}};
+    ecuio_channel_decl_t channels[3] = {{0x7E8u, 0x7E0u, 0, 0, {}},
+                                        {0x7E9u, 0x7E1u, 0, 0, {}},
+                                        {0x7EAu, 0x7E2u, 0, 0, {}}};
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 3;

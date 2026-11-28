@@ -429,7 +429,7 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
     defs[0].mux_key = 0x410C;
     defs[2].mux_key = 0x410D;
     static ecuio_channel_decl_t channel[1] = {
-        {ECUIO_OBD2_ECU_ARB_ID, 0x7E0, 0, 0}};
+        {ECUIO_OBD2_ECU_ARB_ID, 0x7E0, 0, 0, {}}};
     static ecuio_signal_set_t passive{};
     passive.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     passive.defs = defs;

@@ -286,7 +286,7 @@ TEST_F(SimGatewayBusTest, ASessionListsTheGatedDidAsRefused)
     def.bit_length = 8;
     def.scale = 1.0;
     std::snprintf(def.name, sizeof def.name, "Behind Gateway D100");
-    static ecuio_channel_decl_t channel{kModuleReply, kModule, 0, 0};
+    static ecuio_channel_decl_t channel{kModuleReply, kModule, 0, 0, {}};
     static ecuio_signal_set_t set{};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 1;

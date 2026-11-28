@@ -45,7 +45,7 @@ public:
         uint16_t id = 1;
         for (uint32_t m = 0; m < n; ++m) {
             const uint32_t rx = rx_of(m);
-            m_channels.push_back(ecuio_channel_decl_t{rx, rx - 8, 0, 0});
+            m_channels.push_back(ecuio_channel_decl_t{rx, rx - 8, 0, 0, {}});
             for (int k = 0; k < rows; ++k) {
                 ecuio_signal_def_t d{};
                 d.id = id++;

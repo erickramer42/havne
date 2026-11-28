@@ -159,16 +159,16 @@ struct FourModules {
                    {did_word(kTransmissionId, 0x7E9, 0xD200, "Transmission"),
                     did_word(kSilentId, 0x769, 0xD300, "Silent"),
                     did_word(kRefusingId, 0x72E, 0xD400, "Refusing")}),
-              {{0x7E8, 0x7E0, 0, 0},
-               {0x7E9, 0x7E1, 0, 0},
-               {0x769, 0x761, 0, 0},
-               {0x72E, 0x726, 0, 0}}),
+              {{0x7E8, 0x7E0, 0, 0, {}},
+               {0x7E9, 0x7E1, 0, 0, {}},
+               {0x769, 0x761, 0, 0, {}},
+               {0x72E, 0x726, 0, 0, {}}}),
           car(kCar,
               {did_word(kTransmissionId, 0x7E9, 0xD200, "Transmission"),
                did_word(kRefusingId, 0x72E, 0xD401, "Other")},
-              {{0x7E8, 0x7E0, 0, 0},
-               {0x7E9, 0x7E1, 0, 0},
-               {0x72E, 0x726, 0, 0}})
+              {{0x7E8, 0x7E0, 0, 0, {}},
+               {0x7E9, 0x7E1, 0, 0, {}},
+               {0x72E, 0x726, 0, 0, {}}})
     {}
     static constexpr const char* kName = "pacing-stall";
     static constexpr const char* kCar = "pacing-stall-car";
@@ -345,13 +345,14 @@ TEST(PacingTest, TheHoldSharesTheBusBySignalAcrossFourModules)
     std::vector<ecuio_signal_def_t> car = defs;
     defs.push_back(did_word(10, 0x769, 0xD400, "Silent"));
     const Registered session("pacing-hold-four", defs,
-                             {{0x7E8, 0x7E0, 0, 0},
-                              {0x7E9, 0x7E1, 0, 0},
-                              {0x7EA, 0x7E2, 0, 0},
-                              {0x769, 0x761, 0, 0}});
-    const Registered sim(
-        "pacing-hold-four-car", car,
-        {{0x7E8, 0x7E0, 0, 0}, {0x7E9, 0x7E1, 0, 0}, {0x7EA, 0x7E2, 0, 0}});
+                             {{0x7E8, 0x7E0, 0, 0, {}},
+                              {0x7E9, 0x7E1, 0, 0, {}},
+                              {0x7EA, 0x7E2, 0, 0, {}},
+                              {0x769, 0x761, 0, 0, {}}});
+    const Registered sim("pacing-hold-four-car", car,
+                         {{0x7E8, 0x7E0, 0, 0, {}},
+                          {0x7E9, 0x7E1, 0, 0, {}},
+                          {0x7EA, 0x7E2, 0, 0, {}}});
     pacing::bench_config cfg;
     cfg.profile = "pacing-hold-four";
     cfg.sim_keys = "profile=pacing-hold-four-car";

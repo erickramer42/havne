@@ -41,7 +41,8 @@ TEST(SimDidsTest, EachFieldDecodesToTheValueItWasGiven)
         did_def(5, 0x7E9, 0x1235, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
                 0, 1.0, 0.0, "TCM-Sim"),
     };
-    const std::vector<ecuio_channel_decl_t> channels = {{0x7E9, 0x7E1, 0, 0}};
+    const std::vector<ecuio_channel_decl_t> channels = {
+        {0x7E9, 0x7E1, 0, 0, {}}};
     const ecuio_signal_set_t set = set_of(defs, channels);
     ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0)
         << "defs a session would take";
@@ -154,24 +155,24 @@ TEST(SimDidsTest, TheModulesAreTheSetsChannels)
     ASSERT_TRUE(ecuio_sim_plan_modules(none, &plan, why, sizeof why));
     EXPECT_TRUE(plan.engine);
     EXPECT_EQ(plan.count, 0u);
-    const std::vector<ecuio_channel_decl_t> two = {{0x7E8, 0x7E0, 0, 0},
-                                                   {0x7EA, 0x7E2, 0, 0}};
+    const std::vector<ecuio_channel_decl_t> two = {{0x7E8, 0x7E0, 0, 0, {}},
+                                                   {0x7EA, 0x7E2, 0, 0, {}}};
     ASSERT_TRUE(
         ecuio_sim_plan_modules(set_of({}, two), &plan, why, sizeof why));
     EXPECT_TRUE(plan.engine);
     ASSERT_EQ(plan.count, 1u);
     EXPECT_EQ(plan.tx[0], 0x7E2u);
     EXPECT_EQ(plan.rx[0], 0x7EAu);
-    const std::vector<ecuio_channel_decl_t> module = {{0x7E9, 0x7E1, 0, 0}};
+    const std::vector<ecuio_channel_decl_t> module = {{0x7E9, 0x7E1, 0, 0, {}}};
     ASSERT_TRUE(
         ecuio_sim_plan_modules(set_of({}, module), &plan, why, sizeof why));
     EXPECT_FALSE(plan.engine) << "the engine ECU answers no DID of the set";
     EXPECT_EQ(plan.count, 1u);
     for (const std::vector<ecuio_channel_decl_t>& bad :
-         {std::vector<ecuio_channel_decl_t>{{0x18DAF110, 0x18DA10F1, 0, 0}},
-          std::vector<ecuio_channel_decl_t>{{0x7E9, 0x7DF, 0, 0}},
-          std::vector<ecuio_channel_decl_t>{{0x7EA, 0x7E0, 0, 0}},
-          std::vector<ecuio_channel_decl_t>{{0x7E8, 0x7E2, 0, 0}}}) {
+         {std::vector<ecuio_channel_decl_t>{{0x18DAF110, 0x18DA10F1, 0, 0, {}}},
+          std::vector<ecuio_channel_decl_t>{{0x7E9, 0x7DF, 0, 0, {}}},
+          std::vector<ecuio_channel_decl_t>{{0x7EA, 0x7E0, 0, 0, {}}},
+          std::vector<ecuio_channel_decl_t>{{0x7E8, 0x7E2, 0, 0, {}}}}) {
         why[0] = '\0';
         EXPECT_FALSE(
             ecuio_sim_plan_modules(set_of({}, bad), &plan, why, sizeof why))

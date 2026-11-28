@@ -473,8 +473,8 @@ TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanAModuleIsAsked)
      * since the limit is more than Service 01's PIDs. */
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
     constexpr uint32_t kMost = ECUIO_MODULE_MAX_REQUESTS;
-    static ecuio_channel_decl_t two[2] = {{0x7E8, 0x7E0, 0, 0},
-                                          {0x7E9, 0x7E1, 0, 0}};
+    static ecuio_channel_decl_t two[2] = {{0x7E8, 0x7E0, 0, 0, {}},
+                                          {0x7E9, 0x7E1, 0, 0, {}}};
     /* Module A's kMost + 1 defs (kMost requests), then B's kMost, then
      * one more of B's */
     static ecuio_signal_def_t defs[2 * kMost + 2];

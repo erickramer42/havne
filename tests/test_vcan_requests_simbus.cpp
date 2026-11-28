@@ -748,8 +748,8 @@ const char* register_did_profile()
         vcan_did(4, 0x7EA, 0xD201, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
                  1.0, 0.0, "MODULE-HavneSim"),
     };
-    static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
-                                                    {0x7EA, 0x7E2, 0, 0}};
+    static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0, {}},
+                                                    {0x7EA, 0x7E2, 0, 0, {}}};
     static ecuio_signal_set_t set{};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 4;

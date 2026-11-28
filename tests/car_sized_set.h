@@ -43,8 +43,8 @@ constexpr uint16_t did_of(uint32_t def)
 inline const ecuio_signal_set_t* set()
 {
     static ecuio_signal_def_t defs[kDefs];
-    static ecuio_channel_decl_t channels[2] = {{kRxA, 0x7E0, 0, 0},
-                                               {kRxB, 0x7E1, 0, 0}};
+    static ecuio_channel_decl_t channels[2] = {{kRxA, 0x7E0, 0, 0, {}},
+                                               {kRxB, 0x7E1, 0, 0, {}}};
     static ecuio_signal_set_t made = {};
     if (made.count != 0) {
         return &made;

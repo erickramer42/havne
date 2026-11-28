@@ -136,7 +136,7 @@ public:
         : m_name(std::move(name)), m_defs(defs_of(mods))
     {
         for (const module& m : mods) {
-            m_channels.push_back(ecuio_channel_decl_t{m.rx, m.rx - 8, 0, 0});
+            m_channels.push_back(ecuio_channel_decl_t{m.rx, m.rx - 8, 0, 0, {}});
         }
         m_set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         m_set.count = static_cast<uint32_t>(m_defs.size());
