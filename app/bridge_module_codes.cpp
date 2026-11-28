@@ -303,8 +303,8 @@ void SessionBridge::pollModuleCodes()
         if ((r.flags & ECUIO_MODULE_CODES_COMPLETE) != 0 && r.read_id != 0 &&
             r.read_id != m_codesLogged[c]) {
             m_codesLogged[c] = r.read_id;
-            emit logMessage(
-                moduleCodesText(r, m_diagnosticsShown[c], sessionOffered()));
+            emit logMessage(moduleCodesText(r, m_diagnosticsShown[c],
+                                            sessionOffered(m_currentUri)));
         }
     }
     if (changed && m_diagnosticsShownCount > 0) {
@@ -313,14 +313,23 @@ void SessionBridge::pollModuleCodes()
     advanceCodesVisit();
 }
 
-bool SessionBridge::sessionOffered() const
+bool BridgeFormats::sessionOffered(const QString& uri)
 {
-    const QString uri = m_currentUri.toLower();
-    return (uri.startsWith(QLatin1String("elm327://")) ||
-            uri.startsWith(QLatin1String("j2534://")) ||
-            uri.startsWith(QLatin1String("socketcan://"))) &&
-           uri.contains(QLatin1String("profile=uds-generic")) &&
-           !uri.contains(QLatin1String("session="));
+    if (profileOfUri(uri) != QLatin1String("uds-generic")) {
+        return false;
+    }
+    const bool adapter = uri.startsWith(QLatin1String("elm327://")) ||
+                         uri.startsWith(QLatin1String("j2534://")) ||
+                         uri.startsWith(QLatin1String("socketcan://"));
+    const qsizetype q = uri.indexOf(QLatin1Char('?'));
+    const QStringList pairs =
+        q < 0 ? QStringList() : uri.mid(q + 1).split(QLatin1Char('&'));
+    const bool asked =
+        std::any_of(pairs.begin(), pairs.end(), [](const QString& p) {
+            return p.section(QLatin1Char('='), 0, 0) ==
+                   QLatin1String("session");
+        });
+    return adapter && !asked;
 }
 
 void SessionBridge::resetModuleCodes()

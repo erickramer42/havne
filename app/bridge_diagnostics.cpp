@@ -155,8 +155,9 @@ void SessionBridge::rebuildDiagnostics()
     for (uint32_t c = 0; c < m_diagnosticsShownCount; ++c) {
         QVariantMap entry = diagnosticsEntry(m_diagnosticsShown[c],
                                              m_signalModel->unitSystem());
-        entry[QStringLiteral("enhanced")] = moduleCodesEntry(
-            m_codesShown[c], m_diagnosticsShown[c], sessionOffered());
+        entry[QStringLiteral("enhanced")] =
+            moduleCodesEntry(m_codesShown[c], m_diagnosticsShown[c],
+                             sessionOffered(m_currentUri));
         m_diagnostics << entry;
     }
     emit diagnosticsChanged();

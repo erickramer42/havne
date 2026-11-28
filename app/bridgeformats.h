@@ -27,6 +27,9 @@ struct BridgeFormats
     // a scheme this platform's core doesn't take, a malformed query or
     // a bad profile= value. Static, so tests need no session.
     static QString profileOfUri(const QString& uri);
+    // Whether the address's profile and link offer ?session=03 and it isn't
+    // asked already (the hint in a module's extended-session refusal)
+    static bool sessionOffered(const QString& uri);
     static QString linkStateForError(int32_t errorCode);  /* code -> state string; static so tests need no session */
     static QString sessionInfoText(const ecuio_session_info_t& info);  /* the activity log's "Session:" line */
     static QString versionsText(const ecuio_session_info_t& info);  /* its versions clause; "" with none read */

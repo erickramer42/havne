@@ -240,3 +240,17 @@ TEST(BridgeTest, ADiagnoseOffSessionReadsEnhancedCodesAlone)
         << "no standard read was asked";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
+
+TEST(BridgeTest, TheSessionHintIsOfferedByProfileAndKey)
+{
+    const auto offered = [](const char* uri) {
+        return BridgeFormats::sessionOffered(QString::fromLatin1(uri));
+    };
+    EXPECT_TRUE(offered("elm327://COM3?profile=uds-generic"));
+    EXPECT_FALSE(offered("elm327://COM3?profile=uds-generic&session=03"));
+    EXPECT_TRUE(
+        offered("elm327://COM3?profile=uds-generic&sessions=x&nosession=1"));
+    EXPECT_FALSE(offered("elm327://COM3"));
+    EXPECT_FALSE(offered("elm327://COM3?profile=obd2"));
+    EXPECT_FALSE(offered("mock://demo?profile=uds-generic"));
+}
