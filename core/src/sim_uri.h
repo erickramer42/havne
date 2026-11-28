@@ -71,7 +71,7 @@ inline bool take_source(const char* uri, ecuio_sim_config* out,
     return true;
 }
 
-/* values=, modules= and sessions= */
+/* values=, modules=, sessions= and gated= */
 inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
                              char* why, size_t why_cap)
 {
@@ -106,6 +106,16 @@ inline taken take_mock_shape(const ecuio_uri::param& p, ecuio_sim_config* out,
             return taken::bad;
         }
         out->sessions = value_is(p, "1");
+        return taken::ok;
+    }
+    if (p.is("gated")) {
+        if (!value_is(p, "31") && !value_is(p, "7f")) {
+            std::snprintf(why, why_cap,
+                          "gated: 31 or 7f (how a declared module refuses a "
+                          "DID outside its extended session)");
+            return taken::bad;
+        }
+        out->gated_nrc = value_is(p, "31") ? 0x31 : 0x7F;
         return taken::ok;
     }
     return taken::other;
@@ -300,7 +310,8 @@ inline bool take_key(const ecuio_uri::param& p, ecuio_sim_config* out,
 } // namespace ecuio_sim_uri_detail
 
 /* The simulated ECU's URI into *out:
- *   mock://<label>[?values][&modules][&sessions][&profile][&vin][&faults]
+ *   mock://<label>[?values][&modules][&sessions][&gated][&profile][&vin]
+ *          [&faults]
  *          [&timing][&gateway][&behind][&route][&sa][&sa_delay][&gwopt]
  *          [&mem][&kernel]
  *   replay://<absolute path>[?loop][&from][&to][&vin][&faults][&timing]
@@ -332,7 +343,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
         "values",     "modules", "sessions", "profile", "vin",   "faults",
         "pending_ms", "delay",   "fc",       "cf",      "seed",  "busy",
         "bus",        "gateway", "behind",   "route",   "gwopt", "sa",
-        "sa_delay",   "mem",     "kernel",   nullptr};
+        "sa_delay",   "mem",     "kernel",   "gated",   nullptr};
     static const char* const kReplayKeys[] = {
         "loop", "from", "to",   "vin",  "faults", "pending_ms", "delay",
         "fc",   "cf",   "seed", "busy", "bus",    nullptr};
@@ -361,7 +372,7 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                       replay ? "loop, from, to"
                              : "values, modules, sessions, profile, "
                                "gateway, behind, route, sa, sa_delay, gwopt, "
-                               "mem, kernel");
+                               "mem, kernel, gated");
         return ecuio_sim_uri_result::bad;
     }
     for (size_t i = 0; i < q.count; ++i) {

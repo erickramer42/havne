@@ -73,6 +73,8 @@ struct sim_node {
      * has an extended session, and a profile's nodes under sessions=1;
      * the rest and modules=2's module refuse 10 03 */
     ecuio_sim_session session;
+    /* A DID but identification's F1xx answers only in its session */
+    bool declared = false;
     /* A node hears its own request ID and the functional one */
     isotp_rx_of<2> rx;
     isotp_tx tx;

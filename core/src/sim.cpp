@@ -73,7 +73,7 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
     const bool engine = n.role == sim_role::engine && !n.from_set;
     const bool has_extended =
         s->ecu.recording == nullptr &&
-        (engine || (n.from_set && s->ecu.config.sessions));
+        (engine || (n.from_set && (s->ecu.config.sessions || n.declared)));
     if (s->ecu.recording == nullptr) {
         n.session.security.strict = s->strict.load(std::memory_order_relaxed);
     }
@@ -94,6 +94,10 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
         if (handled) {
             return m;
         }
+    }
+    if (n.declared && !n.session.extended && len >= 3 && req[0] == 0x22 &&
+        req[1] != 0xF1) {
+        return ecuio_sim_detail::refuse(0x22, s->ecu.config.gated_nrc, out);
     }
     if (n.from_set &&
         (n.role != sim_role::engine || (len > 0 && req[0] == 0x22))) {
@@ -308,6 +312,15 @@ bool build_nodes(ecuio_sim* s, const sim_plan& p)
             m.rx.timed = true;
         }
         s->node_count = 1 + static_cast<int>(p.modules.count);
+        for (int i = 0; i < s->node_count; ++i) {
+            sim_node& n = s->nodes[i];
+            for (uint32_t c = 0; n.from_set && c < p.set->channel_count; ++c) {
+                n.declared =
+                    n.declared || (p.set->channels[c].rx_id == n.reply_id &&
+                                   p.set->channels[c].session ==
+                                       ECUIO_CHANNEL_SESSION_EXTENDED);
+            }
+        }
     }
     if (!s->nodes[0].from_set && s->ecu.recording == nullptr) {
         /* the engine ECU with security access has memory to read */

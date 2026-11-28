@@ -94,6 +94,7 @@ struct ecuio_sim_config {
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
     bool second_module = false; /* mock: modules=2 */
     bool sessions = false;      /* mock: sessions=1, the profile's modules */
+    uint8_t gated_nrc = 0x31;   /* mock: gated=, a declared module's DID */
     ecuio_sim_gateway_config gateway; /* mock: gateway= and its keys */
     ecuio_sim_memory_faults memory;   /* mock: mem=, the engine ECU's */
     bool kernel = false;              /* mock: kernel=, the engine ECU's */

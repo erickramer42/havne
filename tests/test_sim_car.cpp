@@ -69,15 +69,22 @@ struct Modules {
     std::vector<ecuio_channel_decl_t> channels;
     ecuio_signal_set_t set{};
 
-    Modules(const char* n, uint32_t count) : name(n)
+    Modules(const char* n, uint32_t count, uint32_t declared = UINT32_MAX)
+        : name(n)
     {
         for (uint32_t i = 0; i < count; ++i) {
             ecuio_channel_decl_t c{};
             c.rx_id = 0x740u + i;
             c.tx_id = 0x700u + i;
+            if (i == declared) {
+                c.session = ECUIO_CHANNEL_SESSION_EXTENDED;
+            }
             channels.push_back(c);
             defs.push_back(did_def(static_cast<uint16_t>(100 + i), c.rx_id,
                                    static_cast<uint16_t>(0x1000 + i)));
+        }
+        if (declared < count) {
+            defs.push_back(did_def(99, 0x740u + declared, 0xF190));
         }
         set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
         set.count = static_cast<uint32_t>(defs.size());
@@ -427,6 +434,43 @@ TEST(SimAskTest, TheSessionsKeyGivesAProfilesModulesTheExtendedSession)
     }
     EXPECT_EQ(reply(u.ask(0x7E0, {0x10, 0x03})), entered)
         << "the engine ECU's own session";
+}
+
+// A module its set declares extended answers its DIDs only in that
+// session, but identification's F1xx in both; gated= picks the refusal
+TEST(SimAskTest, ADeclaredModulesDidsAnswerOnlyInItsSession)
+{
+    const auto reply = [](const std::vector<ecuio_sim_reply_t>& r) {
+        return r.size() == 1 ? Bytes(r[0].data, r[0].data + r[0].length)
+                             : Bytes{};
+    };
+    EXPECT_EQ(parsed("mock://ask?profile=x").gated_nrc, 0x31);
+    EXPECT_EQ(parsed("mock://ask?profile=x&gated=7f").gated_nrc, 0x7F);
+    EXPECT_EQ(refusal("mock://ask?profile=x&gated=22"),
+              "gated: 31 or 7f (how a declared module refuses a DID outside "
+              "its extended session)");
+    Modules m("sim-car-declared", 2, 1);
+    for (const char* gated : {"", "&gated=7f"}) {
+        SCOPED_TRACE(gated);
+        const uint8_t nrc = std::string(gated).empty() ? 0x31 : 0x7F;
+        Unbound u(std::string("mock://ask?profile=sim-car-declared") + gated);
+        ASSERT_NE(u.sim, nullptr);
+        EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})),
+                  (Bytes{0x7F, 0x22, nrc}));
+        EXPECT_EQ(reply(u.ask(0x701, {0x22, 0xF1, 0x90})).size(), 4u)
+            << "identification answers in default";
+        EXPECT_EQ(reply(u.ask(0x700, {0x22, 0x10, 0x00})).size(), 4u)
+            << "the undeclared module reads in default";
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x03})),
+                  (Bytes{0x50, 0x03, 0x00, 0x32, 0x01, 0xF4}));
+        EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})).size(), 4u);
+        EXPECT_EQ(reply(u.ask(0x701, {0x10, 0x01})).size(), 6u);
+        EXPECT_EQ(reply(u.ask(0x701, {0x22, 0x10, 0x01})),
+                  (Bytes{0x7F, 0x22, nrc}))
+            << "back in default";
+        EXPECT_EQ(reply(u.ask(0x700, {0x10, 0x03})), (Bytes{0x7F, 0x10, 0x12}))
+            << "the undeclared module has no session";
+    }
 }
 
 // The aim is judged after the profile (its modules are known only then)
