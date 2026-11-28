@@ -224,7 +224,8 @@ An unknown format, flag bit or nonzero reserved word is
 `ECUIO_ERR_INVALID_ARGUMENT`. The export's classes are named,
 `ECUIO_EXPORT_LEFT_OUT_IDENTIFICATION` (0), `_UNATTRIBUTABLE` (1),
 `_TEXT_VALUES` (2), `_ACTIVITY` (3) and `_VIN_SHAPED` (4, the check's
-alone, so its count stays 0), indexes of the report's `left_out`; a
+alone, so its count stays 0), indexes of the report's `left_out`
+(a note of 2026-11-27: `_VIN_MASKED`, 5, a count of tokens, joined it later, see the appendix below); a
 failed check's class is `failed_class`, the index plus one, 0 for none.
 The report is 120 bytes, `failed_class` at 80, the import's report 80,
 both static-asserted.
