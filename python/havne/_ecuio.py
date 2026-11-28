@@ -376,6 +376,7 @@ ECUIO_OPERATION_CLASS_READ = 1
 ECUIO_OPERATION_CLASS_WRITE = 2
 ECUIO_OPERATION_END_BAD_REPLY = 11
 ECUIO_OPERATION_END_CANCELED = 2
+ECUIO_OPERATION_END_CHECK_FAILED = 17
 ECUIO_OPERATION_END_DIFFER = 5
 ECUIO_OPERATION_END_ENGINE_RUNNING = 12
 ECUIO_OPERATION_END_FILE = 10
@@ -384,12 +385,14 @@ ECUIO_OPERATION_END_LINK_LOST = 9
 ECUIO_OPERATION_END_MOVING = 13
 ECUIO_OPERATION_END_NONE = 0
 ECUIO_OPERATION_END_NO_ANSWER = 4
+ECUIO_OPERATION_END_RECOVERY_NEEDED = 18
 ECUIO_OPERATION_END_REFUSED = 3
 ECUIO_OPERATION_END_SAVED = 1
 ECUIO_OPERATION_END_SESSION_LOST = 8
 ECUIO_OPERATION_END_UNLOCK_REFUSED = 7
 ECUIO_OPERATION_END_VOLTAGE_HIGH = 15
 ECUIO_OPERATION_END_VOLTAGE_LOW = 14
+ECUIO_OPERATION_END_WRITTEN = 16
 ECUIO_OPERATION_FLASH_OVERWRITE_SAFE = 1
 ECUIO_OPERATION_KIND_DUMP = 1
 ECUIO_OPERATION_KIND_FLASH = 3
@@ -401,12 +404,15 @@ ECUIO_OPERATION_PARKED = 2
 ECUIO_OPERATION_PHASE_CHECKING = 1
 ECUIO_OPERATION_PHASE_COMPARING = 5
 ECUIO_OPERATION_PHASE_DONE = 8
+ECUIO_OPERATION_PHASE_ERASING = 9
 ECUIO_OPERATION_PHASE_LEAVING = 7
 ECUIO_OPERATION_PHASE_NONE = 0
 ECUIO_OPERATION_PHASE_PRECONDITIONS = 2
 ECUIO_OPERATION_PHASE_READING = 4
 ECUIO_OPERATION_PHASE_SAVING = 6
 ECUIO_OPERATION_PHASE_UNLOCKING = 3
+ECUIO_OPERATION_PHASE_VERIFYING = 11
+ECUIO_OPERATION_PHASE_WRITING = 10
 ECUIO_PART_PLUGIN = 1
 ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
@@ -1650,7 +1656,8 @@ ecuio_operation_state_t._fields_ = [
     ('waiting_ms', c_uint32),
     ('rpm', c_uint16),
     ('kmh', c_uint16),
-    ('reserved', (c_uint32 * 1)),
+    ('sectors', c_uint16),
+    ('sectors_done', c_uint16),
 ]
 ecuio_plugin_conversation_ecu_t._fields_ = [
     ('struct_size', c_uint32),
@@ -2410,6 +2417,7 @@ FUNCTIONS = {
     'ecuio_session_keep_awake': (c_int, [POINTER(ecuio_session_t), c_uint32, c_char_p]),  # core.h
     'ecuio_session_operation_cancel': (c_int, [POINTER(ecuio_session_t)]),  # operation.h
     'ecuio_session_operation_start': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_request_t), c_char_p]),  # operation.h
+    'ecuio_session_operation_start_from': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_operation_request_t), c_char_p, c_char_p]),  # operation.h
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_session_receive': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_frame_t), c_uint32]),  # core.h
     'ecuio_session_record': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_recorder_t)]),  # recording.h

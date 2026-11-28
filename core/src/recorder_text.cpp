@@ -420,7 +420,8 @@ std::string operation_text(const char* id, uint32_t rx, uint64_t bytes,
         "identity-changed", "unlock-refused", "session-lost",
         "link-lost",        "file",           "bad-reply",
         "engine-running",   "moving",         "voltage-low",
-        "voltage-high"};
+        "voltage-high",     "written",        "check-failed",
+        "recovery-needed"};
     char text[64];
     std::snprintf(text, sizeof text, ",0x%X,%llu,", rx,
                   static_cast<unsigned long long>(bytes));

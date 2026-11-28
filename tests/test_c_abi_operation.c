@@ -38,7 +38,8 @@ int c_abi_operation(void)
          offsetof(ecuio_operation_state_t, waiting_ms) == 324u &&
          offsetof(ecuio_operation_state_t, rpm) == 328u &&
          offsetof(ecuio_operation_state_t, kmh) == 330u &&
-         offsetof(ecuio_operation_state_t, reserved) == 332u;
+         offsetof(ecuio_operation_state_t, sectors) == 332u &&
+         offsetof(ecuio_operation_state_t, sectors_done) == 334u;
     ok = ok && ECUIO_OPERATION_MAY_UNLOCK == 1u &&
          ECUIO_OPERATION_PARKED == 2u && ECUIO_OPERATION_PHASE_NONE == 0u &&
          ECUIO_OPERATION_PHASE_CHECKING == 1u &&
@@ -48,7 +49,10 @@ int c_abi_operation(void)
          ECUIO_OPERATION_PHASE_COMPARING == 5u &&
          ECUIO_OPERATION_PHASE_SAVING == 6u &&
          ECUIO_OPERATION_PHASE_LEAVING == 7u &&
-         ECUIO_OPERATION_PHASE_DONE == 8u;
+         ECUIO_OPERATION_PHASE_DONE == 8u &&
+         ECUIO_OPERATION_PHASE_ERASING == 9u &&
+         ECUIO_OPERATION_PHASE_WRITING == 10u &&
+         ECUIO_OPERATION_PHASE_VERIFYING == 11u;
     ok = ok && ECUIO_OPERATION_END_NONE == 0u &&
          ECUIO_OPERATION_END_SAVED == 1u &&
          ECUIO_OPERATION_END_CANCELED == 2u &&
@@ -64,6 +68,9 @@ int c_abi_operation(void)
          ECUIO_OPERATION_END_ENGINE_RUNNING == 12u &&
          ECUIO_OPERATION_END_MOVING == 13u &&
          ECUIO_OPERATION_END_VOLTAGE_LOW == 14u &&
+         ECUIO_OPERATION_END_WRITTEN == 16u &&
+         ECUIO_OPERATION_END_CHECK_FAILED == 17u &&
+         ECUIO_OPERATION_END_RECOVERY_NEEDED == 18u &&
          ECUIO_OPERATION_CHECK_RPM == 1u && ECUIO_OPERATION_CHECK_KMH == 2u &&
          ECUIO_OPERATION_CHECK_VOLTS == 4u &&
          ECUIO_OPERATION_CHECK_VOLTS_FROM_ECU == 8u &&

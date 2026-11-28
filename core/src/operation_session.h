@@ -22,6 +22,8 @@
 
 #include "ecuio/operation.h"
 #include "operation_checks.h"
+#include "operation_flash.h"
+#include "operation_journal.h"
 #include "operation_plan.h"
 #include "operation_run.h"
 #include "operation_sink.h"
@@ -30,6 +32,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace ecuio_operation {
 
@@ -59,6 +62,8 @@ struct session_run {
     bool write = false;     /* the write class's envelope */
     bool held_awake = false; /* core's keep-awake claim, released at the end */
     uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
+    std::vector<uint8_t> current; /* a flash's copy to judge sectors by */
+    journal_writer journal;       /* a flash's */
 
     std::atomic<uint8_t> stage{kStageIdle};
     std::atomic<bool> cancel{false};
@@ -87,6 +92,9 @@ struct session_run {
     own_step own = own_step::none;
     bool own_out = false; /* the talk out is the session's */
     ecuio_talk_result own_end;
+    flash_run f;
+    int64_t pause_until_us = 0;
+    bool journal_closed = false;
 
     /* What the getter reads, under the session's support mutex */
     ecuio_operation_state_t view{};

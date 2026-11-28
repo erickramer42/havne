@@ -193,6 +193,29 @@ inline uint32_t phase_of(const session_run& o)
     }
 }
 
+inline uint32_t flash_phase_of(const session_run& o)
+{
+    if (o.checking) {
+        return ECUIO_OPERATION_PHASE_PRECONDITIONS;
+    }
+    if (o.own == own_step::leaving || o.r.at == run_stage::done) {
+        return ECUIO_OPERATION_PHASE_LEAVING;
+    }
+    if (o.r.at != run_stage::flash) {
+        return ECUIO_OPERATION_PHASE_UNLOCKING;
+    }
+    switch (o.f.at) {
+    case flash_stage::erase:
+        return ECUIO_OPERATION_PHASE_ERASING;
+    case flash_stage::check:
+        return ECUIO_OPERATION_PHASE_VERIFYING;
+    case flash_stage::done:
+        return ECUIO_OPERATION_PHASE_LEAVING;
+    default:
+        return ECUIO_OPERATION_PHASE_WRITING;
+    }
+}
+
 /* What the run has read, as the view's checks */
 inline uint32_t checks_of(const session_run& o)
 {
@@ -212,9 +235,11 @@ inline uint32_t checks_of(const session_run& o)
  * its own fields without the lock. */
 inline void publish(ecuio_session_t* s, session_run& o)
 {
-    const uint32_t phase = phase_of(o);
+    const uint32_t phase = o.p->has_flash ? flash_phase_of(o) : phase_of(o);
     const bool reading = phase == ECUIO_OPERATION_PHASE_READING ||
                          phase == ECUIO_OPERATION_PHASE_COMPARING;
+    const uint64_t done = o.p->has_flash ? o.f.written : o.r.handed;
+    const auto sectors_done = static_cast<uint16_t>(o.f.done_sectors);
     const uint32_t pass = reading ? o.r.pass + 1 : 0;
     const size_t steps = o.p->steps.size();
     const uint32_t step =
@@ -222,15 +247,17 @@ inline void publish(ecuio_session_t* s, session_run& o)
     ecuio_operation_state_t& v = o.view;
     const uint32_t checks = checks_of(o);
     if (v.phase == phase && v.pass == pass && v.step == step &&
-        v.bytes_done == o.r.handed && v.checks == checks &&
-        v.volts_mv == o.v.mv && v.volts_min_mv == o.v.min_mv) {
+        v.bytes_done == done && v.sectors_done == sectors_done &&
+        v.checks == checks && v.volts_mv == o.v.mv &&
+        v.volts_min_mv == o.v.min_mv) {
         return;
     }
     const std::lock_guard<std::mutex> lock(s->support_mutex);
     v.phase = phase;
     v.pass = pass;
     v.step = step;
-    v.bytes_done = o.r.handed;
+    v.bytes_done = done;
+    v.sectors_done = sectors_done;
     v.checks = checks;
     v.volts_mv = o.v.mv;
     v.volts_min_mv = o.v.min_mv;
@@ -256,14 +283,16 @@ inline void end_run(ecuio_session_t* s, session_run& o, uint32_t end,
         v.phase = ECUIO_OPERATION_PHASE_DONE;
         v.end = end;
         v.pass = 0;
-        v.bytes_done = o.r.handed;
+        v.bytes_done = o.p->has_flash ? o.f.written : o.r.handed;
+        v.sectors_done = static_cast<uint16_t>(o.f.done_sectors);
         v.checks = checks_of(o);
         v.volts_mv = o.v.mv;
         v.volts_min_mv = o.v.min_mv;
         v.rpm = static_cast<uint16_t>(o.k.rpm);
         v.kmh = static_cast<uint16_t>(o.k.kmh);
         v.nrc = end == ECUIO_OPERATION_END_REFUSED ||
-                        end == ECUIO_OPERATION_END_UNLOCK_REFUSED
+                        end == ECUIO_OPERATION_END_UNLOCK_REFUSED ||
+                        end == ECUIO_OPERATION_END_RECOVERY_NEEDED
                     ? o.r.nrc
                     : uint8_t{0};
         if (end == ECUIO_OPERATION_END_DIFFER) {
@@ -468,6 +497,8 @@ inline void take_settled(session_run& o, ecuio_engine_talk_state& t)
     }
     if (o.checking) {
         check_silence(o.k);
+    } else if (o.r.at == run_stage::flash) {
+        flash_silence(o.f);
     } else if (res.end == ecuio_talk_end::unsent) {
         stop(o.r, run_end::link_lost);
     } else {
@@ -731,6 +762,12 @@ inline void functional_step(const ecuio_session_t* s, session_run& o,
     }
 }
 
+} // namespace ecuio_operation
+
+#include "request_flash.h"
+
+namespace ecuio_operation {
+
 /* One pass of a run that is the worker's */
 inline void drive(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
                   int64_t now_us)
@@ -805,6 +842,17 @@ inline void on_frame(ecuio_session_t* s, const ecuio_request_engine* e,
         }
         return;
     }
+    if (o->r.at == run_stage::flash) {
+        if (end == ecuio_talk_end::answered || end == ecuio_talk_end::refused) {
+            o->fed = true;
+            (void)flash_reply(o->f, bytes, len);
+        } else if (ch.talk.out && len == 3 &&
+                   bytes[0] == ECUIO_NEGATIVE_RESPONSE && bytes[1] == o->sid &&
+                   bytes[2] == ECUIO_NRC_RESPONSE_PENDING) {
+            (void)flash_reply(o->f, bytes, len);
+        }
+        return;
+    }
     if (end == ecuio_talk_end::answered || end == ecuio_talk_end::refused) {
         o->fed = true;
         const bool left =
@@ -841,6 +889,10 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
     uint8_t stage = o->stage.load(std::memory_order_acquire);
     if (stage == kStageArmed) {
         begin(o->r, *o->p, e->write_max);
+        flash_begin(o->f, *o->p, e->write_max,
+                    o->current.empty() ? nullptr : o->current.data());
+        o->pause_until_us = 0;
+        o->journal_closed = false;
         check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);
         o->checking = true;
         o->talk_at = o->channel;
@@ -864,7 +916,11 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
     if (stage != kStageRunning) {
         return;
     }
-    drive(s, *o, e, now_us);
+    if (o->p->has_flash) {
+        drive_flash(s, *o, e, now_us);
+    } else {
+        drive(s, *o, e, now_us);
+    }
     if (o->stage.load(std::memory_order_relaxed) == kStageRunning) {
         publish(s, *o);
     }
@@ -887,9 +943,14 @@ inline int64_t wait_us(ecuio_session_t* s, const ecuio_request_engine* e,
     if (stage != kStageRunning) {
         return INT64_MAX;
     }
-    const int64_t keep = o->keep_at_us == 0       ? INT64_MAX
-                         : o->keep_at_us > now_us ? o->keep_at_us - now_us
-                                                  : 0;
+    const int64_t pause = o->pause_until_us == 0 ? INT64_MAX
+                          : o->pause_until_us > now_us
+                              ? o->pause_until_us - now_us
+                              : 0;
+    const int64_t keep =
+        (std::min)(pause, o->keep_at_us == 0       ? INT64_MAX
+                          : o->keep_at_us > now_us ? o->keep_at_us - now_us
+                                                   : 0);
     if (o->out) {
         return e->chans[o->talk_at].talk.result.end != ecuio_talk_end::none
                    ? 0

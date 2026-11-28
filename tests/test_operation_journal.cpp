@@ -174,3 +174,19 @@ TEST(OperationJournalTest, AJournalNoHavneReadsIsTakenAsMidFlash)
     std::string why;
     EXPECT_EQ(journal_find(folder, 0x7E8, &why), journal_found::none);
 }
+
+TEST(OperationJournalTest, AWriterOpenedAgainWritesAgain)
+{
+    Folder f("-journal-again");
+    const std::string folder = f.path.u8string();
+    std::string why;
+    journal_writer j;
+    for (int round = 0; round < 3; ++round) {
+        ASSERT_TRUE(j.open(folder, head_of(), &why)) << why;
+        journal_mark m;
+        m.state = journal_state::writing;
+        j.post(m);
+        ASSERT_TRUE(flushed(j)) << "round " << round;
+        j.close(false);
+    }
+}

@@ -18,8 +18,9 @@ constexpr size_t kDumpLineBytes = 2048;
 inline const char* dump_phase_word(uint32_t phase)
 {
     static const char* const words[] = {
-        "none",      "checking", "preconditions", "unlocking", "reading",
-        "comparing", "saving",   "leaving",       "done"};
+        "none",    "checking",  "preconditions", "unlocking",
+        "reading", "comparing", "saving",        "leaving",
+        "done",    "erasing",   "writing",       "verifying"};
     return phase < sizeof words / sizeof words[0] ? words[phase] : "unknown";
 }
 
@@ -40,7 +41,10 @@ inline const char* dump_end_word(uint32_t end)
                                         "engine_running",
                                         "moving",
                                         "voltage_low",
-                                        "voltage_high"};
+                                        "voltage_high",
+                                        "written",
+                                        "check_failed",
+                                        "recovery_needed"};
     return end < sizeof words / sizeof words[0] ? words[end] : "unknown";
 }
 

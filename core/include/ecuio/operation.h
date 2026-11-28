@@ -63,6 +63,9 @@ extern "C" {
 #define ECUIO_OPERATION_PHASE_SAVING        6u /* the copy is sealed */
 #define ECUIO_OPERATION_PHASE_LEAVING       7u /* the session is left */
 #define ECUIO_OPERATION_PHASE_DONE          8u /* end says how */
+#define ECUIO_OPERATION_PHASE_ERASING       9u /* a flash's sector erased */
+#define ECUIO_OPERATION_PHASE_WRITING       10u
+#define ECUIO_OPERATION_PHASE_VERIFYING     11u /* the module's own check */
 
 /* How a run ended: closed, append-only. Only SAVED keeps a copy.
  *   NONE              it runs, or none was started
@@ -99,6 +102,12 @@ extern "C" {
 #define ECUIO_OPERATION_END_MOVING           13u
 #define ECUIO_OPERATION_END_VOLTAGE_LOW      14u
 #define ECUIO_OPERATION_END_VOLTAGE_HIGH     15u
+/* A flash's: WRITTEN, every sector written and the check passed;
+ * CHECK_FAILED and RECOVERY_NEEDED, the module's memory may be partly
+ * written and it needs the flash again before it runs */
+#define ECUIO_OPERATION_END_WRITTEN         16u
+#define ECUIO_OPERATION_END_CHECK_FAILED    17u
+#define ECUIO_OPERATION_END_RECOVERY_NEEDED 18u
 
 /* A state's checks: what the run has read */
 #define ECUIO_OPERATION_CHECK_RPM 0x1u /* rpm holds the engine's answer */
@@ -147,7 +156,8 @@ typedef struct ecuio_operation_state {
     uint32_t waiting_ms;
     uint16_t rpm;
     uint16_t kmh;
-    uint32_t reserved[1]; /* zero; ABI growth space */
+    uint16_t sectors;      /* a flash's sectors to write */
+    uint16_t sectors_done; /* and those written whole */
 } ecuio_operation_state_t;
 
 #if defined(__cplusplus)
@@ -171,8 +181,8 @@ static_assert(offsetof(ecuio_operation_state_t, waiting_ms) == 324,
               "operation state waiting_ms offset is ABI");
 static_assert(offsetof(ecuio_operation_state_t, rpm) == 328,
               "operation state rpm offset is ABI");
-static_assert(offsetof(ecuio_operation_state_t, reserved) == 332,
-              "operation state reserved offset is ABI");
+static_assert(offsetof(ecuio_operation_state_t, sectors) == 332,
+              "operation state sectors offset is ABI");
 #endif
 
 /*
@@ -217,6 +227,23 @@ ecuio_status_t
 ecuio_session_operation_start(ecuio_session_t* session,
                               const ecuio_operation_request_t* request,
                               const char* folder_utf8);
+
+/*
+ * A flash's start, as ecuio_session_operation_start's, with copy_utf8 the
+ * name of a copy in the folder (ecuio_dump_list's) whose ranges are the
+ * flash's images: only the sectors that differ from it are written. NULL
+ * writes every sector. The journal (<reply ID>.havnejournal) is written
+ * in the folder before the call returns. Beside the start's refusals:
+ *   ECUIO_ERR_INVALID_ARGUMENT, with words: a copy for a plan that is no
+ *     flash, a copy whose ranges aren't the images', or one that doesn't
+ *     verify; a transport whose writes can't carry the flash's requests.
+ *   ECUIO_ERR_IN_USE, with words: a journal says a flash of the module
+ *     didn't finish, or can't be read.
+ *   ECUIO_ERR_LOAD_FAILED, with words: the journal can't be written.
+ */
+ecuio_status_t ecuio_session_operation_start_from(
+    ecuio_session_t* session, const ecuio_operation_request_t* request,
+    const char* folder_utf8, const char* copy_utf8);
 
 /*
  * Asks the run under way to stop. It ends CANCELED once the request that

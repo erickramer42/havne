@@ -24,6 +24,8 @@ enum class flash_end : uint8_t {
     bad_reply,
     canceled,
     check_failed,
+    file,      /* the journal couldn't be written before the floor */
+    link_lost, /* a request couldn't be handed to the adapter */
 };
 
 enum class flash_action : uint8_t {
@@ -104,7 +106,8 @@ inline uint32_t flash_select(const plan& p, const uint8_t* current,
             continue;
         }
         const uint8_t* img = p.steps[f.step].blob.data() + f.offset;
-        if (!plain || std::memcmp(img, current + flat, c.bytes) != 0) {
+        if (!plain || std::memcmp(img, current + flat,
+                                  static_cast<size_t>(c.bytes)) != 0) {
             out[n++] = f;
         }
     }

@@ -18,6 +18,7 @@
 #include "error_detail.h"
 #include "host_awake.h"
 #include "host_power.h"
+#include "operation_flash_start.h"
 #include "operation_session.h"
 #include "recorder.h"
 #include "request_engine_ident.h"
@@ -42,6 +43,9 @@ std::atomic<bool> g_write_class{false};
 
 constexpr char kClosedWords[] =
     "the session closed before the read ended: nothing was kept";
+constexpr char kClosedFlashWords[] =
+    "the session closed after the flash began writing: flash the module "
+    "again before it runs";
 
 int64_t utc_now()
 {
@@ -369,7 +373,9 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
         o.view.generation = generation;
         o.view.operation = index;
         o.view.phase = ECUIO_OPERATION_PHASE_CHECKING;
-        o.view.bytes_total = 2 * ecuio_operation::image_bytes(p);
+        o.view.bytes_total =
+            p.has_flash ? o.f.written : 2 * ecuio_operation::image_bytes(p);
+        o.view.sectors = static_cast<uint16_t>(o.f.chosen);
     }
     o.stage.store(ecuio_operation::kStageArmed, std::memory_order_release);
 }
@@ -402,8 +408,55 @@ ecuio_status_t judge_level(const plan& p,
     return ECUIO_ERR_INVALID_ARGUMENT;
 }
 
+/* A flash's own start: the transport's writes, the copy its sectors are
+ * judged by, the journal; nothing sent and no sink */
+ecuio_status_t start_flash(ecuio_session_t* s, session_run& o, const plan& p,
+                           const ecuio_bound_channel& b, const char* folder,
+                           const char* copy)
+{
+    ecuio_status_t st = ecuio_operation::flash_fits(p, b.write_bound.load());
+    if (st != ECUIO_OK) {
+        return st;
+    }
+    o.current.clear();
+    if (copy != nullptr) {
+        st = ecuio_operation::flash_current(folder, copy, p, &o.current);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+    }
+    uint32_t sectors = 0;
+    uint64_t bytes = 0;
+    st =
+        ecuio_operation::flash_journal(s, o, p, folder, copy, &sectors, &bytes);
+    o.f = ecuio_operation::flash_run{};
+    o.f.chosen = sectors;
+    o.f.written = bytes;
+    return st;
+}
+
+/* The run's file before anything is sent: a dump's copy, a flash's
+ * journal */
+ecuio_status_t open_files(ecuio_session_t* s, session_run& o, const plan& p,
+                          const ecuio_bound_channel& b, const char* folder,
+                          const char* copy, std::unique_ptr<dump_sink>* sink)
+{
+    o.journal.close(false);
+    if (p.has_flash) {
+        return start_flash(s, o, p, b, folder, copy);
+    }
+    *sink = std::make_unique<dump_sink>();
+    std::string why;
+    const ecuio_status_t st =
+        (*sink)->open(p, folder, record_for(s, *s->conversation, p), &why);
+    if (st == ECUIO_ERR_LOAD_FAILED) {
+        ecuio_detail_set("%s", why.c_str());
+    }
+    return st;
+}
+
 ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
-                     const char* folder)
+                     const char* folder, const char* copy)
 {
     const plan* p = nullptr;
     uint32_t channel = 0;
@@ -419,6 +472,10 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     if (st != ECUIO_OK) {
         return st;
     }
+    if (copy != nullptr && !p->has_flash) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "only a flash is judged against a copy");
+    }
     ecuio_conversation_report report;
     {
         const std::lock_guard<std::mutex> lock(s->support_mutex);
@@ -428,7 +485,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "the module's code isn't talking on this channel");
     }
-    st = fits(*p, b->talk_bound.load());
+    st = p->has_flash ? ECUIO_OK : fits(*p, b->talk_bound.load());
     st = st == ECUIO_OK ? helper_fits(*p, b->write_bound.load()) : st;
     if (st != ECUIO_OK) {
         return st;
@@ -453,18 +510,15 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     } else if (o->sink != nullptr) {
         o->sink->close(); /* the run before: its writer joined */
     }
-    auto sink = std::make_unique<dump_sink>();
-    std::string why;
-    st = sink->open(*p, folder, record_for(s, *s->conversation, *p), &why);
+    std::unique_ptr<dump_sink> sink;
+    st = open_files(s, *o, *p, *b, folder, copy, &sink);
     if (st != ECUIO_OK) {
-        if (st == ECUIO_ERR_LOAD_FAILED) {
-            ecuio_detail_set("%s", why.c_str());
-        }
         return st;
     }
     if (!open) {
         st = ecuio_session_unlock_mark(s, *b, channel, p->level, nullptr);
         if (st != ECUIO_OK) {
+            o->journal.close(true);
             return st; /* the sink's end removes the unfinished file */
         }
     }
@@ -492,13 +546,19 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
         o->sink->close();
     }
     const uint8_t stage = o->stage.load();
-    if (stage != ecuio_operation::kStageArmed &&
-        stage != ecuio_operation::kStageRunning) {
+    const bool live = stage == ecuio_operation::kStageArmed ||
+                      stage == ecuio_operation::kStageRunning;
+    const bool flash = o->p != nullptr && o->p->has_flash;
+    const bool past_floor = flash && o->f.floor;
+    o->journal.close(live && flash && !past_floor);
+    if (!live) {
         return;
     }
-    const bool saved = o->sink->state() == sink_state::saved;
-    const uint32_t end =
-        saved ? ECUIO_OPERATION_END_SAVED : ECUIO_OPERATION_END_CANCELED;
+    const bool saved =
+        o->sink != nullptr && o->sink->state() == sink_state::saved;
+    const uint32_t end = saved        ? ECUIO_OPERATION_END_SAVED
+                         : past_floor ? ECUIO_OPERATION_END_RECOVERY_NEEDED
+                                      : ECUIO_OPERATION_END_CANCELED;
     /* An armed run never began: it has no start line to end */
     if (stage == ecuio_operation::kStageRunning) {
         ecuio_record_operation(s->record_link.get(), o->p->id.c_str(),
@@ -512,6 +572,8 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
     v.end = end;
     if (saved) {
         std::memcpy(v.name, o->sink->name(), sizeof v.name);
+    } else if (past_floor) {
+        std::memcpy(v.words, kClosedFlashWords, sizeof kClosedFlashWords);
     } else {
         std::memcpy(v.words, kClosedWords, sizeof kClosedWords);
     }
@@ -540,7 +602,26 @@ ecuio_session_operation_start(ecuio_session_t* session,
         return ECUIO_ERR_SESSION_CLOSED;
     }
     try {
-        return start(session, *request, folder_utf8);
+        return start(session, *request, folder_utf8, nullptr);
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_session_operation_start_from(
+    ecuio_session_t* session, const ecuio_operation_request_t* request,
+    const char* folder_utf8, const char* copy_utf8)
+{
+    ecuio_detail_clear();
+    if (session == nullptr || request == nullptr || folder_utf8 == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const std::lock_guard<std::mutex> calls(session->conversation_mutex);
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    try {
+        return start(session, *request, folder_utf8, copy_utf8);
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

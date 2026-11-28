@@ -45,7 +45,11 @@ TEST(CliDumpLineTest, EveryPhaseAndEndHasItsWord)
     for (uint32_t i = 0; i < phases.size(); ++i) {
         EXPECT_EQ(cli::dump_phase_word(i), phases[i]);
     }
-    EXPECT_STREQ(cli::dump_phase_word(ECUIO_OPERATION_PHASE_DONE + 1),
+    EXPECT_STREQ(cli::dump_phase_word(ECUIO_OPERATION_PHASE_ERASING),
+                 "erasing");
+    EXPECT_STREQ(cli::dump_phase_word(ECUIO_OPERATION_PHASE_VERIFYING),
+                 "verifying");
+    EXPECT_STREQ(cli::dump_phase_word(ECUIO_OPERATION_PHASE_VERIFYING + 1),
                  "unknown");
     EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_SAVED), "saved");
     EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_CANCELED), "canceled");
@@ -54,7 +58,9 @@ TEST(CliDumpLineTest, EveryPhaseAndEndHasItsWord)
                  "engine_running");
     EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_VOLTAGE_HIGH),
                  "voltage_high");
-    EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_VOLTAGE_HIGH + 1),
+    EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_RECOVERY_NEEDED),
+                 "recovery_needed");
+    EXPECT_STREQ(cli::dump_end_word(ECUIO_OPERATION_END_RECOVERY_NEEDED + 1),
                  "unknown");
 }
 

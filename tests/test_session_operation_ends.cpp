@@ -608,7 +608,8 @@ TEST(SessionOperationTest, TheStateIsCopiedWhole)
     EXPECT_EQ(v.struct_size, sizeof v);
     EXPECT_EQ(v.generation, 0u);
     EXPECT_EQ(v.phase, ECUIO_OPERATION_PHASE_NONE);
-    EXPECT_EQ(v.reserved[0], 0u);
+    EXPECT_EQ(v.sectors, 0u);
+    EXPECT_EQ(v.sectors_done, 0u);
 }
 
 /* The worker makes no allocation for a chunk: a reading's passes, the

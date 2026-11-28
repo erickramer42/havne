@@ -96,6 +96,7 @@ enum class run_stage : uint8_t {
     leave,  /* a kernel read's session left before the identifiers again */
     ident_after,
     closing, /* the one 37 after a cancel or a fault in an upload */
+    flash,   /* operation_flash.h's, the session entered and unlocked */
     done,
 };
 
@@ -201,6 +202,10 @@ inline void settle(run& r)
     const step& s = p.steps[r.step];
     if (s.session != r.session) {
         r.at = run_stage::enter;
+        return;
+    }
+    if (p.has_flash) {
+        r.at = run_stage::flash;
         return;
     }
     if (!r.before && r.ident < p.idents.size()) {
@@ -349,6 +354,9 @@ template <typename Sink> run_action next(run& r, run_request& out, Sink& sink)
     }
     if (r.at == run_stage::leave) {
         return run_action::leave;
+    }
+    if (r.at == run_stage::flash) {
+        return run_action::hold;
     }
     const bool data =
         r.at == run_stage::read || r.at == run_stage::upload_block;
