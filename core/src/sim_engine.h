@@ -151,6 +151,9 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const ecuio_sim_session& s,
                                  const uint8_t* req, uint32_t len,
                                  bool functional, uint8_t* out)
 {
+    if (s.flash.on && s.flash.boot) {
+        return 0;
+    }
     return ecuio_sim_answer(e, req, len, functional, out,
                             s.extended || s.programming, &s.security,
                             &s.memory);

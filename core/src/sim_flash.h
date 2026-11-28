@@ -19,6 +19,8 @@ constexpr uint8_t ECUIO_SIM_FLASH_FAILED = 0x01;
 constexpr uint8_t ECUIO_SIM_NRC_GENERAL_PROGRAMMING = 0x72;
 constexpr uint8_t ECUIO_SIM_NRC_VOLTAGE_LOW = 0x93;
 constexpr uint32_t ECUIO_SIM_FLASH_SILENT_AFTER = 2;
+constexpr uint8_t ECUIO_SIM_NRC_NOT_SUPPORTED = 0x11;
+constexpr uint32_t ECUIO_SIM_FLASH_PENDING_MOST_MS = 600000;
 
 static_assert(ECUIO_SIM_MEMORY_CODE_BYTES % ECUIO_SIM_FLASH_SECTOR_BYTES == 0,
               "the code region is whole sectors");
@@ -30,6 +32,10 @@ struct ecuio_sim_flash_faults {
     bool check = false;   /* the check answers its failed status */
     bool erase = false;   /* an erase answers 7F 31 22 */
     bool silent = false;  /* nothing answers after the second 36 */
+    bool boot = false;    /* starts part-written: boot_written sectors */
+    uint32_t boot_written = 0;
+    bool locked = false;     /* a seed asks answer 7F 27 36 */
+    uint32_t pending_ms = 0; /* each request answers 78 alone this long */
 };
 
 enum class ecuio_sim_sector : uint8_t { kept, erased, written };
@@ -48,6 +54,10 @@ struct ecuio_sim_flash {
     bool struck_counter = false;
     bool struck_volts = false;
     bool dead = false;
+    bool boot = false; /* the application doesn't run: the bootloader answers */
+    bool valid = false; /* a passing check since the last erase */
+    bool heard = false;
+    int64_t pending_until_us = 0;
     uint32_t erases = 0;
     uint32_t downloads = 0;
     uint32_t checks = 0;
@@ -69,6 +79,14 @@ inline bool ecuio_sim_flash_arm(ecuio_sim_flash& f, ecuio_sim_memory& m,
     for (uint32_t i = 0; i < ECUIO_SIM_MEMORY_CODE_BYTES; ++i) {
         m.code[i] = ecuio_sim_memory_fill(ECUIO_SIM_MEMORY_CODE_ADDRESS + i);
     }
+    f.boot = faults.boot;
+    for (uint32_t i = faults.boot ? faults.boot_written
+                                  : ECUIO_SIM_FLASH_SECTORS;
+         i < ECUIO_SIM_FLASH_SECTORS; ++i) {
+        f.sectors[i] = ecuio_sim_sector::erased;
+        std::memset(m.code.data() + size_t{i} * ECUIO_SIM_FLASH_SECTOR_BYTES,
+                    0xFF, ECUIO_SIM_FLASH_SECTOR_BYTES);
+    }
     return true;
 }
 
@@ -76,6 +94,47 @@ inline void ecuio_sim_flash_end(ecuio_sim_flash& f)
 {
     f.downloading = false;
     f.left = 0;
+}
+
+/* The application runs again only after a passing check */
+inline void ecuio_sim_flash_restart(ecuio_sim_flash& f)
+{
+    f.boot = f.boot && !f.valid;
+}
+
+inline bool ecuio_sim_flash_withholds(const ecuio_sim_flash& f,
+                                      const uint8_t* req, uint32_t len)
+{
+    if (!f.on || !f.boot || len == 0) {
+        return false;
+    }
+    switch (req[0]) {
+    case 0x10:
+    case 0x11:
+    case 0x27:
+    case 0x31:
+    case 0x34:
+    case 0x35:
+    case 0x36:
+    case 0x37:
+    case 0x3E:
+        return false;
+    default:
+        return true;
+    }
+}
+
+/* pending:<ms>, from the first request heard: true while it answers 78 */
+inline bool ecuio_sim_flash_pending(ecuio_sim_flash& f, int64_t now_us)
+{
+    if (!f.on || f.faults.pending_ms == 0) {
+        return false;
+    }
+    if (!f.heard) {
+        f.heard = true;
+        f.pending_until_us = now_us + int64_t{f.faults.pending_ms} * 1000;
+    }
+    return now_us < f.pending_until_us;
 }
 
 namespace ecuio_sim_flash_detail {
@@ -121,6 +180,8 @@ inline uint32_t erase(ecuio_sim_flash& f, ecuio_sim_memory& m,
         return refuse(0x31, ECUIO_SIM_NRC_CONDITIONS, out);
     }
     ++f.erases;
+    f.boot = true;
+    f.valid = false;
     for (uint32_t i = first; i <= last; ++i) {
         f.sectors[i] = ecuio_sim_sector::erased;
         std::memset(m.code.data() + size_t{i} * ECUIO_SIM_FLASH_SECTOR_BYTES,
@@ -144,8 +205,8 @@ inline uint32_t check(ecuio_sim_flash& f, const uint8_t* req, uint32_t len,
     }
     std::memcpy(out, req, 4);
     out[0] = 0x71;
-    out[4] = whole && !f.faults.check ? ECUIO_SIM_FLASH_PASSED
-                                      : ECUIO_SIM_FLASH_FAILED;
+    f.valid = whole && !f.faults.check;
+    out[4] = f.valid ? ECUIO_SIM_FLASH_PASSED : ECUIO_SIM_FLASH_FAILED;
     return 5;
 }
 
@@ -292,8 +353,59 @@ inline uint32_t ecuio_sim_flash_answer(ecuio_sim_flash& f, ecuio_sim_memory& m,
     }
 }
 
-/* flash=: "1", or any of counter, general, volts, check, erase and silent,
- * comma-separated; false for any other word */
+namespace ecuio_sim_flash_detail {
+
+inline bool number_after(const char* text, size_t n, const char* name,
+                         uint32_t most, uint32_t* out)
+{
+    const size_t k = std::strlen(name);
+    if (n <= k + 1 || std::memcmp(text, name, k) != 0 || text[k] != ':') {
+        return false;
+    }
+    uint64_t v = 0;
+    for (size_t i = k + 1; i < n; ++i) {
+        if (text[i] < '0' || text[i] > '9' || v > most) {
+            return false;
+        }
+        v = v * 10 + static_cast<uint64_t>(text[i] - '0');
+    }
+    if (v < 1 || v > most) {
+        return false;
+    }
+    *out = static_cast<uint32_t>(v);
+    return true;
+}
+
+inline bool word(const char* text, size_t n, ecuio_sim_flash_faults* out)
+{
+    const auto is = [&](const char* w) {
+        return std::strlen(w) == n && std::memcmp(text, w, n) == 0;
+    };
+    bool* const words[] = {&out->counter, &out->general, &out->volts,
+                           &out->check,   &out->erase,   &out->silent,
+                           &out->boot,    &out->locked};
+    const char* const names[] = {"counter", "general", "volts", "check",
+                                 "erase",   "silent",  "boot",  "locked"};
+    for (size_t i = 0; i < sizeof words / sizeof words[0]; ++i) {
+        if (is(names[i])) {
+            *words[i] = true;
+            return true;
+        }
+    }
+    if (number_after(text, n, "boot", ECUIO_SIM_FLASH_SECTORS,
+                     &out->boot_written)) {
+        out->boot = true;
+        return true;
+    }
+    return is("1") ||
+           number_after(text, n, "pending", ECUIO_SIM_FLASH_PENDING_MOST_MS,
+                        &out->pending_ms);
+}
+
+} // namespace ecuio_sim_flash_detail
+
+/* flash=: "1", or counter, general, volts, check, erase, silent,
+ * boot[:<n>], locked and pending:<ms>, comma-separated */
 inline bool ecuio_sim_parse_flash(const char* text, size_t len, bool* on,
                                   ecuio_sim_flash_faults* out)
 {
@@ -303,22 +415,7 @@ inline bool ecuio_sim_parse_flash(const char* text, size_t len, bool* on,
         while (end < len && text[end] != ',') {
             ++end;
         }
-        const size_t n = end - at;
-        const auto is = [&](const char* w) {
-            return std::strlen(w) == n && std::memcmp(text + at, w, n) == 0;
-        };
-        bool* const words[] = {&out->counter, &out->general, &out->volts,
-                               &out->check,   &out->erase,   &out->silent};
-        const char* const names[] = {"counter", "general", "volts",
-                                     "check",   "erase",   "silent"};
-        bool known = is("1");
-        for (size_t i = 0; i < sizeof words / sizeof words[0]; ++i) {
-            if (is(names[i])) {
-                *words[i] = true;
-                known = true;
-            }
-        }
-        if (!known) {
+        if (!ecuio_sim_flash_detail::word(text + at, end - at, out)) {
             return false;
         }
         at = end + 1;

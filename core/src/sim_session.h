@@ -63,6 +63,9 @@ inline void ecuio_sim_session_enter(ecuio_sim_session& s, uint8_t session)
     ecuio_sim_memory_end(s.memory);
     ecuio_sim_kernel_end(s.kernel);
     ecuio_sim_flash_end(s.flash);
+    if (session == 0x01) {
+        ecuio_sim_flash_restart(s.flash);
+    }
 }
 
 /* S3 of silence at the ECU's time now_us leaves the extended session,
@@ -131,6 +134,22 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
     using namespace ecuio_sim_detail;
     ecuio_sim_session_lapse(s, now_us);
     s.heard_us = now_us;
+    if (s.memory.vin != nullptr && len > 0 &&
+        ecuio_sim_flash_pending(s.flash, now_us)) {
+        *handled = true;
+        return refuse(req[0], ECUIO_SIM_NRC_PENDING, out);
+    }
+    if (s.memory.vin != nullptr &&
+        ecuio_sim_flash_withholds(s.flash, req, len)) {
+        *handled = true;
+        return refuse(req[0], ECUIO_SIM_NRC_NOT_SUPPORTED, out);
+    }
+    if (has_extended && has_security && len == 2 && req[0] == 0x27 &&
+        (req[1] & 0x01) != 0 && s.flash.on && s.flash.faults.locked &&
+        (s.extended || s.programming)) {
+        *handled = true;
+        return refuse(0x27, ECUIO_SIM_NRC_ATTEMPTS, out);
+    }
     if (has_extended && has_security && len > 0 && req[0] == 0x27) {
         *handled = true;
         return ecuio_sim_security_answer(

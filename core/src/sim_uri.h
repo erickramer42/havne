@@ -299,8 +299,9 @@ inline taken take_flash(const ecuio_uri::param& p, ecuio_sim_config* out,
         return taken::ok;
     }
     std::snprintf(why, why_cap,
-                  "flash takes 1, or counter, general, volts, check, erase "
-                  "and silent, comma-separated");
+                  "flash takes 1, or counter, general, volts, check, erase, "
+                  "silent, boot[:<sectors>], locked and pending:<ms>, "
+                  "comma-separated");
     return taken::bad;
 }
 
