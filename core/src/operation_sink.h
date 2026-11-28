@@ -158,6 +158,7 @@ private:
     bool read_back(const std::string& text, const uint8_t* head,
                    uint8_t file_sum[32]);
     void place(const std::string& name);
+    bool holds_copy(const std::string& out);
     void end(sink_state s, const char* words);
     void test_change(uint64_t at, bool add);
     void let_go();
