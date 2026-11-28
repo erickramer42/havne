@@ -276,7 +276,6 @@ inline std::atomic<bool>& pack_first_only()
     return on;
 }
 
-/* The engine ECU's own codes through 0x19 (core/src/mock_ecu.h's too) */
 struct ModuleCode {
     uint32_t code;
     uint8_t status;
@@ -286,9 +285,6 @@ constexpr ModuleCode kModuleCodes[] = {
     {0x030100, 0x08}, {0x056311, 0x50},
 };
 
-/* How it answers 0x19; the fake DLL sets it from ECUIO_FAKE_MODULE_CODES
- * on each write ("refused", "none", "extended", "many", "no-count",
- * "silent"), the in-process fakes' tests directly */
 enum class CodesMode : int {
     normal,
     refused,
@@ -317,8 +313,6 @@ inline CodesMode codes_mode_of(const char* text)
     return CodesMode::normal;
 }
 
-/* 19 01 and 19 02 under the mode, the session the ECU is in (extended);
- * false for no answer */
 inline bool answer_codes(const unsigned char* req, size_t req_len,
                          bool extended, unsigned char* out, size_t* out_len)
 {
