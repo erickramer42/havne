@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"backend": "mock", "baud": 0, "channels": [{"rx": "0x7E8", "tx": "0x7E0"}], "profile": "mock", "protocol_id": 0, "type": "session"}

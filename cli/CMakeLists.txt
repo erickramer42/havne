@@ -24,7 +24,8 @@ add_executable(havne-cli
     cmd_health.cpp
     cmd_sim.cpp
     cmd_play.cpp
-    cmd_small.cpp)
+    cmd_small.cpp
+    cmd_enhanced_codes.cpp)
 
 find_package(Threads REQUIRED)
 target_link_libraries(havne-cli PRIVATE ecuio-core Threads::Threads)

@@ -275,6 +275,16 @@ int cmd_play(int argc, char** argv);
 // cmd_small.cpp
 std::vector<ecuio_can_interface_t> can_interfaces();
 int run_clear_command(const char* uri, uint32_t flags);
+
+struct EnhancedCodesArgs {
+    const char* uri = nullptr;
+    bool has_ecu = false;
+    uint32_t ecu = 0;
+    uint8_t mask = 0;
+    uint64_t timeout_s = 10;
+};
+int run_enhanced_codes(const EnhancedCodesArgs& args);
+int cmd_enhanced_codes(int argc, char** argv);
 int run_vin(const char* typed);
 int run_dtc(const char* typed);
 int run_devices();

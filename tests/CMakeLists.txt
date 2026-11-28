@@ -436,7 +436,7 @@ if(TARGET havne-cli)
         test_cli_log.cpp test_cli_together.cpp test_cli_layout.cpp test_cli_conditions.cpp
         test_cli_expr.cpp test_cli_pages.cpp test_cli_pairs.cpp
         test_cli_summary.cpp test_cli_emulator.cpp test_cli_sim.cpp
-        test_cli_unlock.cpp test_cli_dump.cpp)
+        test_cli_unlock.cpp test_cli_dump.cpp test_cli_enhanced_codes.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -552,6 +552,9 @@ if(TARGET havne-cli)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(AGatewayHoldsAModuleUntilItsUnlocked gateway)
+        app_cli_elm327(EnhancedCodesReadBothModules codes)
+        app_cli_elm327(EnhancedCodesNameAModuleThatRefuses codes-refused)
+        app_cli_elm327(EnhancedCodesNameAModuleThatAnswersNothing codes-silent)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
         app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
@@ -567,6 +570,17 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> clear mock://golden --yes --engine-running)
         app_cli_golden(ClearRefusesABadUri bad-uri.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> clear "mock://golden?speed=2" --yes)
+        # A module's own codes through 0x19: every module, one narrowed by
+        # --ecu under a wider mask, a replay's refusal and an ECU no module has
+        app_cli_golden(EnhancedCodesReadsTheMock enhanced-codes-mock.jsonl
+            -- $<TARGET_FILE:havne-cli> enhanced-codes mock://golden)
+        app_cli_golden(EnhancedCodesNarrowsToOneEcu enhanced-codes-mock-ecu.jsonl
+            -- $<TARGET_FILE:havne-cli> enhanced-codes mock://golden
+               --ecu 0x7E8 --mask FF)
+        app_cli_golden(EnhancedCodesRefusesAReplay enhanced-codes-replay.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> enhanced-codes "${_cli_replay}?profile=obd2&speed=max")
+        app_cli_golden(EnhancedCodesNamesAnEcuNoModuleHas enhanced-codes-no-ecu.jsonl --exit 2
+            -- $<TARGET_FILE:havne-cli> enhanced-codes mock://golden --ecu 0x7FF)
         # export and import (ADR-0054): a candump log in, read through
         # obd2 and out to pcapng, read back by struct; the refusals; and
         # tshark's reading where it's installed (skip 77)
@@ -1983,6 +1997,18 @@ if(TARGET havne-cli)
     app_cli_usage(ClearTwoUrisIsUsage "clear|mock://a|mock://b|--yes")
     app_cli_usage(ClearMovingWithoutRunningIsUsage "clear|mock://x|--yes|--moving")
     app_cli_usage(ClearAnUnknownOptionIsUsage "clear|mock://x|--yes|--force")
+    app_cli_usage(EnhancedCodesWithoutAUriIsUsage "enhanced-codes")
+    app_cli_usage(EnhancedCodesTwoUrisIsUsage "enhanced-codes|mock://a|mock://b")
+    app_cli_usage(EnhancedCodesAnUnknownOptionIsUsage "enhanced-codes|mock://x|--all")
+    app_cli_usage_says(EnhancedCodesANonHexMaskIsUsage
+        "enhanced-codes|mock://x|--mask|zz" "--mask takes one byte in hex")
+    app_cli_usage_says(EnhancedCodesAMaskPastAByteIsUsage
+        "enhanced-codes|mock://x|--mask|100" "--mask takes one byte in hex")
+    app_cli_usage_says(EnhancedCodesANonHexEcuIsUsage
+        "enhanced-codes|mock://x|--ecu|7E8x" "--ecu takes a CAN ID in hex")
+    app_cli_usage_says(EnhancedCodesATimeoutOfZeroIsUsage
+        "enhanced-codes|mock://x|--timeout|0" "--timeout takes seconds")
+    app_cli_usage(EnhancedCodesAValueMissingIsUsage "enhanced-codes|mock://x|--mask")
     # view's refusals come before any recording opens, but for a name no
     # recording has, which comes after the opens and before any line
     app_cli_usage_says(ViewWithoutARecordingIsUsage "view"

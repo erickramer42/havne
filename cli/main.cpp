@@ -72,6 +72,9 @@ int run(int argc, char** argv)
     if (command == "clear") {
         return cmd_clear(argc, argv);
     }
+    if (command == "enhanced-codes") {
+        return cmd_enhanced_codes(argc, argv);
+    }
     if (command == "sim") {
         return cmd_sim(argc, argv);
     }

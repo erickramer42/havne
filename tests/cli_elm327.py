@@ -6,6 +6,9 @@
 #   python tests/cli_elm327.py session <havne-cli>
 #   python tests/cli_elm327.py modules <havne-cli>
 #   python tests/cli_elm327.py gateway <havne-cli>
+#   python tests/cli_elm327.py codes <havne-cli>
+#   python tests/cli_elm327.py codes-refused <havne-cli>
+#   python tests/cli_elm327.py codes-silent <havne-cli>
 #   python tests/cli_elm327.py plugin <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py aimed <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py car <havne-cli> <plugins/example-sim>
@@ -27,6 +30,9 @@
 # gateway: a host holds the second module behind the simulated gateway:
 # its read refused 33 until the host unlocks the gateway (10 03, 27 01,
 # the key worked out from sim.h's transform), then answered.
+# codes: enhanced-codes reads both modules' own codes through UDS 0x19; the
+# second module's refused (codes=refused@7E9) or silent (codes=silent@7E9)
+# says so beside the engine's.
 # plugin: the example plugin's DIDs (sim --plugin), on both its ECUs, read
 # by a session through the same plugin: each answers raw 0, its offset.
 # aimed: the same, with a fault aimed at the tcm alone (silent:1@7E9):
@@ -363,13 +369,57 @@ def python_obd(cli):
     return 0
 
 
+def enhanced(cli, key):
+    emu = Emulator(cli, "mock://emu?modules=2" + key)
+    uri = "elm327://127.0.0.1:%d?profile=uds-generic&did=7E9:D101" % emu.port
+    run = subprocess.run([cli, "enhanced-codes", uri, "--timeout", "20"],
+                         capture_output=True, text=True, timeout=120)
+    emu.end()
+    lines = [json.loads(l) for l in run.stdout.splitlines() if l.strip()]
+    expect(run.returncode == 0, "enhanced-codes exit %d: %s %r" %
+           (run.returncode, run.stderr, lines[-3:]))
+    by_rx = {l["rx"]: l for l in lines if l["type"] == "enhanced_codes"}
+    end = [l for l in lines if l["type"] == "enhanced_codes_end"]
+    expect(sorted(by_rx) == ["0x7E8", "0x7E9"], "both modules: %r" % lines)
+    expect(by_rx["0x7E8"]["list"]["codes"] ==
+           ["P0128-00", "U1123-45", "B1A01-1C", "P0301-00"],
+           "the engine's codes: %r" % by_rx["0x7E8"])
+    expect(by_rx["0x7E8"]["list"]["emissions"][3] == ["stored"],
+           "the shared code marked: %r" % by_rx["0x7E8"])
+    return by_rx, end
+
+
+def codes(cli):
+    by_rx, end = enhanced(cli, "")
+    expect(by_rx["0x7E9"]["list"]["codes"] == ["C0561-71", "U0401-00"],
+           "the second module's own: %r" % by_rx["0x7E9"])
+    expect(end[0]["read"] == 2 and end[0]["no_response"] == 0, "end: %r" % end)
+
+
+def codes_refused(cli):
+    by_rx, end = enhanced(cli, "&codes=refused@7E9")
+    expect(by_rx["0x7E9"]["list"]["outcome"] == "refused" and
+           by_rx["0x7E9"]["list"]["reply"].startswith("7F 19"),
+           "a refusal with its reply: %r" % by_rx["0x7E9"])
+    expect(end[0]["read"] == 2, "a refusal is a read: %r" % end)
+
+
+def codes_silent(cli):
+    by_rx, end = enhanced(cli, "&codes=silent@7E9")
+    expect(by_rx["0x7E9"]["outcome"] == "no_response",
+           "no response: %r" % by_rx["0x7E9"])
+    expect(end[0]["read"] == 1 and end[0]["no_response"] == 1 and
+           end[0]["not_reached"] == 0, "end: %r" % end)
+
+
 def main():
     mode, cli = sys.argv[1], sys.argv[2]
     if mode in ("plugin", "aimed", "car"):
         rc = {"plugin": plugin, "aimed": aimed, "car": car}[mode](cli, sys.argv[3])
     else:
         rc = {"adapter": adapter, "reconnect": reconnect, "session": session,
-              "modules": modules, "gateway": gateway,
+              "modules": modules, "gateway": gateway, "codes": codes,
+              "codes-refused": codes_refused, "codes-silent": codes_silent,
               "python-obd": python_obd}[mode](cli)
     print("ok" if not rc else "skipped")
     return rc or 0
