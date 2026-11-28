@@ -437,6 +437,7 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
     }
     if (ecuio_engine_closing_leaves(e, ch) &&
         ecuio_engine_session_leave(e, c, &ch.once)) {
+        ecuio_engine_declared_let_go(ch);
         ch.sessioning = true;
         return ECUIO_ENGINE_ONCE;
     }

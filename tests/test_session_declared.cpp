@@ -17,10 +17,14 @@ constexpr uint8_t kVisit = ECUIO_ENGINE_REASON_VISIT;
 /* A module with an extended session: 10 xx and 3E 00 answered, its DID */
 struct Ecu {
     std::vector<Bytes> heard;
+    bool refuses = false;
 
     Bytes operator()(const Bytes& q)
     {
         heard.push_back(q);
+        if (refuses && q == Bytes{0x10, 0x03}) {
+            return {0x7F, 0x10, 0x22};
+        }
         if (q.size() == 2 && q[0] == 0x10) {
             return {0x50, q[1], 0x00, 0x32, 0x01, 0xF4};
         }
@@ -209,6 +213,56 @@ TEST(DeclaredSessionTest, AConversationEntersASessionItsSetLeft)
     EXPECT_EQ(declared.count({0x10, 0x03}), 1u);
     EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(e.chans[1].session_source, ECUIO_SESSION_SOURCE_CONVERSATION);
+}
+
+TEST(DeclaredSessionTest, AClosedModuleLeavesItsSessionAndEntersWhenReadAgain)
+{
+    static ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(engine(&e, true));
+    want(&e, kRange | kRead, kRead);
+    int64_t now = 0;
+    Ecu other;
+    Ecu declared;
+    run(&e, &now, &other, &declared, 20);
+    ASSERT_EQ(declared.count({0x10, 0x03}), 1u);
+
+    /* Its 10 01 out, then open again for its range before it settles */
+    want(&e, kRange | kRead, 0);
+    run(&e, &now, &other, &declared, 20);
+    EXPECT_EQ(declared.count({0x10, 0x01}), 1u);
+    want(&e, kRange | kRead, kRange);
+    declared.heard.clear();
+    run(&e, &now, &other, &declared, 20);
+    EXPECT_EQ(declared.count({0x10, 0x03}), 0u);
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 1, &s);
+    EXPECT_EQ(s.session_source, ECUIO_SESSION_SOURCE_NONE);
+    EXPECT_EQ(s.session_idle, ECUIO_SESSION_IDLE_NOT_READ);
+    want(&e, kRange | kRead, kRange | kRead);
+    run(&e, &now, &other, &declared, 4);
+    EXPECT_EQ(declared.count({0x10, 0x03}), 1u);
+
+    /* Closed with its entry refused: asked again once read again */
+    static ecuio_request_engine refused;
+    ASSERT_NO_FATAL_FAILURE(engine(&refused, true));
+    want(&refused, kRange | kRead, kRead);
+    Ecu refusing;
+    refusing.refuses = true;
+    run(&refused, &now, &other, &refusing, 4);
+    ASSERT_EQ(refused.chans[1].session_step, ECUIO_SESSION_STATE_REFUSED);
+    want(&refused, kRange | kRead, 0);
+    run(&refused, &now, &other, &refusing, 4);
+    EXPECT_EQ(ecuio_engine_modules_settle(&refused, now), 2u);
+    refusing.heard.clear();
+    refusing.refuses = false;
+    want(&refused, kRange | kRead, kRange);
+    run(&refused, &now, &other, &refusing, 4);
+    ecuio_engine_support(&refused, 1, &s);
+    EXPECT_EQ(s.session_source, ECUIO_SESSION_SOURCE_NONE);
+    EXPECT_EQ(s.session_idle, ECUIO_SESSION_IDLE_NOT_READ);
+    want(&refused, kRange | kRead, kRange | kRead);
+    run(&refused, &now, &other, &refusing, 4);
+    EXPECT_EQ(refusing.count({0x10, 0x03}), 1u);
 }
 
 namespace {

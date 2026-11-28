@@ -64,6 +64,14 @@ inline void ecuio_engine_session_allow(ecuio_request_engine* e, uint32_t c,
     ++ch.generation;
 }
 
+inline void ecuio_engine_declared_let_go(ecuio_engine_channel& ch)
+{
+    if (ch.session_source == ECUIO_SESSION_SOURCE_SET) {
+        ch.session_asked = 0;
+        ch.session_source = ECUIO_SESSION_SOURCE_NONE;
+    }
+}
+
 inline void ecuio_engine_sessions_follow(ecuio_request_engine* e)
 {
     for (uint32_t c = 0; c < e->chan_count; ++c) {
@@ -82,8 +90,7 @@ inline bool ecuio_engine_declared_leave_due(ecuio_request_engine* e, uint32_t c)
         !ecuio_engine_session_leave(e, c, &ch.once)) {
         return false;
     }
-    ch.session_asked = 0;
-    ch.session_source = ECUIO_SESSION_SOURCE_NONE;
+    ecuio_engine_declared_let_go(ch);
     ch.sessioning = true;
     ++ch.generation;
     return true;

@@ -68,6 +68,7 @@ inline uint32_t ecuio_engine_modules_settle(ecuio_request_engine* e,
         if (ecuio_engine_session_sub(ch) != 0) {
             ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
         }
+        ecuio_engine_declared_let_go(ch);
         ++ch.generation;
         closed |= 1u << c;
     }
