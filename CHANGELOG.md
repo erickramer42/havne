@@ -30,6 +30,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **A vehicle's plugins are read together,** with obd2's standard signals as one of its picks: Settings, Signals lists what the vehicle reads and in what order, and the profile row offers the vehicle's set by its name. Live filters signals by module, tells two signals of one name apart, and says when the adapter has no room to read one and what would free it. Diagnostics says which modules weren't read. Gauges and alerts that showed a signal a plugin now reads beside obd2's keep showing it. An earlier Havne reading a vehicle saved by this one lists obd2 as a missing pick and passes it by.
 - **havne-cli reads a vehicle's plugins together** (`--together`), says what a merge makes (`plugins together`), and `log` names the signals the adapter has no room for; Python merges signal files (`SignalFile.merge`).
 
+### Fixed
+
+- **Python:** a J2534 session no longer loses sync when the host redirects stderr (pytest's capture, for one); the client writes its lines to the session log only. A request the pipe hands to the surrogate in pieces is assembled, and a close names the exit code of a child that ended first.
+
 ## [0.9.0] - 2026-11-21
 
 ### Added
