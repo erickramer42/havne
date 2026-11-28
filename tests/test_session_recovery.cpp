@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -335,9 +336,24 @@ TEST(SessionRecoveryTest, TheJournalsPinsMustBeTheSessions)
          [](ecuio_operation::journal_head& h) {
              h.images[0] = std::string(64, 'd');
          }},
+        {"the flash was begun with other images: recover the module with "
+         "the images it began with",
+         [](ecuio_operation::journal_head& h) {
+             h.images.push_back(h.images[0]);
+         }},
         {"the journal's sectors aren't this plan's",
          [](ecuio_operation::journal_head& h) {
              h.sectors[0].address = 0x00010000;
+         }},
+        {"the journal's sectors aren't this plan's",
+         [](ecuio_operation::journal_head& h) { h.sectors[0].bytes = 8192; }},
+        {"the journal's sectors aren't this plan's",
+         [](ecuio_operation::journal_head& h) { h.sectors[0].address += 16; }},
+        {"the journal's sectors aren't this plan's",
+         [](ecuio_operation::journal_head& h) { h.sectors[1] = h.sectors[0]; }},
+        {"the journal's sectors aren't this plan's",
+         [](ecuio_operation::journal_head& h) {
+             std::swap(h.sectors[0], h.sectors[1]);
          }},
     };
     for (const Case& c : cases) {

@@ -67,13 +67,21 @@ ecuio_status_t recovery_pins(const ecuio_session* s, const plan& p,
                       "the flash was begun with other images: recover the "
                       "module with the images it began with");
     }
+    const std::vector<sector>& plan_sectors = p.writes.sectors;
+    size_t k = 0;
     for (const sector& c : h.sectors) {
+        while (k < plan_sectors.size() &&
+               (plan_sectors[k].address != c.address ||
+                plan_sectors[k].bytes != c.bytes)) {
+            ++k;
+        }
         flash_sector f;
         uint64_t flat = 0;
-        if (!flash_locate(p, c, &f, &flat)) {
+        if (k == plan_sectors.size() || !flash_locate(p, c, &f, &flat)) {
             return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                           "the journal's sectors aren't this plan's");
         }
+        ++k;
     }
     return ECUIO_OK;
 }
