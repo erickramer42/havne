@@ -2,6 +2,7 @@
 
 #include <ecuio/plugin.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -115,4 +116,56 @@ TEST_F(Elm327SessionTest, SessionOneKeepsAConsentedDeclarationInDefault)
                          "&diagnose=0",
                          true),
               0u);
+}
+
+/* Through the fake: consent applied, 10 03; a clear leaves first
+ * (10 01), sends its 04, reads again, then enters again */
+TEST_F(Elm327SessionTest, AClearOnAHeldModuleLeavesItsSessionAndEntersAgain)
+{
+    Declared d;
+    SessionsReset reset;
+    fake_ecu::reset_diagnostics();
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=user.elm-declared&identify=0")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    consent(s.s);
+    s.start();
+    ASSERT_TRUE(reads(s, 3));
+    ASSERT_EQ(fake_count("1003"), 1u);
+    ecuio_channel_diagnostics_t r{};
+    const auto report = [&] {
+        return ecuio_session_get_channel_diagnostics(s.s, 0, &r) == ECUIO_OK &&
+               (r.flags & ECUIO_DIAG_COMPLETE) != 0;
+    };
+    ASSERT_TRUE(wait_for(report, 8000));
+    fake_elm327::with([](fake_elm327::adapter& a) { a.commands = 0; });
+    ASSERT_EQ(ecuio_session_clear_diagnostics_with(
+                  s.s, 0, r.generation,
+                  ECUIO_CLEAR_ALLOW_RUNNING | ECUIO_CLEAR_ALLOW_MOVING),
+              ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return report() && r.clear == ECUIO_CLEAR_CLEARED &&
+                   fake_count("1003") == 1;
+        },
+        8000))
+        << "clear " << int{r.clear};
+    EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    const std::vector<std::string> sent = fake_commands();
+    const auto at = [&](const char* want) {
+        for (size_t i = 0; i < sent.size(); ++i) {
+            if (sent[i].rfind(want, 0) == 0) {
+                return i;
+            }
+        }
+        return sent.size();
+    };
+    const size_t leave = at("1001");
+    const size_t clear = static_cast<size_t>(
+        std::find(sent.begin(), sent.end(), "04") - sent.begin());
+    const size_t entry = at("1003");
+    EXPECT_LT(leave, clear);
+    EXPECT_LT(clear, entry);
+    EXPECT_LT(entry, sent.size());
+    fake_ecu::reset_diagnostics();
 }
