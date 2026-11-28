@@ -49,7 +49,7 @@ GridLayout {
         visible: !row.own
         spacing: Theme.spacing
         Layout.fillWidth: true
-        Layout.maximumWidth: row.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+        Layout.maximumWidth: row.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
         ThemedButton {
             id: upButton
             objectName: "togetherUp"
