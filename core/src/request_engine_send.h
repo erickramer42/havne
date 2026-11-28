@@ -365,7 +365,7 @@ inline bool ecuio_engine_visit_owes(const ecuio_engine_channel& ch)
 inline int64_t ecuio_engine_limited_next_us(const ecuio_request_engine* e,
                                             const ecuio_engine_channel& ch)
 {
-    if (e->operation_hold) {
+    if (e->operation_hold || ch.part_written) {
         return INT64_MAX; /* it sends nothing under an operation's hold */
     }
     if (ch.module_state == ECUIO_MODULE_STATE_OPEN && ch.visiting) {
@@ -509,6 +509,9 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
 inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
                                 int64_t now_us)
 {
+    if (e->chans[c].part_written) {
+        return ECUIO_ENGINE_NONE;
+    }
     if (e->operation_hold &&
         (!ecuio_engine_module_open(e->chans[c]) || e->chans[c].visiting)) {
         return ECUIO_ENGINE_NONE;
@@ -690,7 +693,7 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
     const bool full = ecuio_engine_slots_full(e);
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         const ecuio_engine_channel& ch = e->chans[c];
-        if (((skip >> c) & 1u) != 0 ||
+        if (((skip >> c) & 1u) != 0 || ch.part_written ||
             (full && ch.outstanding == ECUIO_ENGINE_NONE)) {
             continue;
         }

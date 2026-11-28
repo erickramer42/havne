@@ -3,6 +3,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
+#include "part_written.h"
 #include "session.h"
 #include "conversation_bind.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
@@ -314,6 +315,11 @@ ecuio_session_clear_diagnostics_set(ecuio_session_t* session,
         std::lock_guard<std::mutex> lock(session->support_mutex);
         if (!clear_targets_valid(session, targets, count)) {
             return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        for (uint32_t k = 0; k < count; ++k) {
+            if (ecuio_module_part_written(session, targets[k].channel)) {
+                return ecuio_refuse_part_written();
+            }
         }
         for (uint32_t k = 0; k < count; ++k) {
             const ecuio_channel_diagnostics_t& d =

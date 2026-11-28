@@ -394,7 +394,7 @@ inline bool ecuio_engine_clear_gate(ecuio_request_engine* e, uint32_t c,
     }
     ecuio_engine_channel& ch = e->chans[c];
     ecuio_channel_diagnostics_t& d = ch.diag;
-    if (ch.diag_count == 0 || ecuio_engine_clear_on(ch)) {
+    if (ch.diag_count == 0 || ch.part_written || ecuio_engine_clear_on(ch)) {
         return false;
     }
     d.clear_nrc = 0;

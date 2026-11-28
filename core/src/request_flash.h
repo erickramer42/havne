@@ -189,8 +189,9 @@ inline void flash_finish(ecuio_session_t* s, session_run& o,
         if (!own_leave(o, e, now_us)) {
             return;
         }
-    } else if (o.own == own_step::entered) {
-        ecuio_engine_session_returned(e, o.channel);
+    } else {
+        e->chans[o.channel].part_written = true;
+        s->part_written.fetch_or(1u << o.channel);
         o.own = own_step::left;
     }
     e->operation_hold = false;

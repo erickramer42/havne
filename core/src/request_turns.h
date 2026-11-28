@@ -97,7 +97,7 @@ inline bool ecuio_engine_turn_walking(const ecuio_engine_channel& ch)
 inline int64_t ecuio_engine_turn_own_us(const ecuio_request_engine* e,
                                         const ecuio_engine_channel& ch)
 {
-    if (ch.outstanding != ECUIO_ENGINE_NONE) {
+    if (ch.outstanding != ECUIO_ENGINE_NONE || ch.part_written) {
         return INT64_MAX;
     }
     if (e->operation_hold) {

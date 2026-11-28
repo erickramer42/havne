@@ -200,10 +200,36 @@ TEST(SessionOperationTest, AModuleLostPastTheFloorNeedsTheFlashAgain)
                           "before it runs");
     EXPECT_EQ(b.count(0x11), 0u) << "no reset of a half-written module";
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+    const size_t ended_at = b.sent.size();
+    b.now += 30 * 1000000;
+    b.passes(400);
+    EXPECT_EQ(b.sent.size(), ended_at)
+        << "nothing more is asked of it: no poll, keep-alive or entry";
+    constexpr const char* kWords = "the module's software was left "
+                                   "part-written; reconnect to recover it";
+    EXPECT_EQ(start(b), ECUIO_ERR_IN_USE);
+    EXPECT_STREQ(ecuio_last_error_detail(), kWords);
+    uint32_t wait_ms = 0;
+    EXPECT_EQ(ecuio_session_security_unlock(b.s, 0, 0x01, 0, &wait_ms),
+              ECUIO_ERR_IN_USE);
+    EXPECT_STREQ(ecuio_last_error_detail(), kWords);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(b.s, 0, 0), ECUIO_ERR_IN_USE);
+    EXPECT_STREQ(ecuio_last_error_detail(), kWords);
+}
+
+TEST(SessionOperationTest, AnUnfinishedJournalRefusesTheFlash)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    std::ofstream(ecuio_operation::journal_path(b.folder.str(), 0x7E8),
+                  std::ios::binary)
+        << R"({"havne_journal": 1, "state": "writing"})";
     EXPECT_EQ(start(b), ECUIO_ERR_IN_USE);
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "the flash journal 000007E8.havnejournal says a flash of "
                  "this module didn't finish: the module may be mid-flash");
+    EXPECT_EQ(b.count(0x10), 1u) << "only the bench's own entry; nothing sent";
 }
 
 TEST(SessionOperationTest, AFailedCheckEndsInItsOwnWords)

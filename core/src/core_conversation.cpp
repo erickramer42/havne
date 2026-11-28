@@ -13,6 +13,7 @@
 #include "conversation_bind.h"
 #include "error_detail.h"
 #include "request_engine_ident.h"
+#include "part_written.h"
 #include "session.h"
 
 #include <chrono>
@@ -400,6 +401,9 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
     }
     if (channel >= session->module_rx.size()) {
         return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (ecuio_module_part_written(session, channel)) {
+        return ecuio_refuse_part_written();
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(session, channel);
     if (b == nullptr && ecuio_session_channel_wants_consent(session, channel)) {

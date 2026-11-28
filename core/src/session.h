@@ -226,6 +226,8 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
+    /* a flash's modules left part-written: never cleared until close */
+    std::atomic<uint32_t> part_written{0};
     /* ecuio_session_clear_diagnostics_set's request, from any thread,
      * under clear_mutex: its targets and flags, the requests made, and
      * the last one the worker has seen to its end

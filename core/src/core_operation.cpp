@@ -22,6 +22,7 @@
 #include "operation_session.h"
 #include "recorder.h"
 #include "request_engine_ident.h"
+#include "part_written.h"
 #include "session.h"
 
 #include <atomic>
@@ -466,6 +467,9 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     st = st == ECUIO_OK ? find_plan(s, q, &p, &channel) : st;
     if (st != ECUIO_OK) {
         return st;
+    }
+    if (ecuio_module_part_written(s, channel)) {
+        return ecuio_refuse_part_written();
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
     const bool write = g_write_class.load() || ecuio_operation::class_of(*p) ==

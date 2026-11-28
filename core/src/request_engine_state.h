@@ -254,6 +254,7 @@ inline void ecuio_engine_count(uint32_t& n)
 }
 
 struct ecuio_engine_channel {
+    bool part_written = false;  /* a flash failed past its floor: never asked */
     int64_t deadline_us = 0;    /* when the outstanding request's wait ends */
     int64_t sent_us = 0;        /* when it went out (ADR-0042) */
     int64_t next_send_us = 0;   /* the floor: no request before this */
