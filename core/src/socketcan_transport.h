@@ -21,6 +21,7 @@
 #include "session.h"
 #include "socketcan_wire.h"
 
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -94,6 +95,9 @@ bool set_channel_filters(const ecuio_socketcan_transport* t, int fd,
                          uint32_t hearing);
 /* A requesting session's worker, until the stop (socketcan_request.cpp) */
 void request_worker(ecuio_socketcan_transport* t);
+/* The message's kernel stamp, and the receive queue's drop count */
+uint64_t take_control(struct msghdr& msg, uint32_t& drops,
+                      bool& overflow_pending);
 
 } // namespace ecuio_socketcan
 

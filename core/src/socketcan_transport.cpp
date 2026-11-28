@@ -323,6 +323,33 @@ bool wait_for_stop(ecuio_socketcan_transport* t, uint32_t ms)
     return t->stop.load();
 }
 
+/* The message's kernel stamp, and the receive queue's drop count */
+uint64_t take_control(struct msghdr& msg, uint32_t& drops,
+                      bool& overflow_pending)
+{
+    uint64_t kernel_ns = 0;
+    for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr;
+         c = CMSG_NXTHDR(&msg, c)) {
+        if (c->cmsg_level != SOL_SOCKET) {
+            continue;
+        }
+        if (c->cmsg_type == SCM_TIMESTAMPNS) {
+            struct timespec ts;
+            std::memcpy(&ts, CMSG_DATA(c), sizeof ts);
+            kernel_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000u +
+                        static_cast<uint64_t>(ts.tv_nsec);
+        } else if (c->cmsg_type == SO_RXQ_OVFL) {
+            uint32_t count;
+            std::memcpy(&count, CMSG_DATA(c), sizeof count);
+            if (count != drops) {
+                overflow_pending = true;
+                drops = count;
+            }
+        }
+    }
+    return kernel_ns;
+}
+
 } // namespace ecuio_socketcan
 
 namespace {
@@ -409,26 +436,8 @@ void socketcan_worker(ecuio_socketcan_transport* t)
                 n != static_cast<ssize_t>(CANFD_MTU)) {
                 continue;
             }
-            uint64_t kernel_ns = 0;
-            for (struct cmsghdr* c = CMSG_FIRSTHDR(&msg); c != nullptr;
-                 c = CMSG_NXTHDR(&msg, c)) {
-                if (c->cmsg_level != SOL_SOCKET) {
-                    continue;
-                }
-                if (c->cmsg_type == SCM_TIMESTAMPNS) {
-                    struct timespec ts;
-                    std::memcpy(&ts, CMSG_DATA(c), sizeof ts);
-                    kernel_ns = static_cast<uint64_t>(ts.tv_sec) * 1000000000u +
-                                static_cast<uint64_t>(ts.tv_nsec);
-                } else if (c->cmsg_type == SO_RXQ_OVFL) {
-                    uint32_t count;
-                    std::memcpy(&count, CMSG_DATA(c), sizeof count);
-                    if (count != drops) {
-                        overflow_pending = true;
-                        drops = count;
-                    }
-                }
-            }
+            const uint64_t kernel_ns =
+                ecuio_socketcan::take_control(msg, drops, overflow_pending);
             socketcan_raw in;
             std::memcpy(&in.can_id, raw, 4);
             in.len = raw[4];
