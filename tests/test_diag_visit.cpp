@@ -586,3 +586,21 @@ TEST_F(DiagVisitTest, AClosedModulesCodesReadOpensItOrEndsUnasked)
         }
     }
 }
+
+TEST_F(DiagVisitTest, ARefusedVisitEndsTheReadWaitingBehindItToo)
+{
+    Visits v;
+    ASSERT_NO_FATAL_FAILURE(v.make({kRange, 0}, 31, 1));
+    v.until(1000 * kMs);
+    ecuio_engine_read_codes(&v.e, 1, 0, 1);
+    ecuio_engine_read_codes(&v.e, 1, 0xFF, 2);
+    ecuio_engine_visit_want(&v.e, 1);
+    v.until(2000 * kMs);
+    const ecuio_module_codes_t& r = v.e.chans[1].codes.report;
+    EXPECT_EQ(r.read_id, 2u);
+    EXPECT_EQ(r.mask, 0xFF);
+    EXPECT_NE(r.flags & ECUIO_MODULE_CODES_NOT_OPENED, 0u);
+    EXPECT_NE(r.flags & ECUIO_MODULE_CODES_COMPLETE, 0u);
+    EXPECT_FALSE(ecuio_engine_codes_asks(v.e.chans[1]));
+    EXPECT_EQ(v.sent_on(1), 0u);
+}

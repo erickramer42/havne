@@ -204,7 +204,7 @@ void read_codes(ecuio_mock_transport* t)
             continue;
         }
         ecuio_module_codes_t& r = s->module_codes[c];
-        const uint32_t generation = r.generation + 2;
+        const uint32_t generation = r.generation + 3;
         r = ecuio_module_codes_t{};
         r.rx_id = t->rx_ids[c];
         r.generation = generation;

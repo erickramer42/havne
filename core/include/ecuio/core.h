@@ -1225,7 +1225,8 @@ ecuio_status_t ecuio_session_clear_diagnostics_set(
 #define ECUIO_MODULE_CODES_ASKABLE       0x00000001u
 #define ECUIO_MODULE_CODES_READING       0x00000002u
 #define ECUIO_MODULE_CODES_COMPLETE      0x00000004u
-#define ECUIO_MODULE_CODES_FORMAT        0x00000008u
+#define ECUIO_MODULE_CODES_FORMAT        0x00000008u /* 19 01 answered: format
+                                                       and count hold it */
 #define ECUIO_MODULE_CODES_NOT_OPENED    0x00000010u
 
 /* statusOfDTC bits */
@@ -1335,7 +1336,8 @@ uint32_t ecuio_module_code_emissions_lists(
 /* Reads channel `channel`'s codes: 19 01 then 19 02 under status_mask
  * (0: ECUIO_MODULE_CODES_MASK_DEFAULT), a closed module opened for the
  * read. *out_read_id (may be NULL) is the read's id; the report holds it,
- * or a later read's, with ECUIO_MODULE_CODES_COMPLETE once it has ended.
+ * or a later read's (whose mask it reads under), with
+ * ECUIO_MODULE_CODES_COMPLETE once it has ended.
  * Returns at once, from any thread. ECUIO_ERR_INVALID_ARGUMENT, with the
  * words, for a channel at or past module_count or a session that sends no
  * requests (no ECUIO_MODULE_CODES_ASKABLE). */

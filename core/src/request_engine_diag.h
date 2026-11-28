@@ -615,7 +615,7 @@ inline void ecuio_engine_judge_settle(ecuio_request_engine* e, uint32_t c,
 inline void ecuio_engine_codes_start(ecuio_engine_channel& ch, uint8_t mask,
                                      uint32_t read_id)
 {
-    const uint32_t generation = ch.codes.report.generation;
+    const uint32_t generation = ch.codes.report.generation + 1;
     ch.codes.report = ecuio_module_codes_t{};
     ch.codes.report.generation = generation;
     ch.codes.report.read_id = read_id;
@@ -711,13 +711,14 @@ inline void ecuio_engine_codes_settle(ecuio_request_engine* e, uint32_t c,
     ++r.generation;
 }
 
-/* Module c's read can't open it: COMPLETE, what is left unasked */
+/* Module c's read can't open it: COMPLETE, what is left unasked, a read
+ * waiting behind it ended with it */
 inline void ecuio_engine_codes_not_opened(ecuio_engine_channel& ch)
 {
-    if (!ecuio_engine_codes_asks(ch)) {
+    if (ch.codes.out || !ecuio_engine_codes_asks(ch)) {
         return;
     }
-    if (ch.codes.step == ECUIO_CODES_STEP_NONE) {
+    if (ch.codes.again) {
         ch.codes.again = false;
         ecuio_engine_codes_start(ch, ch.codes.again_mask, ch.codes.again_id);
     }

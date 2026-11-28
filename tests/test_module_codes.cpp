@@ -67,7 +67,7 @@ TEST_F(ModuleCodesTest, AReadAsksTheCountThenTheListAndEndsComplete)
     const ecuio_module_codes_t& r = e.chans[0].codes.report;
     EXPECT_EQ(r.flags, ECUIO_MODULE_CODES_COMPLETE | ECUIO_MODULE_CODES_FORMAT);
     EXPECT_EQ(r.read_id, 1u);
-    EXPECT_EQ(r.generation, 2u);
+    EXPECT_EQ(r.generation, 3u) << "the start, the count, the list";
     EXPECT_EQ(r.mask, 0xAF);
     EXPECT_EQ(r.count_outcome, ECUIO_DIAG_ANSWERED);
     EXPECT_EQ(r.list_outcome, ECUIO_DIAG_ANSWERED);
@@ -225,7 +225,7 @@ TEST_F(ModuleCodesTest, ACallDuringAReadIsTakenWhenItEnds)
     EXPECT_EQ(r.read_id, 2u);
     EXPECT_EQ(r.mask, 0xFF);
     EXPECT_EQ(r.held, 5u);
-    EXPECT_EQ(r.generation, 4u);
+    EXPECT_EQ(r.generation, 6u);
 }
 
 TEST_F(ModuleCodesTest, TheReadGoesAfterAClearAndAheadOfIdentification)
@@ -273,7 +273,7 @@ TEST_F(ModuleCodesTest, AClearReadsTheCodesAgain)
     EXPECT_EQ(sent[4], (Bytes{0x01, 0x01})) << "the J1979 list restarts";
     const ecuio_module_codes_t& r = e.chans[0].codes.report;
     EXPECT_EQ(r.read_id, 1u);
-    EXPECT_EQ(r.generation, before + 2);
+    EXPECT_EQ(r.generation, before + 3);
     EXPECT_NE(r.flags & ECUIO_MODULE_CODES_COMPLETE, 0u);
 }
 
@@ -447,4 +447,31 @@ TEST_F(ModuleCodesTest, TheGateTakesTheTwoReadsAlone)
     for (const Bytes& b : requests_of(drive(&e, &now, with_codes))) {
         EXPECT_TRUE(ecuio_engine_codes_request_allowed(b[0], b[1]));
     }
+}
+
+TEST_F(ModuleCodesTest, AClearWaitsForTheListOfACountAnswered)
+{
+    static ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    e.rpm_module = 0;
+    ecuio_engine_diagnose(&e, ecuio_obd2_signal_set());
+    int64_t now = 0;
+    (void)drive(&e, &now, fake_reply);
+    ecuio_engine_read_codes(&e, 0, 0, 1);
+    EXPECT_EQ(e.chans[0].codes.report.flags, ECUIO_MODULE_CODES_READING);
+    EXPECT_EQ(e.chans[0].codes.report.generation, 1u) << "the start is news";
+    ASSERT_EQ(send_once(&e, 0, now), kCountAf);
+    (void)answer(&e, 0, codes_reply(kCountAf), now + 4 * kMs);
+    ecuio_channel_diagnostics_t d;
+    ecuio_engine_diagnostics(&e, 0, &d);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 0, d.generation));
+    now = std::max(now + 5 * kMs, e.chans[0].next_send_us);
+    const std::vector<Bytes> sent =
+        requests_of(drive(&e, &now, stopped_with_codes));
+    ASSERT_GE(sent.size(), 5u);
+    EXPECT_EQ(sent[0], kListAf) << "the list before the clear";
+    EXPECT_EQ(sent[1], (Bytes{0x01, 0x0C}));
+    EXPECT_EQ(sent[2], (Bytes{0x04}));
+    EXPECT_EQ(sent[3], kCountAf) << "then read again whole";
+    EXPECT_EQ(sent[4], kListAf);
 }

@@ -96,7 +96,7 @@ TEST(MockTest, TheMocksModuleCodesAreTheFakesAndCompleteAtOnce)
         EXPECT_EQ(r.rx_id, 0x7E8u);
         EXPECT_NE(r.flags & ECUIO_MODULE_CODES_ASKABLE, 0u);
         EXPECT_NE(r.flags & ECUIO_MODULE_CODES_FORMAT, 0u);
-        EXPECT_EQ(r.generation, 2u);
+        EXPECT_EQ(r.generation, 3u);
         fake_diagnostics::expect_module_codes(r, 0xAF);
         ecuio_session_destroy(s);
     }

@@ -292,6 +292,10 @@ inline int32_t ecuio_engine_due_once(ecuio_request_engine* e, uint32_t c)
     ecuio_engine_channel& ch = e->chans[c];
     const bool once_turn = ch.requests == 0 || ch.scan_turn ||
                            (e->scan_first && ch.scan_pending > 0);
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST && once_turn &&
+        ecuio_engine_take_codes(ch, c)) {
+        return ECUIO_ENGINE_ONCE; /* a count and its list, no clear between */
+    }
     if (ecuio_engine_clear_asks(ch) && once_turn) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
@@ -397,6 +401,10 @@ inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
     if (ch.identifying || ch.diagnosing || ch.clearing || ch.codes.out) {
         return ECUIO_ENGINE_ONCE;
     }
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST &&
+        ecuio_engine_take_codes(ch, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
     if (ecuio_engine_clear_asks(ch)) {
         ecuio_engine_take_clear(ch, c);
         return ECUIO_ENGINE_ONCE;
@@ -429,6 +437,10 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
         return ECUIO_ENGINE_NONE;
     }
     if (ch.diagnosing || ch.clearing || ch.codes.out || ch.sessioning) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.codes.step == ECUIO_CODES_STEP_LIST &&
+        ecuio_engine_take_codes(ch, c)) {
         return ECUIO_ENGINE_ONCE;
     }
     if (ecuio_engine_clear_asks(ch)) {
