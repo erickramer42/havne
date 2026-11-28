@@ -29,6 +29,11 @@ ecuio_status_t flash_journal(const ecuio_session* s, session_run& o,
                              const char* copy, uint32_t* sectors,
                              uint64_t* bytes);
 
+/* The attempt is counted in the journal before anything is sent */
+ecuio_status_t flash_recovery_journal(const ecuio_session* s, session_run& o,
+                                      const plan& p, const std::string& folder,
+                                      uint32_t* sectors, uint64_t* bytes);
+
 } // namespace ecuio_operation
 
 #endif /* ECUIO_OPERATION_FLASH_START_H */

@@ -163,8 +163,13 @@ inline void on_pass(ecuio_session_t* s, ecuio_request_engine* e, int64_t now_us)
     uint8_t stage = o->stage.load(std::memory_order_acquire);
     if (stage == kStageArmed) {
         begin(o->r, *o->p, e->write_max);
-        flash_begin(o->f, *o->p, e->write_max,
-                    o->current.empty() ? nullptr : o->current.data());
+        if (o->recover) {
+            flash_begin_from(o->f, *o->p, e->write_max, o->recover_sectors);
+            e->chans[o->channel].part_written = false;
+        } else {
+            flash_begin(o->f, *o->p, e->write_max,
+                        o->current.empty() ? nullptr : o->current.data());
+        }
         o->pause_until_us = 0;
         o->journal_closed = false;
         check_begin(o->k, check_engine_of(e, o->channel), o->channel, false);

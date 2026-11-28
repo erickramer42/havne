@@ -124,6 +124,22 @@ inline void flash_begin(flash_run& r, const plan& p, uint32_t wire_max,
     r.at = r.chosen == 0 ? flash_stage::check : flash_stage::erase;
 }
 
+inline void flash_begin_from(flash_run& r, const plan& p, uint32_t wire_max,
+                             const std::vector<sector>& list)
+{
+    r = flash_run{};
+    r.p = &p;
+    r.wire_max = wire_max < kFlashWireMost ? wire_max : kFlashWireMost;
+    for (const sector& c : list) {
+        uint64_t flat = 0;
+        if (r.chosen < ECUIO_PLUGIN_MAX_SECTORS &&
+            flash_locate(p, c, &r.sectors[r.chosen], &flat)) {
+            ++r.chosen;
+        }
+    }
+    r.at = r.chosen == 0 ? flash_stage::check : flash_stage::erase;
+}
+
 inline uint64_t flash_bytes(const flash_run& r)
 {
     uint64_t n = 0;

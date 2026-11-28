@@ -317,7 +317,9 @@ bool journal_writer::open(const std::string& folder, journal_head head,
         thread_ = std::thread(&journal_writer::loop, this);
         return true;
     } catch (const std::exception&) {
-        ecuio_files::remove_file(path_);
+        if (first.state == journal_state::ready) {
+            ecuio_files::remove_file(path_);
+        }
         *why = "the flash journal's writer can't start";
         return false;
     }

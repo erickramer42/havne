@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -197,4 +198,284 @@ TEST(SessionRecoveryTest, TheCallsRefuseWhatTheyDontTake)
     EXPECT_EQ(ecuio_session_get_module_recovery(b.s, 0, &r),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(r.state, 77u) << "nothing written";
+}
+
+namespace {
+
+std::string read_journal(const Bench& b)
+{
+    std::ifstream in(ecuio_operation::journal_path(b.folder.str(), 0x7E8),
+                     std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+/* The journal a flash on the bench left, as the next connect reads it */
+ecuio_operation::journal_record
+record_after(const ecuio_sim_flash_faults& faults, const Flash& f = sim_flash())
+{
+    Bench b;
+    arm(b, faults);
+    b.start(flash_made(f));
+    EXPECT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED) << v.words;
+    ecuio_operation::journal_record j;
+    std::string why;
+    EXPECT_EQ(ecuio_operation::journal_load(b.folder.str(), 0x7E8, &j, &why),
+              ecuio_operation::journal_found::unfinished)
+        << why;
+    return j;
+}
+
+ecuio_operation::journal_record silent_record(const Flash& f = sim_flash())
+{
+    ecuio_sim_flash_faults silent;
+    silent.silent = true;
+    return record_after(silent, f);
+}
+
+/* A bench that connects to a module left part-written, its journal put
+ * and the sector at erased left erased. A record is made before the bench:
+ * a bench's end closes the consent door every bench shares. */
+void reconnect(Bench& b, const ecuio_operation::journal_record& j,
+               uint32_t erased, ecuio_sim_flash_faults faults = {},
+               const Flash& f = sim_flash())
+{
+    b.journals = true;
+    put_journal(b, j.head, j.mark);
+    faults.boot = true;
+    faults.boot_erased = erased;
+    arm(b, faults);
+    b.start(flash_made(f));
+}
+
+ecuio_status_t recover(Bench& b, const char* copy = nullptr)
+{
+    const ecuio_operation_request_t q =
+        request(kFlags | ECUIO_OPERATION_RECOVER);
+    return ecuio_session_operation_start_from(b.s, &q, b.folder.str().c_str(),
+                                              copy);
+}
+
+size_t keys_sent(const Bench& b)
+{
+    size_t n = 0;
+    for (const Bytes& q : b.sent) {
+        n += q.size() >= 2 && q[0] == 0x27 && (q[1] & 0x01) == 0 ? 1u : 0u;
+    }
+    return n;
+}
+
+} // namespace
+
+TEST(SessionRecoveryTest, ARecoveryWritesEveryJournalSectorAgain)
+{
+    ecuio_operation::journal_record j = silent_record();
+    j.mark.written = 1;
+    j.mark.erased = 2;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 1));
+    ASSERT_EQ(recovery_of(b).state, ECUIO_RECOVERY_NEEDED);
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(recovery_of(b).attempts, 1u);
+    EXPECT_NE(read_journal(b).find("\"recoveries\": 1"), std::string::npos)
+        << "counted before anything is sent";
+    EXPECT_NE(read_journal(b).find("\"state\": \"writing\""),
+              std::string::npos);
+    EXPECT_EQ(b.state().sectors, 2u);
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_RECOVERED) << v.words;
+    EXPECT_STREQ(v.words, "");
+    EXPECT_EQ(count_routine(b, 0xFF00), 2u) << "the erase included, each";
+    EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::none);
+    const ecuio_module_recovery_t r = recovery_of(b);
+    EXPECT_EQ(r.state, ECUIO_RECOVERY_RECOVERED);
+    EXPECT_EQ(r.sectors_written, 2u);
+    EXPECT_NE(ecuio_session_clear_diagnostics(b.s, 0, 0), ECUIO_ERR_IN_USE)
+        << "the hold is lifted";
+}
+
+TEST(SessionRecoveryTest, AnOverwriteSafePlanSkipsTheSectorsWritten)
+{
+    Flash f = sim_flash();
+    f.flash_extra = R"(, "overwrite_safe": true)";
+    ecuio_operation::journal_record j = silent_record(f);
+    j.mark.written = 1;
+    j.mark.erased = 2;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 1, {}, f));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(b.state().sectors, 1u);
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_RECOVERED) << v.words;
+    EXPECT_EQ(count_routine(b, 0xFF00), 1u) << "the second sector alone";
+    EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
+}
+
+TEST(SessionRecoveryTest, TheJournalsPinsMustBeTheSessions)
+{
+    const ecuio_operation::journal_record base = silent_record();
+    struct Case {
+        const char* words;
+        void (*change)(ecuio_operation::journal_head&);
+    };
+    const Case cases[] = {
+        {"the flash was begun by another plugin: recover the module with "
+         "the plugin that began it",
+         [](ecuio_operation::journal_head& h) {
+             h.fingerprint = std::string(64, 'c');
+         }},
+        {"the flash was begun by another plan: recover the module with the "
+         "plan that began it",
+         [](ecuio_operation::journal_head& h) { h.operation = "other"; }},
+        {"the flash was begun with other images: recover the module with "
+         "the images it began with",
+         [](ecuio_operation::journal_head& h) {
+             h.images[0] = std::string(64, 'd');
+         }},
+        {"the journal's sectors aren't this plan's",
+         [](ecuio_operation::journal_head& h) {
+             h.sectors[0].address = 0x00010000;
+         }},
+    };
+    for (const Case& c : cases) {
+        ecuio_operation::journal_record j = base;
+        c.change(j.head);
+        Bench b;
+        ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+        EXPECT_EQ(recover(b), ECUIO_ERR_INVALID_ARGUMENT) << c.words;
+        EXPECT_STREQ(ecuio_last_error_detail(), c.words);
+        EXPECT_EQ(recovery_of(b).attempts, 0u) << "nothing counted";
+        EXPECT_EQ(read_journal(b).find("recoveries"), std::string::npos);
+    }
+}
+
+TEST(SessionRecoveryTest, ARecoveryIsAFlashsWithNoCopyAndAJournal)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    {
+        Bench none;
+        arm(none);
+        ASSERT_NO_FATAL_FAILURE(none.start(flash_made()));
+        EXPECT_EQ(recover(none), ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_STREQ(ecuio_last_error_detail(),
+                     "the folder holds no unfinished flash of this module: "
+                     "there is nothing to recover");
+    }
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+    EXPECT_EQ(recover(b, "copy.havnedump"), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a recovery is a flash's, with no copy");
+    EXPECT_EQ(start(b), ECUIO_ERR_IN_USE) << "no flash but a recovery";
+}
+
+TEST(SessionRecoveryTest,
+     ALockedBootloaderEndsTheAttemptWithNoKeyAndKeepsTheCount)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    ecuio_sim_flash_faults locked;
+    locked.locked = true;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0, locked));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_UNLOCK_REFUSED) << v.words;
+    EXPECT_EQ(v.nrc, 0x36);
+    EXPECT_EQ(b.count(0x27), 1u) << "one seed asked, never again";
+    EXPECT_EQ(keys_sent(b), 0u);
+    EXPECT_EQ(count_routine(b, 0xFF00), 0u);
+    EXPECT_NE(std::string(v.words).find("still part-written"),
+              std::string::npos)
+        << v.words;
+    const ecuio_module_recovery_t r = recovery_of(b);
+    EXPECT_EQ(r.state, ECUIO_RECOVERY_NEEDED);
+    EXPECT_EQ(r.attempts, 1u);
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+    EXPECT_EQ(start(b), ECUIO_ERR_IN_USE) << "still held";
+
+    ecuio_operation::journal_record again;
+    std::string why;
+    ASSERT_EQ(
+        ecuio_operation::journal_load(b.folder.str(), 0x7E8, &again, &why),
+        ecuio_operation::journal_found::unfinished);
+    Bench next;
+    ASSERT_NO_FATAL_FAILURE(reconnect(next, again, 0));
+    EXPECT_EQ(recovery_of(next).attempts, 1u) << "kept across the reconnect";
+    ASSERT_EQ(recover(next), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(recovery_of(next).attempts, 2u);
+    EXPECT_EQ(next.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
+}
+
+TEST(SessionRecoveryTest, AStormBeforeTheFloorEndsCleanlyAndKeepsTheHold)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    ecuio_sim_flash_faults storm;
+    storm.pending_ms = ECUIO_SIM_FLASH_PENDING_MOST_MS;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0, storm));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_NE(v.end, ECUIO_OPERATION_END_RECOVERED);
+    EXPECT_NE(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED) << v.words;
+    EXPECT_EQ(count_routine(b, 0xFF00), 0u);
+    EXPECT_NE(std::string(v.words).find("still part-written"),
+              std::string::npos)
+        << v.words;
+    EXPECT_EQ(recovery_of(b).state, ECUIO_RECOVERY_NEEDED);
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+    EXPECT_EQ(start(b), ECUIO_ERR_IN_USE);
+}
+
+TEST(SessionRecoveryTest, ARecoveryLostPastTheFloorNeedsAnother)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    ecuio_sim_flash_faults silent;
+    silent.silent = true;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0, silent));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED) << v.words;
+    EXPECT_EQ(recovery_of(b).state, ECUIO_RECOVERY_NEEDED);
+    EXPECT_EQ(recovery_of(b).attempts, 1u);
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+    EXPECT_EQ(start(b), ECUIO_ERR_IN_USE);
+}
+
+TEST(SessionRecoveryTest, AFlashFailedInTheSessionIsRecoveredInIt)
+{
+    Bench b;
+    ecuio_sim_flash_faults silent;
+    silent.silent = true;
+    arm(b, silent);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERY_NEEDED);
+    const ecuio_module_recovery_t r = recovery_of(b);
+    EXPECT_EQ(r.state, ECUIO_RECOVERY_NEEDED);
+    EXPECT_EQ(r.sectors, 2u);
+    EXPECT_EQ(r.attempts, 0u);
+    b.node.s.flash.faults.silent = false;
+    b.node.s.flash.dead = false;
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERED) << v.words;
+    EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
+    EXPECT_EQ(recovery_of(b).state, ECUIO_RECOVERY_RECOVERED);
+}
+
+TEST(SessionRecoveryTest, ACloseBeforeTheRecoveryWritesKeepsTheJournal)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_close(b.s), ECUIO_OK);
+    const ecuio_operation_state_t v = b.state();
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_CANCELED);
+    EXPECT_STREQ(v.words, "the session closed before the recovery began "
+                          "writing: the module is still part-written");
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
 }

@@ -52,6 +52,8 @@ extern "C" {
 /* The person confirmed battery support: a charger in its power-supply
  * mode. A write-class run needs it. */
 #define ECUIO_OPERATION_BATTERY_SUPPORT 0x4u
+/* The person confirmed a recovery: a flash's start with no copy */
+#define ECUIO_OPERATION_RECOVER 0x8u
 
 /* A run's phase: closed, append-only */
 #define ECUIO_OPERATION_PHASE_NONE          0u /* no run was started */
@@ -108,6 +110,7 @@ extern "C" {
 #define ECUIO_OPERATION_END_WRITTEN         16u
 #define ECUIO_OPERATION_END_CHECK_FAILED    17u
 #define ECUIO_OPERATION_END_RECOVERY_NEEDED 18u
+#define ECUIO_OPERATION_END_RECOVERED       19u
 
 /* A state's checks: what the run has read */
 #define ECUIO_OPERATION_CHECK_RPM 0x1u /* rpm holds the engine's answer */
@@ -289,6 +292,10 @@ ecuio_session_operation_start(ecuio_session_t* session,
 ecuio_status_t ecuio_session_operation_start_from(
     ecuio_session_t* session, const ecuio_operation_request_t* request,
     const char* folder_utf8, const char* copy_utf8);
+/* ECUIO_OPERATION_RECOVER: the folder's journal of the module must name
+ * this plugin, plan and images; the run is the flash's over every sector
+ * the journal names (overwrite-safe: those not yet written), and only
+ * ECUIO_OPERATION_END_RECOVERED lifts the hold */
 
 /*
  * Asks the run under way to stop. It ends CANCELED once the request that
