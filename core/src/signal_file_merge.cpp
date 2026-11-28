@@ -572,6 +572,7 @@ ecuio_status_t ecuio_signal_file_merge(const ecuio_signal_file_t* const* parts,
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
         std::unique_ptr<ecuio_signal_file> file(made);
+        file->parts_merged_here = true;
         merge.give_notes(*file);
         *out = file.release();
         ecuio_detail_clear();

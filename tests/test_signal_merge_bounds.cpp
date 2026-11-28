@@ -539,6 +539,19 @@ TEST(MergeTest, AMergedSetNamesThePartsThatAskAModulesSession)
     EXPECT_EQ(prints[0].rx, 0x7E9u);
     EXPECT_EQ(std::memcmp(prints[0].fingerprint, f.parts[1].fingerprint, 32),
               0);
+
+    /* Read back from its text, a part's print is only text: the file is
+     * named by its own bytes */
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(m.file.get(), &length);
+    File again = load(std::string(text, length));
+    ASSERT_NE(again, nullptr) << ecuio_last_error_detail();
+    ASSERT_EQ(again->parts.size(), 2u);
+    ASSERT_TRUE(again->parts[1].has_fingerprint);
+    ASSERT_TRUE(ecuio_declared_prints_of(&again->set, &prints));
+    ASSERT_EQ(prints.size(), 1u);
+    EXPECT_EQ(ecuio_sha256::hex(prints[0].fingerprint),
+              ecuio_sha256::hex_of(text, length));
 }
 
 TEST(MergeTest, AModuleTheStandardSignalsReadHasANoteForItsSession)

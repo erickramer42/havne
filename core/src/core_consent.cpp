@@ -72,7 +72,7 @@ bool ecuio_declared_prints_of(const ecuio_signal_set_t* set,
             if (f->channels[k].session != ECUIO_CHANNEL_SESSION_EXTENDED) {
                 continue;
             }
-            if (!f->parts.empty()) {
+            if (f->parts_merged_here) {
                 for (const uint32_t p : f->modules[k].session_parts) {
                     if (p < f->parts.size() && f->parts[p].has_fingerprint) {
                         add_print(rx, f->parts[p].fingerprint, out);

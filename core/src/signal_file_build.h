@@ -87,6 +87,7 @@ struct ecuio_signal_file {
      * its parts, each def's part (none for a base def) and the keys a
      * signal stands for besides its own */
     std::vector<part> parts;
+    bool parts_merged_here = false; /* else their prints are only text */
     std::vector<uint32_t> def_part; /* by def index */
     std::vector<std::pair<std::string, uint32_t>> second_keys; /* def index */
     std::vector<std::pair<uint32_t, ecuio_signal_gauge_t>>

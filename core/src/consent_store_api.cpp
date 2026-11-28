@@ -298,17 +298,11 @@ ecuio_status_t own_declaring(const char* bytes, size_t length)
         }
         return loaded;
     }
-    const bool merged = !f->parts.empty();
     bool declares = false;
     for (const ecuio_channel_decl_t& c : f->channels) {
         declares = declares || c.session == ECUIO_CHANNEL_SESSION_EXTENDED;
     }
     ecuio_signal_file_free(f);
-    if (merged) {
-        ecuio_detail_set("the file is a merged set: a consent goes to the "
-                         "parts that declare its sessions");
-        return ECUIO_ERR_INVALID_ARGUMENT;
-    }
     if (!declares) {
         ecuio_detail_set("the file declares no module's session, so there "
                          "is nothing to consent to");

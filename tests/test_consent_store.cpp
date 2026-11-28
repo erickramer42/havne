@@ -411,10 +411,15 @@ TEST(ConsentStoreTest, AGiveFileIsRefusedWhatItCantKeep)
     ASSERT_EQ(ecuio_signal_file_merge(parts, 2, nullptr, &merged), ECUIO_OK)
         << ecuio_last_error_detail();
     size_t length = 0;
-    const char* text = ecuio_signal_file_text(merged, &length);
-    EXPECT_EQ(refusal(std::string(text, length), "a.json"),
-              "the file is a merged set: a consent goes to the parts that "
-              "declare its sessions");
+    const char* merged_text = ecuio_signal_file_text(merged, &length);
+    const std::string text(merged_text, length);
+    EXPECT_EQ(ecuio_consent_store_give_file(s.get(), text.data(), text.size(),
+                                            "Merged.json", kUtc),
+              ECUIO_OK)
+        << "a merged set read from a file is consented to by its bytes";
+    EXPECT_EQ(ecuio_consent_store_withdraw(s.get(), nullptr,
+                                           bytes_of(digest_of(text))),
+              ECUIO_OK);
     ecuio_signal_file_free(merged);
     ecuio_signal_file_free(other);
     ecuio_signal_file_free(own);
