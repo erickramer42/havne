@@ -380,10 +380,18 @@ inline void enter(ecuio_session_t* s, session_run& o, ecuio_request_engine* e,
     if (o.entering_us == 0) {
         o.entering_us = now_us;
     }
+    const ecuio_engine_channel& ch = e->chans[o.channel];
     if (!programming_of(*o.p) &&
-        e->chans[o.channel].session_step != ECUIO_SESSION_STATE_ENTERED) {
-        if (!ecuio_engine_session_enter(e, o.channel) ||
-            now_us - o.entering_us > kEnterMostUs) {
+        ch.session_step != ECUIO_SESSION_STATE_ENTERED) {
+        if (ecuio_engine_session_enter(e, o.channel) &&
+            now_us - o.entering_us <= kEnterMostUs) {
+            return;
+        }
+        if (ch.session_step == ECUIO_SESSION_STATE_UNANSWERED) {
+            not_entered(o.r, run_end::no_answer);
+        } else if (ch.session_step == ECUIO_SESSION_STATE_REFUSED) {
+            not_entered(o.r, run_end::refused, ch.session_nrc);
+        } else {
             not_entered(o.r, run_end::session_lost);
         }
         return;
