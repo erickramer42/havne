@@ -191,6 +191,31 @@ std::string name_of(const Value& e, const std::string& id, ecuio_signal_file& f)
     return text;
 }
 
+/* An ECU's "session": the one its signals are read in */
+uint8_t session_of(const Value& e, const std::string& id, ecuio_signal_file& f)
+{
+    const Value* session = e.find("session");
+    if (session == nullptr) {
+        return ECUIO_CHANNEL_SESSION_NONE;
+    }
+    ecuio_least::raise(f.least, ecuio_least::kEcuSession);
+    const std::string what = "ecu " + q(id) + "'s session";
+    const std::string& text = text_of(*session, 1, 63, what);
+    if (text == "extended") {
+        return ECUIO_CHANNEL_SESSION_EXTENDED;
+    }
+    if (text == "default") {
+        return ECUIO_CHANNEL_SESSION_DEFAULT;
+    }
+    if (text == "programming" || text == "02") {
+        refuse(*session, what + " can't be the programming session: it is "
+                                "core's alone, entered only by a write "
+                                "operation, never by a signal file");
+    }
+    refuse(*session,
+           what + " is " + q(text) + ": it takes \"default\" or \"extended\"");
+}
+
 /* An ECU's "part" in a merged set: the part whose id stands for it */
 uint32_t part_of(const Value& e, const std::string& id,
                  const ecuio_signal_file& f)
@@ -245,7 +270,7 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
     expect(*ecus, Type::array, "\"ecus\"");
     for (const Value& e : ecus->items) {
         expect(e, Type::object, "an ECU");
-        only_keys(e, {"id", "rx", "tx", "name", "part"}, "an ECU");
+        only_keys(e, {"id", "rx", "tx", "name", "session", "part"}, "an ECU");
         const Value* id_v = e.find("id");
         if (id_v == nullptr) {
             refuse(e, "an ECU needs an \"id\"");
@@ -288,6 +313,7 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         }
         f.modules[channel].id = id;
         f.modules[channel].name = name_of(e, id, f);
+        f.channels[channel].session = session_of(e, id, f);
         f.modules[channel].part = part_of(e, id, f);
         ids->emplace_back(id, rx);
     }

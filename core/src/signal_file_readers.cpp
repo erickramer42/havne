@@ -200,6 +200,7 @@ ecuio_status_t ecuio_signal_file_module(const ecuio_signal_file_t* file,
     filled.rx_id = file->channels[index].rx_id;
     filled.tx_id = file->channels[index].tx_id;
     filled.part = m.part;
+    filled.session = file->channels[index].session;
     ecuio_sf::copy_text(filled.id, sizeof filled.id, m.id);
     ecuio_sf::copy_text(filled.name, sizeof filled.name, m.name);
     std::memcpy(out, &filled, sizeof filled);

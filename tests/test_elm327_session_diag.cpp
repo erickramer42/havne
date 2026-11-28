@@ -334,12 +334,16 @@ TEST_F(Elm327SessionTest, ASessionOfSixModulesNamesReadsAndFocusesEachOne)
     for (uint32_t c = 0; c < 6; ++c) {
         ecuio_channel_decl_t m{};
         m.flags = 7;
-        m.reserved = 7;
+        m.session = 7;
+        std::memset(m.reserved, 7, sizeof m.reserved);
         ASSERT_EQ(ecuio_session_get_module(s.s, c, &m), ECUIO_OK) << c;
         EXPECT_EQ(m.rx_id, 0x7E8u + c);
         EXPECT_EQ(m.tx_id, 0x7E0u + c);
         EXPECT_EQ(m.flags, 0u);
-        EXPECT_EQ(m.reserved, 0u);
+        EXPECT_EQ(m.session, 0u);
+        for (const uint8_t r : m.reserved) {
+            EXPECT_EQ(r, 0u);
+        }
         if (c < ECUIO_SESSION_INFO_MAX_CHANNELS) {
             EXPECT_EQ(info.rx_ids[c], m.rx_id);
             EXPECT_EQ(info.tx_ids[c], m.tx_id);

@@ -261,3 +261,33 @@ TEST(PluginPublisherTest, TheGetterRefusesAShortStruct)
     EXPECT_EQ(ecuio_plugin_publisher(p.get(), nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
 }
+
+TEST(PluginPublisherTest, AModulesSessionIsFormat3s)
+{
+    Made m = format3();
+    m.ecus = R"([{"id": "pcm", "rx": "7E8"}, {"id": "tcm", "rx": "7E9", )"
+             R"("session": "extended"}, {"id": "abs", "rx": "7EA"}])";
+    const Plugin p = conversation_test::load_packed(m.json());
+    ASSERT_NE(p, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_plugin_variant_set(p.get(), 0);
+    ASSERT_NE(set, nullptr);
+    ASSERT_GE(set->channel_count, 2u);
+    EXPECT_EQ(set->channels[0].session, ECUIO_CHANNEL_SESSION_NONE);
+    EXPECT_EQ(set->channels[1].session, ECUIO_CHANNEL_SESSION_EXTENDED);
+
+    for (const char* format : {"1", "2"}) {
+        Made older = m;
+        older.format = format;
+        if (std::strcmp(format, "1") == 0) {
+            older.tiers = R"(["data"])";
+            older.has_group = false;
+            older.has_binary = false;
+        }
+        older.publisher.clear();
+        EXPECT_NE(refusal(older).find("an ECU's \"session\" is format 3's: "
+                                      "its manifest starts with "
+                                      "\"havne_plugin\": 3"),
+                  std::string::npos)
+            << format << ": " << ecuio_last_error_detail();
+    }
+}

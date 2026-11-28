@@ -12,10 +12,12 @@ under alone, its own name and format, its plugin's id, version and
 variant (None for a signal file), how many of its signals and modules
 are in the set, and its Source"""
 
-Module = collections.namedtuple("Module", "rx tx id name part")
+Module = collections.namedtuple("Module", "rx tx id name part session")
+_SESSIONS = {1: "default", 3: "extended"}
 Module.__doc__ = """One module of a file's set: its reply and request IDs, its entry's
 id and name (None when not given), and in a merged set the profile of
-the part whose id stands for it (None for none)"""
+the part whose id stands for it (None for none), and the session it
+declares ("default", "extended", or None)"""
 
 Note = collections.namedtuple("Note", "kind text key base_def")
 Note.__doc__ = """One thing a load or a merge did that its files didn't say outright:
@@ -87,7 +89,8 @@ def modules(file):
         part = None
         if m.part != e.ECUIO_SIGNAL_PART_NONE:
             part = _part(file, m.part, lambda s: None).profile
-        out.append(Module(m.rx_id, m.tx_id, text(m.id) or None, text(m.name) or None, part))
+        out.append(Module(m.rx_id, m.tx_id, text(m.id) or None, text(m.name) or None, part,
+                          _SESSIONS.get(m.session)))
     return out
 
 

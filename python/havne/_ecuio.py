@@ -47,6 +47,9 @@ ECUIO_CAN_STATE_SLEEPING = 6
 ECUIO_CAN_STATE_STOPPED = 5
 ECUIO_CAN_STATE_UNKNOWN = 0
 ECUIO_CAN_UP = 1
+ECUIO_CHANNEL_SESSION_DEFAULT = 1
+ECUIO_CHANNEL_SESSION_EXTENDED = 3
+ECUIO_CHANNEL_SESSION_NONE = 0
 ECUIO_CHECK_ASLEEP = 7
 ECUIO_CHECK_DEFAULT_GAP_US = 0xf4240
 ECUIO_CHECK_DEFAULT_RATE_DROP_X100 = 0x3e8
@@ -653,6 +656,7 @@ ECUIO_VALIDATE_ERR_CHANNELS_NULL = -10
 ECUIO_VALIDATE_ERR_CHANNEL_COUNT = -11
 ECUIO_VALIDATE_ERR_CHANNEL_ID = -12
 ECUIO_VALIDATE_ERR_CHANNEL_RESERVED = -26
+ECUIO_VALIDATE_ERR_CHANNEL_SESSION = -27
 ECUIO_VALIDATE_ERR_COMPUTED = 20
 ECUIO_VALIDATE_ERR_COMPUTED_CHAIN = -23
 ECUIO_VALIDATE_ERR_COMPUTED_INPUT = -22
@@ -1115,7 +1119,8 @@ ecuio_channel_decl_t._fields_ = [
     ('rx_id', c_uint32),
     ('tx_id', c_uint32),
     ('flags', c_uint32),
-    ('reserved', c_uint32),
+    ('session', c_uint8),
+    ('reserved', (c_uint8 * 3)),
 ]
 ecuio_dtc_list_t._fields_ = [
     ('outcome', c_uint8),
@@ -2043,7 +2048,8 @@ ecuio_signal_module_t._fields_ = [
     ('rx_id', c_uint32),
     ('tx_id', c_uint32),
     ('part', c_uint32),
-    ('reserved', (c_uint32 * 5)),
+    ('session', c_uint32),
+    ('reserved', (c_uint32 * 4)),
     ('id', (c_char * 32)),
     ('name', (c_char * 64)),
 ]

@@ -105,6 +105,22 @@ bool holds(const Value& v, const Value* target)
     return false;
 }
 
+/* A module's declared session needs consent, which needs format 3's
+ * publisher block */
+void check_ecu_sessions(const Value& root, const ecuio_plugin& p)
+{
+    const Value* ecus = root.find("ecus");
+    if (ecus == nullptr || p.format >= 3) {
+        return;
+    }
+    for (const Value& e : ecus->items) {
+        if (const Value* session = e.find("session")) {
+            refuse(*session, "an ECU's \"session\" is format 3's: its "
+                             "manifest starts with \"havne_plugin\": 3");
+        }
+    }
+}
+
 } // namespace
 
 placed placed_json(const std::string& prefix, const ecuio_json::Error& error)
@@ -172,6 +188,7 @@ void loader::read_manifest(ecuio_plugin& p)
     read_origin(root, p);
     read_tiers(root, p);
     read_publisher(root, p);
+    check_ecu_sessions(root, p);
     read_match(root, p);
     read_fixtures(root, p);
     read_files(root, p);

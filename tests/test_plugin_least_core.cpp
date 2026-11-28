@@ -328,6 +328,10 @@ TEST(PluginWrapTest, EachRowsInputNeedsItsCore)
         least_of_file(file(
             "F", "S", R"({"id": "pcm", "rx": "7E8", "name": "Engine"})", oil)),
         "0.9.1");
+    EXPECT_EQ(least_of_file(file(
+                  "F", "S",
+                  R"({"id": "pcm", "rx": "7E8", "session": "extended"})", oil)),
+              "0.9.1");
     std::string format3 = file("F", "S", kPcm, oil);
     format3.replace(format3.find("\"havne_signals\": 1"), 18,
                     "\"havne_signals\": 3");

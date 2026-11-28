@@ -225,6 +225,60 @@ TEST(SignalFileFormat3Test, AnEcusNameIsReadInAnyFormat)
         << ecuio_last_error_detail();
 }
 
+TEST(SignalFileFormat3Test, AnEcusSessionIsReadInAnyFormat)
+{
+    const auto declared = [](unsigned format, const std::string& session) {
+        return file_of(format, did("a", "A", "D100"),
+                       R"("ecus":[{"id":"pcm","rx":"7E8"},{"id":"tcm",)"
+                       R"("rx":"7E9","session":)" +
+                           session + "}],");
+    };
+    for (unsigned format : {1u, 2u, 3u}) {
+        File f = load(declared(format, "\"extended\""));
+        ASSERT_NE(f, nullptr) << format << ": " << ecuio_last_error_detail();
+        const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+        EXPECT_EQ(set->channels[0].session, ECUIO_CHANNEL_SESSION_NONE);
+        EXPECT_EQ(set->channels[1].session, ECUIO_CHANNEL_SESSION_EXTENDED);
+        EXPECT_EQ(module_at(f.get(), 0).session, ECUIO_CHANNEL_SESSION_NONE);
+        EXPECT_EQ(module_at(f.get(), 1).session, ECUIO_CHANNEL_SESSION_EXTENDED)
+            << format;
+    }
+    File d = load(declared(3, "\"default\""));
+    ASSERT_NE(d, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(module_at(d.get(), 1).session, ECUIO_CHANNEL_SESSION_DEFAULT);
+
+    /* An entry at the base's engine ECU declares the base channel's */
+    File base = load(file_of(3, did("a", "A", "D100"),
+                             R"("extends":"obd2","ecus":[{"id":"pcm",)"
+                             R"("rx":"7E8","session":"extended"}],)"));
+    ASSERT_NE(base, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_set(base.get())->channels[0].session,
+              ECUIO_CHANNEL_SESSION_EXTENDED);
+
+    const std::string programming =
+        "ecu 'tcm''s session can't be the programming session: it is core's "
+        "alone, entered only by a write operation, never by a signal file";
+    const struct {
+        const char* value;
+        std::string words;
+    } refused[] = {
+        {"\"programming\"", programming},
+        {"\"02\"", programming},
+        {"\"Extended\"",
+         "ecu 'tcm''s session is 'Extended': it takes \"default\" or "
+         "\"extended\""},
+        {"\"03\"", "ecu 'tcm''s session is '03': it takes \"default\" or "
+                   "\"extended\""},
+        {"\"\"", "ecu 'tcm''s session is 0 bytes; it takes 1 to 63"},
+        {"3", "ecu 'tcm''s session is a number, not a string"},
+    };
+    for (const auto& r : refused) {
+        EXPECT_NE(refusal(declared(3, r.value)).find(r.words),
+                  std::string::npos)
+            << r.value << ": " << ecuio_last_error_detail();
+    }
+}
+
 // A name adds and changes nothing else: a format 2 file that names its
 // ECU still replaces a base def by name
 TEST(SignalFileFormat3Test, AnEcusNameLeavesAFormat2FilesReplacementAlone)

@@ -126,6 +126,20 @@ void check_signal_file(const char* file, size_t length)
     ecuio_signal_file_t* f = nullptr;
     const ecuio_status_t s = ecuio_signal_file_load(file, length, &f);
     const bool merged = f != nullptr && ecuio_sf::is_merged(*f);
+    std::string declared;
+    for (size_t c = 0; f != nullptr && c < f->channels.size(); ++c) {
+        const uint8_t session = f->channels[c].session;
+        if (session != ECUIO_CHANNEL_SESSION_NONE && declared.empty()) {
+            declared = "the file's ecu " + q(f->modules[c].id) +
+                       " declares the " +
+                       (session == ECUIO_CHANNEL_SESSION_EXTENDED ? "extended"
+                                                                  : "default") +
+                       " session, which only a format 3 plugin carries, "
+                       "beside its publisher block: give the session on the "
+                       "\"ecus\" entry of a manifest that starts with "
+                       "\"havne_plugin\": 3";
+        }
+    }
     ecuio_signal_file_free(f);
     if (s != ECUIO_OK) {
         throw passed{s};
@@ -133,6 +147,9 @@ void check_signal_file(const char* file, size_t length)
     if (merged) {
         throw refusal{"the file is a merged set, which isn't imported: "
                       "import its plugins"};
+    }
+    if (!declared.empty()) {
+        throw refusal{declared};
     }
 }
 

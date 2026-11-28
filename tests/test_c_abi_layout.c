@@ -135,7 +135,10 @@ typedef char abi_channels_check[(ECUIO_MAX_CHANNELS == 32) ? 1 : -1];
 typedef char abi_decl_size_check[(sizeof(ecuio_channel_decl_t) == 16) ? 1 : -1];
 typedef char abi_decl_tx_check[(offsetof(ecuio_channel_decl_t, tx_id) == 4) ? 1 : -1];
 typedef char abi_decl_flags_check[(offsetof(ecuio_channel_decl_t, flags) == 8) ? 1 : -1];
-typedef char abi_decl_reserved_check[(offsetof(ecuio_channel_decl_t, reserved) == 12) ? 1 : -1];
+typedef char abi_decl_session_check
+    [(offsetof(ecuio_channel_decl_t, session) == 12) ? 1 : -1];
+typedef char abi_decl_reserved_check
+    [(offsetof(ecuio_channel_decl_t, reserved) == 13) ? 1 : -1];
 typedef char abi_layout_check[(ECUIO_SIGNAL_SET_LAYOUT == 5u) ? 1 : -1];
 typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 : -1];
 typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];

@@ -43,6 +43,17 @@ def test_a_merge_reads_its_parts_in_order():
         m.part_of("no_such_key")
 
 
+def test_a_module_says_the_session_it_declares():
+    text = json.dumps({"havne_signals": 1, "name": "S", "source": {"name": "t"},
+                       "ecus": [{"id": "pcm", "rx": "7E8"},
+                                {"id": "tcm", "rx": "7E9", "session": "extended"},
+                                {"id": "abs", "rx": "7EA", "session": "default"}],
+                       "signals": [{"key": "a", "name": "A", "ecu": "tcm",
+                                    "read": {"service": "22", "number": "D100"},
+                                    "field": {"byte": 0}}]})
+    assert [x.session for x in havne.SignalFile(text).modules()] == [None, "extended", "default"]
+
+
 def test_modules_reads_obd2s_modules_and_none_of_its_signals():
     trans = havne.SignalFile(path=TRANS)
     m = havne.SignalFile.merge([trans], base="modules")

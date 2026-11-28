@@ -18,7 +18,10 @@
 typedef char abi_module_size_check[(sizeof(ecuio_signal_module_t) == 136) ? 1 : -1];
 typedef char abi_module_rx_check[(offsetof(ecuio_signal_module_t, rx_id) == 8) ? 1 : -1];
 typedef char abi_module_part_check[(offsetof(ecuio_signal_module_t, part) == 16) ? 1 : -1];
-typedef char abi_module_reserved_check[(offsetof(ecuio_signal_module_t, reserved) == 20) ? 1 : -1];
+typedef char abi_module_session_check
+    [(offsetof(ecuio_signal_module_t, session) == 20) ? 1 : -1];
+typedef char abi_module_reserved_check
+    [(offsetof(ecuio_signal_module_t, reserved) == 24) ? 1 : -1];
 typedef char abi_module_id_check[(offsetof(ecuio_signal_module_t, id) == 40) ? 1 : -1];
 typedef char abi_module_name_check[(offsetof(ecuio_signal_module_t, name) == 72) ? 1 : -1];
 typedef char abi_part_size_check[(sizeof(ecuio_signal_part_t) == 248) ? 1 : -1];
@@ -221,7 +224,10 @@ int main(void)
     uint32_t count = 0;
 
     if (ECUIO_SIGNAL_FILE_FORMAT != 3u ||
-        ECUIO_SIGNAL_PART_NONE != 0xFFFFFFFFu || ECUIO_MODULE_BASE != 0x1u) {
+        ECUIO_SIGNAL_PART_NONE != 0xFFFFFFFFu || ECUIO_MODULE_BASE != 0x1u ||
+        ECUIO_CHANNEL_SESSION_NONE != 0u ||
+        ECUIO_CHANNEL_SESSION_DEFAULT != 1u ||
+        ECUIO_CHANNEL_SESSION_EXTENDED != 3u) {
         printf("FAIL: a constant of the merged set moved\n");
         return 1;
     }

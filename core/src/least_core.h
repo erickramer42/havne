@@ -73,6 +73,9 @@ inline constexpr version kFormat3 = {{0, 9, 1}};
 /* An ECU's "name", in a signal file or a manifest of any format (v0.9.1;
  * an older core refuses the key) */
 inline constexpr version kEcuName = {{0, 9, 1}};
+/* An ECU's "session", in a signal file of any format or a format 3
+ * manifest (v0.9.1) */
+inline constexpr version kEcuSession = {{0, 9, 1}};
 
 /* Each "havne_signals" by its number: [0] stands for none */
 inline constexpr version kSignalFormatSince[] = {kSignalFile, kSignalFile,

@@ -159,19 +159,31 @@ typedef struct ecuio_channel_decl {
     uint32_t rx_id;    /* flow-control filter target */
     uint32_t tx_id;    /* request destination */
     uint32_t flags;    /* zero: none defined */
-    uint32_t reserved; /* zero; room for what a module is given later */
+    uint8_t session;   /* 0, or ECUIO_CHANNEL_SESSION_* */
+    uint8_t reserved[3];
 } ecuio_channel_decl_t;
+
+/* A module's declared session; values are append-only */
+#define ECUIO_CHANNEL_SESSION_NONE     0u
+#define ECUIO_CHANNEL_SESSION_DEFAULT  1u
+#define ECUIO_CHANNEL_SESSION_EXTENDED 3u
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_channel_decl_t) == 16, "ecuio_channel_decl_t size is ABI");
 static_assert(offsetof(ecuio_channel_decl_t, tx_id) == 4, "decl tx_id offset is ABI");
 static_assert(offsetof(ecuio_channel_decl_t, flags) == 8, "decl flags offset is ABI");
-static_assert(offsetof(ecuio_channel_decl_t, reserved) == 12, "decl reserved offset is ABI");
+static_assert(offsetof(ecuio_channel_decl_t, session) == 12,
+              "decl session offset is ABI");
+static_assert(offsetof(ecuio_channel_decl_t, reserved) == 13,
+              "decl reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_channel_decl_t) == 16, "ecuio_channel_decl_t size is ABI");
 _Static_assert(offsetof(ecuio_channel_decl_t, tx_id) == 4, "decl tx_id offset is ABI");
 _Static_assert(offsetof(ecuio_channel_decl_t, flags) == 8, "decl flags offset is ABI");
-_Static_assert(offsetof(ecuio_channel_decl_t, reserved) == 12, "decl reserved offset is ABI");
+_Static_assert(offsetof(ecuio_channel_decl_t, session) == 12,
+               "decl session offset is ABI");
+_Static_assert(offsetof(ecuio_channel_decl_t, reserved) == 13,
+               "decl reserved offset is ABI");
 #endif
 
 /* An enum def's labels (ADR-0051): its table_count entries from
@@ -522,6 +534,8 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 #define ECUIO_VALIDATE_ERR_CHANNEL_RESERVED (-26)  /* a channel's flags or
                                                       reserved word not
                                                       zero */
+#define ECUIO_VALIDATE_ERR_CHANNEL_SESSION  (-27)  /* a channel's session
+                                                      not 0, 1 or 3 */
 
 /* Why a set failed validation, and where. index names the element the
  * code is about: the failing def; for a duplicate id or name, the
@@ -1149,7 +1163,8 @@ typedef struct ecuio_signal_module {
     uint32_t tx_id;       /* the ID it is asked on */
     uint32_t part;        /* in a merged set, the part whose id stands
                              for the module; else ECUIO_SIGNAL_PART_NONE */
-    uint32_t reserved[5]; /* zero */
+    uint32_t session;     /* ECUIO_CHANNEL_SESSION_* */
+    uint32_t reserved[4]; /* zero */
     char id[32];          /* its entry's "id"; "" with ECUIO_MODULE_BASE */
     char name[64];        /* its entry's "name", a label for a screen; ""
                              when the entry gives none */
@@ -1160,6 +1175,8 @@ static_assert(sizeof(ecuio_signal_module_t) == 136,
               "ecuio_signal_module_t size is ABI");
 static_assert(offsetof(ecuio_signal_module_t, part) == 16,
               "module part offset is ABI");
+static_assert(offsetof(ecuio_signal_module_t, session) == 20,
+              "module session offset is ABI");
 static_assert(offsetof(ecuio_signal_module_t, id) == 40,
               "module id offset is ABI");
 static_assert(offsetof(ecuio_signal_module_t, name) == 72,
@@ -1169,6 +1186,8 @@ _Static_assert(sizeof(ecuio_signal_module_t) == 136,
                "ecuio_signal_module_t size is ABI");
 _Static_assert(offsetof(ecuio_signal_module_t, part) == 16,
                "module part offset is ABI");
+_Static_assert(offsetof(ecuio_signal_module_t, session) == 20,
+               "module session offset is ABI");
 _Static_assert(offsetof(ecuio_signal_module_t, id) == 40,
                "module id offset is ABI");
 _Static_assert(offsetof(ecuio_signal_module_t, name) == 72,

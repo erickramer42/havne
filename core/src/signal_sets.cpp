@@ -372,9 +372,17 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
                 *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_ID;
             }
-            if (set->channels[i].flags != 0 || set->channels[i].reserved != 0) {
+            const ecuio_channel_decl_t& d = set->channels[i];
+            if (d.flags != 0 || d.reserved[0] != 0 || d.reserved[1] != 0 ||
+                d.reserved[2] != 0) {
                 *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_RESERVED;
+            }
+            if (d.session != ECUIO_CHANNEL_SESSION_NONE &&
+                d.session != ECUIO_CHANNEL_SESSION_DEFAULT &&
+                d.session != ECUIO_CHANNEL_SESSION_EXTENDED) {
+                *index = i;
+                return ECUIO_VALIDATE_ERR_CHANNEL_SESSION;
             }
             for (uint32_t j = 0; j < i; ++j) {
                 if (set->channels[j].rx_id == rx) {

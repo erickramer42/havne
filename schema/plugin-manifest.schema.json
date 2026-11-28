@@ -171,6 +171,13 @@
       "not": { "required": ["signature"] }
     },
     {
+      "$comment": "A module's declared session is format 3's",
+      "if": { "properties": { "havne_plugin": { "enum": [1, 2] } } },
+      "then": {
+        "properties": { "ecus": { "items": { "properties": { "session": false } } } }
+      }
+    },
+    {
       "$comment": "A binary file is format 2's",
       "if": { "properties": { "havne_plugin": { "const": 1 } } },
       "then": {

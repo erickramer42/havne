@@ -288,6 +288,11 @@
           "minLength": 1,
           "maxLength": 63
         },
+        "session": {
+          "title": "Session",
+          "description": "The diagnostic session the module's signals are read in: \"extended\" (10 03, once a person allowed it for the file or plugin) or \"default\" (keeps the module out of a session another part declares). Never the programming session. A core older than 0.9.1 refuses the key.",
+          "enum": ["default", "extended"]
+        },
         "part": {
           "title": "Part",
           "description": "In a merged set: the part whose id stands for the module, its place in \"parts\" from 0.",

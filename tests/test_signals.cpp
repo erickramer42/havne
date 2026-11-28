@@ -592,7 +592,8 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(sizeof(ecuio_channel_decl_t), 16u);
     EXPECT_EQ(offsetof(ecuio_channel_decl_t, tx_id), 4u);
     EXPECT_EQ(offsetof(ecuio_channel_decl_t, flags), 8u);
-    EXPECT_EQ(offsetof(ecuio_channel_decl_t, reserved), 12u);
+    EXPECT_EQ(offsetof(ecuio_channel_decl_t, session), 12u);
+    EXPECT_EQ(offsetof(ecuio_channel_decl_t, reserved), 13u);
     EXPECT_EQ(offsetof(ecuio_signal_set_t, enum_count), 2 * sizeof(void*) + 16);
     EXPECT_EQ(offsetof(ecuio_signal_set_t, computed), 3 * sizeof(void*) + 24);
     EXPECT_EQ(sizeof(ecuio_signal_set_t), 4 * sizeof(void*) + 40);

@@ -325,10 +325,26 @@ TEST(SignalsTest, SetValidationNamesTheFailingElement)
     channels[1].flags = 1;
     expect("channel flags", &set, ECUIO_VALIDATE_ERR_CHANNEL_RESERVED, 1u);
     channels[1].flags = 0;
-    channels[2].reserved = 0x80000000u;
-    expect("channel reserved", &set, ECUIO_VALIDATE_ERR_CHANNEL_RESERVED, 2u);
-    channels[2].reserved = 0;
+    for (uint8_t& r : channels[2].reserved) {
+        r = 0x80;
+        expect("channel reserved", &set, ECUIO_VALIDATE_ERR_CHANNEL_RESERVED,
+               2u);
+        r = 0;
+    }
     expect("valid again", &set, ECUIO_VALIDATE_OK, UINT32_MAX);
+    for (unsigned v = 0; v < 256; ++v) {
+        channels[1].session = static_cast<uint8_t>(v);
+        const bool taken = v == ECUIO_CHANNEL_SESSION_NONE ||
+                           v == ECUIO_CHANNEL_SESSION_DEFAULT ||
+                           v == ECUIO_CHANNEL_SESSION_EXTENDED;
+        ecuio_validation_t why{};
+        EXPECT_EQ(ecuio_validate_signal_set(&set, &why),
+                  taken ? ECUIO_VALIDATE_OK
+                        : ECUIO_VALIDATE_ERR_CHANNEL_SESSION)
+            << "session " << v;
+        EXPECT_EQ(why.index, taken ? UINT32_MAX : 1u) << "session " << v;
+    }
+    channels[1].session = 0;
 
     expect("NULL set", nullptr, ECUIO_VALIDATE_ERR_NULL, UINT32_MAX);
     ecuio_signal_set_t whole = set;

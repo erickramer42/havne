@@ -397,6 +397,20 @@ TEST(PluginWrapTest, EveryRefusalSaysWhy)
     EXPECT_FALSE(refused(wrap("")).empty());
     EXPECT_EQ(refused(put(one, "v", "{\"havne_signals\": 1,\n \"name\": 7}")),
               "line 2, column 10: \"name\" is a number, not a string");
+    /* A declared session needs format 3's publisher block, which neither
+     * call writes */
+    const std::string declared =
+        R"({"havne_signals":1,"name":"S","source":{"name":"t"},)"
+        R"("ecus":[{"id":"tcm","rx":"7E9","session":"extended"}],"signals":[)"
+        R"({"key":"x","name":"X","ecu":"tcm","read":{"service":"22",)"
+        R"("number":"D100"},"field":{"byte":0}}]})";
+    const std::string session_words =
+        "the file's ecu 'tcm' declares the extended session, which only a "
+        "format 3 plugin carries, beside its publisher block: give the "
+        "session on the \"ecus\" entry of a manifest that starts with "
+        "\"havne_plugin\": 3";
+    EXPECT_EQ(refused(wrap(declared)), session_words);
+    EXPECT_EQ(refused(put(one, "v", declared)), session_words);
     /* A packed plugin given as the file, and a file as the plugin */
     EXPECT_TRUE(has(refused(wrap(one)), "a signal file starts with "
                                         "\"havne_signals\""));
