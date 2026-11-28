@@ -12,6 +12,7 @@
 #include "ecuio/signals.h"
 #include "error_detail.h"
 #include "json.h"
+#include "json_build.h"
 #include "request_engine.h"
 #include "signal_file_build.h"
 #include "signal_file_merge.h"
@@ -29,43 +30,13 @@ namespace ecuio_merge {
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
+using ecuio_json::add;
+using ecuio_json::empty_of;
+using ecuio_json::text_value;
+using ecuio_json::whole_value;
 using ecuio_sf::q;
 
 namespace {
-
-Value text_value(const std::string& s)
-{
-    Value v;
-    v.type = Type::string;
-    v.text = s;
-    return v;
-}
-
-Value whole_value(int64_t n)
-{
-    Value v;
-    v.type = Type::number;
-    v.integer = true;
-    v.in_int64 = true;
-    v.whole = n;
-    v.number = static_cast<double>(n);
-    return v;
-}
-
-Value empty_of(Type t)
-{
-    Value v;
-    v.type = t;
-    return v;
-}
-
-void add(Value& object, const std::string& key, Value value)
-{
-    Member m;
-    m.key = key;
-    m.value = std::move(value);
-    object.members.push_back(std::move(m));
-}
 
 std::string hex(uint32_t id)
 {

@@ -260,19 +260,7 @@ private:
     bool text_message(uint32_t id, uint32_t flags, const uint8_t* data,
                       size_t n)
     {
-        if (text_.empty() || n > ECUIO_FRAME_DATA_MAX) {
-            return false;
-        }
-        probe_->arbitration_id = id;
-        probe_->flags = flags;
-        probe_->data_length = static_cast<uint16_t>(n);
-        std::memcpy(probe_->data, data, n);
-        for (const ecuio_signal_def_t* d : text_) {
-            if (ecuio_def_applies_to_frame(d, probe_.get()) != 0) {
-                return true;
-            }
-        }
-        return false;
+        return fr::text_message(*probe_, text_, id, flags, data, n);
     }
 
     /* Messages reassembled from the wire: an identification reply's

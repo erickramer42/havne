@@ -13,6 +13,7 @@
 #include "ecu_join.h"
 #include "error_detail.h"
 #include "json.h"
+#include "json_build.h"
 #include "least_core.h"
 #include "plugin_rules.h"
 #include "sha256.h"
@@ -37,6 +38,10 @@ using ecuio_ecus::fallback_of;
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
+using ecuio_json::add;
+using ecuio_json::empty_of;
+using ecuio_json::text_value;
+using ecuio_json::whole_value;
 using ecuio_sf::q;
 
 /* A rule of the call refused, in words */
@@ -48,40 +53,6 @@ struct refusal {
 struct passed {
     ecuio_status_t status;
 };
-
-Value text_value(const std::string& s)
-{
-    Value v;
-    v.type = Type::string;
-    v.text = s;
-    return v;
-}
-
-Value whole_value(int64_t n)
-{
-    Value v;
-    v.type = Type::number;
-    v.integer = true;
-    v.in_int64 = true;
-    v.whole = n;
-    v.number = static_cast<double>(n);
-    return v;
-}
-
-Value empty_of(Type t)
-{
-    Value v;
-    v.type = t;
-    return v;
-}
-
-void add(Value& object, const std::string& key, Value value)
-{
-    Member m;
-    m.key = key;
-    m.value = std::move(value);
-    object.members.push_back(std::move(m));
-}
 
 Value* at(Value& object, const char* key)
 {
