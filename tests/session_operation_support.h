@@ -59,6 +59,7 @@ struct Bench {
     Script script;
     std::function<bool(const Bytes&)> unsent; /* the adapter takes it not */
     std::function<void(Bench&)> while_out; /* a request is on the wire */
+    bool steps_while_out = false; /* the worker passes between frames */
     bool waits_for_writer = true;
     /* The adapter's battery: the nth reading's millivolts, 0 none */
     bool battery_source = true;
@@ -172,7 +173,7 @@ struct Bench {
                 while_out(*this);
             }
             for (size_t i = 0; i < a.frames.size(); ++i) {
-                now += i == 0 ? 4 * engine_talk_test::kMs : a.pending_us;
+                wait(i == 0 ? 4 * engine_talk_test::kMs : a.pending_us);
                 frame(a.frames[i]);
             }
             /* a wait still out (no frame, or pending ones alone) runs out */
@@ -186,6 +187,17 @@ struct Bench {
         serve_battery();
         ecuio_step_conversations(s, e.get(), now);
         serve_functional();
+    }
+
+    void wait(int64_t us)
+    {
+        const int64_t end = now + us;
+        while (steps_while_out && now + 100 * engine_talk_test::kMs < end) {
+            now += 100 * engine_talk_test::kMs;
+            ecuio_step_conversations(s, e.get(), now);
+            serve_functional();
+        }
+        now = end;
     }
 
     /* The bench's clock is its own and the writer's thread is not: a
