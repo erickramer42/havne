@@ -46,6 +46,8 @@ constexpr char kClosedWords[] =
 constexpr char kClosedFlashWords[] =
     "the session closed after the flash began writing: flash the module "
     "again before it runs";
+constexpr char kClosedUnwrittenWords[] =
+    "the session closed before the flash began writing: nothing was written";
 
 int64_t utc_now()
 {
@@ -375,7 +377,7 @@ void arm(ecuio_session_t* s, session_run& o, const plan& p,
         o.view.phase = ECUIO_OPERATION_PHASE_CHECKING;
         o.view.bytes_total =
             p.has_flash ? o.f.written : 2 * ecuio_operation::image_bytes(p);
-        o.view.sectors = static_cast<uint16_t>(o.f.chosen);
+        o.view.sectors = static_cast<uint16_t>(p.has_flash ? o.f.chosen : 0);
     }
     o.stage.store(ecuio_operation::kStageArmed, std::memory_order_release);
 }
@@ -518,7 +520,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
     if (!open) {
         st = ecuio_session_unlock_mark(s, *b, channel, p->level, nullptr);
         if (st != ECUIO_OK) {
-            o->journal.close(true);
+            o->journal.close(p->has_flash);
             return st; /* the sink's end removes the unfinished file */
         }
     }
@@ -549,7 +551,9 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
     const bool live = stage == ecuio_operation::kStageArmed ||
                       stage == ecuio_operation::kStageRunning;
     const bool flash = o->p != nullptr && o->p->has_flash;
-    const bool past_floor = flash && o->f.floor;
+    const bool past_floor =
+        flash && (o->f.floor ||
+                  (o->f.asked && ecuio_operation::flash_moves_floor(o->f)));
     o->journal.close(live && flash && !past_floor);
     if (!live) {
         return;
@@ -574,6 +578,9 @@ void ecuio_operation_closed(ecuio_session* s) noexcept
         std::memcpy(v.name, o->sink->name(), sizeof v.name);
     } else if (past_floor) {
         std::memcpy(v.words, kClosedFlashWords, sizeof kClosedFlashWords);
+    } else if (flash) {
+        std::memcpy(v.words, kClosedUnwrittenWords,
+                    sizeof kClosedUnwrittenWords);
     } else {
         std::memcpy(v.words, kClosedWords, sizeof kClosedWords);
     }

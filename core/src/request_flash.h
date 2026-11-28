@@ -63,8 +63,18 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
     const flash_run& f = o.f;
     if (f.result == flash_end::none) {
         words_of(o, end, out, cap);
+    } else if (end == ECUIO_OPERATION_END_WRITTEN && o.journal.failed()) {
+        std::snprintf(out, cap,
+                      "written and checked, but %s: the next flash of this "
+                      "module is refused while it says writing",
+                      o.journal.words());
     } else if (end == ECUIO_OPERATION_END_WRITTEN) {
         std::snprintf(out, cap, "%s", "");
+    } else if (end == ECUIO_OPERATION_END_CHECK_FAILED && !f.floor) {
+        std::snprintf(out, cap,
+                      "nothing was written, and the module's own check "
+                      "failed: what it holds isn't the images, so flash it "
+                      "without a copy");
     } else if (end == ECUIO_OPERATION_END_CHECK_FAILED) {
         std::snprintf(out, cap,
                       "the module's own check of what was written "
@@ -211,8 +221,9 @@ inline void drive_flash(ecuio_session_t* s, session_run& o,
     own_settle(o, e, now_us);
     drop_check(o, e, now_us);
     battery_step(s, o, now_us);
+    const bool flash_held = r.at == run_stage::flash && (o.f.floor || o.out);
     if ((o.v.refused_low || o.v.refused_high) && r.at != run_stage::done &&
-        r.at != run_stage::flash) {
+        !flash_held) {
         o.orphan = o.out && !o.fed;
         stop(r, o.v.refused_high && !o.v.refused_low ? run_end::voltage_high
                                                      : run_end::voltage_low);

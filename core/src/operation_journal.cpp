@@ -125,12 +125,21 @@ journal_found journal_find(const std::string& folder, uint32_t rx,
                "be mid-flash";
         return journal_found::unfinished;
     }
+    if (state->text != "ready" && state->text != "done") {
+        *why = "the flash journal " + name +
+               " isn't one this Havne reads: the module may be mid-flash";
+        return journal_found::failed;
+    }
     return journal_found::none;
 }
 
 journal_writer::~journal_writer()
 {
-    close(false);
+    try {
+        close(false);
+        // NOLINTNEXTLINE(bugprone-empty-catch): the join fails only on a bad thread
+    } catch (const std::exception&) {
+    }
 }
 
 bool journal_writer::write(const journal_mark& m, std::string* why)
@@ -223,6 +232,7 @@ void journal_writer::close(bool remove)
     if (remove && !path_.empty()) {
         ecuio_files::remove_file(path_);
     }
+    path_.clear();
 }
 
 } // namespace ecuio_operation

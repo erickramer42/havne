@@ -16,6 +16,7 @@ using ecuio_operation::journal_find;
 using ecuio_operation::journal_found;
 using ecuio_operation::journal_head;
 using ecuio_operation::journal_mark;
+using ecuio_operation::journal_path;
 using ecuio_operation::journal_state;
 using ecuio_operation::journal_writer;
 
@@ -189,4 +190,30 @@ TEST(OperationJournalTest, AWriterOpenedAgainWritesAgain)
         ASSERT_TRUE(flushed(j)) << "round " << round;
         j.close(false);
     }
+}
+
+TEST(OperationJournalTest, AStateItDoesntKnowRefusesTheNextFlash)
+{
+    Folder f("-journal-state");
+    const std::string folder = f.path.u8string();
+    std::ofstream(journal_path(folder, 0x7E8), std::ios::binary)
+        << R"({"havne_journal": 1, "state": "erasing"})";
+    std::string why;
+    EXPECT_EQ(journal_find(folder, 0x7E8, &why), journal_found::failed);
+    EXPECT_EQ(why, "the flash journal 000007E8.havnejournal isn't one this "
+                   "Havne reads: the module may be mid-flash");
+}
+
+TEST(OperationJournalTest, AClosedWritersLaterRemoveKeepsTheFile)
+{
+    Folder f("-journal-kept");
+    const std::string folder = f.path.u8string();
+    std::string why;
+    journal_writer j;
+    ASSERT_TRUE(j.open(folder, head_of(), &why)) << why;
+    j.close(false);
+    j.close(true);
+    std::string found;
+    EXPECT_EQ(journal_find(folder, 0x7E8, &found), journal_found::none);
+    EXPECT_TRUE(std::ifstream(journal_path(folder, 0x7E8)).good());
 }

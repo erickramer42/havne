@@ -56,14 +56,14 @@ struct session_run {
     /* The start's, read by the worker once armed */
     const plan* p = nullptr; /* the session's part's, which outlives it */
     std::unique_ptr<dump_sink> sink;
+    std::vector<uint8_t> current; /* a flash's copy to judge sectors by */
+    journal_writer journal;       /* a flash's */
     uint32_t channel = 0;   /* the plan's module among the session's */
     uint32_t operation = 0; /* its index, for the view */
     bool marked = false;    /* an attempt's mark was saved: its word is owed */
     bool write = false;     /* the write class's envelope */
     bool held_awake = false; /* core's keep-awake claim, released at the end */
     uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
-    std::vector<uint8_t> current; /* a flash's copy to judge sectors by */
-    journal_writer journal;       /* a flash's */
 
     std::atomic<uint8_t> stage{kStageIdle};
     std::atomic<bool> cancel{false};
@@ -89,12 +89,12 @@ struct session_run {
     int64_t entering_us = 0; /* when the entry was first asked; 0 not yet */
     bool quiet_out = false;  /* the machine's functional request is due */
     int64_t keep_at_us = 0;  /* the next functional 3E 80; 0 none */
+    int64_t pause_until_us = 0;
+    flash_run f;
     own_step own = own_step::none;
     bool own_out = false; /* the talk out is the session's */
-    ecuio_talk_result own_end;
-    flash_run f;
-    int64_t pause_until_us = 0;
     bool journal_closed = false;
+    ecuio_talk_result own_end;
 
     /* What the getter reads, under the session's support mutex */
     ecuio_operation_state_t view{};

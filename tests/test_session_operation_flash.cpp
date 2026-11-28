@@ -6,9 +6,12 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -337,4 +340,112 @@ TEST(SessionOperationTest, AJournalThatFailsPastTheFloorLeavesItUnfinished)
     EXPECT_EQ(b.region(kCode, 2 * kSector), image_two_sectors());
     EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished)
         << "the journal says what it last could";
+}
+
+TEST(SessionOperationTest, AFlashClosedWithItsEraseOutNeedsTheFlashAgain)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    ecuio_operation_state_t v{};
+    v.struct_size = sizeof v;
+    b.while_out = [&](Bench& x) {
+        const Bytes& q = x.sent.back();
+        if (v.end == ECUIO_OPERATION_END_NONE && q.size() > 4 && q[0] == 0x31 &&
+            q[2] == 0xFF && q[3] == 0x00) {
+            ecuio_session_close(x.s);
+            (void)ecuio_session_get_operation(x.s, &v);
+        }
+    };
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    for (int i = 0;
+         i < 4000 && v.end == ECUIO_OPERATION_END_NONE && !b.s->closed.load();
+         ++i) {
+        b.pass();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED) << v.words;
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+}
+
+TEST(SessionOperationTest, AFlashClosedBeforeItWritesSaysNothingWasWritten)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_session_close(b.s);
+    const ecuio_operation_state_t v = b.state();
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_CANCELED);
+    EXPECT_STREQ(v.words, "the session closed before the flash began "
+                          "writing: nothing was written");
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::none);
+}
+
+TEST(SessionOperationTest, AFailedCheckWithNothingWrittenSaysSo)
+{
+    Flash fill = sim_flash();
+    for (uint32_t i = 0; i < 2 * kSector; ++i) {
+        fill.images[0].blob[i] = ecuio_sim_memory_fill(kCode + i);
+    }
+    Bench b;
+    ecuio_sim_flash_faults f;
+    f.check = true;
+    arm(b, f);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made(fill)));
+    const std::string copy = write_copy(b);
+    ASSERT_EQ(start(b, copy.c_str()), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(b.state().sectors, 0u);
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    EXPECT_EQ(v.end, ECUIO_OPERATION_END_CHECK_FAILED);
+    EXPECT_STREQ(v.words, "nothing was written, and the module's own check "
+                          "failed: what it holds isn't the images, so flash "
+                          "it without a copy");
+    EXPECT_EQ(b.count(0x34), 0u);
+    EXPECT_EQ(b.sent.back(), (Bytes{0x11, 0x01}));
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::none);
+}
+
+TEST(SessionOperationTest, AWrittenFlashWhoseJournalCantCloseSaysSo)
+{
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(flash_made()));
+    b.script = [&](const Bytes& q, size_t, Answer*) {
+        if (q.size() >= 4 && q[0] == 0x31 && q[2] == 0xFF && q[3] == 0x01) {
+            ecuio_operation::journal_test_fail_at = 1;
+        }
+        return false;
+    };
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_operation_state_t v = b.until_ended(20000);
+    ASSERT_EQ(v.end, ECUIO_OPERATION_END_WRITTEN);
+    EXPECT_EQ(std::string(v.words).rfind(
+                  "written and checked, but the flash journal can't be "
+                  "written: ",
+                  0),
+              0u)
+        << v.words;
+    EXPECT_EQ(journal_of(b), ecuio_operation::journal_found::unfinished);
+}
+
+TEST(SessionOperationTest, ADumpAfterAFlashCountsNoSectors)
+{
+    conversation_test::Made m = flash_made();
+    const std::string dump = made().operations;
+    m.operations =
+        m.operations.substr(0, m.operations.size() - 1) + ", " + dump.substr(1);
+    Bench b;
+    arm(b);
+    ASSERT_NO_FATAL_FAILURE(b.start(m));
+    ASSERT_EQ(start(b), ECUIO_OK) << ecuio_last_error_detail();
+    ASSERT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_WRITTEN);
+    ecuio_operation_request_t q = request(ECUIO_OPERATION_MAY_UNLOCK);
+    q.operation = 1;
+    ASSERT_EQ(ecuio_session_operation_start(b.s, &q, b.folder.str().c_str()),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(b.state().sectors, 0u);
+    ASSERT_EQ(ecuio_session_operation_cancel(b.s), ECUIO_OK);
+    EXPECT_EQ(b.until_ended().end, ECUIO_OPERATION_END_CANCELED);
 }
