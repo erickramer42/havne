@@ -56,6 +56,7 @@ TEST(OperationJournalTest, TheTextNamesWhatTheFlashWrites)
     journal_mark m;
     m.state = journal_state::writing;
     m.written = 1;
+    m.erased = 2;
     EXPECT_EQ(ecuio_operation::journal_text(head_of(), m),
               "{\n"
               "  \"havne_journal\": 1,\n"
@@ -67,6 +68,7 @@ TEST(OperationJournalTest, TheTextNamesWhatTheFlashWrites)
                   "  \"rx\": \"7E8\",\n"
                   "  \"copy\": \"copy.havnedump\",\n"
                   "  \"utc\": 1795000000,\n"
+                  "  \"erased\": 2,\n"
                   "  \"images\": [\"" +
                   std::string(64, 'b') +
                   "\"],\n"

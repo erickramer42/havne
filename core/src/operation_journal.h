@@ -24,6 +24,7 @@ struct journal_head {
     std::vector<std::string> images; /* each step's SHA-256, hex */
     std::vector<sector> sectors;     /* the ones the run writes */
     int64_t utc = 0;
+    uint32_t recoveries = 0;
 };
 
 enum class journal_state : uint8_t { ready, writing, done };
@@ -31,9 +32,15 @@ enum class journal_state : uint8_t { ready, writing, done };
 struct journal_mark {
     journal_state state = journal_state::ready;
     uint32_t written = 0; /* of head.sectors, written whole */
+    uint32_t erased = 0;  /* of head.sectors, their erase marked sent */
 };
 
 enum class journal_found : uint8_t { none, unfinished, failed };
+
+struct journal_record {
+    journal_head head;
+    journal_mark mark;
+};
 
 std::string journal_path(const std::string& folder, uint32_t rx);
 std::string journal_text(const journal_head& h, const journal_mark& m);
@@ -42,6 +49,10 @@ std::string journal_text(const journal_head& h, const journal_mark& m);
  * write begun */
 journal_found journal_find(const std::string& folder, uint32_t rx,
                            std::string* why);
+
+/* An unfinished journal read whole; one whose fields don't read is failed */
+journal_found journal_load(const std::string& folder, uint32_t rx,
+                           journal_record* out, std::string* why);
 
 /* TEST-ONLY: the step of the next write that fails, once (store_file's) */
 inline std::atomic<int> journal_test_fail_at{0};
@@ -56,7 +67,8 @@ public:
     journal_writer& operator=(const journal_writer&) = delete;
     ~journal_writer();
 
-    bool open(const std::string& folder, journal_head head, std::string* why);
+    bool open(const std::string& folder, journal_head head, std::string* why,
+              const journal_mark& first = journal_mark{});
     void post(const journal_mark& m);
     uint32_t posted() const { return posted_.load(std::memory_order_acquire); }
     uint32_t flushed() const

@@ -16,6 +16,7 @@ int c_abi_operation(void)
     int ok = 1;
     ecuio_operation_request_t request;
     ecuio_operation_state_t state;
+    ecuio_module_recovery_t recovery;
 
     ok = ok && sizeof(ecuio_operation_request_t) == 32u &&
          offsetof(ecuio_operation_request_t, operation) == 4u &&
@@ -43,6 +44,19 @@ int c_abi_operation(void)
          offsetof(ecuio_operation_state_t, kmh) == 330u &&
          offsetof(ecuio_operation_state_t, sectors) == 332u &&
          offsetof(ecuio_operation_state_t, sectors_done) == 334u;
+    ok = ok && sizeof(ecuio_module_recovery_t) == 200u &&
+         offsetof(ecuio_module_recovery_t, state) == 4u &&
+         offsetof(ecuio_module_recovery_t, flags) == 8u &&
+         offsetof(ecuio_module_recovery_t, attempts) == 12u &&
+         offsetof(ecuio_module_recovery_t, operation) == 16u &&
+         offsetof(ecuio_module_recovery_t, sectors) == 20u &&
+         offsetof(ecuio_module_recovery_t, sectors_written) == 22u &&
+         offsetof(ecuio_module_recovery_t, words) == 24u &&
+         offsetof(ecuio_module_recovery_t, reserved) == 184u &&
+         ECUIO_RECOVERY_NONE == 0u && ECUIO_RECOVERY_NEEDED == 1u &&
+         ECUIO_RECOVERY_UNREADABLE == 2u && ECUIO_RECOVERY_RECOVERED == 3u &&
+         ECUIO_RECOVERY_COPY_PINNED == 1u &&
+         ECUIO_RECOVERY_NOTHING_ERASED == 2u;
     ok = ok && ECUIO_OPERATION_MAY_UNLOCK == 1u &&
          ECUIO_OPERATION_PARKED == 2u && ECUIO_OPERATION_PHASE_NONE == 0u &&
          ECUIO_OPERATION_PHASE_CHECKING == 1u &&
@@ -99,6 +113,12 @@ int c_abi_operation(void)
     ok = ok && ecuio_session_operation_cancel(NULL) == ECUIO_ERR_NULL_ARGUMENT;
     ok = ok &&
          ecuio_session_get_operation(NULL, &state) == ECUIO_ERR_NULL_ARGUMENT;
+    memset(&recovery, 0, sizeof recovery);
+    recovery.struct_size = sizeof recovery;
+    ok = ok && ecuio_session_get_module_recovery(NULL, 0, &recovery) ==
+                   ECUIO_ERR_NULL_ARGUMENT;
+    ok =
+        ok && ecuio_session_journal_folder(NULL, "") == ECUIO_ERR_NULL_ARGUMENT;
     if (!ok) {
         fprintf(stderr, "c_abi: an operation call's refusal moved\n");
         return 1;

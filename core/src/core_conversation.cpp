@@ -403,7 +403,7 @@ ecuio_status_t ecuio_session_security_unlock(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (ecuio_module_part_written(session, channel)) {
-        return ecuio_refuse_part_written();
+        return ecuio_refuse_part_written(session, channel);
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(session, channel);
     if (b == nullptr && ecuio_session_channel_wants_consent(session, channel)) {

@@ -188,6 +188,48 @@ static_assert(offsetof(ecuio_operation_state_t, sectors) == 332,
               "operation state sectors offset is ABI");
 #endif
 
+/* A module's recovery: closed, append-only. NEEDED and UNREADABLE hold
+ * the module: nothing but a recovery names it. */
+#define ECUIO_RECOVERY_NONE       0u
+#define ECUIO_RECOVERY_NEEDED     1u
+#define ECUIO_RECOVERY_UNREADABLE 2u
+#define ECUIO_RECOVERY_RECOVERED  3u
+
+#define ECUIO_RECOVERY_COPY_PINNED    0x1u /* the journal names a copy */
+#define ECUIO_RECOVERY_NOTHING_ERASED 0x2u /* no erase was marked sent */
+
+typedef struct ecuio_module_recovery {
+    uint32_t struct_size;
+    uint32_t state;
+    uint32_t flags;
+    uint32_t attempts;  /* recoveries started, kept in the journal */
+    uint32_t operation; /* the plan's index, UINT32_MAX for none */
+    uint16_t sectors;
+    uint16_t sectors_written;
+    char words[160]; /* no path */
+    uint32_t reserved[4];
+} ecuio_module_recovery_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_module_recovery_t) == 200,
+              "ecuio_module_recovery_t size is ABI");
+static_assert(offsetof(ecuio_module_recovery_t, sectors) == 20,
+              "module recovery sectors offset is ABI");
+static_assert(offsetof(ecuio_module_recovery_t, words) == 24,
+              "module recovery words offset is ABI");
+#endif
+
+/* Before start: the folder whose unfinished flash journals hold their
+ * modules from the start on */
+ecuio_status_t ecuio_session_journal_folder(ecuio_session_t* session,
+                                            const char* folder_utf8);
+
+/* INVALID_ARGUMENT, nothing written, for a short struct_size or a channel
+ * past the modules; readable after close */
+ecuio_status_t ecuio_session_get_module_recovery(const ecuio_session_t* session,
+                                                 uint32_t channel,
+                                                 ecuio_module_recovery_t* out);
+
 /*
  * Starts the run of request->operation on a started session, the copy to
  * go to folder_utf8 (an existing folder; the copy's name is core's). The

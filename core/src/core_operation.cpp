@@ -471,7 +471,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return st;
     }
     if (ecuio_module_part_written(s, channel)) {
-        return ecuio_refuse_part_written();
+        return ecuio_refuse_part_written(s, channel);
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
     const bool write = g_write_class.load() || ecuio_operation::class_of(*p) ==

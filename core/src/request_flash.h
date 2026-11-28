@@ -150,6 +150,7 @@ inline bool flash_step(session_run& o, ecuio_request_engine* e, int64_t now_us)
         journal_mark m;
         m.state = journal_state::writing;
         m.written = f.done_sectors;
+        m.erased = f.done_sectors + (f.at == flash_stage::erase ? 1u : 0u);
         o.journal.post(m);
         flash_journaled(f);
         return true;
@@ -179,6 +180,7 @@ inline void flash_finish(ecuio_session_t* s, session_run& o,
         journal_mark m;
         m.state = written ? journal_state::done : journal_state::ready;
         m.written = f.done_sectors;
+        m.erased = f.done_sectors;
         o.journal.post(m);
     }
     o.journal_closed = true;

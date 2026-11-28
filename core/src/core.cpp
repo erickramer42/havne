@@ -13,6 +13,7 @@
 #include "consent_gate.h"
 #include "conversation_bind.h"
 #include "operation_session.h"
+#include "recovery_open.h"
 #include "host_awake.h"
 #include "j2534_clock.h"
 #include "uds_generic.h"
@@ -383,6 +384,7 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
         if (bound != ECUIO_OK) {
             return bound;
         }
+        ecuio_recovery_open(session);
     }
     const ecuio_status_t st =
         session->transport->ops->start(session, session->transport->impl);

@@ -65,6 +65,9 @@ inline void ecuio_engine_rejoin(ecuio_request_engine* e, uint32_t c,
 inline void ecuio_conversations_start(ecuio_session_t* s,
                                       ecuio_request_engine* e)
 {
+    for (uint32_t c = 0; c < e->chan_count && c < ECUIO_MAX_CHANNELS; ++c) {
+        e->chans[c].part_written = ((s->part_written.load() >> c) & 1u) != 0;
+    }
     ecuio_session_talk* t = s->talk.get();
     for (uint32_t k = 0; t != nullptr && k < t->count; ++k) {
         const uint32_t c = t->bound[k].conversation.channel;
