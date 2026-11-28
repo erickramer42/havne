@@ -64,7 +64,7 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
         words_of(o, end, out, cap);
     } else if (end == ECUIO_OPERATION_END_WRITTEN && o.journal.failed()) {
         std::snprintf(out, cap,
-                      "written and checked, but %s: the next flash of this "
+                      "written and checked, but %.70s: the next flash of this "
                       "module is refused while it says writing",
                       o.journal.words());
     } else if (end == ECUIO_OPERATION_END_WRITTEN) {
@@ -89,7 +89,8 @@ inline void flash_words(const session_run& o, uint32_t end, char* out,
                       "the module again before it runs",
                       flash_cause(f));
     } else if (end == ECUIO_OPERATION_END_FILE) {
-        std::snprintf(out, cap, "%s: nothing was written", o.journal.words());
+        std::snprintf(out, cap, "%.138s: nothing was written",
+                      o.journal.words());
     } else {
         std::snprintf(out, cap, "%s: nothing was written", flash_cause(f));
     }
