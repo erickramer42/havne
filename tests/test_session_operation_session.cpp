@@ -173,6 +173,34 @@ TEST(SessionOperationTest, AProgrammingEntryRefusedEndsTheRunUnread)
     EXPECT_EQ(b.count(0x10), 1u) << "a session never entered isn't left";
 }
 
+TEST(SessionOperationTest, AnExtendedEntryUnansweredOrRefusedEndsInItsOwnWords)
+{
+    const struct {
+        const char* what;
+        std::vector<Bytes> frames;
+        uint32_t end;
+        uint8_t nrc;
+    } entries[] = {
+        {"silent", {}, ECUIO_OPERATION_END_NO_ANSWER, 0},
+        {"refused", {nrc(0x10, 0x22)}, ECUIO_OPERATION_END_REFUSED, 0x22},
+    };
+    for (const auto& f : entries) {
+        Bench b;
+        ASSERT_NO_FATAL_FAILURE(b.start(in_default(PlanShape{})));
+        b.script = [&f](const Bytes& q, size_t, Answer* a) {
+            a->frames = f.frames;
+            return q == Bytes{0x10, 0x03};
+        };
+        ASSERT_EQ(b.begin(), ECUIO_OK) << ecuio_last_error_detail();
+        const ecuio_operation_state_t v = b.until_ended();
+        EXPECT_EQ(v.end, f.end) << f.what << ": " << v.words;
+        EXPECT_EQ(v.nrc, f.nrc) << f.what;
+        EXPECT_TRUE(has(b.sent, Bytes{0x10, 0x03})) << f.what;
+        EXPECT_EQ(b.count(0x27) + b.count(0x23), 0u) << f.what;
+        EXPECT_EQ(b.files(), std::vector<std::string>{}) << f.what;
+    }
+}
+
 /* A level open in the extended session is locked by the programming
  * session: the start wants the unlock allowed, and the run asks it there */
 TEST(SessionOperationTest, AProgrammingPlanUnlocksInItsOwnSession)
