@@ -33,9 +33,9 @@ struct ecuio_sim_flash_faults {
     bool erase = false;   /* an erase answers 7F 31 22 */
     bool silent = false;  /* nothing answers after the second 36 */
     bool boot = false;    /* starts part-written, sector boot_erased erased */
+    bool locked = false;  /* a seed asks answer 7F 27 36 */
     uint32_t boot_erased = 0; /* ECUIO_SIM_FLASH_SECTORS: none */
-    bool locked = false;     /* a seed asks answer 7F 27 36 */
-    uint32_t pending_ms = 0; /* each request answers 78 alone this long */
+    uint32_t pending_ms = 0;  /* each request answers 78 alone this long */
 };
 
 enum class ecuio_sim_sector : uint8_t { kept, erased, written };

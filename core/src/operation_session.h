@@ -57,19 +57,19 @@ struct session_run {
     const plan* p = nullptr; /* the session's part's, which outlives it */
     std::unique_ptr<dump_sink> sink;
     std::vector<uint8_t> current; /* a flash's copy to judge sectors by */
-    journal_writer journal;       /* a flash's */
-    bool recover = false;
+    std::vector<sector> recover_sectors;
+    journal_writer journal; /* a flash's */
+    uint32_t channel = 0;   /* the plan's module among the session's */
+    uint32_t operation = 0; /* its index, for the view */
     uint32_t journal_base = 0; /* the journal's sectors before the run's */
     uint32_t journal_sectors = 0;
     uint32_t attempts = 0;
-    bool copy_pinned = false;
-    std::vector<sector> recover_sectors;
-    uint32_t channel = 0;   /* the plan's module among the session's */
-    uint32_t operation = 0; /* its index, for the view */
+    uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
     bool marked = false;    /* an attempt's mark was saved: its word is owed */
     bool write = false;     /* the write class's envelope */
     bool held_awake = false; /* core's keep-awake claim, released at the end */
-    uint32_t start_checks = 0; /* the start's warnings (CHECK_*) */
+    bool recover = false;
+    bool copy_pinned = false;
 
     std::atomic<uint8_t> stage{kStageIdle};
     std::atomic<bool> cancel{false};

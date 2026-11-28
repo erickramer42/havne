@@ -92,6 +92,7 @@ struct ecuio_sim_config {
     ecuio_sim_faults faults;    /* every module's, each on its own count */
     ecuio_sim_aims aimed;       /* faults aimed at one module each */
     int64_t pending_us = ECUIO_SIM_PENDING_US; /* pending_ms= */
+    ecuio_sim_flash_faults flash_faults;
     uint8_t pending_service = 0;
     ecuio_sim_codes_plan codes;       /* codes=, 0x19's answers */
     ecuio_sim_timing::timings timing; /* delay=, fc=, cf=, seed= */
@@ -102,7 +103,6 @@ struct ecuio_sim_config {
     bool kernel = false;              /* mock: kernel=, the engine ECU's */
     ecuio_sim_kernel_faults kernel_faults;
     bool flash = false; /* mock: flash=, the engine ECU's */
-    ecuio_sim_flash_faults flash_faults;
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
      * is); empty for none */

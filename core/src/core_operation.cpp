@@ -487,6 +487,20 @@ ecuio_status_t open_files(ecuio_session_t* s, session_run& o, const plan& p,
     return st;
 }
 
+/* Only a recovery starts on a held module, and only as a flash's */
+ecuio_status_t judge_hold(const ecuio_session_t* s, const plan& p,
+                          uint32_t channel, bool recover, const char* copy)
+{
+    if (recover && (!p.has_flash || copy != nullptr)) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "a recovery is a flash's, with no copy");
+    }
+    if (!recover && ecuio_module_part_written(s, channel)) {
+        return ecuio_refuse_part_written(s, channel);
+    }
+    return ECUIO_OK;
+}
+
 ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
                      const char* folder, const char* copy)
 {
@@ -498,12 +512,9 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return st;
     }
     const bool recover = (q.flags & ECUIO_OPERATION_RECOVER) != 0;
-    if (recover && (!p->has_flash || copy != nullptr)) {
-        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
-                      "a recovery is a flash's, with no copy");
-    }
-    if (!recover && ecuio_module_part_written(s, channel)) {
-        return ecuio_refuse_part_written(s, channel);
+    st = judge_hold(s, *p, channel, recover, copy);
+    if (st != ECUIO_OK) {
+        return st;
     }
     ecuio_bound_channel* b = ecuio_bound_channel_of(s, channel);
     const bool write = g_write_class.load() || ecuio_operation::class_of(*p) ==
