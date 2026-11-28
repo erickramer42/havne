@@ -132,7 +132,8 @@ inline void operation_services(Line& l, const ecuio_plugin_t* p,
 
 // One of a plan's steps: {"step", "name", "session", "address" (as many
 // hex digits as the request's address takes), "bytes", "chunk" (a read's
-// bytes for each request; null for an upload)}
+// bytes for each request; null for an upload)}, a download's "dfi" when
+// not 00 and a routine's "option" when it has one
 inline void operation_step(Line& l, const ecuio_plugin_t* p, uint32_t operation,
                            uint32_t i)
 {
@@ -165,6 +166,23 @@ inline void operation_step(Line& l, const ecuio_plugin_t* p, uint32_t operation,
         l.u64(s.chunk);
     } else {
         l.raw("null");
+    }
+    if (s.kind == ECUIO_STEP_DOWNLOAD && s.dfi != 0) {
+        l.key("dfi");
+        l.hex_bytes(&s.dfi, 1);
+    }
+    uint8_t option[ECUIO_PLUGIN_MAX_OPTION];
+    size_t n = 0;
+    if (s.option_len != 0 &&
+        ecuio_plugin_operation_step_option(p, operation, i, option,
+                                           sizeof option, &n) == ECUIO_OK) {
+        char text[2 * ECUIO_PLUGIN_MAX_OPTION + 1];
+        const size_t shown = n < sizeof option ? n : sizeof option;
+        for (size_t b = 0; b < shown; ++b) {
+            std::snprintf(text + 2 * b, 3, "%02X", option[b]);
+        }
+        l.key("option");
+        l.string(text, 2 * shown);
     }
     l.ch('}');
 }

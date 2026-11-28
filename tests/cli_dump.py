@@ -183,7 +183,7 @@ def fake_env(dll_knobs):
     return env
 
 
-def kernel_case(cli, kernel, dll, lib_path, d):
+def kernel_case(cli, kernel, claimed, dll, lib_path, d):
     uri = f"j2534://{dll}?profile=plugin.talker.base&identify=0&diagnose=0"
     knobs = {"ECUIO_FAKE_ENGINE_OFF": "1", "ECUIO_FAKE_KERNEL": "1",
              "ECUIO_FAKE_VBATT": "11700"}
@@ -208,16 +208,38 @@ def kernel_case(cli, kernel, dll, lib_path, d):
     if code != 0 or warned.count("volts_sag") != 1 or \
             "the car may not start" not in err:
         return f"kernel sag: exit {code} {warned!r} {err!r}"
+    return claimed_case(cli, claimed, uri, d)
+
+
+def claimed_case(cli, claimed, uri, d):
+    code, out, err = run(cli, ["plugins", "check", claimed])
+    plans = of_type(rows_of(out), "operation")
+    steps = plans[0]["steps"] if plans else []
+    if code != 0 or len(steps) < 2 or steps[0].get("dfi") != "01" \
+            or steps[1].get("option") != "A55A0FF0" or "option" in steps[0]:
+        return f"claimed check: exit {code} {steps!r} {err!r}"
+    knobs = {"ECUIO_FAKE_ENGINE_OFF": "1", "ECUIO_FAKE_KERNEL": "1"}
+    code, out, err = run(cli, dump_args(uri, claimed, d, ["--parked"],
+                                        "claimed"), fake_env(knobs))
+    rows = rows_of(out)
+    dumps = of_type(rows, "dump")
+    warned = [w["check"] for w in of_type(rows, "warning")]
+    if code != 0 or len(dumps) != 1 or dumps[0].get("end") != "saved" \
+            or dumps[0].get("routine_status") != "10" \
+            or warned.count("dfi_claimed") != 1 \
+            or "cannot check its contents" not in err:
+        return f"claimed: exit {code} {dumps!r} {warned!r} {err!r}"
     return None
 
 
 def fixtures(writer, d):
     plain = os.path.join(d, "plain.json")
     kernel = os.path.join(d, "kernel.json")
-    done = subprocess.run([writer, plain, kernel], capture_output=True)
+    claimed = os.path.join(d, "claimed.json")
+    done = subprocess.run([writer, plain, kernel, claimed], capture_output=True)
     if done.returncode != 0:
         raise SystemExit(f"FAIL  the fixture writer: {done.stderr!r}")
-    return plain, kernel
+    return plain, kernel, claimed
 
 
 def main(argv):
@@ -228,8 +250,8 @@ def main(argv):
     case, cli, writer = argv[1], argv[2], argv[3]
     lib_path = argv[4] if len(argv) > 4 else "-"
     with tempfile.TemporaryDirectory(prefix="havne-cli-dump-") as d:
-        plain, kernel = fixtures(writer, d)
-        for package in (plain, kernel):
+        plain, kernel, claimed = fixtures(writer, d)
+        for package in (plain, kernel, claimed):
             consent(cli, package, os.path.join(d, "consent.json"))
         if case == "saved":
             why = saved_case(cli, plain, lib_path, d)
@@ -247,7 +269,7 @@ def main(argv):
         elif case == "before":
             why = before_case(cli, plain, d)
         elif case == "kernel" and len(argv) > 5:
-            why = kernel_case(cli, kernel, argv[5], lib_path, d)
+            why = kernel_case(cli, kernel, claimed, argv[5], lib_path, d)
         else:
             print(f"FAIL  unknown case {case}")
             return 2

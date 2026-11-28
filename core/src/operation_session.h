@@ -86,6 +86,7 @@ struct session_run {
     int64_t keep_at_us = 0;  /* the next functional 3E 80; 0 none */
     own_step own = own_step::none;
     bool own_out = false; /* the talk out is the session's */
+    bool status_logged = false;
     ecuio_talk_result own_end;
 
     /* What the getter reads, under the session's support mutex */

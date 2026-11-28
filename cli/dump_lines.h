@@ -56,6 +56,7 @@ constexpr DumpWarning kDumpWarnings[] = {
     {ECUIO_OPERATION_CHECK_IDENT_UNREAD, "ident_unread"},
     {ECUIO_OPERATION_CHECK_NOT_HELD_AWAKE, "not_held_awake"},
     {ECUIO_OPERATION_CHECK_ON_BATTERY, "on_battery"},
+    {ECUIO_OPERATION_CHECK_DFI_CLAIMED, "dfi_claimed"},
 };
 
 inline std::string dump_volts(uint32_t mv)
@@ -89,6 +90,9 @@ inline std::string dump_warning_words(uint32_t bit,
         return "this computer may sleep during the read: keep it awake";
     case ECUIO_OPERATION_CHECK_ON_BATTERY:
         return "this computer is on battery: keep it on mains power";
+    case ECUIO_OPERATION_CHECK_DFI_CLAIMED:
+        return "the helper is sent encrypted as the plugin states; Havne "
+               "cannot check its contents";
     default:
         return "";
     }
@@ -233,6 +237,12 @@ inline void dump_line(Line& l, const ecuio_operation_state_t& s,
     l.key("differ_offset");
     s.end == ECUIO_OPERATION_END_DIFFER ? l.u64(s.differ_offset)
                                         : l.raw("null");
+    l.key("routine_status");
+    if (s.routine_status_given != 0) {
+        l.hex_bytes(&s.routine_status, 1);
+    } else {
+        l.raw("null");
+    }
     dump_volts_keys(l, s);
     l.ch('}');
 }

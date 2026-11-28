@@ -27,6 +27,9 @@ int c_abi_operation(void)
          offsetof(ecuio_operation_state_t, end) == 16u &&
          offsetof(ecuio_operation_state_t, step) == 24u &&
          offsetof(ecuio_operation_state_t, nrc) == 28u &&
+         offsetof(ecuio_operation_state_t, routine_status) == 29u &&
+         offsetof(ecuio_operation_state_t, routine_status_given) == 30u &&
+         ECUIO_OPERATION_CHECK_DFI_CLAIMED == 0x400u &&
          offsetof(ecuio_operation_state_t, bytes_done) == 32u &&
          offsetof(ecuio_operation_state_t, bytes_total) == 40u &&
          offsetof(ecuio_operation_state_t, differ_offset) == 48u &&

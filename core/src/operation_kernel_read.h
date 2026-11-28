@@ -24,6 +24,8 @@ struct helper_run {
     uint64_t sent = 0;
     uint32_t downloads = 0;
     uint32_t starts = 0;
+    uint8_t status = 0;
+    bool status_given = false;
 };
 
 inline uint8_t helper_service(const helper_run& h)
@@ -61,7 +63,7 @@ inline uint32_t helper_request(const kernel& k, const helper_run& h,
     uint8_t* at = out;
     *at++ = helper_service(h);
     if (h.at == helper_stage::open) {
-        *at++ = 0x00;
+        *at++ = k.dfi;
         *at++ = static_cast<uint8_t>((k.size_bytes << 4) | k.address_bytes);
         at = helper_put_be(at, k.address, k.address_bytes);
         at = helper_put_be(at, k.blob.size(), k.size_bytes);
@@ -74,6 +76,8 @@ inline uint32_t helper_request(const kernel& k, const helper_run& h,
         *at++ = 0x01;
         *at++ = static_cast<uint8_t>(k.routine >> 8);
         *at++ = static_cast<uint8_t>(k.routine);
+        std::memcpy(at, k.option, k.option_len);
+        at += k.option_len;
     }
     return static_cast<uint32_t>(at - out);
 }
@@ -135,6 +139,8 @@ inline helper_took helper_take(const kernel& k, helper_run& h,
         }
         h.running = true;
         ++h.starts;
+        h.status_given = n > 4;
+        h.status = n > 4 ? d[4] : uint8_t{0};
         h.at = helper_stage::open;
         return helper_took::started;
     }

@@ -10,6 +10,7 @@
 #include "plugin_loader.h"
 #include "sha256.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -56,6 +57,32 @@ uint64_t hex_of(const Value& v, size_t lo, size_t hi, const std::string& what)
                what + " " + q(t) + " takes pairs of hex digits, 0-9 and A-F");
     }
     return value;
+}
+
+int upper_hex(char c)
+{
+    return (c >= '0' && c <= '9')   ? c - '0'
+           : (c >= 'A' && c <= 'F') ? c - 'A' + 10
+                                    : -1;
+}
+
+/* v's text as whole bytes of upper-case hex into out, lo to hi of them */
+size_t hex_bytes_of(const Value& v, size_t lo, size_t hi,
+                    const std::string& what, uint8_t* out)
+{
+    const std::string& t = text_of(v, 2 * lo, 2 * hi, what);
+    bool ok = t.size() % 2 == 0;
+    for (size_t i = 0; ok && i < t.size(); i += 2) {
+        const int a = upper_hex(t[i]);
+        const int b = upper_hex(t[i + 1]);
+        ok = a >= 0 && b >= 0;
+        out[i / 2] = static_cast<uint8_t>(a * 16 + b);
+    }
+    if (!ok) {
+        refuse(v,
+               what + " " + q(t) + " takes pairs of hex digits, 0-9 and A-F");
+    }
+    return t.size() / 2;
 }
 
 /* An id as the manifest's own: [a-z0-9-], a letter or digit at each end */
@@ -249,8 +276,11 @@ void read_download(const Value& v, const std::string& what,
 {
     only_keys(v,
               {"step", "name", "session", "address", "address_bytes",
-               "size_bytes", "file", "sha256"},
+               "size_bytes", "file", "sha256", "dfi"},
               "a download");
+    if (const Value* dfi = v.find("dfi")) {
+        k.dfi = static_cast<uint8_t>(hex_of(*dfi, 1, 1, what + "'s dfi"));
+    }
     k.address = hex_of(required(v, "address", what), 1, 4, what + "'s address");
     k.address_bytes = static_cast<uint8_t>(whole_of(
         required(v, "address_bytes", what), 1, 4, what + "'s address_bytes"));
@@ -296,13 +326,17 @@ bool read_kernel_step(const Value& v, plan& out, uint32_t at)
         read_download(v, what, k);
         return true;
     }
-    only_keys(v, {"step", "name", "session", "routine"}, "a routine");
+    only_keys(v, {"step", "name", "session", "routine", "option"}, "a routine");
     if (name == k.download_name) {
         refuse(v, what + " is given twice");
     }
     k.routine_name = name;
     k.routine = static_cast<uint16_t>(
         hex_of(required(v, "routine", what), 2, 2, what + "'s routine"));
+    if (const Value* option = v.find("option")) {
+        k.option_len = static_cast<uint8_t>(hex_bytes_of(
+            *option, 1, ECUIO_PLUGIN_MAX_OPTION, what + "'s option", k.option));
+    }
     return true;
 }
 
@@ -612,10 +646,12 @@ ecuio_status_t ecuio_plugin_operation_step(const ecuio_plugin_t* plugin,
             s.bytes = k.blob.size();
             s.address_bytes = k.address_bytes;
             s.size_bytes = k.size_bytes;
+            s.dfi = k.dfi;
             ecuio_sf::copy_text(s.name, sizeof s.name, k.download_name);
         } else {
             s.kind = ECUIO_STEP_ROUTINE;
             s.routine_id = k.routine;
+            s.option_len = k.option_len;
             ecuio_sf::copy_text(s.name, sizeof s.name, k.routine_name);
         }
         *out = s;
@@ -652,6 +688,29 @@ ecuio_status_t ecuio_plugin_operation_ident(const ecuio_plugin_t* plugin,
     d.did = p->idents[index].did;
     d.role = p->idents[index].role;
     *out = d;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_operation_step_option(const ecuio_plugin_t* plugin,
+                                                  uint32_t operation,
+                                                  uint32_t index, uint8_t* out,
+                                                  size_t capacity,
+                                                  size_t* count)
+{
+    if (plugin == nullptr || count == nullptr ||
+        (out == nullptr && capacity != 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const plan* p = plan_at(plugin, operation);
+    const size_t lead = p != nullptr && p->has_kernel ? 2u : 0u;
+    if (p == nullptr || index >= p->steps.size() + lead) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const size_t n = lead != 0 && index == 1 ? p->helper.option_len : 0u;
+    if (n != 0 && capacity != 0) {
+        std::memcpy(out, p->helper.option, (std::min)(n, capacity));
+    }
+    *count = n;
     return ECUIO_OK;
 }
 
