@@ -8,26 +8,6 @@
 #include "sessionbridge.h"
 #include "bridge_support.h"
 
-namespace {
-
-ecuio_module_codes_t answered()
-{
-    ecuio_module_codes_t r{};
-    r.flags = ECUIO_MODULE_CODES_ASKABLE | ECUIO_MODULE_CODES_COMPLETE |
-              ECUIO_MODULE_CODES_FORMAT;
-    r.rx_id = 0x7E8;
-    r.read_id = 1;
-    r.count_outcome = ECUIO_DIAG_ANSWERED;
-    r.list_outcome = ECUIO_DIAG_ANSWERED;
-    r.held = r.reported = 3;
-    r.codes[0] = {0x012800, 0x20, {}};
-    r.codes[1] = {0x030100, 0x08, {}};
-    r.codes[2] = {0x9A011C, 0x89, {}};
-    return r;
-}
-
-} // namespace
-
 TEST(BridgeTest, TheReadVisitsEveryModuleInOrderAndLogsOnce)
 {
     SessionBridge bridge;
@@ -168,7 +148,7 @@ TEST(BridgeTest, AReadPressedWhileAVisitRunsIsDropped)
     EXPECT_FALSE(bridge.readingCodes());
     bridge.readModuleCodes();
     EXPECT_TRUE(bridge.readingCodes());
-    bridge.readModuleCodesForTesting({0, 5});
+    bridge.readCodesOfChannels({0, 5});
     ASSERT_TRUE(spinUntil([&]() { return !bridge.readingCodes(); }, 6000));
     spinLoop(400);
     EXPECT_EQ(lines().size(), 1) << "the second press made no second read";
@@ -213,7 +193,7 @@ TEST(BridgeTest, AVisitReportsTheModulesItDidNotReach)
     QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
-    bridge.readModuleCodesForTesting({0, 5});
+    bridge.readCodesOfChannels({0, 5});
     ASSERT_TRUE(spinUntil([&]() { return !bridge.readingCodes(); }, 6000));
     EXPECT_EQ(
         log.filter(QStringLiteral("Enhanced codes: 1 not reached")).size(), 1)
