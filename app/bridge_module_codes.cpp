@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <numeric>
 
 using namespace bridgetext;
 
@@ -181,10 +182,8 @@ void SessionBridge::readDiagnostics()
 
 void SessionBridge::readModuleCodes()
 {
-    std::vector<uint32_t> all;
-    for (uint32_t c = 0; c < m_channelCount; ++c) {
-        all.push_back(c);
-    }
+    std::vector<uint32_t> all(m_channelCount);
+    std::iota(all.begin(), all.end(), 0u);
     readModuleCodesForTesting(std::move(all));
 }
 
