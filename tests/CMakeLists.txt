@@ -53,7 +53,8 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_access_cut.cpp test_core_awake.cpp test_dump_file.cpp
     test_dump_record.cpp test_dump_export.cpp test_plugin_operations.cpp
     test_plugin_kernel.cpp test_plugin_flash.cpp
-    test_operation_plan.cpp test_dump_writer.cpp test_session_operation.cpp
+    test_operation_plan.cpp test_dump_writer.cpp test_operation_journal.cpp
+    test_session_operation.cpp
     test_session_operation_ends.cpp
     test_session_operation_record.cpp test_session_operation_checks.cpp
     test_session_operation_battery.cpp test_session_operation_write.cpp
