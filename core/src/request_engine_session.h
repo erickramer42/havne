@@ -53,6 +53,11 @@ inline bool ecuio_engine_session_enter(ecuio_request_engine* e, uint32_t c)
     if (ch.session_asked == 0) {
         ch.session_asked = ECUIO_SESSION_EXTENDED;
     }
+    if (ch.session_source == ECUIO_SESSION_SOURCE_SET) {
+        ch.obd_out = false;
+        ch.retry_us = 0;
+        ch.reentry = ECUIO_ENGINE_REENTRY_NONE;
+    }
     if (ch.session_source != ECUIO_SESSION_SOURCE_URI) {
         ch.session_source = ECUIO_SESSION_SOURCE_CONVERSATION;
     }
@@ -172,7 +177,7 @@ inline void ecuio_engine_key_windows_end(ecuio_request_engine* e)
 inline int64_t ecuio_engine_session_next_us(const ecuio_request_engine* e,
                                             const ecuio_engine_channel& ch)
 {
-    if (!ecuio_engine_session_live(e, ch)) {
+    if (!ecuio_engine_session_live(e, ch) || ecuio_engine_obd_holds(ch)) {
         return INT64_MAX;
     }
     int64_t at = ch.next_send_us;
@@ -192,7 +197,7 @@ inline int64_t ecuio_engine_session_next_us(const ecuio_request_engine* e,
 inline int64_t ecuio_engine_session_urgent_us(const ecuio_request_engine* e,
                                               const ecuio_engine_channel& ch)
 {
-    if (!ecuio_engine_session_live(e, ch)) {
+    if (!ecuio_engine_session_live(e, ch) || ecuio_engine_obd_holds(ch)) {
         return INT64_MAX;
     }
     int64_t at = ch.next_send_us;
@@ -265,8 +270,6 @@ inline bool ecuio_engine_keepalive_due(ecuio_request_engine* e, uint32_t c,
            ecuio_engine_session_fill(e, c, ECUIO_TESTER_PRESENT, 0x00);
 }
 
-/* A loss of channel ch's session at now_us, counted in ADR-0060's window:
- * true when it is the ECUIO_SESSION_LOSSES_MAX-th there */
 inline bool ecuio_engine_loss_abandons(ecuio_engine_channel& ch, int64_t now_us)
 {
     if (ch.refused_losses == 0 ||
@@ -277,9 +280,6 @@ inline bool ecuio_engine_loss_abandons(ecuio_engine_channel& ch, int64_t now_us)
     return ++ch.refused_losses >= ECUIO_SESSION_LOSSES_MAX;
 }
 
-/* A clear's re-entry refused or unanswered: asked once
- * more after ECUIO_ENGINE_REENTRY_RETRY_US, and each refusal after that a
- * loss in the window */
 inline void ecuio_engine_reentry_refused(ecuio_engine_channel& ch,
                                          int64_t now_us)
 {

@@ -164,7 +164,9 @@ inline void ecuio_engine_take_clear(ecuio_engine_channel& ch, uint32_t c)
     } else {
         ch.once.bytes[0] = ECUIO_CLEAR_SERVICE;
         ch.once.len = 1;
-        if (ch.obd_out) {
+        if (ch.session_source == ECUIO_SESSION_SOURCE_SET &&
+            (ch.obd_out || ch.session_step == ECUIO_SESSION_STATE_ENTERING) &&
+            ecuio_engine_declared_wanted(ch)) {
             ch.reentry = ECUIO_ENGINE_REENTRY_CLEAR;
         }
     }
@@ -421,7 +423,6 @@ inline int32_t ecuio_engine_due_visit(ecuio_request_engine* e, uint32_t c,
     return ECUIO_ENGINE_NONE;
 }
 
-/* Closing module c's 10 01 into the one-shot, when it owes one */
 inline bool ecuio_engine_closing_leave(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -463,8 +464,13 @@ inline int32_t ecuio_engine_due_closing(ecuio_request_engine* e, uint32_t c,
     if (ch.diag_pending > 0 && ecuio_engine_take_diag(e, c)) {
         return ECUIO_ENGINE_ONCE;
     }
-    return ecuio_engine_closing_leave(e, c) ? ECUIO_ENGINE_ONCE
-                                            : ECUIO_ENGINE_NONE;
+    if (ecuio_engine_closing_leave(e, c)) {
+        return ECUIO_ENGINE_ONCE;
+    }
+    if (ch.session_step != ECUIO_SESSION_STATE_ENTERED) {
+        ecuio_engine_declared_let_go(ch);
+    }
+    return ECUIO_ENGINE_NONE;
 }
 
 /* The driver's check (ecuio_engine_ask_check), once: its row, else
@@ -516,8 +522,6 @@ inline int32_t ecuio_engine_due_rotation(ecuio_request_engine* e, uint32_t c,
     return asked;
 }
 
-/* due for open module c out of its declared session: a clear's
- * request, identification and diagnostics items alone, its rows waiting */
 inline int32_t ecuio_engine_due_obd(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -698,8 +702,6 @@ inline bool ecuio_engine_hold_asks(const ecuio_engine_channel& ch)
            ch.scanning || ch.clearing || ch.sessioning;
 }
 
-/* When open module ch out of its declared session next sends: an item or
- * its return at its floor, else a clear's retry */
 inline int64_t ecuio_engine_obd_at_us(const ecuio_engine_channel& ch)
 {
     if (ecuio_engine_clear_asks(ch) || ch.ident_pending > 0 ||

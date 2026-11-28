@@ -67,8 +67,7 @@ inline void ecuio_engine_session_allow(ecuio_request_engine* e, uint32_t c,
     ch.session_idle = idle;
     if (!allowed && ch.session_source == ECUIO_SESSION_SOURCE_SET &&
         ch.session_entries == 0 && !ch.sessioning) {
-        ch.session_asked = 0;
-        ch.session_source = ECUIO_SESSION_SOURCE_NONE;
+        ecuio_engine_declared_let_go(ch);
         ecuio_engine_session_step(ch, ECUIO_SESSION_STATE_NOT_ASKED);
     }
     ++ch.generation;
@@ -98,8 +97,6 @@ inline bool ecuio_engine_declared_leave_due(ecuio_request_engine* e, uint32_t c)
     return true;
 }
 
-/* Held module c's 10 01 ahead of a front end's OBD item or a clear's
- * step, into the one-shot; true when it went there */
 inline bool ecuio_engine_obd_leave_due(ecuio_request_engine* e, uint32_t c)
 {
     ecuio_engine_channel& ch = e->chans[c];
@@ -114,14 +111,11 @@ inline bool ecuio_engine_obd_leave_due(ecuio_request_engine* e, uint32_t c)
     return true;
 }
 
-/* Channel c's pass out over (no OBD item or clear step left), or a
- * clear's retry due: entered again while a signal on it is read, else let
- * go */
 inline void ecuio_engine_obd_return(ecuio_request_engine* e, uint32_t c,
                                     int64_t now_us)
 {
     ecuio_engine_channel& ch = e->chans[c];
-    if (ch.sessioning || ecuio_engine_obd_work(ch)) {
+    if (ch.handed || ch.sessioning || ecuio_engine_obd_work(ch)) {
         return;
     }
     ch.obd_leave = false;

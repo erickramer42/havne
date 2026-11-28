@@ -198,3 +198,36 @@ TEST(RequestTurnsTest,
     EXPECT_EQ(a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(a->e.chans[0].session_lost, 0u);
 }
+
+TEST(RequestTurnsTest, AModuleOutOfItsDeclaredSessionCutsNoTurn)
+{
+    auto a = adapter(2);
+    dids(&a->e, 0, 6);
+    dids(&a->e, 1, 1, 0x80);
+    ecuio_engine_identify(&a->e);
+    ecuio_engine_diagnose(&a->e, nullptr);
+    ecuio_engine_channel& other = a->e.chans[0];
+    other.ident_count = other.ident_pending = 0;
+    other.diag_count = other.diag_pending = 0;
+    a->e.chans[1].session_may_declare = true;
+    ecuio_engine_session_allow(&a->e, 1, true);
+    const uint8_t reasons[2] = {
+        ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ,
+        ECUIO_ENGINE_REASON_RANGE | ECUIO_ENGINE_REASON_READ};
+    ecuio_engine_modules_apply(&a->e, reasons, nullptr, 0);
+    a->ecus = [](uint32_t, const Bytes& q) { return in_session(q); };
+    for (int i = 0;
+         i < 2000 && a->e.chans[1].session_step != ECUIO_SESSION_STATE_ENTERED;
+         ++i) {
+        a->pass();
+    }
+    ASSERT_EQ(a->e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    size_t longest = 0;
+    size_t run = 0;
+    for (const Sent& x : a->sent) {
+        const bool row = x.c == 0 && x.bytes[0] == 0x22 && x.bytes[1] == 0x1E;
+        run = row ? run + 1 : 0;
+        longest = std::max(longest, run);
+    }
+    EXPECT_EQ(longest, 6u) << "channel 0's turn asks each of its rows";
+}

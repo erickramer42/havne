@@ -164,8 +164,13 @@ TEST_F(Elm327SessionTest, AClearOnAHeldModuleLeavesItsSessionAndEntersAgain)
     const size_t clear = static_cast<size_t>(
         std::find(sent.begin(), sent.end(), "04") - sent.begin());
     const size_t entry = at("1003");
+    size_t read = sent.size();
+    for (size_t i = clear; i < sent.size() && read == sent.size(); ++i) {
+        read = sent[i].rfind("03", 0) == 0 ? i : read;
+    }
     EXPECT_LT(leave, clear);
-    EXPECT_LT(clear, entry);
+    EXPECT_LT(clear, read);
+    EXPECT_LT(read, entry) << "the read after the 04 goes before the entry";
     EXPECT_LT(entry, sent.size());
     fake_ecu::reset_diagnostics();
 }

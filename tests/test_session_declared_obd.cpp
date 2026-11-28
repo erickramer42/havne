@@ -23,8 +23,7 @@ bool obd(const Bytes& q)
     return !q.empty() && q[0] >= 0x01 && q[0] <= 0x0A;
 }
 
-/* A module whose DIDs answer only in its extended session; its OBD
- * services answer in either, and it notes each request it hears inside */
+/* Its DIDs answer only in the extended session */
 struct Ecu {
     struct Heard {
         Bytes q;
@@ -34,6 +33,7 @@ struct Ecu {
     std::set<Bytes> silent;
     bool in = false;
     int refusals = 0;
+    int silences = 0;
 
     Bytes operator()(const Bytes& q)
     {
@@ -42,6 +42,10 @@ struct Ecu {
             return {};
         }
         if (q == kEnter) {
+            if (silences > 0) {
+                --silences;
+                return {};
+            }
             if (refusals > 0) {
                 --refusals;
                 return {0x7F, 0x10, 0x22};
@@ -144,9 +148,7 @@ void want(ecuio_request_engine* e, uint8_t r0, uint8_t r1)
     ecuio_engine_modules_apply(e, reasons, nullptr, 0);
 }
 
-/* Channel 0 the engine module (01 0C), channel 1 declaring the extended
- * session with a DID read there, both read; identification listed, and
- * diagnostics when asked */
+/* Channel 0 the engine module, channel 1 declaring the extended session */
 struct Bench {
     ecuio_request_engine* e;
     int64_t now = 0;
@@ -463,4 +465,175 @@ TEST(DeclaredSessionTest, AClosingModuleLeavesBeforeItsRead)
     EXPECT_EQ(b.held.count(kLeave), 1u);
     EXPECT_GE(b.held.count({0x03}), 1u) << "the read still goes";
     EXPECT_EQ(b.held.obd_inside(), 0u);
+}
+
+TEST(DeclaredSessionTest, AnUnansweredReEntryAfterAClearIsTriedOnceMore)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    b.held.silences = 1;
+    ASSERT_NO_FATAL_FAILURE(b.clear());
+    b.run_until([](const ecuio_engine_channel& ch) {
+        return ch.session_step == ECUIO_SESSION_STATE_UNANSWERED;
+    });
+    ASSERT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_UNANSWERED);
+    EXPECT_EQ(b.idle(), ECUIO_SESSION_IDLE_RETRY);
+    ecuio_engine_rescan(&e);
+    ASSERT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERING);
+    EXPECT_EQ(ecuio_engine_turn_next_us(&e, e.chans[1]), e.chans[1].retry_us)
+        << "a rescan's entry still waits for the retry";
+    const size_t entries = b.held.count(kEnter);
+    while (b.now < e.chans[1].retry_us - 50 * kMs) {
+        b.run(1);
+    }
+    EXPECT_EQ(b.held.count(kEnter), entries);
+    b.run_until(back_in, 2000);
+    EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(b.held.count(kEnter), 2u);
+}
+
+TEST(DeclaredSessionTest, AnUntickLetsGoOfARetryAtOnce)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    b.held.refusals = 1;
+    ASSERT_NO_FATAL_FAILURE(b.clear());
+    b.run_until(
+        [](const ecuio_engine_channel& ch) { return ch.retry_us != 0; });
+    ASSERT_NE(e.chans[1].retry_us, 0);
+    want(&e, kRange | kRead, kRange);
+    b.run(2);
+    EXPECT_EQ(e.chans[1].retry_us, 0);
+    EXPECT_EQ(e.chans[1].session_source, ECUIO_SESSION_SOURCE_NONE);
+    EXPECT_EQ(b.idle(), ECUIO_SESSION_IDLE_NOT_READ);
+    b.run(200);
+    EXPECT_EQ(b.held.count(kEnter), 1u) << "no retry once nothing is read";
+}
+
+TEST(DeclaredSessionTest, AModuleClosedInItsRetryForgetsIt)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    b.held.refusals = 1;
+    ASSERT_NO_FATAL_FAILURE(b.clear());
+    b.run_until(
+        [](const ecuio_engine_channel& ch) { return ch.retry_us != 0; });
+    want(&e, kRange | kRead, 0);
+    b.run(4);
+    EXPECT_EQ(e.chans[1].retry_us, 0);
+    EXPECT_EQ(e.chans[1].reentry, ECUIO_ENGINE_REENTRY_NONE);
+    want(&e, kRange | kRead, kRange | kRead);
+    b.held.heard.clear();
+    b.held.refusals = 1;
+    b.run(4);
+    EXPECT_EQ(b.held.count(kEnter), 1u) << "entered at once, no retry wait";
+    b.run(200);
+    EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_REFUSED)
+        << "a refusal after the reopen stands";
+    EXPECT_EQ(e.chans[1].session_lost, 0u);
+    EXPECT_EQ(b.held.count(kEnter), 1u);
+
+    static ecuio_request_engine mid;
+    Bench m(&mid);
+    ASSERT_NO_FATAL_FAILURE(m.entered());
+    ecuio_engine_diagnose_again(&mid);
+    m.run(1);
+    ASSERT_TRUE(mid.chans[1].obd_out);
+    want(&mid, kRange | kRead, 0);
+    m.run(40);
+    EXPECT_FALSE(mid.chans[1].obd_out) << "closed mid-pass";
+    EXPECT_EQ(mid.chans[1].session_source, ECUIO_SESSION_SOURCE_NONE);
+}
+
+TEST(DeclaredSessionTest, AClearWhileEnteringIsRetriedAfterToo)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    ecuio_engine_rescan(&e);
+    b.held.in = false;
+    ecuio_engine_diagnose_again(&e);
+    ASSERT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERING);
+    b.run_until([](const ecuio_engine_channel& ch) {
+        return ch.diag_pending == 0 && !ch.diagnosing;
+    });
+    ASSERT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERING);
+    ASSERT_TRUE(ecuio_engine_clear(&e, 1, e.chans[1].diag.generation, 0));
+    b.held.refusals = 1;
+    b.run_until(back_in, 2000);
+    EXPECT_EQ(e.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(e.chans[1].diag.clear, ECUIO_CLEAR_CLEARED);
+    EXPECT_EQ(b.held.obd_inside(), 0u);
+}
+
+TEST(DeclaredSessionTest, NoLeaveUnderAnOperationsHold)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    e.operation_hold = true;
+    ecuio_engine_diagnose_again(&e);
+    b.run(20);
+    EXPECT_EQ(b.held.count(kLeave), 0u);
+    e.operation_hold = false;
+    b.run_until(back_in);
+    EXPECT_EQ(b.held.at(kLeave), 0u);
+}
+
+TEST(DeclaredSessionTest, ARunsSessionIsNeitherLeftNorEnteredForObdItems)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    ecuio_engine_session_handed(&e, 1, b.now);
+    ecuio_engine_diagnose_again(&e);
+    b.run(20);
+    EXPECT_EQ(b.held.count(kLeave), 0u) << "the run's session stays";
+
+    static ecuio_request_engine mid;
+    Bench m(&mid);
+    ASSERT_NO_FATAL_FAILURE(m.entered());
+    ecuio_engine_diagnose_again(&mid);
+    m.run(1);
+    ASSERT_TRUE(mid.chans[1].obd_out);
+    ecuio_engine_session_handed(&mid, 1, m.now);
+    m.held.in = true;
+    m.held.heard.clear();
+    m.run(100);
+    EXPECT_EQ(mid.chans[1].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_GE(m.held.count(kRow), 1u) << "read on in the run's session";
+    EXPECT_EQ(m.held.count(kEnter), 0u);
+}
+
+TEST(DeclaredSessionTest, AConversationsEntryWaitsForTheObdItems)
+{
+    static ecuio_request_engine e;
+    Bench b(&e);
+    ASSERT_NO_FATAL_FAILURE(b.entered());
+    ecuio_engine_diagnose_again(&e);
+    b.run(1);
+    ASSERT_TRUE(e.chans[1].obd_out);
+    ASSERT_TRUE(ecuio_engine_session_enter(&e, 1));
+    EXPECT_FALSE(e.chans[1].obd_out);
+    b.run_until([](const ecuio_engine_channel& ch) {
+        return ch.session_step == ECUIO_SESSION_STATE_ENTERED;
+    });
+    EXPECT_GT(b.held.at(kEnter), b.held.last_obd());
+    EXPECT_EQ(b.held.obd_inside(), 0u);
+    EXPECT_EQ(e.chans[1].session_source, ECUIO_SESSION_SOURCE_CONVERSATION);
+
+    static ecuio_request_engine retry;
+    Bench r(&retry);
+    ASSERT_NO_FATAL_FAILURE(r.entered());
+    r.held.refusals = 1;
+    ASSERT_NO_FATAL_FAILURE(r.clear());
+    r.run_until(
+        [](const ecuio_engine_channel& ch) { return ch.retry_us != 0; });
+    (void)ecuio_engine_session_enter(&retry, 1);
+    EXPECT_EQ(retry.chans[1].retry_us, 0);
+    EXPECT_EQ(retry.chans[1].reentry, ECUIO_ENGINE_REENTRY_NONE);
+    EXPECT_EQ(r.idle(), ECUIO_SESSION_IDLE_NONE);
 }
