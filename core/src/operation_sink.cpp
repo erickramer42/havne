@@ -565,26 +565,56 @@ void dump_sink::place(const std::string& name)
         end(sink_state::failed, "the copy can't be made read-only");
         return;
     }
-    if (seam(kSinkFailRename) ||
-        !files::rename_to(partial_, out, false, &why)) {
+    const bool placed =
+        !seam(kSinkFailRename) && files::rename_to(partial_, out, false, &why);
+    if (!placed && !holds_copy(out)) {
         end(sink_state::failed,
             why.empty() ? "the copy can't be put in place"
                         : ("the copy can't be put in place: " + why).c_str());
         return;
     }
-    partial_.swap(out); /* the placed file is the one a failure removes */
-    if (seam(kSinkFailFolderFlush) ||
-        !ecuio_dump_handle::flush_folder_of(partial_, &why)) {
-        end(sink_state::failed,
-            why.empty()
-                ? "the copy's folder can't be flushed to the disk"
-                : ("the copy's folder can't be flushed to the disk: " + why)
-                      .c_str());
-        return;
+    if (!placed) {
+        (void)ecuio_dump_handle::drop(partial_);
+    } else {
+        partial_.swap(out); /* the placed file is the one a failure removes */
+        if (seam(kSinkFailFolderFlush) ||
+            !ecuio_dump_handle::flush_folder_of(partial_, &why)) {
+            end(sink_state::failed,
+                why.empty()
+                    ? "the copy's folder can't be flushed to the disk"
+                    : ("the copy's folder can't be flushed to the disk: " + why)
+                          .c_str());
+            return;
+        }
     }
     partial_.clear();
     copy_words(name_, sizeof name_, name.c_str());
     state_.store(sink_state::saved, std::memory_order_release);
+}
+
+/* Whether the file at out holds the partial's bytes: a second equal read
+ * in the same UTC second has the first's name */
+bool dump_sink::holds_copy(const std::string& out)
+{
+    std::string why;
+    FILE* a = files::open_file(partial_, false, &why);
+    FILE* b = files::open_file(out, false, &why);
+    const size_t half = read_.size() / 2;
+    uint8_t* const mine = read_.data();
+    uint8_t* const theirs = mine + half;
+    bool same = a != nullptr && b != nullptr;
+    for (size_t n = half; same && n == half;) {
+        n = std::fread(mine, 1, half, a);
+        same = std::fread(theirs, 1, half, b) == n &&
+               std::memcmp(mine, theirs, n) == 0;
+    }
+    same = same && std::ferror(a) == 0 && std::ferror(b) == 0;
+    for (FILE* f : {a, b}) {
+        if (f != nullptr) {
+            std::fclose(f);
+        }
+    }
+    return same;
 }
 
 /* The copy ended without a seal: nothing of it stays on the disk. It
