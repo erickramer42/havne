@@ -79,13 +79,13 @@ TEST(CliDumpLineTest, EachWarningSaysItsReading)
     }
 }
 
-TEST(CliDumpLineTest, ASameSecondClashIsSaidInWords)
+TEST(CliDumpLineTest, ANameHeldByADifferentFileIsSaidInWords)
 {
     ecuio_operation_state_t s = state();
     s.end = ECUIO_OPERATION_END_FILE;
     std::strcpy(s.words, "the copy can't be put in place: it exists already");
     ASSERT_NE(cli::dump_end_note(s), nullptr);
-    EXPECT_NE(std::strstr(cli::dump_end_note(s), "same second"), nullptr);
+    EXPECT_NE(std::strstr(cli::dump_end_note(s), "a different file"), nullptr);
     std::strcpy(s.words, "the folder can't be written");
     EXPECT_EQ(cli::dump_end_note(s), nullptr);
 }
