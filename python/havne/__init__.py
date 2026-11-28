@@ -29,7 +29,8 @@ from .recording import (Column, GuessedMap, Imported, Marker, RecordedConditionE
 from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, export_csv,
                      export_folder, export_pcapng)
 from .health import HealthReport, health_report
-from .lookup import DtcTitle, VinInfo, decode_vin, dtc_title
+from .lookup import (DtcTitle, VinInfo, decode_vin, dtc_format_uds, dtc_status_class,
+                     dtc_status_state, dtc_title, dtc_title_uds, module_code_emissions_lists)
 from .sim import Reply, Sim
 from .signals import (Evaluation, ExprCheck, Gauge, Plugin, Publisher, PutVariant, SignalFile,
                       Source, expr_names)
@@ -49,7 +50,8 @@ __all__ = [
     "guess_csv_map", "GuessedMap",
     "export_pcapng", "export_csv", "export_folder", "Exported", "LeftOut",
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
-    "decode_vin", "VinInfo", "dtc_title", "DtcTitle",
+    "decode_vin", "VinInfo", "dtc_title", "DtcTitle", "dtc_format_uds", "dtc_title_uds",
+    "dtc_status_state", "dtc_status_class", "module_code_emissions_lists",
     "Sim", "Reply", "SignalFile", "Plugin", "Gauge", "Source", "PutVariant",
     "ExprCheck", "Evaluation", "Publisher", "expr_names", "Part", "Module", "Note",
     "ConsentStore", "ConsentRecord", "ConsentLine", "consent_lines", "consent_path",
