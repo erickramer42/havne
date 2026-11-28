@@ -118,7 +118,7 @@ ColumnLayout {
             objectName: "vehicleNew"
             text: qsTr("New")
             Layout.fillWidth: true
-            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: labelRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             enabled: root.host.ownPart.idle && VehicleBook.labelProblem(root.host.vehicles, root.host.newLabel, "") === ""
             onClicked: root.host.ownPart.changeVehicles(VehicleBook.add(root.host.vehicles, root.host.newLabel))
         }
@@ -126,7 +126,7 @@ ColumnLayout {
             objectName: "vehicleDuplicate"
             text: qsTr("Duplicate")
             Layout.fillWidth: true
-            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: labelRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null
                      && VehicleBook.labelProblem(root.host.vehicles, root.host.copyLabel, "") === ""
             onClicked: root.host.ownPart.duplicateVehicle()
@@ -135,7 +135,7 @@ ColumnLayout {
             objectName: "vehicleMore"
             text: qsTr("More")
             Layout.fillWidth: true
-            Layout.maximumWidth: labelRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: labelRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             enabled: root.host.ownPart.idle
             checkable: true
             checked: root.moreShown
@@ -159,7 +159,7 @@ ColumnLayout {
             objectName: "vehicleRename"
             flat: true
             Layout.fillWidth: true
-            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: moreRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             text: qsTr("Rename")
             enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null && root.host.typedLabel !== ""
                      && root.host.typedLabel !== root.host.pickedVehicle.label
@@ -174,7 +174,7 @@ ColumnLayout {
             objectName: "vehicleForgetVin"
             flat: true
             Layout.fillWidth: true
-            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: moreRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             text: qsTr("Forget the VIN")
             enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null && root.host.pickedVehicle.vinKey !== ""
             onClicked: {
@@ -186,7 +186,7 @@ ColumnLayout {
             objectName: "vehicleForget"
             flat: true
             Layout.fillWidth: true
-            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: moreRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             text: qsTr("Forget")
             enabled: root.host.ownPart.idle && root.host.pickedVehicle !== null
             onClicked: {
@@ -198,7 +198,7 @@ ColumnLayout {
             objectName: "vehicleForgetAll"
             flat: true
             Layout.fillWidth: true
-            Layout.maximumWidth: moreRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
+            Layout.maximumWidth: moreRow.oneRow ? Math.ceil(implicitWidth) : Number.POSITIVE_INFINITY
             text: qsTr("Forget all vehicles")
             enabled: root.host.ownPart.idle && root.host.vehicles.list.length > 0
             onClicked: {
