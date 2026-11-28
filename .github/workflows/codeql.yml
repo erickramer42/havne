@@ -73,6 +73,7 @@ jobs:
       - name: Drop third_party/wamr from the results
         env:
           SARIF_DIR: ${{ steps.analyze.outputs.sarif-output }}
+        shell: bash
         run: |
           python - <<'PY'
           import glob, json, os
