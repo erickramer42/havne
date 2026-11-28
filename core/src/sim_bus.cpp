@@ -304,6 +304,15 @@ bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
             return withhold(s, n.reply_id, v, m, now);
         }
     }
+    const bool quiet = functional && m.len == 2 &&
+                       ((m.data[0] == 0x3E && m.data[1] == 0x80) ||
+                        (m.data[0] == 0x10 && m.data[1] == 0x82));
+    if ((r.active || r.waiting) && quiet) {
+        /* S3 runs through a 78 chain: only the tester's 3E 80 holds it */
+        uint8_t unsent[ECUIO_SIM_REPLY_MAX];
+        (void)answer(s, n, m.data, m.len, functional, unsent);
+        return true;
+    }
     if (r.active || r.waiting) {
         /* busy with a reply: a tester sends one at a time */
         return refuse_busy(s, n, n.reply_id, m, now);
