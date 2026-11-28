@@ -553,3 +553,33 @@ TEST(SessionRecoveryTest, AHostKilledAtEachStepIsRecoveredFromTheJournalItLeft)
         EXPECT_EQ(recovery_of(b).state, ECUIO_RECOVERY_RECOVERED);
     }
 }
+
+TEST(SessionRecoveryTest,
+     AFlashOrRecoveryInAnotherFolderThanTheJournalsIsRefused)
+{
+    const ecuio_operation::journal_record j = silent_record();
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 0));
+    dump_file_test::Folder other("-other");
+    constexpr const char* kWords = "this session keeps its flash journals in "
+                                   "another folder: flash and recover in "
+                                   "that one";
+    const ecuio_operation_request_t q =
+        request(kFlags | ECUIO_OPERATION_RECOVER);
+    EXPECT_EQ(ecuio_session_operation_start_from(b.s, &q, other.str().c_str(),
+                                                 nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), kWords);
+    const ecuio_operation_request_t plain = request(kFlags);
+    EXPECT_EQ(ecuio_session_operation_start_from(b.s, &plain,
+                                                 other.str().c_str(), nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(), kWords);
+    const std::string same = b.folder.str() + "/";
+    EXPECT_EQ(
+        ecuio_session_operation_start_from(b.s, &q, same.c_str(), nullptr),
+        ECUIO_OK)
+        << "the same folder, written another way: "
+        << ecuio_last_error_detail();
+    EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERED);
+}

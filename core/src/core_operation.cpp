@@ -487,10 +487,36 @@ ecuio_status_t open_files(ecuio_session_t* s, session_run& o, const plan& p,
     return st;
 }
 
-/* Only a recovery starts on a held module, and only as a flash's */
-ecuio_status_t judge_hold(const ecuio_session_t* s, const plan& p,
-                          uint32_t channel, bool recover, const char* copy)
+std::string folder_key(const std::string& folder)
 {
+    std::string k;
+    for (const char c : folder) {
+        const char d = c == '\\' ? '/' : c;
+#ifdef _WIN32
+        k += d >= 'A' && d <= 'Z' ? static_cast<char>(d - 'A' + 'a') : d;
+#else
+        k += d;
+#endif
+    }
+    while (k.size() > 1 && k.back() == '/') {
+        k.pop_back();
+    }
+    return k;
+}
+
+/* Only a recovery starts on a held module, and only as a flash's; a
+ * session that names its journal folder flashes in it alone, or its hold
+ * would miss the journal */
+ecuio_status_t judge_hold(const ecuio_session_t* s, const plan& p,
+                          uint32_t channel, bool recover, const char* copy,
+                          const char* folder)
+{
+    if (p.has_flash && !s->journal_folder.empty() &&
+        folder_key(s->journal_folder) != folder_key(folder)) {
+        return refuse(ECUIO_ERR_INVALID_ARGUMENT,
+                      "this session keeps its flash journals in another "
+                      "folder: flash and recover in that one");
+    }
     if (recover && (!p.has_flash || copy != nullptr)) {
         return refuse(ECUIO_ERR_INVALID_ARGUMENT,
                       "a recovery is a flash's, with no copy");
@@ -512,7 +538,7 @@ ecuio_status_t start(ecuio_session_t* s, const ecuio_operation_request_t& q,
         return st;
     }
     const bool recover = (q.flags & ECUIO_OPERATION_RECOVER) != 0;
-    st = judge_hold(s, *p, channel, recover, copy);
+    st = judge_hold(s, *p, channel, recover, copy, folder);
     if (st != ECUIO_OK) {
         return st;
     }
