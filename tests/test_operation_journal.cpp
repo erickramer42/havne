@@ -8,6 +8,9 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
+
+void fail_new_on_this_thread(unsigned long n);
 
 namespace {
 
@@ -218,4 +221,31 @@ TEST(OperationJournalTest, AClosedWritersLaterRemoveKeepsTheFile)
     std::string found;
     EXPECT_EQ(journal_find(folder, 0x7E8, &found), journal_found::none);
     EXPECT_TRUE(std::ifstream(journal_path(folder, 0x7E8)).good());
+}
+
+TEST(OperationJournalTest, AnOpenThatFailsNeverRemovesAJournalLeftWriting)
+{
+    Folder folder;
+    journal_mark m;
+    m.state = journal_state::writing;
+    m.erased = 1;
+    const std::string path = journal_path(folder.str(), 0x7E8);
+    const std::string text = ecuio_operation::journal_text(head_of(), m);
+    bool refused = false;
+    bool opened = false;
+    for (unsigned long n = 1; n < 400 && !opened; ++n) {
+        std::ofstream(path, std::ios::binary) << text;
+        journal_writer j;
+        std::string why;
+        const std::string dir = folder.str();
+        journal_head h = head_of();
+        fail_new_on_this_thread(n);
+        opened = j.open(dir, std::move(h), &why, m);
+        fail_new_on_this_thread(0);
+        refused = refused || !opened;
+        EXPECT_EQ(read_all(path), text) << "allocation " << n << ": " << why;
+        j.close(false);
+    }
+    EXPECT_TRUE(refused);
+    EXPECT_TRUE(opened);
 }

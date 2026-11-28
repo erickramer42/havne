@@ -85,8 +85,14 @@ TEST(SessionRecoveryTest, AnUnfinishedJournalHoldsTheModuleFromTheStart)
     EXPECT_STREQ(r.words, "a flash of this module didn't finish: recover it "
                           "before it runs");
     EXPECT_TRUE(b.sent.empty()) << "nothing is asked of a held module";
+    (void)ecuio_session_read_diagnostics(b.s);
+    (void)ecuio_session_read_diagnostics_channel(b.s, 0);
+    (void)ecuio_session_read_module_codes(b.s, 0, 0, nullptr);
+    (void)ecuio_session_keep_awake(b.s, ECUIO_AWAKE_SYSTEM, "a flash");
+    b.now += 10 * 1000000;
     b.passes(50);
-    EXPECT_TRUE(b.sent.empty());
+    EXPECT_TRUE(b.sent.empty())
+        << "no read, codes, diagnostics or keep-alive asked of it";
     EXPECT_EQ(start(b), ECUIO_ERR_IN_USE);
     EXPECT_STREQ(ecuio_last_error_detail(), kHeld);
     uint32_t wait_ms = 0;
@@ -679,4 +685,30 @@ TEST(SessionRecoveryTest, ACloseAfterTheFlashBeganWritingSaysRecover)
     EXPECT_EQ(v.end, ECUIO_OPERATION_END_RECOVERY_NEEDED);
     EXPECT_STREQ(v.words, "the session closed after the flash began "
                           "writing: recover the module before it runs");
+}
+
+TEST(SessionRecoveryTest, AFailedRecoveryReportsTheSectorsItsJournalHasWritten)
+{
+    Flash f = sim_flash();
+    f.flash_extra = R"(, "overwrite_safe": true)";
+    ecuio_operation::journal_record j = silent_record(f);
+    j.mark.written = 1;
+    j.mark.erased = 2;
+    ecuio_sim_flash_faults silent;
+    silent.silent = true;
+    Bench b;
+    ASSERT_NO_FATAL_FAILURE(reconnect(b, j, 1, silent, f));
+    ASSERT_EQ(recover(b), ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(b.until_ended(20000).end, ECUIO_OPERATION_END_RECOVERY_NEEDED);
+    const ecuio_module_recovery_t r = recovery_of(b);
+    EXPECT_EQ(r.state, ECUIO_RECOVERY_NEEDED);
+    EXPECT_EQ(r.sectors, 2u);
+    EXPECT_EQ(r.sectors_written, 1u) << "the first, written before";
+    ecuio_operation::journal_record after;
+    std::string why;
+    ASSERT_EQ(
+        ecuio_operation::journal_load(b.folder.str(), 0x7E8, &after, &why),
+        ecuio_operation::journal_found::unfinished);
+    EXPECT_EQ(after.mark.written, 1u);
+    EXPECT_EQ(after.mark.erased, 2u);
 }
