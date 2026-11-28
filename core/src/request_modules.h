@@ -53,7 +53,7 @@ inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
     session->support.swap(support);
     session->identity.swap(identity);
     session->diagnostics.swap(diagnostics);
-    session->module_codes.swap(codes);
+    session->codes.reports.swap(codes);
     session->support_count = count;
     session->info.module_count = count;
     session->info.channel_count =
@@ -68,7 +68,7 @@ inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
         session->support[c].rx_id = rx_ids[c];
         session->identity[c].rx_id = rx_ids[c];
         session->diagnostics[c].rx_id = rx_ids[c];
-        session->module_codes[c].rx_id = rx_ids[c];
+        session->codes.reports[c].rx_id = rx_ids[c];
     }
     return ECUIO_OK;
 }

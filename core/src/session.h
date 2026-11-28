@@ -75,6 +75,18 @@ struct session_run; /* operation_session.h */
 }
 void ecuio_operation_free(ecuio_operation::session_run* o) noexcept;
 
+/* reports under support_mutex, asked, taken and mask under mutex;
+ * askable is attach's */
+struct ecuio_session_codes {
+    std::vector<ecuio_module_codes_t> reports;
+    std::mutex mutex;
+    uint32_t asked[ECUIO_MAX_CHANNELS] = {};
+    uint32_t taken[ECUIO_MAX_CHANNELS] = {};
+    uint8_t mask[ECUIO_MAX_CHANNELS] = {};
+    std::atomic<uint32_t> diag_channels{0}; /* bit c: channel c's re-read */
+    bool askable = false;
+};
+
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
      * it's released after every member that reads the set */
@@ -226,14 +238,7 @@ struct ecuio_session {
      * that reads diagnostics asks again when it moves
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
-    std::atomic<uint32_t> diag_channel_requests{0}; /* bit c: channel c */
-    /* the module codes' reports, under support_mutex; askable is attach's */
-    std::vector<ecuio_module_codes_t> module_codes;
-    bool codes_askable = false;
-    std::mutex codes_mutex;
-    uint32_t codes_asked[ECUIO_MAX_CHANNELS] = {};
-    uint32_t codes_taken[ECUIO_MAX_CHANNELS] = {};
-    uint8_t codes_mask[ECUIO_MAX_CHANNELS] = {};
+    ecuio_session_codes codes;
     /* ecuio_session_clear_diagnostics_set's request, from any thread,
      * under clear_mutex: its targets and flags, the requests made, and
      * the last one the worker has seen to its end

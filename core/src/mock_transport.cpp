@@ -192,18 +192,18 @@ void read_codes(ecuio_mock_transport* t)
         uint32_t id = 0;
         uint8_t mask = 0;
         {
-            std::lock_guard<std::mutex> lock(s->codes_mutex);
-            if (s->codes_asked[c] == s->codes_taken[c]) {
+            std::lock_guard<std::mutex> lock(s->codes.mutex);
+            if (s->codes.asked[c] == s->codes.taken[c]) {
                 continue;
             }
-            id = s->codes_taken[c] = s->codes_asked[c];
-            mask = s->codes_mask[c];
+            id = s->codes.taken[c] = s->codes.asked[c];
+            mask = s->codes.mask[c];
         }
         std::lock_guard<std::mutex> lock(s->support_mutex);
-        if (c >= s->module_codes.size()) {
+        if (c >= s->codes.reports.size()) {
             continue;
         }
-        ecuio_module_codes_t& r = s->module_codes[c];
+        ecuio_module_codes_t& r = s->codes.reports[c];
         const uint32_t generation = r.generation + 3;
         r = ecuio_module_codes_t{};
         r.rx_id = t->rx_ids[c];
@@ -214,6 +214,20 @@ void read_codes(ecuio_mock_transport* t)
         r.list_outcome = ECUIO_DIAG_UNANSWERED;
         r.flags = ECUIO_MODULE_CODES_COMPLETE;
     }
+}
+
+bool start_diagnostics(ecuio_mock_transport* impl, ecuio_session_t* session)
+{
+    impl->ecu.engine = &impl->car.car;
+    if (!ecuio_engine_init(impl->diag.get(), 1)) {
+        return false;
+    }
+    if (impl->diagnose) {
+        ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
+        read_diagnostics(impl);
+    }
+    session->codes.askable = true;
+    return true;
 }
 
 void mock_worker(ecuio_mock_transport* t)
@@ -442,16 +456,8 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
             return walked;
         }
     }
-    if (impl->diag) {
-        impl->ecu.engine = &impl->car.car;
-        if (!ecuio_engine_init(impl->diag.get(), 1)) {
-            return ECUIO_ERR_OUT_OF_MEMORY;
-        }
-        if (impl->diagnose) {
-            ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
-            read_diagnostics(impl);
-        }
-        session->codes_askable = true;
+    if (!start_diagnostics(impl, session)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     /* The session takes the transport last, so a refusal above frees it
      * here and leaves the session with none */
