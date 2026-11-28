@@ -184,10 +184,10 @@ void SessionBridge::readModuleCodes()
 {
     std::vector<uint32_t> all(m_channelCount);
     std::iota(all.begin(), all.end(), 0u);
-    readModuleCodesForTesting(std::move(all));
+    readCodesOfChannels(std::move(all));
 }
 
-void SessionBridge::readModuleCodesForTesting(std::vector<uint32_t> channels)
+void SessionBridge::readCodesOfChannels(std::vector<uint32_t> channels)
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
         m_codesVisit.step != CodesVisit::Step::idle || channels.empty()) {

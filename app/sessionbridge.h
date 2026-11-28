@@ -709,7 +709,7 @@ public:
     // session. readDiagnostics is the same pass.
     Q_INVOKABLE void readDiagnostics();
     Q_INVOKABLE void readModuleCodes();
-    void readModuleCodesForTesting(std::vector<uint32_t> channels);
+    void readCodesOfChannels(std::vector<uint32_t> channels);
     // Clears the codes of every ECU whose read has completed (ADR-0038):
     // saves those reports first, to diagnostics-<stamp>[ <vehicle>].jsonl
     // in the recordings folder (diagnosticsFileText; the vehicle for an
