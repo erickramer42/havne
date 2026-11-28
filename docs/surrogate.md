@@ -120,6 +120,8 @@ the child's stdout/stderr and the client's own lines.
   capture does) closes that handle, and a later pipe or file reusing
   the value would take the line: a log line in the child's request
   stream desyncs the session.
+- **No log file:** a session whose TEMP and current folder take no
+  log file keeps no log, and its client lines are dropped.
 
 **Late replies.** When a transaction times out, the client remembers
 its request ID. Before the next request, it reads and discards that
