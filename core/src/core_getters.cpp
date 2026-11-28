@@ -256,6 +256,61 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session)
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_module_codes(const ecuio_session_t* session,
+                                              uint32_t channel,
+                                              ecuio_module_codes_t* out_codes)
+{
+    if (session == nullptr || out_codes == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    if (channel >= session->support_count ||
+        channel >= session->module_codes.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out_codes = session->module_codes[channel];
+    if (session->codes_askable) {
+        out_codes->flags |= ECUIO_MODULE_CODES_ASKABLE;
+    }
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_read_module_codes(ecuio_session_t* session,
+                                               uint32_t channel,
+                                               uint8_t status_mask,
+                                               uint32_t* out_read_id)
+{
+    if (session == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (session->closed.load()) {
+        return ECUIO_ERR_SESSION_CLOSED;
+    }
+    if (!session->codes_askable) {
+        ecuio_detail_set("this session sends no requests: it can't read a "
+                         "module's codes");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    uint32_t count = 0;
+    {
+        std::lock_guard<std::mutex> lock(session->support_mutex);
+        count = session->support_count;
+    }
+    if (channel >= count || channel >= ECUIO_MAX_CHANNELS) {
+        ecuio_detail_set("channel %u: the session has %u modules",
+                         static_cast<unsigned>(channel),
+                         static_cast<unsigned>(count));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    std::lock_guard<std::mutex> lock(session->codes_mutex);
+    const uint32_t id = ++session->codes_asked[channel];
+    session->codes_mask[channel] = status_mask;
+    if (out_read_id != nullptr) {
+        *out_read_id = id;
+    }
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_session_read_diagnostics_channel(ecuio_session_t* session,
                                                       uint32_t channel)
 {

@@ -26,6 +26,7 @@ add_executable(test_core test_core.cpp test_core_dispatch.cpp
     test_core_drive_cycle.cpp test_core_clock_profile.cpp test_core_replay.cpp
     test_core_replay_faults.cpp test_core_values.cpp test_core_chains.cpp test_core_merge.cpp
     test_core_demo_pids.cpp test_core_link.cpp test_core_vin_focus.cpp
+    test_core_module_codes.cpp
     test_json.cpp test_obdb_import.cpp test_bench_load_judge.cpp
     test_recorder.cpp test_recorder_replay.cpp test_recorder_focus.cpp
     test_recorder_attach.cpp test_recorder_file.cpp
@@ -2947,6 +2948,7 @@ if(WIN32)
         ../tests/test_j2534_stream_probe.cpp
         ../tests/test_j2534_start_probe.cpp
         ../tests/test_j2534_stream_session.cpp
+        ../tests/test_j2534_module_codes.cpp
         ../tests/test_j2534_stream_clear.cpp
         ../tests/test_j2534_stream_stamps.cpp
         ../tests/test_j2534_stream_focus.cpp

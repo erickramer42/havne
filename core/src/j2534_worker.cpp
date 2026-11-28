@@ -403,6 +403,7 @@ struct worker_state {
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
+    uint32_t published_codes[ECUIO_MAX_CHANNELS] = {};
     uint32_t diag_seen = 0;
     uint32_t clear_seen = 0;     /* ecuio_take_clear_requests' count */
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
@@ -605,6 +606,7 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
     if (requests) {
         ecuio_take_diag_request(t->session, &e, w.diag_seen);
         ecuio_take_clear_requests(t->session, &e, &w.clear_seen);
+        ecuio_take_codes_requests(t->session, &e);
         ecuio_take_test_talk(t->session, &e, engine_now_us(t));
         ecuio_take_focus(t->session, &e, w.focus_seen);
         (void)ecuio_take_modules(t->session, &e, w.modules_seen,
@@ -620,6 +622,8 @@ void serve_session(ecuio_j2534_transport* t, worker_state& w)
                                w.published_identity[c]);
         ecuio_publish_diagnostics(t->session, e, c, t->chans[c].rx_id,
                                   w.published_diagnostics[c]);
+        ecuio_publish_module_codes(t->session, e, c, t->chans[c].rx_id,
+                                   w.published_codes[c]);
     }
     ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t),
                          w.timing_at, false);

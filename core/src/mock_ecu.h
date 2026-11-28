@@ -65,6 +65,46 @@ constexpr ecuio_mock_answer ECUIO_MOCK_CLEARED_ANSWERS[] = {
     {{0x02, 0x02, 0x00}, 3, {0x42, 0x02, 0x00, 0x00, 0x00}, 5},
 };
 
+/* The engine ECU's own codes (19 02), as the fakes' (tests/fake_ecu.h):
+ * P0301-00 is also a J1979 stored code */
+struct ecuio_mock_code {
+    uint32_t code;
+    uint8_t status;
+};
+constexpr ecuio_mock_code ECUIO_MOCK_CODES[] = {
+    {0x012800, 0x20}, {0xD12345, 0x24}, {0x9A011C, 0x89},
+    {0x030100, 0x08}, {0x056311, 0x50},
+};
+constexpr uint8_t ECUIO_MOCK_REPLY_MAX =
+    3 + 4 * (sizeof ECUIO_MOCK_CODES / sizeof ECUIO_MOCK_CODES[0]);
+
+inline uint8_t ecuio_mock_ecu_codes(const ecuio_request& q, uint8_t* out)
+{
+    uint8_t n = 0;
+    out[n++] = 0x59;
+    out[n++] = q.bytes[1];
+    out[n++] = 0xFF;
+    uint8_t held = 0;
+    for (const ecuio_mock_code& c : ECUIO_MOCK_CODES) {
+        if ((c.status & q.bytes[2]) == 0) {
+            continue;
+        }
+        ++held;
+        if (q.bytes[1] == 0x02) {
+            out[n++] = static_cast<uint8_t>(c.code >> 16);
+            out[n++] = static_cast<uint8_t>(c.code >> 8);
+            out[n++] = static_cast<uint8_t>(c.code);
+            out[n++] = c.status;
+        }
+    }
+    if (q.bytes[1] == 0x01) {
+        out[n++] = 0x00;
+        out[n++] = 0x00;
+        out[n++] = held;
+    }
+    return n;
+}
+
 /* The simulated ECU's state: the car whose engine speed PID 0C reads
  * (the transport's drive cycle, on the thread that steps it), and
  * whether a 04 has cleared it. One per session, so a new connect starts
@@ -74,7 +114,8 @@ struct ecuio_mock_ecu {
     bool cleared = false;
 };
 
-/* The diagnostics list's reply to q into out (8 bytes), its length, or
+/* The diagnostics list's reply to q into out (ECUIO_MOCK_REPLY_MAX), its
+ * length, or
  * 0: a request it lacks goes unanswered, as a silent ECU's would. 01 0C
  * reads the engine speed and 01 0D the vehicle speed (unanswered with no
  * engine to read); 04 clears and answers 44, the engine running or not,
@@ -108,6 +149,10 @@ inline uint8_t ecuio_mock_ecu_reply(ecuio_mock_ecu* ecu, const ecuio_request& q,
                                                       : kmh + 0.5f);
         return 3;
     }
+    if (q.len == 3 &&
+        ecuio_engine_codes_request_allowed(q.bytes[0], q.bytes[1])) {
+        return ecuio_mock_ecu_codes(q, out);
+    }
     if (q.len == 1 && q.bytes[0] == ECUIO_CLEAR_SERVICE) {
         ecu->cleared = true;
         out[0] = 0x44;
@@ -139,7 +184,8 @@ inline void ecuio_mock_ecu_read(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
     const ecuio_engine_channel& ch = e->chans[0];
     for (int step = 0; step < 256; ++step) {
         if (ch.diag_pending == 0 && !ch.diagnosing &&
-            !ecuio_engine_clear_on(ch) && ch.outstanding == ECUIO_ENGINE_NONE) {
+            !ecuio_engine_clear_on(ch) && !ecuio_engine_codes_asks(ch) &&
+            ch.outstanding == ECUIO_ENGINE_NONE) {
             return;
         }
         const int32_t r = ecuio_engine_due(e, 0, *now_us);
@@ -150,7 +196,7 @@ inline void ecuio_mock_ecu_read(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
             *now_us += ECUIO_ENGINE_GAP_US;
             continue;
         }
-        uint8_t reply[8];
+        uint8_t reply[ECUIO_MOCK_REPLY_MAX];
         const uint8_t n =
             ecuio_mock_ecu_reply(ecu, ecuio_engine_request_of(e, 0, r), reply);
         ecuio_engine_sent(e, 0, r, true, *now_us);

@@ -227,6 +227,13 @@ struct ecuio_session {
      * (ecuio_take_diag_request) */
     std::atomic<uint32_t> diag_requests{0};
     std::atomic<uint32_t> diag_channel_requests{0}; /* bit c: channel c */
+    /* the module codes' reports, under support_mutex; askable is attach's */
+    std::vector<ecuio_module_codes_t> module_codes;
+    bool codes_askable = false;
+    std::mutex codes_mutex;
+    uint32_t codes_asked[ECUIO_MAX_CHANNELS] = {};
+    uint32_t codes_taken[ECUIO_MAX_CHANNELS] = {};
+    uint8_t codes_mask[ECUIO_MAX_CHANNELS] = {};
     /* ecuio_session_clear_diagnostics_set's request, from any thread,
      * under clear_mutex: its targets and flags, the requests made, and
      * the last one the worker has seen to its end

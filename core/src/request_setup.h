@@ -25,6 +25,7 @@
 #include "obd2_rates.h"
 #include "pid_support.h"
 #include "request_engine.h"
+#include "request_module_codes.h"
 #include "request_modules.h"
 #include "request_params.h"
 #include "session.h"
@@ -378,6 +379,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
     e->pack = params.pack && *probe;
     e->pack_frames = params.pack_frames;
     const bool requests = e->count > 0 || e->scan_count > 0;
+    session->codes_askable = requests;
     *identify = params.identify && !params.has_poll && requests;
     if (*identify) {
         ecuio_engine_identify(e);

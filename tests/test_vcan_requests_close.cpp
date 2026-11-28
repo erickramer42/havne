@@ -565,3 +565,22 @@ TEST_F(SocketCanRequestTest, AnAnswerThatNeverComesHoldsTheCloseToItsBound)
         EXPECT_LT(r.closed - r.asked, 1000ms);
     }
 }
+
+TEST_F(SocketCanRequestTest, AModulesCodesAreReadOnVcan)
+{
+    vcan_bus::Ecu ecu;
+    Session s("?profile=obd2&probe=0&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    uint32_t id = 0;
+    ASSERT_EQ(ecuio_session_read_module_codes(s.get(), 0, 0, &id), ECUIO_OK);
+    ecuio_module_codes_t r{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_module_codes(s.get(), 0, &r) == ECUIO_OK &&
+                   r.read_id >= id &&
+                   (r.flags & ECUIO_MODULE_CODES_COMPLETE) != 0;
+        },
+        8000ms));
+    EXPECT_EQ(r.rx_id, 0x7E8u);
+    fake_diagnostics::expect_module_codes(r, 0xAF);
+}

@@ -78,6 +78,10 @@ int c_abi_diag(void)
         ecuio_session_read_diagnostics(NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_read_diagnostics_channel(NULL, 0) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_read_module_codes(NULL, 0, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_module_codes(NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_set_focus_with(NULL, NULL, 0, 0, 0) !=
             ECUIO_ERR_NULL_ARGUMENT ||
