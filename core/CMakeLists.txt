@@ -83,6 +83,7 @@ add_library(ecuio-core STATIC
     src/plugin.cpp
     src/plugin_manifest.cpp
     src/plugin_operations.cpp
+    src/plugin_operation_getters.cpp
     src/plugin_conversation.cpp
     src/plugin_fingerprint.cpp
     src/plugin_publisher.cpp
