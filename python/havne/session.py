@@ -718,6 +718,59 @@ class Session(_Talk):
               "ecuio_session_get_channel_diagnostics")
         return out
 
+    def read_module_codes(self, channel=0, mask=0):
+        """Asks channel's module for its own trouble codes through UDS 0x19
+        (19 01, then 19 02) under the status mask (0: 0xAF); a closed
+        module is opened for the read. Returns the read's id"""
+        read_id = ctypes.c_uint32()
+        check(lib.ecuio_session_read_module_codes(self._handle(), channel, mask,
+                                                  ctypes.byref(read_id)),
+              "ecuio_session_read_module_codes")
+        return read_id.value
+
+    def module_codes(self, channel=0):
+        """The channel's last enhanced-codes report: core's
+        ecuio_module_codes_t"""
+        out = e.ecuio_module_codes_t()
+        check(lib.ecuio_session_get_module_codes(self._handle(), channel, ctypes.byref(out)),
+              "ecuio_session_get_module_codes")
+        return out
+
+    def wait_module_codes(self, read_id, channel=0, timeout_s=10):
+        """The channel's report once the read read_id (or a later one) has
+        ended, None when timeout_s seconds pass first"""
+        deadline = time.monotonic() + timeout_s
+        while True:
+            report = self.module_codes(channel)
+            if report.flags & e.ECUIO_MODULE_CODES_COMPLETE and report.read_id >= read_id:
+                return report
+            if time.monotonic() >= deadline:
+                return None
+            time.sleep(0.02)
+
+    def read_all_module_codes(self, mask=0, timeout_s=10):
+        """Every module's pass, in channel order, as havne-cli enhanced-codes
+        runs it: the module's J1979 read to its end where the session asks
+        one, then its enhanced codes, timeout_s seconds a module. Returns
+        (reports, not_reached): the reports of the modules read, each as
+        module_codes gives it, and how many modules were not reached"""
+        reports = []
+        not_reached = 0
+        for channel in range(self.info.module_count):
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                flags = self.diagnostics(channel).flags
+                if not flags & e.ECUIO_DIAG_ASKED or flags & e.ECUIO_DIAG_COMPLETE:
+                    break
+                time.sleep(0.02)
+            report = self.wait_module_codes(self.read_module_codes(channel, mask), channel,
+                                            max(0.0, deadline - time.monotonic()))
+            if report is None or report.flags & e.ECUIO_MODULE_CODES_NOT_OPENED:
+                not_reached += 1
+            else:
+                reports.append(report)
+        return reports, not_reached
+
     def clear(self, channel=0, confirm=False, engine_running=False, moving=False):
         """Asks the ECU of channel, or of each channel in a list, to clear
         its trouble codes (ADR-0038): Service 04, which also erases the

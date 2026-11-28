@@ -79,6 +79,7 @@ SessionBridge::SessionBridge(QObject* parent)
         pollUnaskedSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
+        pollModuleCodes();
         m_consent->poll(m_channelCount);
         pollSleep();
         // Fires even when nothing arrived this window: dimming exists for

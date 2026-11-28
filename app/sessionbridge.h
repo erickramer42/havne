@@ -179,6 +179,8 @@ class SessionBridge : public QObject, public BridgeFormats, public BridgeSeams
     // refreshed on the tick as a read settles each item, and when the
     // unit system changes; emptied at connect, kept after disconnect
     Q_PROPERTY(QVariantList diagnostics READ diagnostics NOTIFY diagnosticsChanged)
+    // A Read is visiting the modules; a press meanwhile is dropped
+    Q_PROPERTY(bool readingCodes READ readingCodes NOTIFY readingCodesChanged)
     // The ECUs a clear goes to (ADR-0038), as "0x7E8": each whose shown
     // report is a clear target (clearTarget), the rule clearDiagnostics
     // sends by, so the confirmation names exactly them
@@ -698,12 +700,16 @@ public:
     // so two points give it; a unit left as it is passes through
     Q_INVOKABLE double decodedValue(const QString& unit, double shown) const;
     QVariantList diagnostics() const { return m_diagnostics; }
+    bool readingCodes() const;
     QStringList clearTargets() const;
     bool clearFindsNothing() const;
     QVariantMap inspection() const;
-    // Read again: every ECU's diagnostics asked once more
-    // (ecuio_session_read_diagnostics); nothing without a session
+    // Read: each module in turn, its standard codes then its enhanced ones
+    // (UDS 0x19), a result per module as its pass ends; nothing without a
+    // session. readDiagnostics is the same pass.
     Q_INVOKABLE void readDiagnostics();
+    Q_INVOKABLE void readModuleCodes();
+    void readCodesOfChannels(std::vector<uint32_t> channels);
     // Clears the codes of every ECU whose read has completed (ADR-0038):
     // saves those reports first, to diagnostics-<stamp>[ <vehicle>].jsonl
     // in the recordings folder (diagnosticsFileText; the vehicle for an
@@ -792,6 +798,7 @@ signals:
     void minSweepMsChanged();
     void pickGaugesChanged();
     void diagnosticsChanged();
+    void readingCodesChanged();
     void clearMovingChanged();
     void refusedUnnamedChanged();
     void readingOnceChanged();
@@ -967,6 +974,12 @@ private:
     // logged once per completed read
     void pollChannelDiagnostics();
     void rebuildDiagnostics();
+    void pollModuleCodes();
+    void resetModuleCodes();
+    void queueModuleCodes(uint32_t channel);
+    QByteArray clearFileText(const ecuio_channel_diagnostics_t* reports,
+                             const uint32_t* channels, uint32_t n) const;
+    void advanceCodesVisit();
     QVariantMap previewObdbBytes(const QByteArray& bytes,
                                  const QString& refusal, int modelYear,
                                  const QString& name);

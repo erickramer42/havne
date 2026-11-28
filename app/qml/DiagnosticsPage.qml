@@ -34,7 +34,7 @@ Page {
     readonly property string baselineFolder: pickedVehicle !== null ? pickedVehicle.baseline : ""
     // Read again needs a session and a read that has settled
     readonly property bool canReadAgain: Bridge.connected &&
-        ecus.some(e => e.asked && e.complete)
+        ecus.some(e => (e.asked && e.complete) || e.enhanced.asked)
 
     // The clear (ADR-0038): its confirmation open; the file the last one
     // saved the report to; a clear that sent nothing because the report
@@ -383,8 +383,8 @@ Page {
                     id: readAgain
                     objectName: "readAgain"
                     visible: Bridge.connected
-                    enabled: root.canReadAgain && !root.clearing && !root.confirming
-                    text: qsTr("Read again")
+                    enabled: root.canReadAgain && !root.clearing && !root.confirming && !Bridge.readingCodes
+                    text: qsTr("Read")
                     Layout.row: 0
                     Layout.column: actions.twoRows ? 0 : 1
                     Layout.fillWidth: actions.twoRows
@@ -838,6 +838,11 @@ Page {
                             font.pixelSize: Theme.fontCaption
                         }
                     }
+                }
+
+                EnhancedCodesSection {
+                    ecu: card.ecu
+                    plainFamily: root.font.family
                 }
 
                 SectionLabel {

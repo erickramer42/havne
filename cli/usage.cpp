@@ -198,6 +198,28 @@ void usage_plugins(FILE* to)
         "         merge did; --out writes the merged set's text.\n");
 }
 
+// health's paragraph
+void usage_health(FILE* to)
+{
+    std::fprintf(
+        to,
+        "health   writes a car's health as one scrubbed file, JSON or a\n"
+        "         text for a person: the vehicle from its VIN (model year,\n"
+        "         make, check digit; never the VIN), the inspection's\n"
+        "         verdict, each ECU's readiness, trouble codes with their\n"
+        "         titles, freeze frame, values since the codes were "
+        "cleared\n"
+        "         and identification by name only, then the profile's\n"
+        "         ranked values. From a session it reads only (Services 01,\n"
+        "         02, 03, 07, 09 and 0A, never a clear), parked or driving,\n"
+        "         until every report it asks is in and the values have\n"
+        "         come, or --seconds (30); from a recording, its replies\n"
+        "         and values from --from to --to seconds. --baseline names\n"
+        "         the vehicle's baseline recording, by its start and length,\n"
+        "         never its folder. The file is checked for the car's\n"
+        "         identity before it's written.\n");
+}
+
 } // namespace
 
 void usage(FILE* to)
@@ -207,6 +229,8 @@ void usage(FILE* to)
         to,
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
+        "       havne-cli enhanced-codes <uri> [--ecu <rx>] [--mask <hex>]\n"
+        "                      [--timeout <s>]\n"
         "       havne-cli dump <uri> --plugin <pkg> --out <folder> "
         "[--operation <id>]\n"
         "                      [--parked] [--consent-store <path>]\n"
@@ -310,6 +334,16 @@ void usage(FILE* to)
         "         ID, only at 0 rpm unless --engine-running gives your word\n"
         "         (then only at 0 km/h unless --moving does too), and read\n"
         "         again. --yes is your word that the codes may go.\n"
+        "enhanced-codes\n"
+        "         reads each module's own trouble codes through UDS service\n"
+        "         0x19 (19 01, then 19 02 under --mask, 0xAF unless given),\n"
+        "         one line a module as its read ends: the code, its title\n"
+        "         where the generic table has one, its state (active or not\n"
+        "         now), its class (stored, pending, history), the warning\n"
+        "         lamp and the emissions lists that hold the same code. A\n"
+        "         module that answered nothing says no_response. --ecu\n"
+        "         names one module by its reply ID; --timeout is seconds a\n"
+        "         module. Exit 1 when a module was not reached.\n"
         "dump     copies a module's memory by a plugin's plan (--operation\n"
         "         names it among several): read twice, compared, sealed as\n"
         "         a .havnedump in --out and read back. --parked is your word\n"
@@ -388,22 +422,10 @@ void usage(FILE* to)
         "         interval that gives no fewer rows than every sweep (the\n"
         "         recording is slower than it) says so with\n"
         "         no_fewer_than_sweep, and export on stderr too; export's\n"
-        "         --rows <ms> sizes the sweep first for it, a pass more.\n"
-        "health   writes a car's health as one scrubbed file, JSON or a\n"
-        "         text for a person: the vehicle from its VIN (model year,\n"
-        "         make, check digit; never the VIN), the inspection's\n"
-        "         verdict, each ECU's readiness, trouble codes with their\n"
-        "         titles, freeze frame, values since the codes were "
-        "cleared\n"
-        "         and identification by name only, then the profile's\n"
-        "         ranked values. From a session it reads only (Services 01,\n"
-        "         02, 03, 07, 09 and 0A, never a clear), parked or driving,\n"
-        "         until every report it asks is in and the values have\n"
-        "         come, or --seconds (30); from a recording, its replies\n"
-        "         and values from --from to --to seconds. --baseline names\n"
-        "         the vehicle's baseline recording, by its start and length,\n"
-        "         never its folder. The file is checked for the car's\n"
-        "         identity before it's written.\n"
+        "         --rows <ms> sizes the sweep first for it, a pass more.\n");
+    usage_health(to);
+    std::fprintf(
+        to,
         "import   reads a candump -L log (one bus: --interface names it\n"
         "         when the log has several) into a recording's folder that\n"
         "         view --frames, info and replay:// read. import csv reads\n"

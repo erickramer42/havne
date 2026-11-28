@@ -1,0 +1,4 @@
+{"schema": 1, "type": "start"}
+{"backend": "mock", "baud": 0, "channels": [{"rx": "0x7E8", "tx": "0x7E0"}], "profile": "mock", "protocol_id": 0, "type": "session"}
+{"count": {"available": "0xFF", "format": "SAE J2012", "outcome": "answered", "reported": 4}, "generation": 3, "list": {"class": ["History", "Pending", "Stored", "Stored"], "codes": ["P0128-00", "U1123-45", "B1A01-1C", "P0301-00"], "emissions": [[], [], [], ["stored"]], "lamp": [false, false, true, false], "outcome": "answered", "reported": 4, "state": ["Not now", "Not now", "Active", "Not now"], "status": ["0x20", "0x24", "0x89", "0x8"], "titles": ["Coolant Thermostat (Coolant Temperature Below Thermostat Regulating Temperature)", null, null, "Cylinder 1 Misfire Detected"]}, "mask": "0xAF", "read": 1, "rx": "0x7E8", "type": "enhanced_codes"}
+{"modules": 1, "no_response": 0, "not_reached": 0, "read": 1, "type": "enhanced_codes_end"}

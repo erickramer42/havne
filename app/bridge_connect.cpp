@@ -213,12 +213,11 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_absentIds.clear();
     m_unaskedRead.assign(m_absentRead.size(), 0);
     m_unaskedIds.clear();
-    for (uint32_t& g : m_identityGeneration) {
-        g = 0;
-    }
-    for (uint32_t& g : m_diagnosticsGeneration) {
-        g = 0;
-    }
+    std::fill(std::begin(m_identityGeneration), std::end(m_identityGeneration),
+              0u);
+    std::fill(std::begin(m_diagnosticsGeneration),
+              std::end(m_diagnosticsGeneration), 0u);
+    resetModuleCodes();
     for (bool& asked : m_clearAsked) {
         asked = false;
     }

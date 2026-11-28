@@ -56,3 +56,35 @@ def dtc_title(code):
     check(lib.ecuio_dtc_format(value.value, buf, len(buf)), "ecuio_dtc_format")
     return DtcTitle(text(buf.raw), text(lib.ecuio_dtc_title(value.value)) or None,
                     text(lib.ecuio_dtc_title_source()))
+
+
+def dtc_format_uds(code, format=e.ECUIO_DTC_FORMAT_J2012):
+    """A 3-byte UDS trouble code as core writes it: "P0128-00" for the
+    J2012 formats (00, 01, 04), "0x012800" for the others"""
+    buf = ctypes.create_string_buffer(e.ECUIO_DTC_UDS_TEXT_LEN)
+    check(lib.ecuio_dtc_format_uds(code, format, buf, len(buf)), "ecuio_dtc_format_uds")
+    return text(buf.raw)
+
+
+def dtc_title_uds(code, format=e.ECUIO_DTC_FORMAT_J2012):
+    """The generic title of a J2012-format code, None for any other"""
+    return text(lib.ecuio_dtc_title_uds(code, format)) or None
+
+
+def dtc_status_state(status):
+    """"Active" (bit 0) or "Not now" """
+    return text(lib.ecuio_dtc_status_state(status))
+
+
+def dtc_status_class(status):
+    """"Stored" (bit 3), "Pending" (bit 2), "History" (bit 5) or None"""
+    return text(lib.ecuio_dtc_status_class(status)) or None
+
+
+def module_code_emissions_lists(report, code, format=e.ECUIO_DTC_FORMAT_J2012):
+    """The J1979 lists of report (a channel's diagnostics) that hold the
+    same code, as ECUIO_DIAG_STORED, _PENDING and _PERMANENT's names"""
+    bits = lib.ecuio_module_code_emissions_lists(ctypes.byref(report), code, format)
+    names = ((e.ECUIO_DIAG_STORED, "stored"), (e.ECUIO_DIAG_PENDING, "pending"),
+             (e.ECUIO_DIAG_PERMANENT, "permanent"))
+    return [name for bit, name in names if bits & (1 << bit)]

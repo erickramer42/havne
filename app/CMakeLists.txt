@@ -225,6 +225,7 @@ qt_add_qml_module(app_ui
         qml/LiveSignalRow.qml
         qml/LiveViewPage.qml
         qml/DiagnosticsPage.qml
+        qml/EnhancedCodesSection.qml
         qml/ChartLayout.qml
         qml/ChartViews.qml
         qml/ChartBands.qml

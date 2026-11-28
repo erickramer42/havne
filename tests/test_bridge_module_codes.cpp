@@ -1,0 +1,236 @@
+#include <gtest/gtest.h>
+
+#include <QDir>
+#include <QFile>
+#include <QStringList>
+#include <QTemporaryDir>
+
+#include "sessionbridge.h"
+#include "bridge_support.h"
+
+TEST(BridgeTest, TheReadVisitsEveryModuleInOrderAndLogsOnce)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 enhanced codes: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 1; }, 4000))
+        << log.join('\n').toStdString();
+    spinLoop(400);
+    ASSERT_EQ(lines().size(), 1);
+    EXPECT_EQ(lines().first().toStdString(),
+              "ECU 0x7E8 enhanced codes: P0128-00 not now (history), "
+              "U1123-45 not now (pending), B1A01-1C active (stored, "
+              "warning lamp requested), P0301-00 not now (stored, also an "
+              "emissions code)");
+    const QVariantMap e =
+        bridge.diagnostics().at(0).toMap().value("enhanced").toMap();
+    EXPECT_EQ(e.value("outcome").toString(), QStringLiteral("answered"));
+    EXPECT_EQ(e.value("codes").toStringList().size(), 4);
+    bridge.readDiagnostics();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 2; }, 4000))
+        << "Read again is the same pass";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, AnUnansweredModuleReadsNoResponse)
+{
+    ecuio_module_codes_t r{};
+    r.flags = ECUIO_MODULE_CODES_ASKABLE | ECUIO_MODULE_CODES_COMPLETE;
+    r.rx_id = 0x7E9;
+    r.read_id = 1;
+    r.count_outcome = ECUIO_DIAG_UNANSWERED;
+    r.list_outcome = ECUIO_DIAG_UNANSWERED;
+    const ecuio_channel_diagnostics_t standard{};
+    EXPECT_EQ(BridgeFormats::moduleCodesEntry(r, standard, false)
+                  .value("outcome")
+                  .toString(),
+              QStringLiteral("no_response"));
+    EXPECT_EQ(BridgeFormats::moduleCodesText(r, standard, false).toStdString(),
+              "ECU 0x7E9 enhanced codes: no response");
+    EXPECT_EQ(
+        BridgeFormats::moduleCodesEntry(ecuio_module_codes_t{}, standard, false)
+            .value("outcome")
+            .toString(),
+        QStringLiteral("not_read"));
+}
+
+TEST(BridgeTest, AModuleThatReadsItsCodesOnlyInTheSessionSaysSo)
+{
+    ecuio_module_codes_t r{};
+    r.flags = ECUIO_MODULE_CODES_ASKABLE | ECUIO_MODULE_CODES_COMPLETE;
+    r.rx_id = 0x7E9;
+    r.read_id = 1;
+    r.count_outcome = ECUIO_DIAG_REFUSED;
+    r.list_outcome = ECUIO_DIAG_REFUSED;
+    r.list_nrc = 0x7F;
+    const ecuio_channel_diagnostics_t standard{};
+    EXPECT_EQ(BridgeFormats::moduleCodesText(r, standard, false).toStdString(),
+              "ECU 0x7E9 enhanced codes: refused (7F 19 7F): the module reads "
+              "its codes only in its extended session");
+    EXPECT_TRUE(BridgeFormats::moduleCodesText(r, standard, true)
+                    .endsWith(QStringLiteral(", connect with ?session=03")));
+}
+
+TEST(BridgeTest, AClearsSavedFileHoldsTheEnhancedCodes)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return !log.filter(QStringLiteral("enhanced codes: ")).isEmpty();
+        },
+        4000));
+    ASSERT_FALSE(bridge.clearDiagnostics().isEmpty());
+    const QStringList files =
+        QDir(root.path()).entryList({QStringLiteral("*.jsonl")}, QDir::Files);
+    ASSERT_EQ(files.size(), 1);
+    QFile saved(root.path() + QLatin1Char('/') + files.first());
+    ASSERT_TRUE(saved.open(QIODevice::ReadOnly));
+    EXPECT_TRUE(saved.readAll().contains("\"type\":\"enhanced_codes\""));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, AClearReadsTheModulesEnhancedCodesAgain)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 enhanced codes: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 1; }, 4000));
+    ASSERT_FALSE(bridge.clearDiagnostics().isEmpty());
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 2; }, 6000))
+        << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.diagnostics()
+                  .at(0)
+                  .toMap()
+                  .value("enhanced")
+                  .toMap()
+                  .value("outcome")
+                  .toString(),
+              QStringLiteral("answered"));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, AReadPressedWhileAVisitRunsIsDropped)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    int changes = 0;
+    QObject::connect(&bridge, &SessionBridge::readingCodesChanged,
+                     [&changes]() { ++changes; });
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 enhanced codes: "));
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    EXPECT_FALSE(bridge.readingCodes());
+    bridge.readModuleCodes();
+    EXPECT_TRUE(bridge.readingCodes());
+    bridge.readCodesOfChannels({0, 5});
+    ASSERT_TRUE(spinUntil([&]() { return !bridge.readingCodes(); }, 6000));
+    spinLoop(400);
+    EXPECT_EQ(lines().size(), 1) << "the second press made no second read";
+    EXPECT_TRUE(log.filter(QStringLiteral("not reached")).isEmpty())
+        << "and did not replace the visit";
+    EXPECT_GE(changes, 2);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, AReconnectEmptiesTheEnhancedState)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const auto lines = [&log]() {
+        return log.filter(QStringLiteral("ECU 0x7E8 enhanced codes: "));
+    };
+    const auto enhanced = [&bridge]() {
+        return bridge.diagnostics().at(0).toMap().value("enhanced").toMap();
+    };
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 1; }, 4000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    ASSERT_TRUE(
+        spinUntil([&]() { return !bridge.diagnostics().isEmpty(); }, 2000));
+    EXPECT_EQ(enhanced().value("outcome").toString(),
+              QStringLiteral("not_read"));
+    EXPECT_TRUE(enhanced().value("codes").toStringList().isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil([&]() { return lines().size() == 2; }, 4000))
+        << "a fresh line for the next Read";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, AVisitReportsTheModulesItDidNotReach)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    bridge.readCodesOfChannels({0, 5});
+    ASSERT_TRUE(spinUntil([&]() { return !bridge.readingCodes(); }, 6000));
+    EXPECT_EQ(
+        log.filter(QStringLiteral("Enhanced codes: 1 not reached")).size(), 1)
+        << log.join(QLatin1Char(0x0A)).toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, ADiagnoseOffSessionReadsEnhancedCodesAlone)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo?diagnose=0"))
+                    .isEmpty());
+    bridge.readModuleCodes();
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return !log.filter(QStringLiteral("enhanced codes: ")).isEmpty();
+        },
+        4000));
+    spinLoop(300);
+    EXPECT_TRUE(log.filter(QStringLiteral(" diagnostics: ")).isEmpty())
+        << "no standard read was asked";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+TEST(BridgeTest, TheSessionHintIsOfferedByProfileAndKey)
+{
+    const auto offered = [](const char* uri) {
+        return BridgeFormats::sessionOffered(QString::fromLatin1(uri));
+    };
+    EXPECT_TRUE(offered("elm327://COM3?profile=uds-generic"));
+    EXPECT_FALSE(offered("elm327://COM3?profile=uds-generic&session=03"));
+    EXPECT_TRUE(
+        offered("elm327://COM3?profile=uds-generic&sessions=x&nosession=1"));
+    EXPECT_FALSE(offered("elm327://COM3"));
+    EXPECT_FALSE(offered("elm327://COM3?profile=obd2"));
+    EXPECT_FALSE(offered("mock://demo?profile=uds-generic"));
+}
