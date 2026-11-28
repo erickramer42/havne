@@ -99,6 +99,9 @@ ecuio_status_t take_profile(ecuio_session_t* s, const char* chosen,
     s->conversation = ecuio_conversation_of(*set);
     s->conversation_consent =
         s->conversation != nullptr && ecuio_plugin_code_may_run(s);
+    if (!ecuio_declared_prints_of(*set, &s->declared_prints)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     return ECUIO_OK;
 }
 

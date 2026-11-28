@@ -14,6 +14,7 @@
 #include "json.h"
 #include "request_engine.h"
 #include "signal_file_build.h"
+#include "sha256.h"
 #include "signal_file_merge.h"
 
 #include <algorithm>
@@ -342,6 +343,13 @@ Value merger::written_parts() const
             add(entry, "plugin", std::move(plugin));
         }
         add(entry, "source", written_source(f.source));
+        if (!f.plugin.empty() ? f.consent_fingerprint : !f.bytes.empty()) {
+            add(entry, "fingerprint",
+                text_value(!f.plugin.empty()
+                               ? ecuio_sha256::hex(f.fingerprint)
+                               : ecuio_sha256::hex_of(f.bytes.data(),
+                                                      f.bytes.size())));
+        }
         list.items.push_back(std::move(entry));
     }
     return list;
@@ -368,6 +376,13 @@ Value merger::written_ecus() const
                 text_value(session == ECUIO_CHANNEL_SESSION_DEFAULT
                                ? "default"
                                : "extended"));
+        }
+        if (session == ECUIO_CHANNEL_SESSION_EXTENDED) {
+            Value asked = empty_of(Type::array);
+            for (const uint32_t p : modules_[m].said_extended) {
+                asked.items.push_back(whole_value(p));
+            }
+            add(entry, "session_parts", std::move(asked));
         }
         if (modules_[m].part != ECUIO_SIGNAL_PART_NONE) {
             add(entry, "part", whole_value(modules_[m].part));

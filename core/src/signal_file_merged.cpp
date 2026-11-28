@@ -90,7 +90,9 @@ ecuio_signal_file::part read_part(const Value& v, size_t index)
 {
     const std::string what = "part " + std::to_string(index);
     expect(v, Type::object, what);
-    only_keys(v, {"profile", "name", "format", "plugin", "source"}, "a part");
+    only_keys(v,
+              {"profile", "name", "format", "plugin", "source", "fingerprint"},
+              "a part");
     ecuio_signal_file::part out;
     const Value& profile = member(v, "profile", what);
     out.profile =
@@ -112,6 +114,22 @@ ecuio_signal_file::part read_part(const Value& v, size_t index)
     take_source(source, out.source);
     if (const Value* plugin = v.find("plugin")) {
         read_plugin(*plugin, what, out);
+    }
+    if (const Value* print = v.find("fingerprint")) {
+        const std::string& text =
+            text_of(*print, 64, 64, what + "'s fingerprint");
+        for (size_t i = 0; i < 64; ++i) {
+            const char c = text[i];
+            const int d = c >= '0' && c <= '9'   ? c - '0'
+                          : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                                                 : -1;
+            if (d < 0) {
+                refuse(*print, what + "'s fingerprint takes 64 of 0-9 and a-f");
+            }
+            out.fingerprint[i / 2] = static_cast<uint8_t>(
+                out.fingerprint[i / 2] | (d << (i % 2 == 0 ? 4 : 0)));
+        }
+        out.has_fingerprint = true;
     }
     return out;
 }

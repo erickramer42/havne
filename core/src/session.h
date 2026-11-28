@@ -118,7 +118,13 @@ struct ecuio_session {
     bool consent_applied = false; /* the fingerprint and second above hold */
     /* The link is one no car is on (SocketCAN's vcan), set by attach */
     bool no_car_bus = false;
-    /* A bit for each channel whose declared session a consent allows */
+    /* Each declared module's parts a consent can name (create's), and a
+     * bit for each channel whose declared session a consent allows */
+    struct declared_print {
+        uint32_t rx = 0;
+        uint8_t fingerprint[32] = {};
+    };
+    std::vector<declared_print> declared_prints;
     uint32_t declared_allowed = 0;
     /* started's copy for any thread: the conditions' states judge what the
      * session gets only once it runs */

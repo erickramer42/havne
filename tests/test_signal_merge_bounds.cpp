@@ -7,9 +7,13 @@
 
 #include "test_signal_merge_support.h"
 
+#include "consent_gate.h"
+#include "sha256.h"
 #include "signal_file_build.h" /* core/src: a part with no text */
 
 #include <cstdio>
+#include <cstring>
+#include <vector>
 
 namespace {
 
@@ -511,6 +515,30 @@ TEST(MergeTest, APartWithNoSessionOverrulesNothing)
     ASSERT_EQ(none.status, ECUIO_OK) << none.words;
     EXPECT_EQ(module_at(none.file.get(), 0).session,
               ECUIO_CHANNEL_SESSION_NONE);
+}
+
+TEST(MergeTest, AMergedSetNamesThePartsThatAskAModulesSession)
+{
+    File asks = load(doc("Asks", num("a", "D100"), "", 3, kTcmExtended));
+    File silent = load(doc("Silent", num("c", "D200"), "", 3, kTcm));
+    ASSERT_NE(asks, nullptr) << ecuio_last_error_detail();
+    ASSERT_NE(silent, nullptr) << ecuio_last_error_detail();
+    const Merged m = merge({silent.get(), asks.get()});
+    ASSERT_EQ(m.status, ECUIO_OK) << m.words;
+    const ecuio_signal_file& f = *m.file;
+    ASSERT_EQ(f.modules.size(), 1u);
+    EXPECT_EQ(f.modules[0].session_parts, std::vector<uint32_t>{1});
+    ASSERT_EQ(f.parts.size(), 2u);
+    ASSERT_TRUE(f.parts[1].has_fingerprint);
+    EXPECT_EQ(ecuio_sha256::hex(f.parts[1].fingerprint),
+              ecuio_sha256::hex_of(asks->bytes.data(), asks->bytes.size()));
+
+    std::vector<ecuio_session::declared_print> prints;
+    ASSERT_TRUE(ecuio_declared_prints_of(&f.set, &prints));
+    ASSERT_EQ(prints.size(), 1u);
+    EXPECT_EQ(prints[0].rx, 0x7E9u);
+    EXPECT_EQ(std::memcmp(prints[0].fingerprint, f.parts[1].fingerprint, 32),
+              0);
 }
 
 TEST(MergeTest, AModuleTheStandardSignalsReadHasANoteForItsSession)

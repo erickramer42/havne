@@ -22,13 +22,31 @@
 #include <utility>
 #include <vector>
 
+struct ecuio_signal_file;
+
+namespace ecuio_sf {
+
+/* Every file core made, by its set (signal_file_readers.cpp): a session
+ * finds the file behind its set at create, while the file lives */
+void keep_file(const ecuio_signal_file* f);
+void forget_file(const ecuio_signal_file* f) noexcept;
+const ecuio_signal_file* file_of_set(const ecuio_signal_set_t* set) noexcept;
+
+} // namespace ecuio_sf
+
 struct ecuio_signal_file {
+    ecuio_signal_file() { ecuio_sf::keep_file(this); }
+    ~ecuio_signal_file() { ecuio_sf::forget_file(this); }
+    ecuio_signal_file(const ecuio_signal_file&) = delete;
+    ecuio_signal_file& operator=(const ecuio_signal_file&) = delete;
+
     /* A channel as the "ecus" entry that names it gives it: id "" for a
      * base channel no entry names */
     struct module {
         std::string id;
         std::string name;
         uint32_t part = ECUIO_SIGNAL_PART_NONE;
+        std::vector<uint32_t> session_parts; /* those asking it extended */
     };
 
     /* What ecuio_signal_file_note gives */
@@ -52,6 +70,8 @@ struct ecuio_signal_file {
         std::string plugin_version;
         std::string plugin_variant;
         ecuio_signal_source_t source{};
+        bool has_fingerprint = false; /* a consent can name it */
+        uint8_t fingerprint[32] = {};
     };
 
     std::string name;
@@ -85,6 +105,10 @@ struct ecuio_signal_file {
     /* A plugin variant's "<id>,<version>,<variant>", a recording's plugin
      * line (ADR-0052 section 4); "" for a file loaded alone */
     std::string plugin;
+    /* A variant's plugin's fingerprint, when the plugin names a publisher
+     * (a consent can name it) */
+    bool consent_fingerprint = false;
+    uint8_t fingerprint[32] = {};
     /* Its "source", or a variant's own (ecuio_signal_file_source) */
     ecuio_signal_source_t source{};
     /* Its "needs" as written, and the keys of its signals left out for

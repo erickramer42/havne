@@ -234,6 +234,29 @@ uint32_t part_of(const Value& e, const std::string& id,
                  "ecu " + q(id) + "'s part"));
 }
 
+/* An ECU's "session_parts" in a merged set: the parts asking it extended */
+std::vector<uint32_t> session_parts_of(const Value& e, const std::string& id,
+                                       const ecuio_signal_file& f)
+{
+    std::vector<uint32_t> out;
+    const Value* list = e.find("session_parts");
+    if (list == nullptr) {
+        return out;
+    }
+    if (f.parts.empty()) {
+        refuse(*list, "ecu " + q(id) +
+                          "'s \"session_parts\" is a merged set's: a file "
+                          "with no \"parts\" takes none");
+    }
+    expect(*list, Type::array, "ecu " + q(id) + "'s session_parts");
+    for (const Value& p : list->items) {
+        out.push_back(static_cast<uint32_t>(
+            whole_of(p, 0, static_cast<int64_t>(f.parts.size()) - 1,
+                     "ecu " + q(id) + "'s session part")));
+    }
+    return out;
+}
+
 /* A channel for ecu id, of the width the set carries, within its count */
 void add_channel(const Value& e, const std::string& id, uint32_t rx,
                  uint32_t tx, ecuio_signal_file& f)
@@ -270,7 +293,9 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
     expect(*ecus, Type::array, "\"ecus\"");
     for (const Value& e : ecus->items) {
         expect(e, Type::object, "an ECU");
-        only_keys(e, {"id", "rx", "tx", "name", "session", "part"}, "an ECU");
+        only_keys(
+            e, {"id", "rx", "tx", "name", "session", "session_parts", "part"},
+            "an ECU");
         const Value* id_v = e.find("id");
         if (id_v == nullptr) {
             refuse(e, "an ECU needs an \"id\"");
@@ -315,6 +340,7 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         f.modules[channel].name = name_of(e, id, f);
         f.channels[channel].session = session_of(e, id, f);
         f.modules[channel].part = part_of(e, id, f);
+        f.modules[channel].session_parts = session_parts_of(e, id, f);
         ids->emplace_back(id, rx);
     }
 }

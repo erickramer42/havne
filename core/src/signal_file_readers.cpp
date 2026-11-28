@@ -13,9 +13,57 @@
 #include "signal_file_build.h"
 
 #include <cstring>
+#include <mutex>
 #include <new>
 #include <string>
 #include <vector>
+
+namespace {
+
+std::mutex& files_mutex()
+{
+    static std::mutex m;
+    return m;
+}
+
+std::vector<const ecuio_signal_file*>& files()
+{
+    static std::vector<const ecuio_signal_file*> all;
+    return all;
+}
+
+} // namespace
+
+void ecuio_sf::keep_file(const ecuio_signal_file* f)
+{
+    const std::lock_guard<std::mutex> lock(files_mutex());
+    files().push_back(f);
+}
+
+void ecuio_sf::forget_file(const ecuio_signal_file* f) noexcept
+{
+    const std::lock_guard<std::mutex> lock(files_mutex());
+    std::vector<const ecuio_signal_file*>& all = files();
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (all[i] == f) {
+            all[i] = all.back();
+            all.pop_back();
+            return;
+        }
+    }
+}
+
+const ecuio_signal_file*
+ecuio_sf::file_of_set(const ecuio_signal_set_t* set) noexcept
+{
+    const std::lock_guard<std::mutex> lock(files_mutex());
+    for (const ecuio_signal_file* f : files()) {
+        if (&f->set == set) {
+            return f;
+        }
+    }
+    return nullptr;
+}
 
 namespace {
 

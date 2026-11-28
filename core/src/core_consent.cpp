@@ -13,9 +13,12 @@
 #include "conversation_bind.h"
 #include "error_detail.h"
 #include "session.h"
+#include "sha256.h"
+#include "signal_file_build.h"
 
 #include <cstring>
 #include <mutex>
+#include <new>
 
 namespace {
 
@@ -25,7 +28,74 @@ bool recording(const ecuio_session_t& s)
     return s.record_link->active.load() != nullptr;
 }
 
+void add_print(uint32_t rx, const uint8_t* fingerprint,
+               std::vector<ecuio_session::declared_print>* out)
+{
+    ecuio_session::declared_print d;
+    d.rx = rx;
+    std::memcpy(d.fingerprint, fingerprint, sizeof d.fingerprint);
+    out->push_back(d);
+}
+
+/* The channels of session's declared modules whose parts include
+ * fingerprint, a bit each */
+uint32_t declared_by(const ecuio_session_t& s, const uint8_t* fingerprint)
+{
+    uint32_t bits = 0;
+    for (const ecuio_session::declared_print& d : s.declared_prints) {
+        if (std::memcmp(d.fingerprint, fingerprint, 32) != 0) {
+            continue;
+        }
+        for (uint32_t c = 0; c < s.module_rx.size() && c < 32; ++c) {
+            if (s.module_rx[c] == d.rx) {
+                bits |= 1u << c;
+            }
+        }
+    }
+    return bits;
+}
+
 } // namespace
+
+bool ecuio_declared_prints_of(const ecuio_signal_set_t* set,
+                              std::vector<ecuio_session::declared_print>* out)
+{
+    out->clear();
+    const ecuio_signal_file* f = ecuio_sf::file_of_set(set);
+    if (f == nullptr) {
+        return true;
+    }
+    try {
+        for (size_t k = 0; k < f->channels.size() && k < f->modules.size();
+             ++k) {
+            const uint32_t rx = f->channels[k].rx_id;
+            if (f->channels[k].session != ECUIO_CHANNEL_SESSION_EXTENDED) {
+                continue;
+            }
+            if (!f->parts.empty()) {
+                for (const uint32_t p : f->modules[k].session_parts) {
+                    if (p < f->parts.size() && f->parts[p].has_fingerprint) {
+                        add_print(rx, f->parts[p].fingerprint, out);
+                    }
+                }
+            } else if (!f->plugin.empty()) {
+                if (f->consent_fingerprint) {
+                    add_print(rx, f->fingerprint, out);
+                }
+            } else {
+                ecuio_sha256::hasher h;
+                h.add(f->bytes.data(), f->bytes.size());
+                uint8_t d[32];
+                h.finish(d);
+                add_print(rx, d, out);
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        out->clear();
+        return false;
+    }
+    return true;
+}
 
 extern "C" ecuio_status_t
 ecuio_session_apply_consent(ecuio_session_t* session,
@@ -48,9 +118,31 @@ ecuio_session_apply_consent(ecuio_session_t* session,
         ecuio_detail_set("consent is applied before a recorder attaches");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    if (session->conversation == nullptr) {
-        ecuio_detail_set("no plugin of this session's signals asks consent");
+    const uint32_t declared = declared_by(*session, fingerprint);
+    if (session->conversation == nullptr && declared == 0) {
+        ecuio_detail_set(
+            session->declared_prints.empty()
+                ? "no plugin of this session's signals asks consent"
+                : "the fingerprint is no part's that declares a "
+                  "module's session");
         return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if (session->conversation == nullptr ||
+        (declared != 0 && std::memcmp(session->conversation->fingerprint,
+                                      fingerprint, 32) != 0)) {
+        ecuio_consent_record_t record{};
+        record.struct_size = sizeof record;
+        const ecuio_status_t found =
+            ecuio_consent_store_find(store, fingerprint, &record);
+        if (found == ECUIO_ERR_CONSENT_REQUIRED) {
+            ecuio_detail_set("the consent store holds no consent to the part "
+                             "that declares a module's session");
+        }
+        if (found != ECUIO_OK) {
+            return found;
+        }
+        session->declared_allowed |= declared;
+        return ECUIO_OK;
     }
     const ecuio_conversation_part& p = *session->conversation;
     if (!p.has_publisher) {
@@ -75,6 +167,7 @@ ecuio_session_apply_consent(ecuio_session_t* session,
     if (found != ECUIO_OK) {
         return found;
     }
+    session->declared_allowed |= declared;
     session->consent_applied = true;
     std::memcpy(session->consent_fingerprint, fingerprint,
                 sizeof session->consent_fingerprint);

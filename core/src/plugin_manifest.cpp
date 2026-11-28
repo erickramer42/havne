@@ -13,6 +13,7 @@
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
 
+#include <cstring>
 #include <memory>
 #include <string>
 #include <utility>
@@ -223,6 +224,11 @@ void loader::read_manifest(ecuio_plugin& p)
     read_blobs(root, p);
     check_binaries();
     read_fingerprint(root, p);
+    for (variant& v : p.variants) {
+        v.file->consent_fingerprint = p.publisher != nullptr;
+        std::memcpy(v.file->fingerprint, p.fingerprint,
+                    sizeof v.file->fingerprint);
+    }
 }
 
 /* "havne_plugin", first, and the keys a manifest may hold */

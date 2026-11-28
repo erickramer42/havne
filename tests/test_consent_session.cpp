@@ -441,3 +441,95 @@ TEST(ConsentSessionTest, TheSessionSaysWhetherAPartWantsConsent)
     EXPECT_EQ(ecuio_session_wants_consent(closed.session.get(), nullptr),
               ECUIO_ERR_NULL_ARGUMENT);
 }
+
+/* A data plugin of format 3 that declares its second module extended */
+conversation_test::Made declaring()
+{
+    conversation_test::Made m = made3();
+    m.tiers = R"(["data"])";
+    m.has_group = false;
+    m.has_binary = false;
+    m.ecus = R"([{"id": "pcm", "rx": "7E8"}, {"id": "tcm", "rx": "7E9", )"
+             R"("session": "extended"}, {"id": "abs", "rx": "7EA"}])";
+    return m;
+}
+
+uint32_t channel_of(const ecuio_session_t* s, uint32_t rx)
+{
+    for (uint32_t c = 0; c < s->module_rx.size(); ++c) {
+        if (s->module_rx[c] == rx) {
+            return c;
+        }
+    }
+    return UINT32_MAX;
+}
+
+TEST(ConsentSessionTest, AConsentToTheDeclaringPluginAllowsItsModulesSession)
+{
+    Store store("consent-session-declared.json");
+    Bound b;
+    ASSERT_NO_FATAL_FAILURE(make_session(&b, declaring()));
+    ecuio_session_t* s = b.session.get();
+    const std::string print = print_of(b.plugin.get());
+    ASSERT_EQ(s->declared_prints.size(), 1u);
+    EXPECT_EQ(s->declared_prints[0].rx, 0x7E9u);
+    EXPECT_EQ(std::memcmp(s->declared_prints[0].fingerprint, print.data(), 32),
+              0);
+    const uint32_t tcm = channel_of(s, 0x7E9);
+    ASSERT_LT(tcm, 32u);
+
+    EXPECT_EQ(ecuio_session_apply_consent(s, store.store, bytes_of(print)),
+              ECUIO_ERR_CONSENT_REQUIRED);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the consent store holds no consent to the part that "
+                 "declares a module's session");
+    EXPECT_EQ(s->declared_allowed, 0u);
+
+    conversation_test::Made other = declaring();
+    other.publisher = R"({"name": "Other Tools", "contact": "c", )"
+                      R"("license": "MIT", "terms": "Mine."})";
+    const conversation_test::Plugin p2 =
+        conversation_test::load_packed(other.json());
+    ASSERT_NE(p2, nullptr) << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_consent_store_give(store.store, p2.get(), kUtc), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_apply_consent(s, store.store,
+                                          bytes_of(print_of(p2.get()))),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the fingerprint is no part's that declares a module's "
+                 "session");
+
+    ASSERT_EQ(ecuio_consent_store_give(store.store, b.plugin.get(), kUtc),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_apply_consent(s, store.store, bytes_of(print)),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(s->declared_allowed, 1u << tcm);
+    EXPECT_FALSE(s->consent_applied) << "no conversation was consented to";
+}
+
+TEST(ConsentSessionTest, AnOwnFilesDeclarationIsNamedByItsBytes)
+{
+    const std::string text =
+        R"({"havne_signals": 1, "name": "Own declared", "source": {"name": "t"},)"
+        R"( "ecus": [{"id": "tcm", "rx": "7E9", "session": "extended"}],)"
+        R"( "signals": [{"key": "a", "name": "A", "read": {"service": "22",)"
+        R"( "number": "D100"}, "field": {"byte": 0}}]})";
+    ecuio_signal_file_t* f = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(text.data(), text.size(), &f), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_profile_register("user.own-declared",
+                                     ecuio_signal_file_set(f), nullptr),
+              ECUIO_OK);
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://x?profile=user.own-declared", &s),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(s->declared_prints.size(), 1u);
+    EXPECT_EQ(s->declared_prints[0].rx, 0x7E9u);
+    EXPECT_EQ(ecuio_sha256::hex(s->declared_prints[0].fingerprint),
+              ecuio_sha256::hex_of(text.data(), text.size()));
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_profile_unregister("user.own-declared"), ECUIO_OK);
+    ecuio_signal_file_free(f);
+}

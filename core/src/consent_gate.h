@@ -29,6 +29,11 @@ inline bool ecuio_plugin_code_may_run(const ecuio_session_t* session)
            g_ecuio_conversation_door.load(std::memory_order_relaxed);
 }
 
+/* The fingerprints of the parts declaring set's modules extended, into
+ * out; false when out can't grow */
+bool ecuio_declared_prints_of(const ecuio_signal_set_t* set,
+                              std::vector<ecuio_session::declared_print>* out);
+
 /* Whether session may hold channel's declared session */
 inline bool ecuio_declared_session_allowed(const ecuio_session_t* session,
                                            uint32_t channel)
